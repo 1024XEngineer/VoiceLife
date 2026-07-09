@@ -1,0 +1,34 @@
+# OS generated files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+Desktop.ini
+
+# Editor and IDE local files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+.cache/
+
+# Common dependency and build outputs
+node_modules/
+dist/
+build/
+coverage/
+__pycache__/
+*.py[cod]
