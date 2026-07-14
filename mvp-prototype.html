@@ -1,0 +1,1663 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Xe615 Mvp Prototype V2</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;max-width:736px;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Xe615 Mvp Prototype V2" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;Xe615 Mvp Prototype V2&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(--background) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: light-dark(rgb(255 255 255), rgb(24 24 24));
+  --foreground: light-dark(rgb(26 28 31), rgb(255 255 255));
+  --card: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --card-foreground: var(--foreground);
+  --popover: light-dark(rgb(255 255 255), rgb(45 45 45));
+  --popover-foreground: var(--foreground);
+  --primary: light-dark(rgb(51 156 255), rgb(131 195 255));
+  --primary-foreground: light-dark(rgb(255 255 255), rgb(13 13 13));
+  --secondary: light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%));
+  --secondary-foreground: var(--foreground);
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: light-dark(
+    rgb(26 28 31 / 49.4%),
+    rgb(255 255 255 / 49.8%)
+  );
+  --accent: light-dark(rgb(229 242 255), rgb(13 39 63));
+  --accent-foreground: var(--primary);
+  --destructive: light-dark(rgb(226 85 7), rgb(255 133 73));
+  --border: light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%));
+  --input: light-dark(
+    rgb(26 28 31 / 11.8%),
+    color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+  );
+  --ring: light-dark(rgb(51 156 255), rgb(131 195 255 / 76%));
+  --font-size-base: 14px;
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: 12.5px;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+  --color-background-primary: var(--background);
+  --color-text-primary: var(--foreground);
+  --color-border-secondary: var(--border);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--viz-font-weight-medium);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+    [aria-pressed=&quot;true&quot;],
+    [aria-selected=&quot;true&quot;],
+    .is-selected
+  ) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;style&gt;
+  #xe615-prototype {
+    --xe-sidebar: 220px;
+    color: var(--foreground);
+    background: var(--background);
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, &quot;PingFang SC&quot;, &quot;Microsoft YaHei&quot;, sans-serif;
+    width: 100%;
+  }
+
+  #xe615-prototype * { box-sizing: border-box; }
+  #xe615-prototype button,
+  #xe615-prototype input,
+  #xe615-prototype select { font: inherit; }
+
+  #xe615-prototype .prototype-bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0 18px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 18px;
+  }
+
+  #xe615-prototype .prototype-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    white-space: nowrap;
+  }
+
+  #xe615-prototype .prototype-title strong { font-weight: 500; }
+  #xe615-prototype .screen-tabs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  #xe615-prototype .screen-tabs .btn { min-width: 34px; padding-inline: 10px; }
+
+  #xe615-prototype .screen {
+    display: none;
+    min-height: 720px;
+    border: 1px solid var(--border);
+    background: var(--background);
+    overflow: hidden;
+  }
+
+  #xe615-prototype .screen.is-active { display: block; }
+  #xe615-prototype .screen.auth-screen { min-height: 720px; }
+
+  #xe615-prototype .auth-shell {
+    min-height: 720px;
+    display: grid;
+    grid-template-columns: 1.05fr .95fr;
+  }
+
+  #xe615-prototype .brand-panel {
+    background: var(--primary);
+    color: var(--primary-foreground);
+    padding: 54px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  #xe615-prototype .brand-mark,
+  #xe615-prototype .brand-lockup {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  #xe615-prototype .brand-mark-box {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border: 1px solid currentColor;
+  }
+
+  #xe615-prototype .brand-copy { max-width: 520px; }
+  #xe615-prototype .brand-copy h2 { margin: 0 0 18px; max-width: 460px; }
+  #xe615-prototype .brand-copy p { margin: 0; opacity: .78; max-width: 500px; }
+
+  #xe615-prototype .auth-panel {
+    padding: 54px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #xe615-prototype .auth-content { width: min(420px, 100%); }
+  #xe615-prototype .auth-content h1 { margin: 0 0 12px; }
+  #xe615-prototype .auth-content &gt; p { margin: 0 0 28px; }
+  #xe615-prototype .oauth-btn { display: flex; align-items: center; justify-content: center; gap: 10px; }
+  #xe615-prototype .fine-print { margin: 18px 0 0; }
+
+  #xe615-prototype .setup-shell { min-height: 720px; display: flex; flex-direction: column; }
+  #xe615-prototype .setup-topbar,
+  #xe615-prototype .app-topbar {
+    height: 66px;
+    padding: 0 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+  }
+
+  #xe615-prototype .setup-body {
+    width: min(860px, calc(100% - 44px));
+    margin: 0 auto;
+    padding: 42px 0 54px;
+  }
+
+  #xe615-prototype .setup-heading { margin-bottom: 28px; }
+  #xe615-prototype .setup-heading h1 { margin: 0 0 10px; }
+  #xe615-prototype .setup-heading p { margin: 0; }
+  #xe615-prototype .search-line { margin-bottom: 24px; }
+  #xe615-prototype .repo-list { border-top: 1px solid var(--border); }
+
+  #xe615-prototype .repo-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 14px;
+    align-items: center;
+    padding: 18px 4px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+
+  #xe615-prototype .repo-row:hover { background: var(--accent); color: var(--accent-foreground); }
+  #xe615-prototype .repo-name { display: flex; gap: 8px; align-items: center; font-weight: 500; }
+  #xe615-prototype .repo-meta { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+  #xe615-prototype .setup-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 28px; gap: 18px; }
+
+  #xe615-prototype .sync-summary {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin: 24px 0 32px;
+  }
+
+  #xe615-prototype .summary-value { margin-top: 6px; }
+  #xe615-prototype .suggestion-list { border-top: 1px solid var(--border); }
+  #xe615-prototype .suggestion-row {
+    padding: 18px 0;
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 18px;
+    align-items: center;
+  }
+
+  #xe615-prototype .suggestion-title { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-weight: 500; }
+  #xe615-prototype .suggestion-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  #xe615-prototype .estimate-editor { display: none; align-items: center; gap: 8px; }
+  #xe615-prototype .estimate-editor.is-open { display: flex; }
+  #xe615-prototype .estimate-editor input { width: 92px; }
+  #xe615-prototype .accepted { color: var(--foreground); display: none; align-items: center; gap: 6px; }
+  #xe615-prototype .accepted.is-shown { display: flex; }
+
+  #xe615-prototype .app-shell {
+    min-height: 720px;
+    display: grid;
+    grid-template-columns: var(--xe-sidebar) minmax(0, 1fr);
+  }
+
+  #xe615-prototype .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 24px 18px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  #xe615-prototype .side-brand { padding: 0 10px 24px; }
+  #xe615-prototype .side-nav { display: grid; gap: 4px; }
+  #xe615-prototype .side-link {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: var(--foreground);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  #xe615-prototype .side-link:hover { background: var(--accent); color: var(--accent-foreground); }
+  #xe615-prototype .side-link.is-active { background: var(--primary); color: var(--primary-foreground); }
+  #xe615-prototype .side-repo { margin-top: auto; padding: 18px 10px 0; border-top: 1px solid var(--border); }
+  #xe615-prototype .side-repo strong { display: block; margin-top: 5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+
+  #xe615-prototype .app-main { min-width: 0; display: flex; flex-direction: column; }
+  #xe615-prototype .app-topbar { padding-inline: 30px; }
+  #xe615-prototype .topbar-actions { display: flex; align-items: center; gap: 12px; }
+  #xe615-prototype .user-chip { display: flex; align-items: center; gap: 8px; }
+  #xe615-prototype .avatar {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    background: var(--secondary);
+    color: var(--secondary-foreground);
+    border-radius: 50%;
+  }
+
+  #xe615-prototype .content { padding: 30px; }
+  #xe615-prototype .page-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 18px;
+    margin-bottom: 26px;
+  }
+
+  #xe615-prototype .page-heading h1 { margin: 0 0 7px; }
+  #xe615-prototype .page-heading p { margin: 0; }
+  #xe615-prototype .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  #xe615-prototype .task-list { border-top: 1px solid var(--border); }
+  #xe615-prototype .task-row {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    gap: 16px;
+    padding: 18px 4px;
+    border-bottom: 1px solid var(--border);
+    align-items: start;
+  }
+
+  #xe615-prototype button.task-row {
+    width: 100%;
+    background: transparent;
+    color: var(--foreground);
+    border-left: 0;
+    border-right: 0;
+    border-top: 0;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  #xe615-prototype button.task-row:hover { background: var(--accent); color: var(--accent-foreground); }
+  #xe615-prototype .task-rank { color: var(--muted-foreground); text-align: center; padding-top: 3px; }
+  #xe615-prototype .task-title { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: 500; }
+  #xe615-prototype .task-meta,
+  #xe615-prototype .task-reason { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 7px; }
+  #xe615-prototype .task-time { text-align: right; white-space: nowrap; font-weight: 500; }
+
+  #xe615-prototype .detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 22px;
+  }
+
+  #xe615-prototype .section-heading { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 18px; }
+  #xe615-prototype .section-heading h3 { margin: 0; }
+  #xe615-prototype .facts { display: grid; gap: 0; }
+  #xe615-prototype .fact-row { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 14px; padding: 13px 0; border-bottom: 1px solid var(--border); }
+  #xe615-prototype .fact-row:last-child { border-bottom: 0; }
+  #xe615-prototype .planning-form { display: grid; gap: 15px; }
+  #xe615-prototype .planning-form .form-label { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 14px; align-items: center; }
+  #xe615-prototype .detail-footer { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+
+  #xe615-prototype .capacity-line { margin-bottom: 26px; }
+  #xe615-prototype .capacity-meta { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 9px; flex-wrap: wrap; }
+  #xe615-prototype .progress { height: 8px; background: var(--muted); overflow: hidden; }
+  #xe615-prototype .progress &gt; span { display: block; height: 100%; background: var(--primary); width: 100%; }
+  #xe615-prototype .update-banner { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 22px; }
+  #xe615-prototype .today-list { border-top: 1px solid var(--border); }
+  #xe615-prototype .today-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 16px; padding: 22px 4px; border-bottom: 1px solid var(--border); align-items: center; }
+  #xe615-prototype .pool-links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
+
+  #xe615-prototype .change-panel { width: min(760px, calc(100% - 42px)); margin: 42px auto; }
+  #xe615-prototype .change-header { padding-bottom: 22px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 18px; align-items: start; }
+  #xe615-prototype .change-header h1 { margin: 0 0 8px; }
+  #xe615-prototype .change-header p { margin: 0; }
+  #xe615-prototype .change-list { display: grid; }
+  #xe615-prototype .change-row { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 14px; padding: 21px 0; border-bottom: 1px solid var(--border); }
+  #xe615-prototype .change-symbol { width: 28px; height: 28px; display: grid; place-items: center; background: var(--secondary); color: var(--secondary-foreground); border-radius: 50%; }
+  #xe615-prototype .change-title { font-weight: 500; margin-bottom: 5px; }
+  #xe615-prototype .change-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 24px; }
+
+  #xe615-prototype .conflict-shell { width: min(860px, calc(100% - 42px)); margin: 36px auto; }
+  #xe615-prototype .conflict-heading { display: flex; gap: 15px; align-items: flex-start; margin-bottom: 26px; }
+  #xe615-prototype .conflict-icon { width: 42px; height: 42px; display: grid; place-items: center; background: var(--destructive); color: var(--primary-foreground); }
+  #xe615-prototype .conflict-heading h1 { margin: 0 0 7px; }
+  #xe615-prototype .conflict-heading p { margin: 0; }
+  #xe615-prototype .conflict-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 26px; }
+  #xe615-prototype .conflict-task { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; padding: 17px 0; border-bottom: 1px solid var(--border); }
+  #xe615-prototype .resolution-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 24px; }
+  #xe615-prototype .resolution-actions .btn { justify-content: flex-start; text-align: left; }
+  #xe615-prototype .resolution-result { margin-top: 20px; display: none; }
+  #xe615-prototype .resolution-result.is-shown { display: block; }
+  #xe615-prototype .resolution-form { display: none; margin-top: 12px; }
+  #xe615-prototype .resolution-form.is-shown { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+  #xe615-prototype .resolution-form input { width: 120px; }
+
+  #xe615-prototype .viz-badge { white-space: nowrap; }
+  #xe615-prototype .badge-soft { background: var(--muted); color: var(--muted-foreground); }
+  #xe615-prototype .inline-icon { display: inline-flex; align-items: center; gap: 6px; }
+  #xe615-prototype .hidden { display: none !important; }
+
+  @media (max-width: 820px) {
+    #xe615-prototype .prototype-bar { align-items: flex-start; flex-direction: column; }
+    #xe615-prototype .screen-tabs { justify-content: flex-start; }
+    #xe615-prototype .auth-shell { grid-template-columns: 1fr; }
+    #xe615-prototype .brand-panel { min-height: 270px; padding: 34px; }
+    #xe615-prototype .auth-panel { padding: 38px 28px; }
+    #xe615-prototype .app-shell { grid-template-columns: 1fr; }
+    #xe615-prototype .sidebar { border-right: 0; border-bottom: 1px solid var(--border); padding: 14px; }
+    #xe615-prototype .side-brand, #xe615-prototype .side-repo { display: none; }
+    #xe615-prototype .side-nav { display: flex; overflow-x: auto; }
+    #xe615-prototype .side-link { white-space: nowrap; width: auto; }
+    #xe615-prototype .detail-grid { grid-template-columns: 1fr; }
+    #xe615-prototype .conflict-stats, #xe615-prototype .sync-summary { grid-template-columns: 1fr; }
+    #xe615-prototype .resolution-actions { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 560px) {
+    #xe615-prototype .setup-body { width: calc(100% - 28px); padding-top: 28px; }
+    #xe615-prototype .setup-topbar, #xe615-prototype .app-topbar { padding-inline: 16px; }
+    #xe615-prototype .content { padding: 22px 16px; }
+    #xe615-prototype .repo-row { grid-template-columns: auto 1fr; }
+    #xe615-prototype .repo-meta { grid-column: 2; justify-content: flex-start; }
+    #xe615-prototype .suggestion-row { grid-template-columns: 1fr; }
+    #xe615-prototype .suggestion-actions { justify-content: flex-start; }
+    #xe615-prototype .task-row, #xe615-prototype .today-row { grid-template-columns: 30px minmax(0, 1fr); }
+    #xe615-prototype .task-time, #xe615-prototype .today-row &gt; .btn { grid-column: 2; justify-self: start; text-align: left; }
+    #xe615-prototype .planning-form .form-label { grid-template-columns: 1fr; gap: 6px; }
+    #xe615-prototype .detail-footer, #xe615-prototype .update-banner, #xe615-prototype .setup-actions { align-items: flex-start; flex-direction: column; }
+    #xe615-prototype .change-actions { justify-content: stretch; flex-direction: column; }
+    #xe615-prototype .change-actions .btn { width: 100%; }
+  }
+&lt;/style&gt;
+
+&lt;div id=&quot;xe615-prototype&quot;&gt;
+  &lt;div class=&quot;prototype-bar&quot; aria-label=&quot;原型页面导航&quot;&gt;
+    &lt;div class=&quot;prototype-title&quot;&gt;
+      &lt;span class=&quot;viz-badge&quot;&gt;可点击原型&lt;/span&gt;
+      &lt;strong&gt;XE6-15 MVP&lt;/strong&gt;
+      &lt;span class=&quot;text-muted text-small&quot; id=&quot;current-screen-label&quot;&gt;01 · 连接 GitHub&lt;/span&gt;
+    &lt;/div&gt;
+    &lt;nav class=&quot;screen-tabs&quot; aria-label=&quot;选择原型页面&quot;&gt;
+      &lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-screen-tab=&quot;1&quot; aria-pressed=&quot;true&quot; data-tooltip=&quot;连接 GitHub&quot;&gt;01&lt;/button&gt;
+      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;2&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;选择单一仓库&quot;&gt;02&lt;/button&gt;
+      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;3&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;同步与时间建议&quot;&gt;03&lt;/button&gt;
+      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;4&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;全部待办&quot;&gt;04&lt;/button&gt;
+      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;5&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;任务详情&quot;&gt;05&lt;/button&gt;
+      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;6&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;今日计划&quot;&gt;06&lt;/button&gt;
+      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;7&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;自动重排&quot;&gt;07&lt;/button&gt;
+      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;8&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;硬截止容量冲突&quot;&gt;08&lt;/button&gt;
+    &lt;/nav&gt;
+  &lt;/div&gt;
+
+  &lt;section class=&quot;screen auth-screen is-active&quot; data-screen=&quot;1&quot; aria-label=&quot;连接 GitHub 页面&quot;&gt;
+    &lt;div class=&quot;auth-shell&quot;&gt;
+      &lt;div class=&quot;brand-panel&quot;&gt;
+        &lt;div class=&quot;brand-mark&quot;&gt;
+          &lt;span class=&quot;brand-mark-box&quot;&gt;&lt;i data-lucide=&quot;check-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;
+          &lt;strong&gt;XE6-15&lt;/strong&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;brand-copy&quot;&gt;
+          &lt;h2&gt;把 GitHub 任务变成今天可执行的计划&lt;/h2&gt;
+          &lt;p&gt;连接一个你参与的仓库，自动汇总与你有关的 Issue 和 PR Review。&lt;/p&gt;
+        &lt;/div&gt;
+        &lt;span class=&quot;text-small&quot;&gt;个人任务工作台 · MVP&lt;/span&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;auth-panel&quot;&gt;
+        &lt;div class=&quot;auth-content&quot;&gt;
+          &lt;span class=&quot;viz-badge&quot;&gt;首次使用&lt;/span&gt;
+          &lt;h1&gt;连接 GitHub&lt;/h1&gt;
+          &lt;p class=&quot;text-muted&quot;&gt;授权后选择一个仓库，我们会自动同步与你有关的任务。&lt;/p&gt;
+          &lt;button class=&quot;btn btn-primary btn-block oauth-btn&quot; type=&quot;button&quot; data-go=&quot;2&quot;&gt;
+            &lt;i data-lucide=&quot;git-branch&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;
+            连接 GitHub
+          &lt;/button&gt;
+          &lt;p class=&quot;fine-print text-muted text-small&quot;&gt;将申请读取身份、仓库及 Issue / PR 基础信息。不会替你创建或关闭 GitHub 任务。&lt;/p&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;section class=&quot;screen&quot; data-screen=&quot;2&quot; aria-label=&quot;选择单一仓库页面&quot;&gt;
+    &lt;div class=&quot;setup-shell&quot;&gt;
+      &lt;header class=&quot;setup-topbar&quot;&gt;
+        &lt;div class=&quot;brand-lockup&quot;&gt;&lt;span class=&quot;brand-mark-box&quot;&gt;&lt;i data-lucide=&quot;check-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;strong&gt;XE6-15&lt;/strong&gt;&lt;/div&gt;
+        &lt;div class=&quot;user-chip&quot;&gt;&lt;span class=&quot;avatar&quot;&gt;J&lt;/span&gt;&lt;span&gt;@Jiang&lt;/span&gt;&lt;/div&gt;
+      &lt;/header&gt;
+      &lt;main class=&quot;setup-body&quot;&gt;
+        &lt;div class=&quot;setup-heading&quot;&gt;
+          &lt;span class=&quot;viz-badge&quot;&gt;第 1 步，共 2 步&lt;/span&gt;
+          &lt;h1&gt;选择工作仓库&lt;/h1&gt;
+          &lt;p class=&quot;text-muted&quot;&gt;选择一个你有权访问或参与的仓库。MVP 目前一次只支持一个仓库。&lt;/p&gt;
+        &lt;/div&gt;
+        &lt;label class=&quot;form-label search-line&quot;&gt;搜索仓库
+          &lt;input class=&quot;form-control&quot; id=&quot;repo-search&quot; type=&quot;search&quot; placeholder=&quot;输入组织或仓库名称……&quot;&gt;
+        &lt;/label&gt;
+        &lt;div class=&quot;repo-list&quot; id=&quot;repo-list&quot;&gt;
+          &lt;label class=&quot;repo-row&quot; data-repo-name=&quot;1024XEngineer XE6-15&quot;&gt;
+            &lt;input class=&quot;form-check-input&quot; type=&quot;radio&quot; name=&quot;repo&quot; value=&quot;1024XEngineer / XE6-15&quot; checked&gt;
+            &lt;span&gt;&lt;span class=&quot;repo-name&quot;&gt;&lt;i data-lucide=&quot;lock&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;1024XEngineer / XE6-15&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;你是 Contributor&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;repo-meta&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Private&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;有访问权限&lt;/span&gt;&lt;/span&gt;
+          &lt;/label&gt;
+          &lt;label class=&quot;repo-row&quot; data-repo-name=&quot;1024XEngineer course-examples&quot;&gt;
+            &lt;input class=&quot;form-check-input&quot; type=&quot;radio&quot; name=&quot;repo&quot; value=&quot;1024XEngineer / course-examples&quot;&gt;
+            &lt;span&gt;&lt;span class=&quot;repo-name&quot;&gt;&lt;i data-lucide=&quot;folder-git-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;1024XEngineer / course-examples&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;你是 Contributor&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;repo-meta&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Public&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;有访问权限&lt;/span&gt;&lt;/span&gt;
+          &lt;/label&gt;
+          &lt;label class=&quot;repo-row&quot; data-repo-name=&quot;Jiang personal-lab&quot;&gt;
+            &lt;input class=&quot;form-check-input&quot; type=&quot;radio&quot; name=&quot;repo&quot; value=&quot;Jiang / personal-lab&quot;&gt;
+            &lt;span&gt;&lt;span class=&quot;repo-name&quot;&gt;&lt;i data-lucide=&quot;lock&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Jiang / personal-lab&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;你是 Owner&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;repo-meta&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Private&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;有访问权限&lt;/span&gt;&lt;/span&gt;
+          &lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;setup-actions&quot;&gt;
+          &lt;span class=&quot;text-muted text-small&quot;&gt;已选择：&lt;strong id=&quot;selected-repo&quot;&gt;1024XEngineer / XE6-15&lt;/strong&gt;&lt;/span&gt;
+          &lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-go=&quot;3&quot;&gt;连接此仓库 &lt;i data-lucide=&quot;arrow-right&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+        &lt;/div&gt;
+      &lt;/main&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;section class=&quot;screen&quot; data-screen=&quot;3&quot; aria-label=&quot;同步与时间建议页面&quot;&gt;
+    &lt;div class=&quot;setup-shell&quot;&gt;
+      &lt;header class=&quot;setup-topbar&quot;&gt;
+        &lt;div class=&quot;brand-lockup&quot;&gt;&lt;span class=&quot;brand-mark-box&quot;&gt;&lt;i data-lucide=&quot;check-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;strong&gt;XE6-15&lt;/strong&gt;&lt;/div&gt;
+        &lt;span class=&quot;inline-icon text-small&quot;&gt;&lt;i data-lucide=&quot;circle-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;同步完成&lt;/span&gt;
+      &lt;/header&gt;
+      &lt;main class=&quot;setup-body&quot;&gt;
+        &lt;div class=&quot;setup-heading&quot;&gt;
+          &lt;span class=&quot;viz-badge&quot;&gt;第 2 步，共 2 步&lt;/span&gt;
+          &lt;h1&gt;已找到与你有关的任务&lt;/h1&gt;
+          &lt;p class=&quot;text-muted&quot;&gt;&lt;strong&gt;1024XEngineer / XE6-15&lt;/strong&gt; 的 GitHub 内容会自动保持同步。&lt;/p&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sync-summary&quot;&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;开放 Issue&lt;/span&gt;&lt;div class=&quot;summary-value&quot;&gt;&lt;strong&gt;6&lt;/strong&gt; 项&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;待处理 PR Review&lt;/span&gt;&lt;div class=&quot;summary-value&quot;&gt;&lt;strong&gt;1&lt;/strong&gt; 项&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;Milestone&lt;/span&gt;&lt;div class=&quot;summary-value&quot;&gt;&lt;strong&gt;2&lt;/strong&gt; 个&lt;/div&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;section-heading&quot;&gt;&lt;div&gt;&lt;h3&gt;需要你确认预计投入&lt;/h3&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;建议已明确对应到具体任务，可逐项接受或修改。&lt;/span&gt;&lt;/div&gt;&lt;span class=&quot;viz-badge&quot; id=&quot;suggestion-count&quot;&gt;2 项待确认&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;suggestion-list&quot;&gt;
+          &lt;div class=&quot;suggestion-row&quot; data-suggestion=&quot;1&quot;&gt;
+            &lt;div&gt;&lt;div class=&quot;suggestion-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #51&lt;/span&gt;更新项目文档&lt;/div&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;系统建议：1h&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;suggestion-actions&quot;&gt;
+              &lt;div class=&quot;default-suggestion-actions&quot;&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-accept-estimate=&quot;1&quot; data-estimate=&quot;1h&quot;&gt;接受 1h&lt;/button&gt; &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-edit-estimate=&quot;1&quot;&gt;修改&lt;/button&gt;&lt;/div&gt;
+              &lt;div class=&quot;estimate-editor&quot; data-editor=&quot;1&quot;&gt;&lt;label class=&quot;form-label&quot;&gt;预计投入&lt;input class=&quot;form-control&quot; type=&quot;text&quot; value=&quot;1h&quot;&gt;&lt;/label&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-save-estimate=&quot;1&quot;&gt;保存&lt;/button&gt;&lt;/div&gt;
+              &lt;span class=&quot;accepted&quot; data-accepted=&quot;1&quot;&gt;&lt;i data-lucide=&quot;circle-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;已设为 1h&lt;/span&gt;&lt;/span&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;suggestion-row&quot; data-suggestion=&quot;2&quot;&gt;
+            &lt;div&gt;&lt;div class=&quot;suggestion-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;PR #45&lt;/span&gt;审阅任务列表交互&lt;/div&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;系统建议：45min&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;suggestion-actions&quot;&gt;
+              &lt;div class=&quot;default-suggestion-actions&quot;&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-accept-estimate=&quot;2&quot; data-estimate=&quot;45min&quot;&gt;接受 45min&lt;/button&gt; &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-edit-estimate=&quot;2&quot;&gt;修改&lt;/button&gt;&lt;/div&gt;
+              &lt;div class=&quot;estimate-editor&quot; data-editor=&quot;2&quot;&gt;&lt;label class=&quot;form-label&quot;&gt;预计投入&lt;input class=&quot;form-control&quot; type=&quot;text&quot; value=&quot;45min&quot;&gt;&lt;/label&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-save-estimate=&quot;2&quot;&gt;保存&lt;/button&gt;&lt;/div&gt;
+              &lt;span class=&quot;accepted&quot; data-accepted=&quot;2&quot;&gt;&lt;i data-lucide=&quot;circle-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;已设为 45min&lt;/span&gt;&lt;/span&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;setup-actions&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;可以稍后处理；未确认的任务会进入“待估算”。&lt;/span&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-go=&quot;6&quot;&gt;进入今日计划 &lt;i data-lucide=&quot;arrow-right&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;&lt;/div&gt;
+      &lt;/main&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;section class=&quot;screen&quot; data-screen=&quot;4&quot; aria-label=&quot;全部待办页面&quot;&gt;
+    &lt;div class=&quot;app-shell&quot;&gt;
+      &lt;aside class=&quot;sidebar&quot;&gt;
+        &lt;div class=&quot;side-brand&quot;&gt;&lt;div class=&quot;brand-lockup&quot;&gt;&lt;span class=&quot;brand-mark-box&quot;&gt;&lt;i data-lucide=&quot;check-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;strong&gt;XE6-15&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;nav class=&quot;side-nav&quot; aria-label=&quot;产品导航&quot;&gt;
+          &lt;button class=&quot;side-link&quot; type=&quot;button&quot; data-go=&quot;6&quot;&gt;&lt;i data-lucide=&quot;calendar-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;今日计划&lt;/button&gt;
+          &lt;button class=&quot;side-link is-active&quot; type=&quot;button&quot; data-go=&quot;4&quot;&gt;&lt;i data-lucide=&quot;inbox&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;全部待办&lt;/button&gt;
+          &lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;clock-3&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;待评审&lt;/button&gt;
+          &lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;circle-pause&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;阻塞任务&lt;/button&gt;
+          &lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;settings&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;设置&lt;/button&gt;
+        &lt;/nav&gt;
+        &lt;div class=&quot;side-repo&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;当前仓库&lt;/span&gt;&lt;strong&gt;1024XEngineer / XE6-15&lt;/strong&gt;&lt;/div&gt;
+      &lt;/aside&gt;
+      &lt;div class=&quot;app-main&quot;&gt;
+        &lt;header class=&quot;app-topbar&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;最后同步：刚刚&lt;/span&gt;&lt;div class=&quot;user-chip&quot;&gt;&lt;span class=&quot;avatar&quot;&gt;J&lt;/span&gt;&lt;span&gt;@Jiang&lt;/span&gt;&lt;/div&gt;&lt;/header&gt;
+        &lt;main class=&quot;content&quot;&gt;
+          &lt;div class=&quot;page-heading&quot;&gt;&lt;div&gt;&lt;h1&gt;全部待办&lt;/h1&gt;&lt;p class=&quot;text-muted&quot;&gt;与你有关的 Issue 和 PR Review，按当前优先顺序展示。&lt;/p&gt;&lt;/div&gt;&lt;span class=&quot;viz-badge&quot;&gt;共 7 项&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;filters&quot;&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot;&gt;全部&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot;&gt;Issue&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot;&gt;PR Review&lt;/button&gt;&lt;/div&gt;
+          &lt;div class=&quot;task-list&quot;&gt;
+            &lt;button class=&quot;task-row&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;1&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #42&lt;/span&gt;提交训练营作业&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;&lt;span&gt;P0&lt;/span&gt;&lt;span&gt;·&lt;/span&gt;&lt;span&gt;今天截止&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;arrow-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;24 小时内到期&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-time&quot;&gt;2h&lt;/span&gt;&lt;/button&gt;
+            &lt;button class=&quot;task-row&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;2&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #31&lt;/span&gt;完成 GitHub 登录页&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;&lt;span&gt;P0&lt;/span&gt;&lt;span&gt;·&lt;/span&gt;&lt;span&gt;7 月 16 日&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;arrow-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;P0&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-time&quot;&gt;2h&lt;/span&gt;&lt;/button&gt;
+            &lt;button class=&quot;task-row&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;3&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;PR #45&lt;/span&gt;审阅任务列表交互&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;&lt;span&gt;P1&lt;/span&gt;&lt;span&gt;·&lt;/span&gt;&lt;span&gt;无硬截止&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;message-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;等待你的 Review&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-time&quot;&gt;45min&lt;/span&gt;&lt;/button&gt;
+            &lt;button class=&quot;task-row&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;4&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #18&lt;/span&gt;补充错误提示&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;&lt;span&gt;P2&lt;/span&gt;&lt;span&gt;·&lt;/span&gt;&lt;span&gt;无硬截止&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;history&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;8 天未活动&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-time&quot;&gt;1h&lt;/span&gt;&lt;/button&gt;
+            &lt;button class=&quot;task-row&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;5&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #51&lt;/span&gt;更新项目文档&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;&lt;span&gt;P2&lt;/span&gt;&lt;span&gt;·&lt;/span&gt;&lt;span&gt;无硬截止&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;timer-off&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;补充预计投入后才能进入今日计划&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-time&quot;&gt;待估算&lt;/span&gt;&lt;/button&gt;
+          &lt;/div&gt;
+        &lt;/main&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;section class=&quot;screen&quot; data-screen=&quot;5&quot; aria-label=&quot;任务详情页面&quot;&gt;
+    &lt;div class=&quot;app-shell&quot;&gt;
+      &lt;aside class=&quot;sidebar&quot;&gt;
+        &lt;div class=&quot;side-brand&quot;&gt;&lt;div class=&quot;brand-lockup&quot;&gt;&lt;span class=&quot;brand-mark-box&quot;&gt;&lt;i data-lucide=&quot;check-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;strong&gt;XE6-15&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;nav class=&quot;side-nav&quot; aria-label=&quot;产品导航&quot;&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot; data-go=&quot;6&quot;&gt;&lt;i data-lucide=&quot;calendar-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;今日计划&lt;/button&gt;&lt;button class=&quot;side-link is-active&quot; type=&quot;button&quot; data-go=&quot;4&quot;&gt;&lt;i data-lucide=&quot;inbox&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;全部待办&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;clock-3&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;待评审&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;circle-pause&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;阻塞任务&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;settings&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;设置&lt;/button&gt;&lt;/nav&gt;
+        &lt;div class=&quot;side-repo&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;当前仓库&lt;/span&gt;&lt;strong&gt;1024XEngineer / XE6-15&lt;/strong&gt;&lt;/div&gt;
+      &lt;/aside&gt;
+      &lt;div class=&quot;app-main&quot;&gt;
+        &lt;header class=&quot;app-topbar&quot;&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-go=&quot;4&quot;&gt;&lt;i data-lucide=&quot;arrow-left&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;全部待办&lt;/button&gt;&lt;div class=&quot;user-chip&quot;&gt;&lt;span class=&quot;avatar&quot;&gt;J&lt;/span&gt;&lt;span&gt;@Jiang&lt;/span&gt;&lt;/div&gt;&lt;/header&gt;
+        &lt;main class=&quot;content&quot;&gt;
+          &lt;div class=&quot;page-heading&quot;&gt;&lt;div&gt;&lt;div class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #31&lt;/span&gt;&lt;span class=&quot;viz-badge&quot;&gt;On Progress&lt;/span&gt;&lt;/div&gt;&lt;h1&gt;完成 GitHub 登录页&lt;/h1&gt;&lt;p class=&quot;text-muted&quot;&gt;1024XEngineer / XE6-15&lt;/p&gt;&lt;/div&gt;&lt;a class=&quot;btn&quot; href=&quot;https://github.com/1024XEngineer/XE6-15/issues/31&quot; target=&quot;_blank&quot; rel=&quot;noreferrer&quot;&gt;在 GitHub 中查看 &lt;i data-lucide=&quot;external-link&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/a&gt;&lt;/div&gt;
+          &lt;div class=&quot;detail-grid&quot;&gt;
+            &lt;section class=&quot;card&quot;&gt;&lt;div class=&quot;section-heading&quot;&gt;&lt;h3&gt;GitHub 信息&lt;/h3&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;只读&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;facts&quot;&gt;&lt;div class=&quot;fact-row&quot;&gt;&lt;span class=&quot;text-muted&quot;&gt;状态&lt;/span&gt;&lt;span&gt;Open&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;fact-row&quot;&gt;&lt;span class=&quot;text-muted&quot;&gt;Assignee&lt;/span&gt;&lt;span&gt;@Jiang&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;fact-row&quot;&gt;&lt;span class=&quot;text-muted&quot;&gt;Milestone&lt;/span&gt;&lt;span&gt;MVP&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;fact-row&quot;&gt;&lt;span class=&quot;text-muted&quot;&gt;最近更新&lt;/span&gt;&lt;span&gt;7 月 13 日&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;&lt;/section&gt;
+            &lt;section class=&quot;card&quot;&gt;&lt;div class=&quot;section-heading&quot;&gt;&lt;h3&gt;我的规划&lt;/h3&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;仅保存在产品内&lt;/span&gt;&lt;/div&gt;&lt;form class=&quot;planning-form&quot; id=&quot;planning-form&quot;&gt;&lt;label class=&quot;form-label&quot;&gt;优先级&lt;select class=&quot;form-select&quot;&gt;&lt;option selected&gt;P0&lt;/option&gt;&lt;option&gt;P1&lt;/option&gt;&lt;option&gt;P2&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;&lt;label class=&quot;form-label&quot;&gt;硬截止&lt;input class=&quot;form-control&quot; type=&quot;date&quot; value=&quot;2026-07-16&quot;&gt;&lt;/label&gt;&lt;label class=&quot;form-label&quot;&gt;预计投入&lt;input class=&quot;form-control&quot; type=&quot;text&quot; value=&quot;2h&quot;&gt;&lt;/label&gt;&lt;label class=&quot;form-label&quot;&gt;当前安排&lt;input class=&quot;form-control&quot; type=&quot;text&quot; value=&quot;今日计划&quot; disabled&gt;&lt;/label&gt;&lt;/form&gt;&lt;/section&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;detail-footer&quot;&gt;&lt;span class=&quot;inline-icon text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;arrow-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;当前靠前原因：P0&lt;/span&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; id=&quot;save-planning&quot;&gt;保存并更新计划&lt;/button&gt;&lt;/div&gt;
+        &lt;/main&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;section class=&quot;screen&quot; data-screen=&quot;6&quot; aria-label=&quot;今日计划页面&quot;&gt;
+    &lt;div class=&quot;app-shell&quot;&gt;
+      &lt;aside class=&quot;sidebar&quot;&gt;
+        &lt;div class=&quot;side-brand&quot;&gt;&lt;div class=&quot;brand-lockup&quot;&gt;&lt;span class=&quot;brand-mark-box&quot;&gt;&lt;i data-lucide=&quot;check-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;strong&gt;XE6-15&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;nav class=&quot;side-nav&quot; aria-label=&quot;产品导航&quot;&gt;&lt;button class=&quot;side-link is-active&quot; type=&quot;button&quot; data-go=&quot;6&quot;&gt;&lt;i data-lucide=&quot;calendar-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;今日计划&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot; data-go=&quot;4&quot;&gt;&lt;i data-lucide=&quot;inbox&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;全部待办&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;clock-3&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;待评审&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;circle-pause&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;阻塞任务&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;settings&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;设置&lt;/button&gt;&lt;/nav&gt;
+        &lt;div class=&quot;side-repo&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;当前仓库&lt;/span&gt;&lt;strong&gt;1024XEngineer / XE6-15&lt;/strong&gt;&lt;/div&gt;
+      &lt;/aside&gt;
+      &lt;div class=&quot;app-main&quot;&gt;
+        &lt;header class=&quot;app-topbar&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;1024XEngineer / XE6-15&lt;/span&gt;&lt;div class=&quot;user-chip&quot;&gt;&lt;span class=&quot;avatar&quot;&gt;J&lt;/span&gt;&lt;span&gt;@Jiang&lt;/span&gt;&lt;/div&gt;&lt;/header&gt;
+        &lt;main class=&quot;content&quot;&gt;
+          &lt;div class=&quot;page-heading&quot;&gt;&lt;div&gt;&lt;h1&gt;今日计划&lt;/h1&gt;&lt;p class=&quot;text-muted&quot;&gt;默认首页 · 7 月 14 日 · 按顺序开始下一项任务&lt;/p&gt;&lt;/div&gt;&lt;span class=&quot;viz-badge&quot;&gt;自动同步&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;capacity-line&quot;&gt;&lt;div class=&quot;capacity-meta&quot;&gt;&lt;span&gt;&lt;strong&gt;今日容量 4h&lt;/strong&gt;&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;已安排 4h · 剩余 0h&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;progress&quot; role=&quot;progressbar&quot; aria-label=&quot;今日容量已安排百分比&quot; aria-valuenow=&quot;100&quot; aria-valuemin=&quot;0&quot; aria-valuemax=&quot;100&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;card update-banner&quot;&gt;&lt;span&gt;&lt;strong&gt;计划刚刚自动更新&lt;/strong&gt;&lt;br&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;1 项加入，1 项移回规划池&lt;/span&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;7&quot;&gt;查看变化&lt;/button&gt;&lt;/div&gt;
+          &lt;div class=&quot;today-list&quot;&gt;
+            &lt;div class=&quot;today-row&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;1&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #42&lt;/span&gt;提交训练营作业&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;今天截止 · 2h&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;arrow-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;24 小时内到期&lt;/span&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;查看任务&lt;/button&gt;&lt;/div&gt;
+            &lt;div class=&quot;today-row&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;2&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #31&lt;/span&gt;完成 GitHub 登录页&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;P0 · 7 月 16 日 · 2h&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;arrow-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;P0&lt;/span&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;查看任务&lt;/button&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;pool-links&quot;&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot;&gt;待评审 1 项&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;4&quot;&gt;规划池 3 项&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;3&quot;&gt;处理待估算 1 项&lt;/button&gt;&lt;/div&gt;
+        &lt;/main&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;section class=&quot;screen&quot; data-screen=&quot;7&quot; aria-label=&quot;自动重排结果页面&quot;&gt;
+    &lt;div class=&quot;change-panel&quot;&gt;
+      &lt;header class=&quot;change-header&quot;&gt;&lt;div&gt;&lt;span class=&quot;viz-badge&quot;&gt;刚刚&lt;/span&gt;&lt;h1&gt;计划已更新&lt;/h1&gt;&lt;p class=&quot;text-muted&quot;&gt;GitHub 中的任务状态发生变化，今日计划已经自动调整。&lt;/p&gt;&lt;/div&gt;&lt;i data-lucide=&quot;refresh-cw&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/header&gt;
+      &lt;div class=&quot;change-list&quot;&gt;
+        &lt;div class=&quot;change-row&quot;&gt;&lt;span class=&quot;change-symbol&quot;&gt;+&lt;/span&gt;&lt;div&gt;&lt;div class=&quot;change-title&quot;&gt;加入今日计划&lt;/div&gt;&lt;div&gt;Issue #31 · 完成 GitHub 登录页返工 &lt;strong&gt;1h&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;text-muted text-small&quot;&gt;原因：PR 收到 changes requested，需要你继续处理&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;div class=&quot;change-row&quot;&gt;&lt;span class=&quot;change-symbol&quot;&gt;−&lt;/span&gt;&lt;div&gt;&lt;div class=&quot;change-title&quot;&gt;移回规划池&lt;/div&gt;&lt;div&gt;Issue #18 · 补充错误提示 &lt;strong&gt;1h&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;text-muted text-small&quot;&gt;原因：今日容量不足；任务没有被删除或关闭&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;div class=&quot;change-row&quot;&gt;&lt;span class=&quot;change-symbol&quot;&gt;↕&lt;/span&gt;&lt;div&gt;&lt;div class=&quot;change-title&quot;&gt;顺序变化&lt;/div&gt;&lt;div&gt;Issue #42 已移动到第 1 位&lt;/div&gt;&lt;div class=&quot;text-muted text-small&quot;&gt;原因：24 小时内到期&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;change-actions&quot;&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;4&quot;&gt;查看全部待办&lt;/button&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-go=&quot;6&quot;&gt;返回今日计划&lt;/button&gt;&lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;section class=&quot;screen&quot; data-screen=&quot;8&quot; aria-label=&quot;硬截止容量冲突页面&quot;&gt;
+    &lt;div class=&quot;conflict-shell&quot;&gt;
+      &lt;header class=&quot;conflict-heading&quot;&gt;&lt;span class=&quot;conflict-icon&quot;&gt;&lt;i data-lucide=&quot;triangle-alert&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;div&gt;&lt;h1&gt;硬截止容量冲突&lt;/h1&gt;&lt;p class=&quot;text-muted&quot;&gt;今天必须完成的任务超过了可用时间，系统无法自动生成可执行计划。&lt;/p&gt;&lt;/div&gt;&lt;/header&gt;
+      &lt;div class=&quot;conflict-stats&quot;&gt;&lt;div class=&quot;card&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;今日剩余容量&lt;/span&gt;&lt;div class=&quot;summary-value&quot;&gt;&lt;strong&gt;2h&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;card&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;必须今日完成&lt;/span&gt;&lt;div class=&quot;summary-value&quot;&gt;&lt;strong&gt;3h&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;card&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;时间缺口&lt;/span&gt;&lt;div class=&quot;summary-value text-destructive&quot;&gt;&lt;strong&gt;1h&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
+      &lt;section aria-label=&quot;发生冲突的任务&quot;&gt;&lt;div class=&quot;conflict-task&quot;&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #31&lt;/span&gt;完成 GitHub 登录页返工&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;原因：今天截止&lt;/span&gt;&lt;/span&gt;&lt;strong&gt;1h&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;conflict-task&quot;&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #42&lt;/span&gt;提交训练营作业&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;原因：今天截止&lt;/span&gt;&lt;/span&gt;&lt;strong&gt;2h&lt;/strong&gt;&lt;/div&gt;&lt;/section&gt;
+      &lt;div class=&quot;section-heading&quot; style=&quot;margin-top:24px&quot;&gt;&lt;div&gt;&lt;h3&gt;请选择处理方向&lt;/h3&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;系统不会预选或自动修改截止承诺。&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;resolution-actions&quot;&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-resolution=&quot;capacity&quot;&gt;&lt;i data-lucide=&quot;clock-3&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;调高今日容量&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;&lt;i data-lucide=&quot;pencil&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;调整任务范围或预计投入&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-resolution=&quot;remove&quot;&gt;&lt;i data-lucide=&quot;list-minus&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;手动移出一个任务&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-resolution=&quot;delay&quot;&gt;&lt;i data-lucide=&quot;calendar-x&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;接受可能延期&lt;/button&gt;&lt;/div&gt;
+      &lt;div class=&quot;resolution-form&quot; id=&quot;capacity-form&quot;&gt;&lt;label class=&quot;form-label&quot;&gt;新的今日容量&lt;input class=&quot;form-control&quot; id=&quot;new-capacity&quot; type=&quot;text&quot; value=&quot;5h&quot;&gt;&lt;/label&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-confirm-resolution=&quot;已将今日容量调高为 5h，可重新生成计划。&quot;&gt;确认容量&lt;/button&gt;&lt;/div&gt;
+      &lt;div class=&quot;resolution-form&quot; id=&quot;remove-form&quot;&gt;&lt;label class=&quot;form-label&quot;&gt;移出任务&lt;select class=&quot;form-select&quot;&gt;&lt;option&gt;Issue #31 · 登录页返工&lt;/option&gt;&lt;option&gt;Issue #42 · 提交训练营作业&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-confirm-resolution=&quot;已按你的选择移出任务；该任务仍保留在规划池。&quot;&gt;确认移出&lt;/button&gt;&lt;/div&gt;
+      &lt;div class=&quot;card resolution-result&quot; id=&quot;resolution-result&quot; role=&quot;status&quot;&gt;&lt;strong id=&quot;resolution-message&quot;&gt;&lt;/strong&gt;&lt;div style=&quot;margin-top:12px&quot;&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-go=&quot;6&quot;&gt;查看更新后的今日计划&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;
+      &lt;p class=&quot;text-muted text-small&quot; style=&quot;margin-top:18px&quot;&gt;在你选择前，任务截止时间不会被自动修改。&lt;/p&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+&lt;/div&gt;
+
+&lt;script&gt;
+  (function () {
+    const root = document.getElementById(&#x27;xe615-prototype&#x27;);
+    const names = {
+      1: &#x27;01 · 连接 GitHub&#x27;,
+      2: &#x27;02 · 选择单一仓库&#x27;,
+      3: &#x27;03 · 同步与时间建议&#x27;,
+      4: &#x27;04 · 全部待办&#x27;,
+      5: &#x27;05 · 任务详情&#x27;,
+      6: &#x27;06 · 今日计划&#x27;,
+      7: &#x27;07 · 自动重排&#x27;,
+      8: &#x27;08 · 硬截止容量冲突&#x27;
+    };
+
+    function showScreen(number) {
+      root.querySelectorAll(&#x27;[data-screen]&#x27;).forEach((screen) =&gt; {
+        screen.classList.toggle(&#x27;is-active&#x27;, screen.dataset.screen === String(number));
+      });
+      root.querySelectorAll(&#x27;[data-screen-tab]&#x27;).forEach((button) =&gt; {
+        const selected = button.dataset.screenTab === String(number);
+        button.classList.toggle(&#x27;btn-primary&#x27;, selected);
+        button.setAttribute(&#x27;aria-pressed&#x27;, String(selected));
+      });
+      root.querySelector(&#x27;#current-screen-label&#x27;).textContent = names[number];
+      root.scrollIntoView({ behavior: &#x27;smooth&#x27;, block: &#x27;start&#x27; });
+    }
+
+    root.addEventListener(&#x27;click&#x27;, (event) =&gt; {
+      const target = event.target.closest(&#x27;[data-go], [data-screen-tab]&#x27;);
+      if (!target || !root.contains(target)) return;
+      const next = target.dataset.go || target.dataset.screenTab;
+      showScreen(Number(next));
+    });
+
+    const repoSearch = root.querySelector(&#x27;#repo-search&#x27;);
+    repoSearch.addEventListener(&#x27;input&#x27;, () =&gt; {
+      const query = repoSearch.value.trim().toLowerCase();
+      root.querySelectorAll(&#x27;[data-repo-name]&#x27;).forEach((row) =&gt; {
+        row.hidden = query &amp;&amp; !row.dataset.repoName.toLowerCase().includes(query);
+      });
+    });
+
+    root.querySelectorAll(&#x27;input[name=&quot;repo&quot;]&#x27;).forEach((radio) =&gt; {
+      radio.addEventListener(&#x27;change&#x27;, () =&gt; {
+        root.querySelector(&#x27;#selected-repo&#x27;).textContent = radio.value;
+      });
+    });
+
+    let pendingSuggestions = 2;
+    function finishSuggestion(id, value) {
+      const row = root.querySelector(`[data-suggestion=&quot;${id}&quot;]`);
+      row.querySelector(&#x27;.default-suggestion-actions&#x27;).classList.add(&#x27;hidden&#x27;);
+      row.querySelector(`[data-editor=&quot;${id}&quot;]`).classList.remove(&#x27;is-open&#x27;);
+      const accepted = row.querySelector(`[data-accepted=&quot;${id}&quot;]`);
+      accepted.querySelector(&#x27;span&#x27;).textContent = `已设为 ${value}`;
+      if (!accepted.classList.contains(&#x27;is-shown&#x27;)) pendingSuggestions -= 1;
+      accepted.classList.add(&#x27;is-shown&#x27;);
+      root.querySelector(&#x27;#suggestion-count&#x27;).textContent = pendingSuggestions ? `${pendingSuggestions} 项待确认` : &#x27;已全部确认&#x27;;
+      if (window.lucide) window.lucide.createIcons({ attrs: { width: 16, height: 16 } });
+    }
+
+    root.querySelectorAll(&#x27;[data-accept-estimate]&#x27;).forEach((button) =&gt; {
+      button.addEventListener(&#x27;click&#x27;, () =&gt; finishSuggestion(button.dataset.acceptEstimate, button.dataset.estimate));
+    });
+
+    root.querySelectorAll(&#x27;[data-edit-estimate]&#x27;).forEach((button) =&gt; {
+      button.addEventListener(&#x27;click&#x27;, () =&gt; {
+        const id = button.dataset.editEstimate;
+        root.querySelector(`[data-suggestion=&quot;${id}&quot;] .default-suggestion-actions`).classList.add(&#x27;hidden&#x27;);
+        root.querySelector(`[data-editor=&quot;${id}&quot;]`).classList.add(&#x27;is-open&#x27;);
+      });
+    });
+
+    root.querySelectorAll(&#x27;[data-save-estimate]&#x27;).forEach((button) =&gt; {
+      button.addEventListener(&#x27;click&#x27;, () =&gt; {
+        const id = button.dataset.saveEstimate;
+        const value = root.querySelector(`[data-editor=&quot;${id}&quot;] input`).value.trim() || &#x27;待估算&#x27;;
+        finishSuggestion(id, value);
+      });
+    });
+
+    root.querySelector(&#x27;#save-planning&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; showScreen(7));
+
+    const capacityForm = root.querySelector(&#x27;#capacity-form&#x27;);
+    const removeForm = root.querySelector(&#x27;#remove-form&#x27;);
+    const result = root.querySelector(&#x27;#resolution-result&#x27;);
+    root.querySelectorAll(&#x27;[data-resolution]&#x27;).forEach((button) =&gt; {
+      button.addEventListener(&#x27;click&#x27;, () =&gt; {
+        capacityForm.classList.toggle(&#x27;is-shown&#x27;, button.dataset.resolution === &#x27;capacity&#x27;);
+        removeForm.classList.toggle(&#x27;is-shown&#x27;, button.dataset.resolution === &#x27;remove&#x27;);
+        result.classList.remove(&#x27;is-shown&#x27;);
+        if (button.dataset.resolution === &#x27;delay&#x27;) {
+          root.querySelector(&#x27;#resolution-message&#x27;).textContent = &#x27;已记录你接受可能延期；冲突标识将继续保留。&#x27;;
+          result.classList.add(&#x27;is-shown&#x27;);
+        }
+      });
+    });
+
+    root.querySelectorAll(&#x27;[data-confirm-resolution]&#x27;).forEach((button) =&gt; {
+      button.addEventListener(&#x27;click&#x27;, () =&gt; {
+        root.querySelector(&#x27;#resolution-message&#x27;).textContent = button.dataset.confirmResolution;
+        result.classList.add(&#x27;is-shown&#x27;);
+      });
+    });
+  })();
+&lt;/script&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>
