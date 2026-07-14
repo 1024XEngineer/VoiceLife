@@ -1,0 +1,2225 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GitDay Mobile Live Demo Prototype</title>
+  <style>
+    :root {
+      --bg: #f3f5f7;
+      --bg-2: #fbfcfd;
+      --ink: #18202b;
+      --text: #394150;
+      --muted: #737f8f;
+      --soft: #e5e9ef;
+      --surface: #ffffff;
+      --surface-2: #f7f9fb;
+      --green: #27745d;
+      --green-deep: #174d3e;
+      --green-soft: #edf7f2;
+      --blue: #356fb6;
+      --blue-soft: #eef5ff;
+      --amber: #a96f16;
+      --amber-soft: #fff6e4;
+      --red: #b94a48;
+      --red-soft: #fff0ef;
+      --violet: #66627f;
+      --violet-soft: #f3f1fa;
+      --cyan: #477f8a;
+      --cyan-soft: #edf8fa;
+      --phone-bg: #f8fafc;
+      --line: rgba(24, 32, 43, .09);
+      --shadow: 0 28px 70px rgba(24, 32, 43, .16);
+      --soft-shadow: 0 14px 30px rgba(24, 32, 43, .08);
+      --card-shadow: 0 1px 2px rgba(24, 32, 43, .04), 0 8px 20px rgba(24, 32, 43, .045);
+      --radius-card: 12px;
+      --radius-panel: 18px;
+      --motion-fast: 120ms;
+      --motion-base: 200ms;
+      --motion-medium: 280ms;
+      --motion-slow: 400ms;
+      --stagger-step: 56ms;
+      --ease-out: cubic-bezier(.22, 1, .36, 1);
+      --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+      --ease: var(--ease-out);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    @property --angle {
+      syntax: "<angle>";
+      inherits: false;
+      initial-value: 0deg;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: geometricPrecision;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background: linear-gradient(180deg, #fbfcfe 0%, var(--bg) 100%);
+      min-height: 100vh;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      border: 0;
+    }
+
+    .stage {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 34px 0 44px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 26px;
+    }
+
+    .brand-lockup {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .mark {
+      width: 48px;
+      height: 48px;
+      border-radius: 13px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      background: #174d3e;
+      box-shadow: 0 10px 22px rgba(24, 32, 43, .14);
+    }
+
+    .brand-svg {
+      width: 31px;
+      height: 31px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 2;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 30px;
+      line-height: 1.08;
+      letter-spacing: -.025em;
+      font-weight: 760;
+    }
+
+    .subtitle {
+      margin: 7px 0 0;
+      max-width: 680px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .ghost-action,
+    .solid-action {
+      min-height: 42px;
+      border-radius: 12px;
+      padding: 0 14px;
+      font-weight: 720;
+      font-size: 13px;
+    }
+
+    .ghost-action {
+      color: var(--ink);
+      background: rgba(255, 255, 255, .82);
+      border: 1px solid var(--line);
+    }
+
+    .solid-action {
+      color: #fff;
+      background: var(--ink);
+      box-shadow: 0 10px 18px rgba(24, 32, 43, .12);
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 430px minmax(0, 1fr);
+      gap: 26px;
+      align-items: start;
+    }
+
+    .phone-shell {
+      width: 425px;
+      min-height: 900px;
+      padding: 16px;
+      border-radius: 44px;
+      background: linear-gradient(180deg, #202734, #111827);
+      box-shadow: var(--shadow);
+      position: sticky;
+      top: 20px;
+    }
+
+    .phone {
+      width: 393px;
+      height: 852px;
+      border-radius: 34px;
+      background: var(--phone-bg);
+      overflow: hidden;
+      position: relative;
+      isolation: isolate;
+    }
+
+    .phone::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(255,255,255,.74), transparent 24%);
+      z-index: -1;
+    }
+
+    .dynamic-island {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 112px;
+      height: 31px;
+      border-radius: 99px;
+      background: #0b1020;
+      z-index: 10;
+    }
+
+    .statusbar {
+      height: 54px;
+      padding: 15px 23px 0;
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      color: #0f172a;
+      font-size: 13px;
+      font-weight: 800;
+      position: relative;
+      z-index: 4;
+    }
+
+    .signal {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: #0f172a;
+      opacity: .88;
+    }
+
+    .screen {
+      height: calc(100% - 54px);
+      display: flex;
+      flex-direction: column;
+      animation: rise var(--motion-medium) var(--ease);
+    }
+
+    @keyframes rise {
+      from { opacity: .58; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .motion-item {
+      opacity: 0;
+      animation: item-in var(--motion-medium) var(--ease) both;
+      animation-delay: calc(var(--i, 0) * var(--stagger-step));
+      will-change: transform, opacity;
+    }
+
+    @keyframes item-in {
+      from {
+        opacity: 0;
+        transform: translateY(10px) scale(.985);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes import-progress {
+      from { transform: scaleX(0); }
+      to { transform: scaleX(1); }
+    }
+
+    @keyframes import-sweep {
+      from { transform: translateX(-120%); opacity: 0; }
+      26% { opacity: .9; }
+      to { transform: translateX(120%); opacity: 0; }
+    }
+
+    @keyframes ring-grow {
+      from { --angle: 0deg; }
+    }
+
+    @keyframes badge-pop {
+      0% { transform: scale(.9); }
+      48% { transform: scale(1.08); }
+      100% { transform: scale(1); }
+    }
+
+    @keyframes row-flash {
+      0% { background: rgba(39, 116, 93, .12); }
+      100% { background: transparent; }
+    }
+
+    .screen-body {
+      flex: 1;
+      padding: 0 20px 96px;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+
+    .screen-body::-webkit-scrollbar {
+      display: none;
+    }
+
+    .app-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      padding: 8px 0 18px;
+    }
+
+    .kicker {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+      margin-bottom: 4px;
+      font-weight: 650;
+    }
+
+    .title {
+      margin: 0;
+      color: var(--ink);
+      font-size: 27px;
+      line-height: 1.12;
+      letter-spacing: -.025em;
+      font-weight: 760;
+    }
+
+    .title.small {
+      font-size: 24px;
+    }
+
+    .avatar {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 760;
+      background: linear-gradient(145deg, #1f2937, #4b5563);
+      box-shadow: 0 10px 20px rgba(15, 23, 42, .14);
+      flex: 0 0 auto;
+    }
+
+    .hero-card {
+      border-radius: 24px;
+      color: var(--ink);
+      padding: 20px;
+      min-height: 190px;
+      background: linear-gradient(135deg, #ffffff 0%, #edf7f2 100%);
+      box-shadow: var(--card-shadow);
+      border: 1px solid rgba(39, 116, 93, .12);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-card::after {
+      content: "";
+      position: absolute;
+      right: -32px;
+      top: -18px;
+      width: 150px;
+      height: 150px;
+      border-radius: 42px;
+      background: linear-gradient(135deg, rgba(39,116,93,.13), rgba(255,255,255,.12));
+      transform: rotate(18deg);
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero-label {
+      margin: 0 0 10px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--green-deep);
+    }
+
+    .hero-title {
+      margin: 0;
+      width: 230px;
+      color: var(--ink);
+      font-size: 27px;
+      line-height: 1.12;
+      letter-spacing: -.025em;
+      font-weight: 760;
+    }
+
+    .hero-copy {
+      margin: 14px 0 0;
+      width: 220px;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.5;
+      font-weight: 520;
+    }
+
+    .hero-stats {
+      display: flex;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .hero-stat {
+      min-width: 74px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.78);
+      border: 1px solid var(--line);
+    }
+
+    .hero-stat strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1;
+      color: var(--ink);
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hero-stat span {
+      display: block;
+      margin-top: 5px;
+      font-size: 10px;
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    .hero-symbol {
+      position: absolute;
+      right: 20px;
+      top: 18px;
+      width: 46px;
+      height: 46px;
+      border-radius: 15px;
+      display: grid;
+      place-items: center;
+      color: var(--green-deep);
+      background: rgba(255,255,255,.72);
+      border: 1px solid var(--line);
+      z-index: 1;
+    }
+
+    .hero-symbol .brand-svg {
+      width: 28px;
+      height: 28px;
+    }
+
+    .primary-btn,
+    .secondary-btn,
+    .danger-btn {
+      min-height: 48px;
+      border-radius: 14px;
+      width: 100%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-weight: 720;
+      font-size: 14px;
+      transition: transform .16s var(--ease), box-shadow .16s var(--ease), background .16s var(--ease);
+      touch-action: manipulation;
+    }
+
+    .primary-btn {
+      color: #fff;
+      background: var(--green-deep);
+      box-shadow: 0 10px 20px rgba(18, 96, 69, .16);
+    }
+
+    .secondary-btn {
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+
+    .danger-btn {
+      color: #fff;
+      background: #a83d3b;
+      box-shadow: 0 10px 20px rgba(184, 74, 72, .14);
+    }
+
+    .primary-btn:active,
+    .secondary-btn:active,
+    .danger-btn:active,
+    .tap:active {
+      transform: scale(.98);
+    }
+
+    .button-stack {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .fine-print {
+      margin-top: 15px;
+      padding: 13px 14px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.74);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+      font-weight: 520;
+      border: 1px solid var(--line);
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 22px 0 12px;
+    }
+
+    .section-title h3 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 17px;
+      line-height: 1.25;
+      letter-spacing: -.015em;
+      font-weight: 720;
+    }
+
+    .section-title p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 720;
+      white-space: nowrap;
+    }
+
+    .chip.green { color: var(--green-deep); background: var(--green-soft); }
+    .chip.blue { color: #174ea6; background: var(--blue-soft); }
+    .chip.amber { color: #8a5a00; background: var(--amber-soft); }
+    .chip.red { color: #9f2525; background: var(--red-soft); }
+    .chip.violet { color: #4f46a3; background: var(--violet-soft); }
+    .chip.cyan { color: #0e7490; background: var(--cyan-soft); }
+    .chip.dark { color: #fff; background: var(--ink); }
+
+    .repo-card,
+    .source-card,
+    .task-card,
+    .pool-card,
+    .option-card,
+    .receipt-card,
+    .metric-card {
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(250,252,253,.94));
+      box-shadow: 0 1px 1px rgba(24, 32, 43, .035), 0 10px 24px rgba(24, 32, 43, .052);
+      border: 1px solid rgba(24, 32, 43, .075);
+    }
+
+    .repo-card {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      min-height: 84px;
+      padding: 14px;
+      margin-bottom: 10px;
+      border: 1px solid transparent;
+      transition: border-color .16s var(--ease), transform .16s var(--ease);
+    }
+
+    .repo-card.selected {
+      border-color: rgba(34, 160, 107, .38);
+      background: linear-gradient(135deg, rgba(237, 247, 242, .94), #fff 72%);
+    }
+
+    .repo-card.disabled {
+      opacity: .55;
+    }
+
+    .icon-box {
+      width: 42px;
+      height: 42px;
+      border-radius: 13px;
+      display: grid;
+      place-items: center;
+      background: var(--surface-2);
+      color: var(--blue);
+      border: 1px solid rgba(24, 32, 43, .055);
+      box-shadow: inset 0 -1px 0 rgba(255,255,255,.82), 0 6px 14px rgba(24,32,43,.045);
+    }
+
+    .icon-box.green { color: var(--green-deep); background: var(--green-soft); }
+    .icon-box.blue { color: var(--blue); background: var(--blue-soft); }
+    .icon-box.amber { color: var(--amber); background: var(--amber-soft); }
+    .icon-box.red { color: var(--red); background: var(--red-soft); }
+    .icon-box.violet { color: var(--violet); background: var(--violet-soft); }
+    .icon-box.cyan { color: var(--cyan); background: var(--cyan-soft); }
+
+    .repo-name,
+    .card-title {
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.28;
+      font-weight: 720;
+      letter-spacing: -.01em;
+    }
+
+    .card-meta {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+      font-weight: 520;
+    }
+
+    .milestone {
+      border-radius: 20px;
+      padding: 16px;
+      background: linear-gradient(135deg, var(--violet-soft), #fff 68%);
+      box-shadow: var(--card-shadow);
+      border: 1px solid var(--line);
+    }
+
+    .milestone-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-top: 12px;
+    }
+
+    .progress-track {
+      height: 9px;
+      border-radius: 99px;
+      background: rgba(113, 128, 150, .18);
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: var(--green);
+      transition: width var(--motion-slow) var(--ease);
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric-card {
+      padding: 14px;
+      min-height: 92px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .metric-card::before {
+      content: "";
+      position: absolute;
+      top: 13px;
+      right: 13px;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 0 5px var(--green-soft);
+      z-index: 1;
+    }
+
+    .metric-card::after {
+      content: "";
+      position: absolute;
+      right: -20px;
+      bottom: -24px;
+      width: 86px;
+      height: 86px;
+      border-radius: 26px;
+      transform: rotate(18deg);
+      opacity: .55;
+    }
+
+    .metric-card.green::after { background: var(--green-soft); }
+    .metric-card.blue::after { background: var(--blue-soft); }
+    .metric-card.amber::after { background: var(--amber-soft); }
+    .metric-card.violet::after { background: var(--violet-soft); }
+    .metric-card.green::before { background: var(--green); box-shadow: 0 0 0 5px var(--green-soft); }
+    .metric-card.blue::before { background: var(--blue); box-shadow: 0 0 0 5px var(--blue-soft); }
+    .metric-card.amber::before { background: var(--amber); box-shadow: 0 0 0 5px var(--amber-soft); }
+    .metric-card.violet::before { background: var(--violet); box-shadow: 0 0 0 5px var(--violet-soft); }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      position: relative;
+      z-index: 1;
+    }
+
+    .metric-value {
+      margin-top: 8px;
+      color: var(--ink);
+      font-size: 28px;
+      line-height: 1;
+      letter-spacing: -.025em;
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+      position: relative;
+      z-index: 1;
+    }
+
+    .source-card {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 13px;
+      margin-bottom: 10px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .source-card::before {
+      content: attr(data-step);
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      min-width: 26px;
+      height: 22px;
+      padding: 0 7px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      font-size: 10px;
+      line-height: 1;
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .source-card .card-title,
+    .source-card .card-meta {
+      padding-right: 34px;
+    }
+
+    .source-card > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .source-card.pending {
+      background: linear-gradient(135deg, var(--amber-soft), #fff 78%);
+    }
+
+    .import-status {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      margin-bottom: 14px;
+      border-radius: 18px;
+      background: #fff;
+      border: 1px solid var(--line);
+      box-shadow: var(--card-shadow);
+    }
+
+    .import-status-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.35;
+      font-weight: 720;
+    }
+
+    .import-progress {
+      height: 7px;
+      border-radius: 999px;
+      background: rgba(113, 128, 150, .16);
+      overflow: hidden;
+    }
+
+    .import-progress::before {
+      content: "";
+      display: block;
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--green);
+      transform-origin: left center;
+      animation: import-progress 900ms var(--ease) 120ms both;
+    }
+
+    .import-screen .source-card.motion-item::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.68), transparent);
+      pointer-events: none;
+      animation: import-sweep 760ms var(--ease) both;
+      animation-delay: calc(var(--i, 0) * var(--stagger-step) + 120ms);
+    }
+
+    .import-screen .import-status {
+      padding: 12px 14px;
+      margin-bottom: 12px;
+    }
+
+    .import-screen .metric-card {
+      min-height: 82px;
+    }
+
+    .import-screen .section-title {
+      margin: 16px 0 10px;
+    }
+
+    .import-screen .source-card {
+      padding: 11px 13px;
+      margin-bottom: 8px;
+    }
+
+    .date-strip {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 9px;
+      margin: 2px 0 18px;
+    }
+
+    .date-pill {
+      height: 64px;
+      border-radius: 16px;
+      background: rgba(255,255,255,.88);
+      display: grid;
+      place-items: center;
+      box-shadow: var(--card-shadow);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .date-pill strong {
+      display: block;
+      margin-top: 5px;
+      color: var(--ink);
+      font-size: 18px;
+      line-height: 1;
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .date-pill.active {
+      color: rgba(255,255,255,.74);
+      background: var(--ink);
+    }
+
+    .date-pill.active strong {
+      color: #fff;
+    }
+
+    .capacity-card {
+      border-radius: 24px;
+      padding: 17px;
+      background: #fff;
+      box-shadow: var(--soft-shadow);
+      border: 1px solid var(--line);
+      margin-bottom: 14px;
+    }
+
+    .capacity-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: center;
+    }
+
+    .capacity-number {
+      color: var(--ink);
+      font-weight: 760;
+      font-size: 26px;
+      letter-spacing: -.025em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .ring {
+      width: 74px;
+      height: 74px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background:
+        conic-gradient(var(--green) 0deg var(--angle), rgba(113, 128, 150, .15) var(--angle) 360deg);
+      position: relative;
+      flex: 0 0 auto;
+      animation: ring-grow var(--motion-slow) var(--ease) 80ms both;
+    }
+
+    .ring::after {
+      content: "";
+      position: absolute;
+      inset: 8px;
+      border-radius: 50%;
+      background: #fff;
+    }
+
+    .ring span {
+      position: relative;
+      z-index: 1;
+      font-size: 15px;
+      color: var(--ink);
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .task-card {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr);
+      gap: 12px;
+      text-align: left;
+      padding: 14px;
+      margin-bottom: 10px;
+      color: inherit;
+      position: relative;
+      overflow: hidden;
+      transition: transform .16s var(--ease), box-shadow .16s var(--ease);
+    }
+
+    .task-card::after {
+      content: "";
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--green);
+      opacity: .72;
+    }
+
+    .task-card.tone-blue {
+      background: linear-gradient(135deg, #fff 0%, rgba(238,245,255,.86) 100%);
+    }
+
+    .task-card.tone-green {
+      background: linear-gradient(135deg, #fff 0%, rgba(237,247,242,.88) 100%);
+    }
+
+    .task-card.tone-amber {
+      background: linear-gradient(135deg, #fff 0%, rgba(255,246,228,.88) 100%);
+    }
+
+    .task-card.tone-red {
+      background: linear-gradient(135deg, #fff 0%, rgba(255,240,239,.88) 100%);
+    }
+
+    .task-card.tone-violet {
+      background: linear-gradient(135deg, #fff 0%, rgba(243,241,250,.88) 100%);
+    }
+
+    .task-card.tone-blue::after { background: var(--blue); }
+    .task-card.tone-green::after { background: var(--green); }
+    .task-card.tone-amber::after { background: var(--amber); }
+    .task-card.tone-red::after { background: var(--red); }
+    .task-card.tone-violet::after { background: var(--violet); }
+
+    .task-card:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 22px rgba(24, 32, 43, .08);
+    }
+
+    .task-card.changed {
+      border-color: rgba(53, 111, 182, .24);
+      background: linear-gradient(180deg, #fff, #f7fbff);
+    }
+
+    .task-card.changed .icon-box {
+      animation: badge-pop 520ms var(--ease) 150ms both;
+    }
+
+    .task-main {
+      min-width: 0;
+    }
+
+    .task-headline {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 8px;
+      padding-right: 14px;
+    }
+
+    .task-tags {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .reason-box {
+      margin-top: 12px;
+      padding: 11px 12px;
+      border-radius: 13px;
+      color: var(--text);
+      background: var(--surface-2);
+      font-size: 12px;
+      line-height: 1.55;
+      font-weight: 520;
+      border: 1px solid var(--line);
+    }
+
+    .receipt-hero {
+      border-radius: 24px;
+      padding: 18px;
+      color: #fff;
+      background: linear-gradient(135deg, #18202b 0%, #2d4a5a 100%);
+      box-shadow: var(--soft-shadow);
+    }
+
+    .receipt-hero h3 {
+      margin: 10px 0 0;
+      font-size: 25px;
+      letter-spacing: -.03em;
+      line-height: 1.1;
+      font-weight: 760;
+    }
+
+    .receipt-hero p {
+      margin: 10px 0 0;
+      color: rgba(255,255,255,.78);
+      font-size: 12px;
+      line-height: 1.55;
+      font-weight: 520;
+    }
+
+    .receipt-card {
+      padding: 14px;
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .receipt-card.added {
+      border-color: rgba(39,116,93,.18);
+      background: linear-gradient(135deg, #fff 0%, rgba(237,247,242,.88) 100%);
+    }
+
+    .receipt-card.removed {
+      border-color: rgba(169,111,22,.18);
+      background: linear-gradient(135deg, #fff 0%, rgba(255,246,228,.88) 100%);
+    }
+
+    .receipt-card::after {
+      content: "";
+      position: absolute;
+      right: 13px;
+      top: 13px;
+      width: 26px;
+      height: 4px;
+      border-radius: 999px;
+      background: var(--green);
+      opacity: .55;
+    }
+
+    .receipt-card.removed::after {
+      background: var(--amber);
+    }
+
+    .receipt-card > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .before-after {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .mini-list {
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(255,255,255,.88);
+      box-shadow: var(--card-shadow);
+      border: 1px solid var(--line);
+    }
+
+    .mini-list h4 {
+      margin: 0 0 10px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .mini-list.after-list .mini-row {
+      border-radius: 8px;
+      animation: row-flash 720ms var(--ease) both;
+      animation-delay: calc(var(--i, 0) * 80ms + 280ms);
+    }
+
+    .mini-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 28px;
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 620;
+    }
+
+    .pool-card,
+    .option-card {
+      padding: 14px;
+      margin-bottom: 10px;
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .pool-card::after,
+    .option-card::after {
+      content: "";
+      position: absolute;
+      right: -30px;
+      bottom: -34px;
+      width: 92px;
+      height: 92px;
+      border-radius: 30px;
+      transform: rotate(18deg);
+      background: rgba(237,247,242,.72);
+    }
+
+    .pool-card > *,
+    .option-card > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .conflict-card {
+      border-radius: 24px;
+      padding: 17px;
+      background: linear-gradient(135deg, var(--red-soft), #fff 78%);
+      box-shadow: var(--soft-shadow);
+      border: 1px solid rgba(185, 74, 72, .14);
+    }
+
+    .conflict-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .conflict-metric {
+      border-radius: 15px;
+      padding: 13px;
+      background: rgba(255,255,255,.86);
+      border: 1px solid var(--line);
+    }
+
+    .conflict-metric span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .conflict-metric strong {
+      display: block;
+      margin-top: 8px;
+      color: var(--red);
+      font-size: 24px;
+      line-height: 1;
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .estimate-box {
+      border-radius: 22px;
+      padding: 16px;
+      background: linear-gradient(135deg, var(--amber-soft), #fff 78%);
+      box-shadow: var(--soft-shadow);
+      border: 1px solid rgba(169, 111, 22, .14);
+      margin-top: 12px;
+    }
+
+    .estimate-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 94px;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .estimate-row input {
+      height: 48px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      padding: 0 12px;
+      outline: none;
+      font-weight: 650;
+    }
+
+    .estimate-row input:focus {
+      border-color: rgba(208, 138, 0, .70);
+      box-shadow: 0 0 0 4px rgba(208, 138, 0, .13);
+    }
+
+    .bottom-nav {
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      bottom: 16px;
+      height: 68px;
+      border-radius: 24px;
+      background: rgba(255,255,255,.94);
+      box-shadow: 0 14px 30px rgba(24, 32, 43, .12);
+      border: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      padding: 8px;
+      z-index: 6;
+    }
+
+    .nav-btn {
+      min-height: 52px;
+      border-radius: 18px;
+      background: transparent;
+      color: var(--muted);
+      display: grid;
+      place-items: center;
+      gap: 2px;
+      font-size: 10px;
+      font-weight: 680;
+      transition: background .16s var(--ease), color .16s var(--ease), transform .16s var(--ease);
+    }
+
+    .nav-btn svg {
+      width: 19px;
+      height: 19px;
+      stroke-width: 2.2;
+    }
+
+    .nav-btn.active {
+      color: var(--green-deep);
+      background: var(--green-soft);
+    }
+
+    .nav-btn:active {
+      transform: scale(.95);
+    }
+
+    .side-panel {
+      min-width: 0;
+      display: grid;
+      gap: 0;
+      padding: 24px;
+      border-radius: 26px;
+      background: rgba(255,255,255,.88);
+      border: 1px solid var(--line);
+      box-shadow: 0 1px 2px rgba(24, 32, 43, .03), 0 18px 42px rgba(24, 32, 43, .06);
+    }
+
+    .script-card {
+      padding: 19px 0;
+      background: transparent;
+      box-shadow: none;
+      border: 0;
+      border-top: 1px solid var(--line);
+      margin-bottom: 0;
+    }
+
+    .script-card.dark {
+      color: var(--ink);
+      background: transparent;
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .script-card h2,
+    .script-card h3 {
+      margin: 0;
+      color: inherit;
+      letter-spacing: -.02em;
+    }
+
+    .script-card h2 {
+      font-size: 29px;
+      line-height: 1.12;
+      font-weight: 760;
+    }
+
+    .script-card h3 {
+      color: var(--ink);
+      font-size: 18px;
+      font-weight: 720;
+    }
+
+    .script-card.dark p {
+      color: var(--muted);
+    }
+
+    .script-card p {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .report-kicker {
+      margin-bottom: 14px;
+      color: var(--green-deep);
+      font-size: 12px;
+      line-height: 1.2;
+      font-weight: 720;
+      letter-spacing: 0;
+    }
+
+    .report-summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .report-pill {
+      border-radius: 14px;
+      padding: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+    }
+
+    .report-pill strong {
+      display: block;
+      color: var(--ink);
+      font-size: 18px;
+      line-height: 1;
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .report-pill span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+      font-weight: 600;
+    }
+
+    .screen-rail {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      margin-top: 20px;
+    }
+
+    .rail-btn {
+      min-height: 50px;
+      border-radius: 13px;
+      padding: 9px 10px;
+      text-align: left;
+      color: var(--text);
+      background: transparent;
+      border: 1px solid transparent;
+      transition: background .16s var(--ease), border-color .16s var(--ease), transform .16s var(--ease);
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+    }
+
+    .rail-index {
+      width: 28px;
+      height: 28px;
+      border-radius: 9px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      background: var(--surface-2);
+      font-size: 11px;
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .rail-btn strong {
+      display: block;
+      color: var(--ink);
+      font-size: 12px;
+      line-height: 1.25;
+      font-weight: 720;
+    }
+
+    .rail-btn .rail-copy span {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+      font-weight: 520;
+    }
+
+    .rail-copy {
+      min-width: 0;
+    }
+
+    .rail-btn.active {
+      border-color: rgba(39,116,93,.18);
+      background: var(--green-soft);
+    }
+
+    .rail-btn.active .rail-index {
+      color: #fff;
+      background: var(--green-deep);
+    }
+
+    .flow-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .flow-item {
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .flow-index {
+      width: 30px;
+      height: 30px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      color: var(--green-deep);
+      background: var(--green-soft);
+      font-size: 12px;
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .flow-item strong {
+      display: block;
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.3;
+      font-weight: 720;
+    }
+
+    .flow-item span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .decision-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .decision {
+      min-height: 88px;
+      border-radius: 15px;
+      padding: 14px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+    }
+
+    .decision strong {
+      display: block;
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.3;
+      font-weight: 720;
+    }
+
+    .decision span {
+      display: block;
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .tokens {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .token {
+      min-height: 58px;
+      border-radius: 15px;
+      padding: 12px;
+      color: var(--text);
+      font-size: 11px;
+      line-height: 1.3;
+      font-weight: 680;
+      display: flex;
+      align-items: end;
+      background: #fff;
+      border: 1px solid var(--line);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .token::before {
+      content: "";
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 18px;
+      height: 4px;
+      border-radius: 99px;
+      background: var(--green);
+    }
+
+    .token.green::before { background: var(--green); }
+    .token.blue::before { background: var(--blue); }
+    .token.amber::before { background: var(--amber); }
+    .token.red::before { background: var(--red); }
+
+    .icon {
+      display: block;
+      width: 21px;
+      height: 21px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 2;
+    }
+
+    .mono {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .spacer {
+      height: 12px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 940px) {
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .phone-shell {
+        position: relative;
+        top: 0;
+        margin: 0 auto;
+      }
+
+      .topbar {
+        align-items: start;
+        flex-direction: column;
+      }
+
+      .top-actions {
+        justify-content: start;
+      }
+    }
+
+    @media (max-width: 500px) {
+      .stage {
+        width: 100%;
+        padding: 18px 10px 28px;
+      }
+
+      .phone-shell {
+        width: min(100%, 425px);
+        padding: 8px;
+        border-radius: 34px;
+      }
+
+      .phone {
+        width: 100%;
+        height: min(852px, calc(100vh - 32px));
+        min-height: 760px;
+      }
+
+      .screen-rail,
+      .tokens,
+      .report-summary,
+      .decision-grid {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        font-size: 26px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+      }
+
+      .motion-item {
+        opacity: 1 !important;
+        transform: none !important;
+      }
+
+      .source-card.motion-item::after {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="mark" aria-hidden="true">
+          <svg class="brand-svg" viewBox="0 0 32 32">
+            <rect x="5" y="6" width="22" height="21" rx="7"></rect>
+            <path d="M10 4v5M22 4v5M5 12h22"></path>
+            <path d="M10 20h5c3 0 5-2 5-5"></path>
+            <path d="m18 15 2-2 2 2"></path>
+            <circle cx="10" cy="20" r="1.5" fill="currentColor" stroke="none"></circle>
+          </svg>
+        </div>
+        <div>
+          <h1>GitDay 手机端 Live Demo</h1>
+          <p class="subtitle">固定数据串起授权、绑定仓库、导入任务、今日计划和 PR 返工重排。重点看用户能不能看懂变化原因。</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="ghost-action" type="button" data-action="reset">重置演示</button>
+        <button class="solid-action" type="button" data-action="jump" data-screen="today">直接看今日计划</button>
+      </div>
+    </header>
+
+    <section class="workspace">
+      <div class="phone-shell" aria-label="iPhone 15 prototype shell">
+        <div class="phone">
+          <div class="dynamic-island" aria-hidden="true"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="signal" aria-hidden="true">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M4 18h2M8 18h2M12 18h2M16 18h4M18 6v12"/></svg>
+              <svg class="icon" viewBox="0 0 24 24"><path d="M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0M12 19h.01"/></svg>
+              <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 11v2"/></svg>
+            </span>
+          </div>
+          <div id="app"></div>
+        </div>
+      </div>
+
+      <aside class="side-panel">
+        <section class="script-card dark">
+          <div class="report-kicker" id="sideKicker">汇报页 1 / 7</div>
+          <h2 id="sideTitle">演示主线</h2>
+          <p id="sideDesc">早上打开 App，看今天该推进什么；下午 PR 被退回，计划自动调整，并把原因说清楚。</p>
+          <div class="report-summary">
+            <div class="report-pill"><strong>3 min</strong><span>讲完主线</span></div>
+            <div class="report-pill"><strong>7 页</strong><span>手机流程</span></div>
+            <div class="report-pill"><strong>1 条</strong><span>核心路径</span></div>
+          </div>
+          <div class="screen-rail" id="screenRail"></div>
+        </section>
+
+        <section class="script-card">
+          <h3>汇报节奏</h3>
+          <div class="flow-list">
+            <div class="flow-item"><div class="flow-index">1</div><div><strong>先收边界</strong><span>一个仓库，只看个人相关的开放任务。</span></div></div>
+            <div class="flow-item"><div class="flow-index">2</div><div><strong>再看今日计划</strong><span>任务顺序、容量、排序理由放在同一个手机场景里。</span></div></div>
+            <div class="flow-item"><div class="flow-index">3</div><div><strong>最后讲变化</strong><span>PR 被退回后，谁进来、谁出去、为什么。</span></div></div>
+          </div>
+        </section>
+
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const screens = [
+      { id: "auth", label: "授权", note: "连接 GitHub" },
+      { id: "repo", label: "仓库", note: "一个仓库" },
+      { id: "import", label: "导入", note: "开放任务" },
+      { id: "today", label: "今日", note: "排序 + 容量" },
+      { id: "receipt", label: "变化", note: "谁进谁出" },
+      { id: "pool", label: "规划池", note: "明天继续排" },
+      { id: "conflict", label: "冲突", note: "用户拍板" }
+    ];
+
+    const initialScreen = screens.some(s => s.id === window.location.hash.slice(1))
+      ? window.location.hash.slice(1)
+      : "auth";
+
+    const state = {
+      screen: initialScreen,
+      updated: false,
+      expanded: "T1",
+      estimateSaved: false
+    };
+
+    const tasksBefore = [
+      {
+        id: "T1",
+        icon: "pull",
+        tone: "blue",
+        title: "PR #29 Proposal 03 自动重排",
+        meta: "Pending review · 预计 1h",
+        tags: [["P0", "red"], ["今天截止", "red"], ["Review", "blue"]],
+        reason: "硬截止最近，并且 PR 正在等待 Review。这个任务本质上也是今日工作，不能和普通 Issue 分开处理。"
+      },
+      {
+        id: "T2",
+        icon: "issue",
+        tone: "green",
+        title: "#28 Proposal 02 排序规则对齐",
+        meta: "Open issue · 预计 1.5h",
+        tags: [["P1", "green"], ["依赖项", "violet"]],
+        reason: "Proposal 03 需要先确认排序规则，所以排在普通收尾任务之前。"
+      },
+      {
+        id: "T3",
+        icon: "check",
+        tone: "amber",
+        title: "#7 MS1 战略决策补充",
+        meta: "Open issue · 预计 0.5h",
+        tags: [["可收尾", "amber"], ["3天后截止", "blue"]],
+        reason: "完成度高、耗时短，所以今天可以收掉；但它的截止更晚，容量不足时会先让位。"
+      }
+    ];
+
+    const tasksAfter = [
+      {
+        id: "T1",
+        icon: "pull",
+        tone: "red",
+        title: "PR #29 返工修改",
+        meta: "Changes requested · 预计 1h",
+        tags: [["P0", "red"], ["今天截止", "red"], ["返工", "blue"]],
+        reason: "GitHub 同步到“需要修改”。PR 从待评审回到进行中，按原优先级和硬截止重新进入今日计划。"
+      },
+      tasksBefore[1],
+      {
+        id: "T5",
+        icon: "review",
+        tone: "blue",
+        title: "Review #30 任务导入 Proposal",
+        meta: "待我 Review · 预计 1h",
+        tags: [["Review", "blue"], ["今天截止", "red"]],
+        reason: "Review 和 Issue 都是个人任务。它今天截止，排在无硬截止任务之前。"
+      }
+    ];
+
+    const poolTasks = [
+      {
+        icon: "check",
+        tone: "amber",
+        title: "#7 MS1 战略决策补充",
+        meta: "因今日容量不足移出 · 0.5h",
+        chip: ["回到规划池", "amber"]
+      },
+      {
+        icon: "issue",
+        tone: "green",
+        title: "#30 任务导入 Proposal 对齐",
+        meta: "无硬截止 · 随时间上浮",
+        chip: ["待排序", "green"]
+      },
+      {
+        icon: "clock",
+        tone: "violet",
+        title: "#18 首版草案收口",
+        meta: "规划池中 · 暂不进今天",
+        chip: ["池中", "violet"]
+      }
+    ];
+
+    const sideCopy = {
+      auth: ["GitHub 授权", "这一页只讲连接 GitHub 后能看到今日任务。权限边界放在汇报说明里，不塞进手机界面。"],
+      repo: ["选择仓库", "这一版先收住边界：一个仓库，一条个人路径。"],
+      import: ["导入任务", "只导入开放任务和我的 PR / Review。历史完成项不参与排序。"],
+      today: ["今日计划", "重点看三件事：顺序、容量、为什么排在这里。"],
+      receipt: ["变化回执", "变化发生后，要说清楚谁进来了、谁出去了、原因是什么。"],
+      pool: ["规划池", "今天放不下的任务留在池子里，明天继续参与排序。"],
+      conflict: ["冲突处理", "硬截止撞车时，系统提示风险，不替用户拍板。"]
+    };
+
+    function brandMark() {
+      return `<svg class="brand-svg" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="5" y="6" width="22" height="21" rx="7"></rect>
+        <path d="M10 4v5M22 4v5M5 12h22"></path>
+        <path d="M10 20h5c3 0 5-2 5-5"></path>
+        <path d="m18 15 2-2 2 2"></path>
+        <circle cx="10" cy="20" r="1.5" fill="currentColor" stroke="none"></circle>
+      </svg>`;
+    }
+
+    function icon(name) {
+      const paths = {
+        github: '<path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.19-3.37-1.19-.46-1.16-1.12-1.47-1.12-1.47-.91-.63.07-.62.07-.62 1.01.07 1.55 1.04 1.55 1.04.9 1.54 2.36 1.1 2.94.84.09-.65.35-1.1.64-1.35-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02A9.5 9.5 0 0 1 12 5.98c.85 0 1.7.11 2.5.33 1.9-1.29 2.74-1.02 2.74-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>',
+        repo: '<path d="M7 4h8l4 4v12H7z"/><path d="M15 4v5h5"/><path d="M10 14h6M10 18h5"/>',
+        issue: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>',
+        pull: '<circle cx="7" cy="6" r="2"/><circle cx="17" cy="18" r="2"/><path d="M7 8v4a6 6 0 0 0 6 6h2"/>',
+        review: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/>',
+        check: '<path d="m5 13 4 4L19 7"/>',
+        clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+        sync: '<path d="M20 7h-5a5 5 0 0 0-8.5-1.5L5 7"/><path d="M4 17h5a5 5 0 0 0 8.5 1.5L19 17"/><path d="M19 4v3h-3M5 20v-3h3"/>',
+        calendar: '<rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4M16 3v4M4 10h16"/>',
+        alert: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 4.8 2.8 18a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.8a2 2 0 0 0-3.4 0Z"/>',
+        home: '<path d="M4 10.6 12 4l8 6.6V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/>',
+        list: '<path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>'
+      };
+      const fillOnly = name === "github" ? 'fill="currentColor" stroke="none"' : "";
+      return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" ${fillOnly}>${paths[name] || paths.issue}</svg>`;
+    }
+
+    function chip(label, tone = "green") {
+      return `<span class="chip ${tone}">${label}</span>`;
+    }
+
+    function iconBox(name, tone) {
+      return `<div class="icon-box ${tone}">${icon(name)}</div>`;
+    }
+
+    function appHead(kicker, title) {
+      return `<div class="app-head">
+        <div>
+          <div class="kicker">${kicker}</div>
+          <h2 class="title">${title}</h2>
+        </div>
+        <div class="avatar">Z</div>
+      </div>`;
+    }
+
+    function bottomNav(active) {
+      const navItems = [
+        ["today", "今日", "home"],
+        ["pool", "规划池", "list"],
+        ["receipt", "变化", "sync"],
+        ["conflict", "冲突", "alert"]
+      ];
+      return `<nav class="bottom-nav" aria-label="主导航">
+        ${navItems.map(([screen, label, i]) => `
+          <button class="nav-btn ${active === screen ? "active" : ""}" type="button" data-action="jump" data-screen="${screen}" aria-label="${label}">
+            ${icon(i)}
+            <span>${label}</span>
+          </button>
+        `).join("")}
+      </nav>`;
+    }
+
+    function taskCard(task, index = 0) {
+      const isOpen = state.expanded === task.id;
+      const changed = state.updated && (task.id === "T1" || task.id === "T5");
+      return `<button class="task-card tap motion-item tone-${task.tone} ${changed ? "changed" : ""}" style="--i:${index}" type="button" data-action="expand" data-task="${task.id}" aria-expanded="${isOpen}">
+        ${iconBox(task.icon, task.tone)}
+        <div class="task-main">
+          <div class="task-headline">
+            <div>
+              <div class="card-title">${task.title}</div>
+              <div class="card-meta">${task.meta}</div>
+            </div>
+          </div>
+          <div class="task-tags">${task.tags.map(t => chip(t[0], t[1])).join("")}</div>
+          ${isOpen ? `<div class="reason-box">${task.reason}</div>` : ""}
+        </div>
+      </button>`;
+    }
+
+    function screenWrap(content, navActive = "today") {
+      return `<section class="screen ${state.screen}-screen">
+        <div class="screen-body">${content}</div>
+        ${bottomNav(navActive)}
+      </section>`;
+    }
+
+    function authScreen() {
+      return screenWrap(`
+        ${appHead("GitDay", "今日 GitHub 任务")}
+        <section class="hero-card">
+          <div class="hero-symbol">${brandMark()}</div>
+          <div class="hero-content">
+            <p class="hero-label">个人任务台</p>
+            <h3 class="hero-title">今天要推进的事，先排好</h3>
+            <p class="hero-copy">连接仓库后，先看今天要推进的任务。</p>
+            <div class="hero-stats">
+              <div class="hero-stat"><strong>1</strong><span>绑定仓库</span></div>
+              <div class="hero-stat"><strong>7</strong><span>个人任务</span></div>
+              <div class="hero-stat"><strong>4h</strong><span>今日容量</span></div>
+            </div>
+          </div>
+        </section>
+        <div class="button-stack">
+          <button class="primary-btn" type="button" data-action="jump" data-screen="repo">${icon("github")} GitHub 授权</button>
+          <button class="secondary-btn" type="button" data-action="jump" data-screen="repo">Token 体验</button>
+        </div>
+        <p class="fine-print">连接后会整理与你相关的 Issue、PR 和 Review。</p>
+      `, "today");
+    }
+
+    function repoScreen() {
+      return screenWrap(`
+        ${appHead("ZhaoXingPeng", "选择一个仓库")}
+        <div class="repo-card selected tap">
+          ${iconBox("repo", "green")}
+          <div>
+            <div class="repo-name">1024XEngineer / XE6-15</div>
+            <div class="card-meta">MS1 · 战略决策与首个可串联版本</div>
+          </div>
+          ${chip("当前", "green")}
+        </div>
+        <div class="repo-card">
+          ${iconBox("repo", "blue")}
+          <div>
+            <div class="repo-name">ZhaoXingPeng / XE6-15</div>
+            <div class="card-meta">个人 Fork · 暂不作为主任务池</div>
+          </div>
+          ${chip("可选", "blue")}
+        </div>
+        <div class="repo-card disabled">
+          ${iconBox("repo", "amber")}
+          <div>
+            <div class="repo-name">其他仓库</div>
+            <div class="card-meta">当前先选择一个仓库</div>
+          </div>
+          ${chip("置灰", "amber")}
+        </div>
+        <section class="milestone">
+          <div class="kicker">当前 Milestone</div>
+          <div class="card-title">MS1：战略决策与首个可串联版本</div>
+          <div class="milestone-row">
+            <div class="card-meta">Proposal 01/02/03 已进入收口讨论</div>
+            ${chip("单仓库", "violet")}
+          </div>
+          <div class="spacer"></div>
+          <div class="progress-track"><div class="progress-fill" style="width: 68%"></div></div>
+        </section>
+        <div class="button-stack">
+          <button class="primary-btn" type="button" data-action="jump" data-screen="import">绑定这个仓库</button>
+        </div>
+      `, "today");
+    }
+
+    function importScreen() {
+      return screenWrap(`
+        ${appHead("同步摘要", "导入我的任务")}
+        <div class="import-status motion-item" style="--i:0">
+          <div class="import-status-top">
+            <span>正在同步 GitHub 任务</span>
+            ${chip("已连接", "green")}
+          </div>
+          <div class="import-progress" aria-hidden="true"></div>
+        </div>
+        <div class="metrics-grid">
+          <div class="metric-card green motion-item" style="--i:1"><div class="metric-label">Open Issue</div><div class="metric-value mono">4</div></div>
+          <div class="metric-card blue motion-item" style="--i:2"><div class="metric-label">我的 PR</div><div class="metric-value mono">1</div></div>
+          <div class="metric-card violet motion-item" style="--i:3"><div class="metric-label">待我 Review</div><div class="metric-value mono">1</div></div>
+          <div class="metric-card amber motion-item" style="--i:4"><div class="metric-label">待估算</div><div class="metric-value mono">1</div></div>
+        </div>
+        <div class="button-stack motion-item" style="--i:5">
+          <button class="primary-btn" type="button" data-action="jump" data-screen="today">查看今日计划</button>
+        </div>
+        <div class="section-title motion-item" style="--i:6">
+          <div><h3>导入预览</h3><p>先看和我有关的开放任务</p></div>
+          ${chip("已同步", "green")}
+        </div>
+        <div class="source-card motion-item" data-step="01" style="--i:7">
+          ${iconBox("pull", "blue")}
+          <div><div class="card-title">PR #29 Proposal 03 自动重排</div><div class="card-meta">预估 1h，可修改</div></div>
+        </div>
+        <div class="source-card motion-item" data-step="02" style="--i:8">
+          ${iconBox("issue", "green")}
+          <div><div class="card-title">#28 Proposal 02 排序规则对齐</div><div class="card-meta">Proposal 03 依赖它</div></div>
+        </div>
+        <div class="source-card pending motion-item" data-step="03" style="--i:9">
+          ${iconBox("clock", "amber")}
+          <div><div class="card-title">#31 原型文档补充</div><div class="card-meta">未估算，先留在规划池</div></div>
+        </div>
+        <p class="fine-print motion-item" style="--i:10">已完成的任务先不显示。</p>
+      `, "today");
+    }
+
+    function todayScreen() {
+      const tasks = state.updated ? tasksAfter : tasksBefore;
+      const used = state.updated ? "4h / 4h" : "3h / 4h";
+      const angle = state.updated ? 360 : 270;
+      return screenWrap(`
+        ${appHead("7月14日 周二", state.updated ? "新的今日计划" : "今日计划")}
+        <div class="date-strip" aria-label="日期选择">
+          ${[["五","10"],["六","11"],["日","12"],["一","13"],["二","14"]].map((d, index) => `
+            <div class="date-pill ${index === 4 ? "active" : ""}">${d[0]}<strong>${d[1]}</strong></div>
+          `).join("")}
+        </div>
+        <section class="capacity-card">
+          <div class="capacity-top">
+            <div>
+              <div class="kicker">今日容量</div>
+              <div class="capacity-number mono">${used}</div>
+              <div class="card-meta">${state.updated ? "容量已满。晚截止的任务回到规划池。" : "还剩 1h。点开任务看原因。"}</div>
+            </div>
+            <div class="ring" style="--angle:${angle}deg"><span>${state.updated ? "100%" : "75%"}</span></div>
+          </div>
+        </section>
+        <div class="section-title">
+          <div><h3>任务顺序</h3><p>先看截止，再看偏好和剩余时间</p></div>
+          ${chip(state.updated ? "已重排" : "初始", state.updated ? "violet" : "green")}
+        </div>
+        ${tasks.map((task, index) => taskCard(task, index)).join("")}
+        <div class="button-stack">
+          <button class="${state.updated ? "secondary-btn" : "danger-btn"}" type="button" data-action="${state.updated ? "jump" : "update"}" data-screen="receipt">
+            ${state.updated ? "查看变化回执" : "模拟 Review 退回"}
+          </button>
+        </div>
+      `, "today");
+    }
+
+    function receiptScreen() {
+      return screenWrap(`
+        ${appHead("PR #29 被要求修改", "计划已更新")}
+        <section class="receipt-hero motion-item" style="--i:0">
+          ${chip("变化回执", "green")}
+          <h3>计划变了，原因也要说清楚</h3>
+          <p>PR 被要求修改后，重新进今日计划。截止更晚的任务回到规划池。</p>
+        </section>
+        <div class="receipt-card added motion-item" style="--i:1">
+          ${iconBox("pull", "red")}
+          <div><div class="card-title">加入今日：PR #29 返工修改</div><div class="card-meta">原因：从待评审回到进行中，今天截止。</div></div>
+        </div>
+        <div class="receipt-card removed motion-item" style="--i:2">
+          ${iconBox("check", "amber")}
+          <div><div class="card-title">移出今日：#7 MS1 战略决策补充</div><div class="card-meta">原因：容量不足，#7 截止更晚。</div></div>
+        </div>
+        <div class="before-after motion-item" style="--i:3">
+          <div class="mini-list">
+            <h4>调整前</h4>
+            <div class="mini-row"><span>PR #29</span><span>Review</span></div>
+            <div class="mini-row"><span>#28</span><span>P1</span></div>
+            <div class="mini-row"><span>#7</span><span>收尾</span></div>
+          </div>
+          <div class="mini-list after-list">
+            <h4>调整后</h4>
+            <div class="mini-row" style="--i:0"><span>PR #29</span><span>返工</span></div>
+            <div class="mini-row" style="--i:1"><span>#28</span><span>P1</span></div>
+            <div class="mini-row" style="--i:2"><span>Review #30</span><span>今日</span></div>
+          </div>
+        </div>
+        <div class="button-stack motion-item" style="--i:4">
+          <button class="primary-btn" type="button" data-action="jump" data-screen="today">查看新的今日计划</button>
+          <button class="secondary-btn" type="button" data-action="jump" data-screen="pool">查看规划池</button>
+        </div>
+      `, "receipt");
+    }
+
+    function poolScreen() {
+      return screenWrap(`
+        ${appHead("今日之外", "规划池")}
+        <section class="hero-card" style="min-height: 142px;">
+          <div class="hero-symbol">${brandMark()}</div>
+          <div class="hero-content">
+            <p class="hero-label">先放回这里</p>
+            <h3 class="hero-title" style="font-size:24px;width:248px;">容量不够时，明天继续排序</h3>
+          </div>
+        </section>
+        <div class="section-title">
+          <div><h3>未排入今天</h3><p>保留来源、状态和下一步</p></div>
+          ${chip("3 个任务", "violet")}
+        </div>
+        ${poolTasks.map((item, index) => `
+          <div class="pool-card motion-item" style="--i:${index}">
+            ${iconBox(item.icon, item.tone)}
+            <div><div class="card-title">${item.title}</div><div class="card-meta">${item.meta}</div><div class="task-tags">${chip(item.chip[0], item.chip[1])}</div></div>
+          </div>
+        `).join("")}
+        <div class="button-stack">
+          <button class="secondary-btn" type="button" data-action="jump" data-screen="conflict">查看冲突与待估算</button>
+        </div>
+      `, "pool");
+    }
+
+    function conflictScreen() {
+      return screenWrap(`
+        ${appHead("今日风险", "冲突与待估算")}
+        <section class="conflict-card motion-item" style="--i:0">
+          ${chip("硬截止冲突", "red")}
+          <div class="section-title" style="margin:12px 0 0;">
+          <div><h3>硬截止超出今天容量</h3><p>不替用户延期，也不假装能完成。</p></div>
+          </div>
+          <div class="conflict-grid">
+            <div class="conflict-metric"><span>硬截止总量</span><strong class="mono">5h</strong></div>
+            <div class="conflict-metric"><span>剩余容量</span><strong class="mono">2h</strong></div>
+          </div>
+        </section>
+        <div class="section-title motion-item" style="--i:1">
+          <div><h3>可选处理</h3><p>把选择交还给用户</p></div>
+        </div>
+        <div class="option-card motion-item" style="--i:2">
+          ${iconBox("list", "green")}
+          <div><div class="card-title">手动调整顺序</div><div class="card-meta">拖拽后，除硬 DDL 外保持用户偏好。</div></div>
+        </div>
+        <div class="option-card motion-item" style="--i:3">
+          ${iconBox("alert", "red")}
+          <div><div class="card-title">标记延期风险</div><div class="card-meta">先保留提醒，让你决定下一步。</div></div>
+        </div>
+        <section class="estimate-box motion-item" style="--i:4">
+          ${chip("待估算", "amber")}
+          <div class="card-title" style="margin-top:10px;">#31 原型文档补充</div>
+          <div class="card-meta">补充预计投入后，才允许进入今日容量。</div>
+          <div class="estimate-row">
+            <input aria-label="预计投入" value="${state.estimateSaved ? "45m" : ""}" placeholder="例如 45m" />
+            <button class="primary-btn" style="min-height:48px;" type="button" data-action="estimate">${state.estimateSaved ? "已保存" : "补估算"}</button>
+          </div>
+        </section>
+      `, "conflict");
+    }
+
+    const renderers = {
+      auth: authScreen,
+      repo: repoScreen,
+      import: importScreen,
+      today: todayScreen,
+      receipt: receiptScreen,
+      pool: poolScreen,
+      conflict: conflictScreen
+    };
+
+    function setScreen(screen) {
+      if (!renderers[screen]) return;
+      state.screen = screen;
+      if (window.location.hash.slice(1) !== screen) {
+        history.replaceState(null, "", `#${screen}`);
+      }
+      render();
+    }
+
+    function renderRail() {
+      const rail = document.getElementById("screenRail");
+      rail.innerHTML = screens.map((s, index) => `
+        <button class="rail-btn ${state.screen === s.id ? "active" : ""}" type="button" data-action="jump" data-screen="${s.id}">
+          <span class="rail-index">${String(index + 1).padStart(2, "0")}</span>
+          <div class="rail-copy">
+            <strong>${s.label}</strong>
+            <span>${s.note}</span>
+          </div>
+        </button>
+      `).join("");
+    }
+
+    function renderSideCopy() {
+      const copy = sideCopy[state.screen] || sideCopy.auth;
+      const index = Math.max(0, screens.findIndex(s => s.id === state.screen));
+      document.getElementById("sideKicker").textContent = `汇报页 ${index + 1} / ${screens.length}`;
+      document.getElementById("sideTitle").textContent = copy[0];
+      document.getElementById("sideDesc").textContent = copy[1];
+    }
+
+    function render() {
+      document.getElementById("app").innerHTML = renderers[state.screen]();
+      renderRail();
+      renderSideCopy();
+    }
+
+    document.addEventListener("click", event => {
+      const target = event.target.closest("[data-action]");
+      if (!target) return;
+      const action = target.dataset.action;
+      if (action === "jump") {
+        setScreen(target.dataset.screen);
+      }
+      if (action === "expand") {
+        state.expanded = state.expanded === target.dataset.task ? "" : target.dataset.task;
+        render();
+      }
+      if (action === "update") {
+        state.updated = true;
+        state.expanded = "T1";
+        setScreen("receipt");
+      }
+      if (action === "estimate") {
+        state.estimateSaved = true;
+        render();
+      }
+      if (action === "reset") {
+        state.screen = "auth";
+        state.updated = false;
+        state.expanded = "T1";
+        state.estimateSaved = false;
+        setScreen("auth");
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>
