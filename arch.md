@@ -159,10 +159,12 @@ GitHubDisconnected
 SourceReference
 - repositoryId
 - githubNodeId
-- kind: issue | pull_request
+- kind: issue | pull_request | review_request
 - number
 - url
 ```
+
+`kind` 含 `review_request`：Review 请求是与 Issue、PR 并列的源节点，有独立的 `githubNodeId`、`requestedAt` 与 `ReviewRequestFacts`，因此作为独立 source 进入 `evidenceSources`（见 `ActionIdentityResolver` 规则 3），而不是 PR 的属性。
 
 唯一性约束（作用于源节点缓存，不直接决定个人行动数量）：
 
@@ -247,6 +249,29 @@ ActionIdentityResolver
 
 `PersonalAction` 的唯一性由 `ActionIdentityResolver` 的归并结果决定，不等于 `bindingId + githubNodeId`。归并键稳定：同一 GitHub 节点集合在同样关联关系下始终归并为同一 `actionId`，避免重排时身份漂移。
 
+#### 归并与拆分的身份、规划迁移
+
+GitHub 关系变化会触发行动合并（裸 PR 新增 `Closes #N` 关联到既有 Issue）或拆分（关联消失）。这类变化是正常同步事件，不能因此静默丢失用户的优先级、预估、截止或手动顺序。迁移规则：
+
+```text
+合并（两个独立行动 → 一个行动）
+- actionId 存活：以 primarySource 所在行动的 actionId 为准（规则 1 中 Issue 为 primarySource，故 Issue 行动的 actionId 存活；规则 3 中 PR 行动的 actionId 存活）。
+- PersonalPlanning 合并择优（两份冲突时按下列优先级取值）：
+    priority       取更高优先级（P0 > P1 > P2 > unset）
+    hardDeadline   取更早的硬截止（null 视为最晚）
+    estimatedEffortMinutes  优先取非 null（都非 null 取较大值，保留更保守预估）
+    manualOrderKey 取非 null（都非 null 取较小值，靠前位置优先）
+    blocked        任一为 true 则为 true
+- evidenceSources 的 actionId 不存活，但其 PersonalPlanning 按上述规则并入存活行动。
+
+拆分（一个行动 → 两个独立行动，因 closesIssues/partOf 关联消失）
+- 原行动的 actionId 废弃，按当前节点集合重新归并生成新 actionId（每个独立源各得一个）。
+- PersonalPlanning 跟随 primarySource 迁移：原规划字段整体跟随仍为 primarySource 的那一方；纯 evidenceSource 升格为独立行动时，规划字段置为默认值（priority=unset、estimate=null、manualOrderKey=null），blocked=false。
+- 拆分产生的新行动进入待估算/规划池等区域由其字段重新判定，不继承原行动的 plan_bucket。
+```
+
+迁移产生的 `affectedActionIds` 记入 `SyncResult`，Coordinator 据此触发下游重排；规划字段的择优结果通过 `PlanChange` 的 `reasonCode`（如 `merge_planning_inherited`、`split_planning_reset`）可追溯。
+
 状态与原因必须分开，例如：
 
 ```text
@@ -267,9 +292,11 @@ PersonalPlanning
 - priority: P0 | P1 | P2 | unset
 - hardDeadline
 - estimatedEffortMinutes
-- manualOrderKey
+- manualOrderKey          // 有序分数键：同一硬截止分组内用户手动指定的相对位置；非整数槽位
 - blocked
 ```
+
+`manualOrderKey` 是有序分数键而非绝对槽位：在同一硬截止分组内，键值大小决定相对先后，新插入任务取相邻两键的中值，避免碰撞与全表 reindex。未手动拖拽的任务 `manualOrderKey = null`，由排序引擎按规则计算位置。键值经长期插入后可能精度退化，由 Task Pool 在同步或重排时按需压实（compaction）：组内按键值排序后重新均匀分配，保持相对顺序不变。
 
 这里不保存 `plannedDate`。任务安排日期由 Daily Planning 独占，避免两个模块同时维护计划状态。
 
@@ -418,7 +445,7 @@ PrioritizationCandidate
 
 ```text
 workStatus: on_progress | pending_review | done
-statusReasons 候选: changes_requested | blocked | missing_estimate | merged | closed_unmerged | issue_closed
+statusReasons 候选: waiting_for_review | changes_requested | blocked | missing_estimate | merged | closed_unmerged | issue_closed
 priority: P0 | P1 | P2 | unset
 ```
 
@@ -537,12 +564,13 @@ ManualMoveRequest
 - `beforeActionId` 与 `afterActionId` 互斥，同时提供则 `rejected("不能同时指定 before 和 after")`。
 - 目标任务必须存在于当前快照中，否则 `rejected("任务不存在")`。
 - `expectedSnapshotVersion` 与 `rankingId` 对应的快照版本一致，否则 `rejected("排序已过期，请刷新")`。
-- `manualOrderKey` 计算：取 `beforeActionId` 或 `afterActionId` 任务在最新排序中的 `position`，插中间记为 `manualOrderKey`，与同组内其他已拖拽任务的 `manualOrderKey` 保持一致量纲。
+- `manualOrderKey` 计算：用有序分数键，不取目标绝对 `position`。设目标位置相邻两任务的键为 `lo` 与 `hi`（拖到最前 `lo = null` 视为 −∞，拖到最后 `hi = null` 视为 +∞），则新键 = `(lo + hi) / 2`。这样 `before` 与 `after` 可靠区分（落在不同区间），且不会与已有键碰撞。
+- 键值精度退化时由 Task Pool 在写入时触发压实：组内按键排序后重新均匀分配键值，相对顺序不变；压实对用户不可见。
 
 ```text
 ManualOrderPatch
 - actionId
-- manualOrderKey        // 应保存的绝对槽位（0-based）
+- manualOrderKey        // 有序分数键，非整数槽位
 ```
 
 与实际写入分离：Prioritization 只返回应保存的 `manualOrderKey`，实际写入仍通过 Task Pool 的 `updatePlanning` 完成。
@@ -634,6 +662,7 @@ PlanChange
 - fromBucket?
 - toBucket?
 - reasonCode
+```
 
 `reasonCode` 取值：
 
@@ -650,7 +679,6 @@ issue_closed                 Issue 已关闭，任务移出计划
 ```
 
 完成类（`merged` / `closed_unmerged` / `issue_closed`）固定配 `type = removed`、`toBucket` 省略。
-```
 
 ```text
 PlanChangeSet
@@ -661,6 +689,7 @@ PlanChangeSet
 - causeEvent
 - changes[]
 - createdAt
+```
 
 `trigger`、`causeEvent`、`reasonCode` 分三层，职责不重叠：
 
@@ -676,7 +705,35 @@ reasonCode  任务级 — 每条 PlanChange 自己的原因
 new_task | pr_resubmitted | changes_requested | issue_reopened
 | blocked | unblocked | hard_deadline_changed | task_closed | pr_merged | date_rollover
 ```
+
+### 冲突解决决策（持久化）
+
+`resolveCapacityConflict` 的 `manually_exclude` 与 `accept_late_risk` 必须持久化，否则下一次 sync / 容量变化 / 跨日重排会重建同样的候选，把被排除的任务重新塞回今日计划，或再次报同样的冲突。决策模型：
+
+```text
+ExclusionRecord              // 用户在硬截止冲突中手动移出的任务
+- recordId
+- actionId
+- date                       // 作用日期
+- scope: today_only | until_resolved   // 仅当日排除，或持续至任务状态变化
+- reasonCode                 // manual_exclude
+- createdAt
+- version
 ```
+
+```text
+LateRiskAcceptance           // 用户明确接受可能延期
+- recordId
+- actionIds[]                // 接受延期的任务集合
+- date
+- scope: today_only | until_resolved
+- gapMinutes                 // 接受时的缺口
+- reasonCode                 // accept_late_risk
+- createdAt
+- version
+```
+
+`replan` 在选入今日计划前读取当日有效的 `ExclusionRecord`（排除对应 `actionId`）与 `LateRiskAcceptance`（容忍其超载、不再报冲突）。`scope = today_only` 的记录在日期切换后失效；`until_resolved` 的记录在任务 `workStatus` 变为 `done` 或用户显式撤销时清除。`increase_capacity` 不产生决策记录（它改的是容量，由 `DailyCapacityOverride` 持久化）。
 
 ### 容量管理接口
 
@@ -768,9 +825,16 @@ resolveCapacityConflict(conflictId, resolution, expectedVersion)
 支持的解决方式：
 
 ```text
-increase_capacity(newTotalMinutes)
-manually_exclude(actionId)
-accept_late_risk(actionIds)
+increase_capacity(newTotalMinutes)    // 改容量，持久化为 DailyCapacityOverride
+manually_exclude(actionId)            // 排除任务，持久化为 ExclusionRecord
+accept_late_risk(actionIds)           // 接受延期，持久化为 LateRiskAcceptance
+```
+
+`manually_exclude` 与 `accept_late_risk` 的 `scope` 默认 `today_only`；若用户选择"持续至解决"则记 `until_resolved`。撤销决策：
+
+```text
+revokeConflictDecision(recordId, expectedVersion)
+→ void                  // 清除 ExclusionRecord 或 LateRiskAcceptance，下次 replan 重新评估
 ```
 
 “修改任务预计投入”不直接由该接口完成：
@@ -797,11 +861,14 @@ refreshWorkspace(trigger)
 ```text
 1. GitHub Connection.requireActiveRepository()   → 得到 RepositoryContext（含当前 Milestone）
 2. Task Pool.syncTaskPool(scope, trigger)        → scope = RepositoryContext + 当前 Milestone
-3. Task Pool.getTaskPoolSnapshot()
-4. Prioritization.rank()
-5. Daily Planning.replan()
-6. 返回同步摘要、排序结果和计划结果
+3. 若 syncResult.status == failed：短路，跳过 4-5，返回上次持久化的 ranking/plan（见不变量 #9）
+4. Task Pool.getTaskPoolSnapshot()
+5. Prioritization.rank()
+6. Daily Planning.replan()
+7. 返回同步摘要、排序结果和计划结果
 ```
+
+**同步失败短路**：`syncResult.status == failed` 时，Coordinator 不执行排序与重排——从 stale 数据重排会产生新的计划版本和误导性变更史，尽管并未成功刷新。此时 `WorkspaceRefreshResult` 返回上次成功持久化的 `rankingResult` 与 `planningOutcome`，`syncResult` 标记 `staleDataAvailable = true`，App Shell 据此展示"保留上次数据 + 重试同步"。`not_modified` 不触发短路（数据无变化，可走轻量重排或直接返回缓存）。
 
 ```text
 WorkspaceRefreshResult
@@ -810,6 +877,7 @@ WorkspaceRefreshResult
 - taskPoolSnapshotVersion
 - rankingResult
 - planningOutcome
+- staleRankingAndPlan?      // 同步失败时为 true，表示 ranking/planning 为上次持久化值
 ```
 
 不同变化只执行必要链路：
@@ -835,11 +903,14 @@ WorkspaceRefreshResult
 6. 阻塞、待评审任务不占今日容量；Done 任务退出计划，不在 DailyPlan.items 中。
 7. 相同输入和规则版本必须得到稳定排序。
 8. 所有写操作携带 `expectedVersion`，防止同步与用户编辑互相覆盖。
-9. 同步失败保留上次成功快照和计划，不能伪装成“没有任务”。
+9. 同步失败保留上次成功快照和计划，不能伪装成“没有任务”；Coordinator 在 `syncResult.status == failed` 时短路，不执行排序与重排，返回上次持久化的 ranking/plan，不产生新计划版本或变更史。
 10. 任何模块都不能写回 GitHub Issue、PR、Review 或团队字段。
 11. 每次重排必须携带 causeEvent，记录触发本次重排的具体事件，供变化说明追溯；trigger 只负责路由，不能替代事件级追溯。
 12. 行动归并键稳定：同一 GitHub 节点集合在同样关联关系下始终归并为同一 `actionId`，避免重排时身份漂移。
 13. 每日有效容量 = 该日 override 存在则取 override，否则取 `defaultCapacityMinutes`；默认容量由 Daily Planning 持有，不藏在 Task Pool。
+14. 行动合并/拆分时 `PersonalPlanning` 必须按既定择优/迁移规则保留，不得因 GitHub 关系变化静默丢失优先级、预估、截止或手动顺序。
+15. 冲突解决决策（`manually_exclude` / `accept_late_risk`）必须持久化并带作用域；`replan` 读取当日有效决策，不得在后续重排中重建已被排除的任务或重复报同一冲突。
+16. App Shell 只持有 `WorkspaceCoordinator` 引用，所有用户操作经 Coordinator façade 方法，不直接调用领域模块；领域方法名不出现在 App Shell。
 
 ---
 
@@ -856,16 +927,34 @@ App Shell 是桌面端的外壳层，作为 driving adapter 从外向内驱动 W
 
 ### 页面与 Coordinator 调用映射
 
-| 原型页 | 用户目标 | App Shell 调 Coordinator 的入口 |
+App Shell 只持有 `WorkspaceCoordinator` 引用，下表”调用入口”均为 Coordinator 暴露的 façade 方法；Coordinator 内部再分发到对应领域模块。领域方法名（如 `GitHubConnection.startAuthorization`）不出现在 App Shell。
+
+| 原型页 | 用户目标 | App Shell 调 Coordinator 的 façade |
 |---|---|---|
-| 01 连接 GitHub | 完成身份授权 | `GitHubConnection.startAuthorization()` / `checkAuthorization()` |
-| 02 选择单一仓库 | 绑定一个仓库 | `listAccessibleRepositories()` / `bindRepository()` |
-| 03 同步与时间建议 | 确认导入结果、补预计投入 | `refreshWorkspace(initial)` → 渲染 `listPendingEffortSuggestions()`；接受后走 `updatePlanning` |
-| 04 全部待办 | 查看任务池与排序 | 读 `TaskPoolSnapshot` + `RankingResult` 渲染（经 Coordinator 投影） |
-| 05 任务详情 | 区分事实与规划、改规划字段 | `getAction()` / `updatePlanning()` → 触发重排 |
-| 06 今日计划 | 按今日容量执行 | 读 `DailyPlan` + `getEffectiveCapacity(today)` |
-| 07 自动重排 | 看变化与原因 | 读最近 `PlanChangeSet`（含 `causeEvent` 与逐条 `reasonCode`） |
-| 08 硬截止容量冲突 | 选择处理方向 | `resolveCapacityConflict()`；选“改投入”则转 `updatePlanning` 链 |
+| 01 连接 GitHub | 完成身份授权 | `coordinator.startGitHubAuthorization()` / `checkAuthorization(challengeId)` |
+| 02 选择单一仓库 | 绑定一个仓库 | `coordinator.listAccessibleRepositories(query?)` / `bindRepository(repositoryId)` / `listMilestones()` / `setCurrentMilestone(milestoneNumber?)` |
+| 03 同步与时间建议 | 确认导入结果、补预计投入 | `coordinator.refreshWorkspace(initial)` → 渲染 `listPendingEffortSuggestions()`；接受后走 `coordinator.updatePlanning(actionId, patch)` |
+| 04 全部待办 | 查看任务池与排序 | `coordinator.getWorkspaceView()`（经 Coordinator 投影 `TaskPoolSnapshot` + `RankingResult`） |
+| 05 任务详情 | 区分事实与规划、改规划字段 | `coordinator.getAction(actionId)` / `updatePlanning(...)` → 触发重排 |
+| 06 今日计划 | 按今日容量执行 | `coordinator.getTodayPlan()`（含 `DailyPlan` + `getEffectiveCapacity(today)`） |
+| 07 自动重排 | 看变化与原因 | `coordinator.getLatestChangeSet()`（含 `causeEvent` 与逐条 `reasonCode`） |
+| 08 硬截止容量冲突 | 选择处理方向 | `coordinator.resolveCapacityConflict(conflictId, resolution)`；选”改投入”则转 `updatePlanning` 链 |
+
+Coordinator façade 方法清单（部分，按需扩展）：
+
+```text
+startGitHubAuthorization() / checkAuthorization(challengeId)
+listAccessibleRepositories(query?) / bindRepository(repositoryId)
+listMilestones(repositoryId) / setCurrentMilestone(milestoneNumber?)
+refreshWorkspace(trigger)                    // 同步失败时短路，见第六节
+getWorkspaceView()                           // 04 全部待办投影
+getAction(actionId) / updatePlanning(actionId, patch, expectedVersion)
+listPendingEffortSuggestions()
+getTodayPlan()                               // 06 今日计划 + 有效容量
+getLatestChangeSet()                         // 07 自动重排
+getCapacityConflict() / resolveCapacityConflict(conflictId, resolution)
+revokeConflictDecision(recordId)
+```
 
 App Shell 不直接拼排序文案或变化原因文字——它消费内核返回的 `RankingReason.code` / `PlanChange.reasonCode` / `causeEvent` 等机器码，再本地化成“24 小时内到期”“今日容量不足”等展示文字。
 
