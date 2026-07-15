@@ -1,1663 +1,652 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
-<title>Xe615 Mvp Prototype V2</title>
-<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;max-width:736px;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>XE6-15 · macOS 桌面端原型</title>
+  <style>
+    :root {
+      --bg: #d9d8d4;
+      --window: #f8f7f4;
+      --surface: #ffffff;
+      --surface-2: #f0efeb;
+      --surface-3: #e8e7e2;
+      --sidebar: #ffffff;
+      --sidebar-2: #efeee9;
+      --sidebar-text: #343430;
+      --sidebar-muted: #77766f;
+      --sidebar-hover: #f4f3ef;
+      --sidebar-border: #e4e3dd;
+      --onboarding: #1d1d1b;
+      --text: #1c1c1a;
+      --muted: #74736d;
+      --faint: #aaa9a3;
+      --line: #deddd7;
+      --line-strong: #c9c8c1;
+      --accent: #d9773f;
+      --accent-soft: #f7e8de;
+      --primary-bg: #1c1c1a;
+      --primary-fg: #ffffff;
+      --green: #26764b;
+      --green-soft: #e0f1e7;
+      --blue: #356da8;
+      --blue-soft: #e3edf8;
+      --yellow: #91651d;
+      --yellow-soft: #f8edcf;
+      --red: #9c433a;
+      --red-soft: #f6e5e2;
+      --purple: #6854a1;
+      --purple-soft: #ece8f7;
+      --shadow: 0 30px 80px rgb(32 31 28 / 24%), 0 2px 10px rgb(32 31 28 / 10%);
+      --radius: 12px;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      --mono: "SFMono-Regular", ui-monospace, Menlo, monospace;
+    }
+
+    :root[data-theme="dark"] {
+      --bg: #11110f;
+      --window: #1c1c1a;
+      --surface: #242421;
+      --surface-2: #2d2d29;
+      --surface-3: #383833;
+      --sidebar: #141412;
+      --sidebar-2: #252521;
+      --sidebar-text: #f2f1eb;
+      --sidebar-muted: #a9a8a2;
+      --sidebar-hover: #252522;
+      --sidebar-border: rgb(255 255 255 / 8%);
+      --onboarding: #141412;
+      --text: #f1f0ea;
+      --muted: #aaa9a1;
+      --faint: #77766f;
+      --line: #3d3c37;
+      --line-strong: #52514a;
+      --accent: #e58a54;
+      --accent-soft: #4a3025;
+      --primary-bg: #f1f0ea;
+      --primary-fg: #1c1c1a;
+      --green: #73bd8e;
+      --green-soft: #203b2b;
+      --blue: #7eacdc;
+      --blue-soft: #24384c;
+      --yellow: #e0b663;
+      --yellow-soft: #463a22;
+      --red: #e39088;
+      --red-soft: #482a27;
+      --purple: #b6a1ea;
+      --purple-soft: #342d48;
+      --shadow: 0 34px 90px rgb(0 0 0 / 54%), 0 2px 12px rgb(0 0 0 / 30%);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 20% 10%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 31%),
+        linear-gradient(145deg, var(--bg), color-mix(in srgb, var(--bg) 78%, #fff 22%));
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--accent) 70%, white);
+      outline-offset: 2px;
+    }
+    a { color: inherit; text-decoration: none; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: clamp(26px, 2.2vw, 36px); line-height: 1.15; letter-spacing: -.035em; }
+    h2 { font-size: 21px; line-height: 1.25; letter-spacing: -.02em; }
+    h3 { font-size: 15px; line-height: 1.3; }
+    svg { display: block; }
+    .icon { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+    .icon-lg { width: 24px; height: 24px; }
+
+    .prototype-window {
+      width: min(1480px, calc(100vw - 48px));
+      height: min(920px, calc(100vh - 48px));
+      min-height: 680px;
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--line-strong) 76%, transparent);
+      border-radius: 15px;
+      background: var(--window);
+      box-shadow: var(--shadow);
+    }
+
+    .titlebar {
+      height: 50px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 16px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--window) 86%, transparent);
+      backdrop-filter: blur(22px) saturate(1.2);
+      -webkit-app-region: drag;
+    }
+    .traffic { display: flex; gap: 8px; align-items: center; }
+    .traffic span { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 .5px rgb(0 0 0 / 20%); }
+    .traffic span:nth-child(1) { background: #ff5f57; }
+    .traffic span:nth-child(2) { background: #febc2e; }
+    .traffic span:nth-child(3) { background: #28c840; }
+    .window-title { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
+    .window-title strong { color: var(--text); }
+    .title-actions { justify-self: end; display: flex; align-items: center; gap: 7px; -webkit-app-region: no-drag; }
+    .theme-button, .step-dot {
+      width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; cursor: pointer;
+    }
+    .theme-button:hover, .step-dot:hover { background: var(--surface-2); }
+    .step-nav { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+    .step-dot { width: 24px; height: 22px; border-radius: 5px; font: 600 10px/1 var(--mono); color: var(--muted); }
+    .step-dot.is-active { color: var(--primary-fg); background: var(--primary-bg); }
+
+    .viewport { position: relative; height: calc(100% - 50px); overflow: hidden; }
+    .screen { display: none; width: 100%; height: 100%; }
+    .screen.is-active { display: block; animation: enter .2s ease both; }
+    @keyframes enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+    .btn {
+      min-height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 0 14px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      color: var(--text);
+      background: var(--surface);
+      box-shadow: 0 1px 1px rgb(0 0 0 / 4%);
+      font-weight: 560;
+      cursor: pointer;
+      transition: transform .12s ease, background .12s ease, border-color .12s ease;
+    }
+    .btn:hover { background: var(--surface-2); border-color: color-mix(in srgb, var(--line-strong) 72%, var(--text)); }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary { color: var(--primary-fg); border-color: var(--primary-bg); background: var(--primary-bg); }
+    .btn-primary:hover { color: var(--primary-fg); background: color-mix(in srgb, var(--primary-bg) 88%, var(--accent)); }
+    .btn-accent { color: #fff; border-color: var(--accent); background: var(--accent); }
+    .btn-accent:hover { background: color-mix(in srgb, var(--accent) 84%, #000); }
+    .btn-ghost { border-color: transparent; background: transparent; box-shadow: none; }
+    .btn-danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, var(--line)); background: var(--red-soft); }
+    .btn:disabled { opacity: .42; cursor: not-allowed; transform: none; }
+    .btn-sm { min-height: 30px; padding: 0 10px; border-radius: 7px; font-size: 12px; }
+    .kbd { padding: 2px 6px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; color: var(--muted); background: var(--surface); font: 10px/1.3 var(--mono); }
+
+    .eyebrow { display: flex; align-items: center; gap: 7px; color: var(--muted); font: 600 11px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    .mono { font-family: var(--mono); }
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px; width: fit-content; min-height: 23px; padding: 2px 8px;
+      border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); font-size: 11px; font-weight: 600;
+    }
+    .badge.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 27%, var(--line)); background: var(--accent-soft); }
+    .badge.green { color: var(--green); border-color: color-mix(in srgb, var(--green) 25%, var(--line)); background: var(--green-soft); }
+    .badge.blue { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 25%, var(--line)); background: var(--blue-soft); }
+    .badge.yellow { color: var(--yellow); border-color: color-mix(in srgb, var(--yellow) 25%, var(--line)); background: var(--yellow-soft); }
+    .badge.red { color: var(--red); border-color: color-mix(in srgb, var(--red) 25%, var(--line)); background: var(--red-soft); }
+    .badge.purple { color: var(--purple); border-color: color-mix(in srgb, var(--purple) 25%, var(--line)); background: var(--purple-soft); }
+
+    .field { width: 100%; height: 40px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--surface); }
+    .field::placeholder { color: var(--faint); }
+    .search-field { position: relative; }
+    .search-field .icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+    .search-field .field { padding-left: 38px; }
+
+    .setup-layout { height: 100%; display: grid; grid-template-columns: minmax(280px, 34%) 1fr; }
+    .setup-aside {
+      position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; padding: 44px;
+      color: #f5f4ee; background: var(--onboarding);
+    }
+    .setup-aside::after {
+      content: ""; position: absolute; width: 440px; height: 440px; left: -180px; bottom: -250px; border: 1px solid rgb(255 255 255 / 12%); border-radius: 50%; box-shadow: 0 0 0 70px rgb(255 255 255 / 2%), 0 0 0 140px rgb(255 255 255 / 2%);
+    }
+    .brand { position: relative; z-index: 1; display: flex; align-items: center; gap: 11px; font-weight: 700; letter-spacing: -.02em; }
+    .brand-mark { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid rgb(255 255 255 / 20%); border-radius: 9px; color: #fff; background: #292926; }
+    .aside-copy { position: relative; z-index: 1; max-width: 390px; display: grid; gap: 18px; }
+    .aside-copy h1 { color: #f7f5ee; font-size: clamp(34px, 4vw, 54px); }
+    .aside-copy p { color: #aeadab; font-size: 15px; line-height: 1.7; }
+    .aside-foot { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; color: #8c8c87; font: 11px var(--mono); }
+    .setup-main { min-width: 0; overflow: auto; display: grid; place-items: center; padding: 48px; background: var(--window); }
+    .setup-card { width: min(620px, 100%); display: grid; gap: 26px; }
+    .setup-card.narrow { width: min(440px, 100%); }
+    .setup-heading { display: grid; gap: 9px; }
+    .setup-heading p { max-width: 560px; color: var(--muted); }
+    .trust-list { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+    .trust-item { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+    .trust-item .icon { color: var(--green); }
+    .auth-actions { display: grid; gap: 10px; }
+    .auth-actions .btn { height: 44px; }
+    .auth-note { text-align: center; color: var(--faint); font-size: 11px; }
+
+    .repo-panel { overflow: hidden; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
+    .repo-panel-head { display: flex; justify-content: space-between; align-items: center; padding: 11px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .repo-option { width: 100%; display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 13px 14px; border: 0; border-bottom: 1px solid var(--line); text-align: left; background: transparent; cursor: pointer; }
+    .repo-option:last-child { border-bottom: 0; }
+    .repo-option:hover, .repo-option.is-selected { background: var(--surface-2); }
+    .repo-option.is-selected { box-shadow: inset 3px 0 var(--accent); }
+    .repo-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: var(--surface-2); }
+    .repo-name { font-weight: 620; }
+    .repo-meta { margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .repo-footer { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
+
+    .sync-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .metric { padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+    .metric strong { display: block; font-size: 22px; letter-spacing: -.03em; }
+    .metric span { color: var(--muted); font-size: 11px; }
+    .estimate-list { overflow: hidden; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
+    .estimate-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .estimate-row { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: center; padding: 15px 14px; border-bottom: 1px solid var(--line); }
+    .estimate-row:last-child { border-bottom: 0; }
+    .estimate-title { display: flex; align-items: center; gap: 7px; font-weight: 610; }
+    .estimate-reason { margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .estimate-actions { display: flex; align-items: center; gap: 7px; }
+    .estimate-editor { display: none; align-items: center; gap: 7px; }
+    .estimate-editor .field { width: 82px; height: 30px; }
+
+    .app-layout { height: 100%; display: grid; grid-template-columns: 232px minmax(0, 1fr); }
+    .sidebar { min-width: 0; display: flex; flex-direction: column; gap: 24px; padding: 22px 14px 16px; color: var(--sidebar-text); border-right: 1px solid var(--sidebar-border); background: var(--sidebar); }
+    .sidebar .brand { padding: 0 8px; }
+    .sidebar .brand-mark { width: 28px; height: 28px; }
+    .side-section { display: grid; gap: 5px; }
+    .side-label { padding: 0 9px 5px; color: var(--sidebar-muted); font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .side-link { width: 100%; min-height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 0; border-radius: 8px; color: var(--sidebar-muted); background: transparent; text-align: left; cursor: pointer; }
+    .side-link:hover { color: var(--sidebar-text); background: var(--sidebar-hover); }
+    .side-link.is-active { color: var(--sidebar-text); background: var(--sidebar-2); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sidebar-border) 70%, transparent); }
+    .side-link .count { margin-left: auto; color: var(--sidebar-muted); font: 10px var(--mono); }
+    .repo-context { margin-top: auto; padding: 12px; border: 1px solid var(--sidebar-border); border-radius: 9px; color: var(--sidebar-text); background: var(--sidebar-hover); }
+    .repo-context .mono { display: block; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; color: var(--sidebar-muted); font-size: 10px; white-space: nowrap; }
+    .profile { display: flex; align-items: center; gap: 9px; padding: 6px 8px 0; color: var(--sidebar-muted); }
+    .avatar { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 8px; color: white; background: linear-gradient(135deg, #55554f, #30302d); font-size: 10px; font-weight: 700; }
+
+    .main { min-width: 0; overflow: auto; background: var(--window); }
+    .content { width: min(1060px, calc(100% - 72px)); margin: 0 auto; padding: 42px 0 56px; }
+    .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
+    .page-header-copy { display: grid; gap: 7px; }
+    .page-header-actions { display: flex; align-items: center; gap: 8px; }
+    .card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
+    .filter-group { display: flex; align-items: center; gap: 5px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+    .filter { min-height: 28px; padding: 0 10px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 12px; cursor: pointer; }
+    .filter.is-active { color: var(--text); background: var(--surface-2); font-weight: 620; }
+    .toolbar .search-field { width: min(310px, 42%); }
+    .toolbar .field { height: 36px; }
+
+    .task-list { overflow: hidden; }
+    .task-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 14px; align-items: start; padding: 16px 18px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; cursor: pointer; width: 100%; }
+    .task-row:last-child { border-bottom: 0; }
+    .task-row:hover { background: var(--surface-2); }
+    .task-rank { width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--surface); font: 11px var(--mono); }
+    .task-main { min-width: 0; display: grid; gap: 7px; }
+    .task-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-weight: 650; font-size: 14px; }
+    .task-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 11px; }
+    .task-reason { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: 11px; }
+    .task-time { padding-top: 3px; font: 600 12px var(--mono); white-space: nowrap; }
+
+    .detail-grid { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(320px, .82fr); gap: 16px; align-items: start; }
+    .section-card { padding: 20px; }
+    .section-card + .section-card { margin-top: 16px; }
+    .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+    .fact-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 28px; }
+    .fact { display: grid; gap: 4px; }
+    .fact span { color: var(--muted); font-size: 11px; }
+    .planning-form { display: grid; gap: 14px; }
+    .form-row { display: grid; grid-template-columns: 96px 1fr; gap: 14px; align-items: center; }
+    .form-row label { color: var(--muted); font-size: 12px; }
+    .form-row .field { height: 36px; }
+    .detail-note { padding: 16px; border-left: 3px solid var(--accent); border-radius: 0 9px 9px 0; color: var(--muted); background: var(--accent-soft); font-size: 12px; }
+
+    .capacity-card { display: grid; grid-template-columns: auto 1fr auto; gap: 22px; align-items: center; padding: 18px 20px; margin-bottom: 16px; }
+    .capacity-ring { width: 54px; height: 54px; display: grid; place-items: center; border-radius: 50%; background: conic-gradient(var(--accent) 100%, var(--surface-3) 0); position: relative; }
+    .capacity-ring::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--surface); }
+    .capacity-ring span { position: relative; z-index: 1; font: 700 10px var(--mono); }
+    .capacity-copy { display: grid; gap: 6px; }
+    .capacity-stats { display: flex; gap: 22px; color: var(--muted); font-size: 11px; }
+    .capacity-stats strong { color: var(--text); }
+    .progress { height: 6px; overflow: hidden; border-radius: 999px; background: var(--surface-3); }
+    .progress span { display: block; width: 100%; height: 100%; border-radius: inherit; background: var(--accent); }
+    .today-list { overflow: hidden; }
+    .today-task { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 14px; align-items: start; padding: 19px 20px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .today-task:last-child { border-bottom: 0; }
+    .today-task[draggable="true"] { cursor: grab; }
+    .today-task.is-dragging { opacity: .45; }
+    .drag-handle { color: var(--faint); font: 13px var(--mono); letter-spacing: -3px; }
+    .today-index { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; color: var(--primary-fg); background: var(--primary-bg); font: 11px var(--mono); }
+    .pool-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; padding: 14px 16px; border: 1px dashed var(--line-strong); border-radius: 10px; color: var(--muted); background: color-mix(in srgb, var(--surface) 55%, transparent); }
+    .pool-actions { display: flex; gap: 7px; }
+
+    .focus-layout { height: 100%; overflow: auto; display: grid; place-items: center; padding: 48px; background: var(--window); }
+    .focus-card { width: min(780px, 100%); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: 0 18px 50px rgb(0 0 0 / 8%); }
+    .focus-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 25px 26px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .focus-head-copy { display: grid; gap: 8px; }
+    .focus-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 11px; color: var(--accent); background: var(--accent-soft); }
+    .change-list { padding: 7px 26px; }
+    .change-row { display: grid; grid-template-columns: 34px 1fr; gap: 13px; padding: 17px 0; border-bottom: 1px solid var(--line); }
+    .change-row:last-child { border-bottom: 0; }
+    .change-symbol { width: 29px; height: 29px; display: grid; place-items: center; border-radius: 8px; font: 700 16px var(--mono); }
+    .change-symbol.add { color: var(--green); background: var(--green-soft); }
+    .change-symbol.remove { color: var(--red); background: var(--red-soft); }
+    .change-symbol.move { color: var(--blue); background: var(--blue-soft); }
+    .change-copy { display: grid; gap: 4px; }
+    .change-copy strong { font-size: 13px; }
+    .focus-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 17px 26px; border-top: 1px solid var(--line); }
+    .action-group { display: flex; gap: 8px; }
+
+    .conflict-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 0 26px 20px; }
+    .conflict-stat { padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+    .conflict-stat strong { display: block; margin-top: 2px; font: 700 20px var(--mono); }
+    .conflict-stat.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, var(--line)); background: var(--red-soft); }
+    .conflict-tasks { margin: 0 26px 18px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; }
+    .conflict-task { display: flex; justify-content: space-between; gap: 14px; padding: 13px 14px; border-bottom: 1px solid var(--line); }
+    .conflict-task:last-child { border-bottom: 0; }
+    .resolution { padding: 0 26px 22px; }
+    .resolution-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .resolution-option { min-height: 48px; justify-content: flex-start; text-align: left; }
+    .resolution-panel { display: none; margin-top: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
+    .resolution-panel.is-active { display: flex; align-items: center; gap: 8px; }
+    .resolution-panel .field { width: 110px; }
+
+    .toast { position: absolute; z-index: 10; right: 22px; bottom: 22px; display: flex; align-items: center; gap: 9px; padding: 11px 14px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--text); background: var(--surface); box-shadow: 0 12px 35px rgb(0 0 0 / 14%); opacity: 0; transform: translateY(10px); pointer-events: none; transition: .2s ease; }
+    .toast.is-visible { opacity: 1; transform: none; }
+
+    @media (max-width: 900px) {
+      body { padding: 0; }
+      .prototype-window { width: 100vw; height: 100vh; min-height: 620px; border: 0; border-radius: 0; }
+      .step-nav { display: none; }
+      .setup-layout { grid-template-columns: 1fr; }
+      .setup-aside { display: none; }
+      .setup-main { padding: 28px; }
+      .app-layout { grid-template-columns: 72px minmax(0, 1fr); }
+      .sidebar { padding-inline: 10px; }
+      .sidebar .brand span:last-child, .side-link span:not(.count), .side-label, .repo-context, .profile span { display: none; }
+      .side-link { justify-content: center; }
+      .side-link .count { display: none; }
+      .content { width: calc(100% - 36px); padding-top: 28px; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .capacity-card { grid-template-columns: auto 1fr; }
+      .capacity-card > .badge { display: none; }
+      .resolution-options { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body>
-<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Xe615 Mvp Prototype V2" srcdoc="&lt;!doctype html&gt;
-&lt;html lang=&quot;en&quot;&gt;
-&lt;head&gt;
-&lt;meta charset=&quot;utf-8&quot;&gt;
-&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
-&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
-&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
-&lt;title&gt;Xe615 Mvp Prototype V2&lt;/title&gt;
-&lt;style&gt;:root {
-  color-scheme: light dark;
-  background-color: var(--background) !important;
-
-  /* Agent-facing contract; keep in sync with SKILL.md. */
-  --background: light-dark(rgb(255 255 255), rgb(24 24 24));
-  --foreground: light-dark(rgb(26 28 31), rgb(255 255 255));
-  --card: color-mix(in oklab, var(--foreground) 5%, transparent);
-  --card-foreground: var(--foreground);
-  --popover: light-dark(rgb(255 255 255), rgb(45 45 45));
-  --popover-foreground: var(--foreground);
-  --primary: light-dark(rgb(51 156 255), rgb(131 195 255));
-  --primary-foreground: light-dark(rgb(255 255 255), rgb(13 13 13));
-  --secondary: light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%));
-  --secondary-foreground: var(--foreground);
-  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
-  --muted-foreground: light-dark(
-    rgb(26 28 31 / 49.4%),
-    rgb(255 255 255 / 49.8%)
-  );
-  --accent: light-dark(rgb(229 242 255), rgb(13 39 63));
-  --accent-foreground: var(--primary);
-  --destructive: light-dark(rgb(226 85 7), rgb(255 133 73));
-  --border: light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%));
-  --input: light-dark(
-    rgb(26 28 31 / 11.8%),
-    color-mix(in oklab, rgb(0 0 0) 10%, transparent)
-  );
-  --ring: light-dark(rgb(51 156 255), rgb(131 195 255 / 76%));
-  --font-size-base: 14px;
-  --viz-series-1: var(--primary);
-  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
-  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
-  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
-  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
-  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
-
-  /* Internal implementation variables; not part of the agent contract. */
-  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
-  --font-mono:
-    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
-    monospace;
-  --font-size-normal: max(11px, var(--font-size-base));
-  --font-size-tooltip: calc(var(--font-size-base) - 1px);
-  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
-  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
-  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
-  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
-  --font-weight-normal: 430;
-  --font-weight-medium: 500;
-  --line-height-normal: calc(var(--font-size-normal) * 1.5);
-  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
-  --line-height-small: calc(var(--font-size-small) + 4px);
-  --radius: 12.5px;
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-2xl: calc(var(--radius) * 1.6);
-  --radius-full: 9999px;
-  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
-  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
-
-  /* Legacy aliases; not part of the current agent contract. */
-  --viz-bg: transparent;
-  --viz-panel: var(--card);
-  --viz-border: var(--border);
-  --viz-text: var(--foreground);
-  --viz-muted: var(--muted-foreground);
-  --viz-accent: var(--primary);
-  --viz-accent-text: var(--primary-foreground);
-  --viz-accent-bg: var(--accent);
-  --viz-font-size: var(--font-size-base);
-  --viz-warning: var(--destructive);
-  --color-background-primary: var(--background);
-  --color-text-primary: var(--foreground);
-  --color-border-secondary: var(--border);
-}
-
-:root[data-theme=&quot;light&quot;] {
-  color-scheme: light;
-}
-
-:root[data-theme=&quot;dark&quot;] {
-  color-scheme: dark;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html &gt; body {
-  margin: 0;
-  padding: 5px;
-  color: var(--foreground);
-  background: transparent !important;
-  font-family: var(--font-sans);
-  font-size: var(--font-size-normal);
-  font-weight: var(--font-weight-normal);
-  line-height: var(--line-height-normal);
-}
-
-a {
-  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
-  cursor: pointer;
-  font-weight: var(--viz-font-weight-medium);
-  text-decoration: none;
-  text-underline-offset: 2px;
-}
-
-a:is(:hover, :focus-visible) {
-  text-decoration-line: underline;
-  text-decoration-style: dashed;
-  text-decoration-thickness: 0.5px;
-}
-
-h1,
-h2,
-h3,
-h4,
-h5,
-h6,
-p {
-  margin-block: 0;
-}
-
-h1 {
-  font-size: var(--font-size-h1);
-  font-weight: var(--font-weight-medium);
-  line-height: 1.25;
-}
-
-h2 {
-  font-size: var(--font-size-h2);
-  font-weight: var(--font-weight-medium);
-  line-height: 1.25;
-}
-
-h3,
-h4,
-h5,
-h6 {
-  font-size: var(--font-size-h3);
-  font-weight: var(--font-weight-medium);
-  line-height: 1.3;
-}
-
-b,
-strong,
-th {
-  font-weight: var(--font-weight-medium);
-}
-
-code:not(pre code) {
-  display: inline;
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  corner-shape: superellipse(1.5);
-  background: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 0.92em;
-  overflow-wrap: anywhere;
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-  word-break: break-word;
-}
-
-#widget {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  padding: 0;
-  background: transparent !important;
-}
-
-.card {
-  min-width: 0;
-  padding: 12px;
-  overflow: hidden;
-  overflow-wrap: break-word;
-  border-radius: var(--radius-2xl);
-  corner-shape: superellipse(1.5);
-  color: var(--card-foreground);
-  background: var(--card);
-}
-
-#widget &gt; :not(.card) {
-  width: 100% !important;
-  max-width: none !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.tooltip {
-  position: fixed;
-  z-index: 50;
-  top: 0;
-  left: 0;
-  width: max-content;
-  max-width: min(
-    20rem,
-    var(--tooltip-available-width, calc(100vw - 10px)),
-    calc(100vw - 10px)
-  );
-  max-height: min(
-    var(--tooltip-available-height, calc(100vh - 10px)),
-    calc(100vh - 10px)
-  );
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  corner-shape: superellipse(1.5);
-  color: var(--popover-foreground);
-  background: var(--popover);
-  box-shadow: none;
-  font-size: var(--font-size-tooltip);
-  line-height: var(--line-height-tooltip);
-  overflow-wrap: break-word;
-  white-space: normal;
-  pointer-events: none;
-  user-select: none;
-}
-
-.viz-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
-  gap: 10px;
-}
-
-.viz-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.viz-stat-value {
-  font-size: var(--font-size-h2);
-  font-weight: var(--font-weight-medium);
-  line-height: 1.25;
-}
-
-.viz-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.viz-badge {
-  padding: 3px 8px;
-  border-radius: var(--radius-full);
-  color: var(--accent-foreground);
-  background: var(--accent);
-  font-weight: var(--font-weight-medium);
-}
-
-small,
-.text-small,
-.viz-badge {
-  font-size: var(--font-size-small);
-  line-height: var(--line-height-small);
-}
-
-.text-muted {
-  color: var(--muted-foreground);
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.viz-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.viz-controls &gt; .form-label {
-  display: grid;
-  min-width: min(100%, 260px);
-  flex: 1 1 280px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 2px 12px;
-  margin-bottom: 0;
-}
-
-.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
-  grid-column: 1 / -1;
-}
-
-.btn,
-.form-check-input,
-.form-control,
-.form-range,
-.form-select {
-  font: inherit;
-}
-
-.btn {
-  appearance: button;
-  display: inline-flex;
-  inline-size: fit-content;
-  max-inline-size: 100%;
-  min-height: 28px;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  margin: 0;
-  padding: 0 8px;
-  -webkit-app-region: no-drag;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-lg);
-  corner-shape: superellipse(1.5);
-  color: var(--secondary-foreground);
-  background: var(--secondary);
-  cursor: var(--cursor-interaction, pointer);
-  text-align: center;
-  text-decoration: none;
-  white-space: nowrap;
-  user-select: none;
-  -webkit-font-smoothing: antialiased;
-}
-
-.btn:is(.btn-block, .viz-tile) {
-  inline-size: 100%;
-}
-
-.btn.viz-tile {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-
-a.btn {
-  cursor: pointer;
-  text-decoration: none;
-}
-
-.btn:not(:disabled):hover {
-  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
-}
-
-.btn-primary {
-  border-color: transparent;
-  color: var(--primary-foreground);
-  background: var(--foreground);
-  background-clip: padding-box;
-}
-
-.btn-primary .text-muted {
-  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
-}
-
-.btn-primary:not(:disabled):hover {
-  background: color-mix(in srgb, var(--foreground) 80%, transparent);
-  background-clip: padding-box;
-}
-
-.btn-ghost {
-  border-color: transparent;
-  color: var(--muted-foreground);
-  background: transparent;
-}
-
-.btn-ghost:not(:disabled):hover {
-  color: var(--foreground);
-  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
-}
-
-.btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
-
-[data-lucide] {
-  stroke-width: 1.6;
-}
-
-.form-label {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--foreground);
-}
-
-.form-control {
-  display: block;
-  width: 100%;
-  min-height: 28px;
-  padding: 0 8px;
-  outline: none;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-lg);
-  corner-shape: superellipse(1.5);
-  color: var(--foreground);
-  background: var(--secondary);
-}
-
-.form-control::placeholder {
-  color: var(--muted-foreground);
-}
-
-.form-control[type=&quot;file&quot;] {
-  padding: 0;
-  overflow: hidden;
-  cursor: var(--cursor-interaction, pointer);
-}
-
-.form-control[type=&quot;file&quot;]::file-selector-button {
-  min-height: 26px;
-  margin-right: 8px;
-  padding: 0 8px;
-  border: 0;
-  border-right: 1px solid var(--input);
-  color: var(--secondary-foreground);
-  background: var(--secondary);
-  cursor: inherit;
-  font: inherit;
-}
-
-.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
-  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
-}
-
-.form-control-color[type=&quot;color&quot;] {
-  width: 40px;
-  height: 28px;
-  padding: 3px;
-  cursor: var(--cursor-interaction, pointer);
-}
-
-.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-
-.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
-  border: 0;
-  border-radius: calc(var(--radius-lg) - 4px);
-  corner-shape: superellipse(1.5);
-}
-
-textarea.form-control {
-  height: auto;
-  min-height: 72px;
-  padding: 8px 10px;
-  resize: vertical;
-}
-
-.form-control:focus-visible {
-  border-color: var(--ring);
-  box-shadow: inset 0 0 0 1px var(--ring);
-}
-
-.form-control:disabled,
-.form-select:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
-
-.form-select {
-  appearance: none;
-  display: block;
-  width: 100%;
-  min-height: 28px;
-  margin: 0;
-  padding: 0 32px 0 8px;
-  outline: none;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-lg);
-  corner-shape: superellipse(1.5);
-  color: var(--foreground);
-  background-color: var(--secondary);
-  background-image:
-    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
-    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
-  background-position:
-    calc(100% - 14px) 50%,
-    calc(100% - 10px) 50%;
-  background-repeat: no-repeat;
-  background-size: 4px 4px;
-  cursor: var(--cursor-interaction, default);
-}
-
-.form-select:not(:disabled):hover {
-  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
-}
-
-.form-select:focus-visible {
-  border-color: var(--ring);
-  box-shadow: inset 0 0 0 1px var(--ring);
-}
-
-.form-check {
-  display: flex;
-  min-height: 20px;
-  align-items: center;
-  gap: 6px;
-}
-
-.form-check-input {
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  flex: 0 0 auto;
-  margin: 0;
-  border: 1px solid var(--input);
-  color: var(--primary-foreground);
-  background-color: transparent;
-  cursor: var(--cursor-interaction, default);
-  transition:
-    background-color 150ms,
-    border-color 150ms,
-    box-shadow 150ms;
-}
-
-.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
-  border-color: var(--input);
-  border-radius: var(--radius-sm);
-  corner-shape: superellipse(1.5);
-  background-color: var(--secondary);
-  box-shadow: var(--shadow-sm);
-}
-
-.form-check:not(.form-switch)
-  .form-check-input:not(:disabled):not(:checked):hover {
-  background-color: var(--card);
-}
-
-.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
-  border-color: var(--primary);
-  background-color: var(--primary);
-}
-
-.form-check:not(.form-switch)
-  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
-  display: block;
-  width: 100%;
-  height: 100%;
-  background: var(--primary-foreground);
-  content: &quot;&quot;;
-  mask: var(--checkmark-image) center / 12px 12px no-repeat;
-}
-
-.form-check-input[type=&quot;radio&quot;] {
-  width: 14px;
-  height: 14px;
-  border-radius: var(--radius-full);
-}
-
-.form-check-input[type=&quot;radio&quot;]:checked {
-  border: 2px solid var(--primary);
-  background:
-    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
-    var(--primary);
-}
-
-.form-check:not(.form-switch) .form-check-input:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
-.form-check:not(.form-switch) .form-check-input:disabled {
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
-  cursor: not-allowed;
-}
-
-.form-switch .form-check-input:disabled,
-.form-switch .form-check-input:disabled + .form-check-label {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.form-check-label {
-  color: var(--foreground);
-  cursor: var(--cursor-interaction, default);
-}
-
-.form-switch .form-check-input {
-  position: relative;
-  width: 32px;
-  height: 20px;
-  border: 0;
-  border-radius: var(--radius-full);
-  background: var(--muted);
-  box-shadow: none;
-  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
-}
-
-.form-switch .form-check-input::before {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  width: 16px;
-  height: 16px;
-  box-sizing: border-box;
-  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
-  border-radius: var(--radius-full);
-  background: light-dark(var(--primary-foreground), var(--foreground));
-  box-shadow: var(--shadow-sm);
-  content: &quot;&quot;;
-  transform: translate(2px, -50%);
-  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
-}
-
-.form-switch .form-check-input:checked {
-  background: var(--primary);
-}
-
-.form-switch .form-check-input:checked::before {
-  transform: translate(14px, -50%);
-}
-
-.form-switch .form-check-input:focus-visible {
-  box-shadow: 0 0 0 2px var(--ring);
-}
-
-.form-range {
-  appearance: none;
-  display: block;
-  width: 100%;
-  height: 28px;
-  flex: 1;
-  margin: 0;
-  padding: 0;
-  outline: none;
-  border: 0;
-  accent-color: var(--primary);
-  background: linear-gradient(
-      color-mix(in srgb, var(--foreground) 7%, transparent),
-      color-mix(in srgb, var(--foreground) 7%, transparent)
-    )
-    center / 100% 2px no-repeat;
-}
-
-.form-range::-webkit-slider-runnable-track {
-  height: 28px;
-  background: transparent;
-}
-
-.form-range::-webkit-slider-thumb {
-  appearance: none;
-  width: 20px;
-  height: 20px;
-  margin-top: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  background: light-dark(var(--primary-foreground), var(--foreground));
-}
-
-.form-range:focus-visible::-webkit-slider-thumb {
-  border-color: var(--ring);
-  box-shadow: inset 0 0 0 1px var(--ring);
-}
-
-.form-range::-moz-range-track {
-  height: 28px;
-  background: transparent;
-}
-
-.form-range::-moz-range-thumb {
-  width: 20px;
-  height: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  background: light-dark(var(--primary-foreground), var(--foreground));
-}
-
-.form-range:focus-visible::-moz-range-thumb {
-  border-color: var(--ring);
-  box-shadow: inset 0 0 0 1px var(--ring);
-}
-
-.form-range:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
-
-.btn:not(.btn-primary, .viz-tile):is(
-    [aria-pressed=&quot;true&quot;],
-    [aria-selected=&quot;true&quot;],
-    .is-selected
-  ) {
-  border-color: var(--primary);
-  color: var(--primary-foreground);
-  background: var(--primary);
-}
-
-.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
-  border-color: var(--primary);
-  box-shadow: inset 0 0 0 1px var(--primary);
-}
-
-.btn:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
-svg {
-  display: block;
-  max-width: 100%;
-  height: auto;
-}
-
-#widget &gt; svg {
-  width: 100%;
-}
-
-.text-warning,
-.text-destructive {
-  color: var(--destructive);
-}
-
-html&gt;body{padding:0}&lt;/style&gt;
-&lt;/head&gt;
-&lt;body&gt;
-&lt;style&gt;
-  #xe615-prototype {
-    --xe-sidebar: 220px;
-    color: var(--foreground);
-    background: var(--background);
-    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, &quot;PingFang SC&quot;, &quot;Microsoft YaHei&quot;, sans-serif;
-    width: 100%;
-  }
-
-  #xe615-prototype * { box-sizing: border-box; }
-  #xe615-prototype button,
-  #xe615-prototype input,
-  #xe615-prototype select { font: inherit; }
-
-  #xe615-prototype .prototype-bar {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 0 18px;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 18px;
-  }
-
-  #xe615-prototype .prototype-title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    white-space: nowrap;
-  }
-
-  #xe615-prototype .prototype-title strong { font-weight: 500; }
-  #xe615-prototype .screen-tabs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-  #xe615-prototype .screen-tabs .btn { min-width: 34px; padding-inline: 10px; }
-
-  #xe615-prototype .screen {
-    display: none;
-    min-height: 720px;
-    border: 1px solid var(--border);
-    background: var(--background);
-    overflow: hidden;
-  }
-
-  #xe615-prototype .screen.is-active { display: block; }
-  #xe615-prototype .screen.auth-screen { min-height: 720px; }
-
-  #xe615-prototype .auth-shell {
-    min-height: 720px;
-    display: grid;
-    grid-template-columns: 1.05fr .95fr;
-  }
-
-  #xe615-prototype .brand-panel {
-    background: var(--primary);
-    color: var(--primary-foreground);
-    padding: 54px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-  }
-
-  #xe615-prototype .brand-mark,
-  #xe615-prototype .brand-lockup {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  #xe615-prototype .brand-mark-box {
-    width: 34px;
-    height: 34px;
-    display: grid;
-    place-items: center;
-    border: 1px solid currentColor;
-  }
-
-  #xe615-prototype .brand-copy { max-width: 520px; }
-  #xe615-prototype .brand-copy h2 { margin: 0 0 18px; max-width: 460px; }
-  #xe615-prototype .brand-copy p { margin: 0; opacity: .78; max-width: 500px; }
-
-  #xe615-prototype .auth-panel {
-    padding: 54px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  #xe615-prototype .auth-content { width: min(420px, 100%); }
-  #xe615-prototype .auth-content h1 { margin: 0 0 12px; }
-  #xe615-prototype .auth-content &gt; p { margin: 0 0 28px; }
-  #xe615-prototype .oauth-btn { display: flex; align-items: center; justify-content: center; gap: 10px; }
-  #xe615-prototype .fine-print { margin: 18px 0 0; }
-
-  #xe615-prototype .setup-shell { min-height: 720px; display: flex; flex-direction: column; }
-  #xe615-prototype .setup-topbar,
-  #xe615-prototype .app-topbar {
-    height: 66px;
-    padding: 0 28px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-  }
-
-  #xe615-prototype .setup-body {
-    width: min(860px, calc(100% - 44px));
-    margin: 0 auto;
-    padding: 42px 0 54px;
-  }
-
-  #xe615-prototype .setup-heading { margin-bottom: 28px; }
-  #xe615-prototype .setup-heading h1 { margin: 0 0 10px; }
-  #xe615-prototype .setup-heading p { margin: 0; }
-  #xe615-prototype .search-line { margin-bottom: 24px; }
-  #xe615-prototype .repo-list { border-top: 1px solid var(--border); }
-
-  #xe615-prototype .repo-row {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    gap: 14px;
-    align-items: center;
-    padding: 18px 4px;
-    border-bottom: 1px solid var(--border);
-    cursor: pointer;
-  }
-
-  #xe615-prototype .repo-row:hover { background: var(--accent); color: var(--accent-foreground); }
-  #xe615-prototype .repo-name { display: flex; gap: 8px; align-items: center; font-weight: 500; }
-  #xe615-prototype .repo-meta { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
-  #xe615-prototype .setup-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 28px; gap: 18px; }
-
-  #xe615-prototype .sync-summary {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 14px;
-    margin: 24px 0 32px;
-  }
-
-  #xe615-prototype .summary-value { margin-top: 6px; }
-  #xe615-prototype .suggestion-list { border-top: 1px solid var(--border); }
-  #xe615-prototype .suggestion-row {
-    padding: 18px 0;
-    border-bottom: 1px solid var(--border);
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 18px;
-    align-items: center;
-  }
-
-  #xe615-prototype .suggestion-title { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-weight: 500; }
-  #xe615-prototype .suggestion-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-  #xe615-prototype .estimate-editor { display: none; align-items: center; gap: 8px; }
-  #xe615-prototype .estimate-editor.is-open { display: flex; }
-  #xe615-prototype .estimate-editor input { width: 92px; }
-  #xe615-prototype .accepted { color: var(--foreground); display: none; align-items: center; gap: 6px; }
-  #xe615-prototype .accepted.is-shown { display: flex; }
-
-  #xe615-prototype .app-shell {
-    min-height: 720px;
-    display: grid;
-    grid-template-columns: var(--xe-sidebar) minmax(0, 1fr);
-  }
-
-  #xe615-prototype .sidebar {
-    border-right: 1px solid var(--border);
-    padding: 24px 18px;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-
-  #xe615-prototype .side-brand { padding: 0 10px 24px; }
-  #xe615-prototype .side-nav { display: grid; gap: 4px; }
-  #xe615-prototype .side-link {
-    width: 100%;
-    border: 0;
-    background: transparent;
-    color: var(--foreground);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  #xe615-prototype .side-link:hover { background: var(--accent); color: var(--accent-foreground); }
-  #xe615-prototype .side-link.is-active { background: var(--primary); color: var(--primary-foreground); }
-  #xe615-prototype .side-repo { margin-top: auto; padding: 18px 10px 0; border-top: 1px solid var(--border); }
-  #xe615-prototype .side-repo strong { display: block; margin-top: 5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
-
-  #xe615-prototype .app-main { min-width: 0; display: flex; flex-direction: column; }
-  #xe615-prototype .app-topbar { padding-inline: 30px; }
-  #xe615-prototype .topbar-actions { display: flex; align-items: center; gap: 12px; }
-  #xe615-prototype .user-chip { display: flex; align-items: center; gap: 8px; }
-  #xe615-prototype .avatar {
-    width: 30px;
-    height: 30px;
-    display: grid;
-    place-items: center;
-    background: var(--secondary);
-    color: var(--secondary-foreground);
-    border-radius: 50%;
-  }
-
-  #xe615-prototype .content { padding: 30px; }
-  #xe615-prototype .page-heading {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 18px;
-    margin-bottom: 26px;
-  }
-
-  #xe615-prototype .page-heading h1 { margin: 0 0 7px; }
-  #xe615-prototype .page-heading p { margin: 0; }
-  #xe615-prototype .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
-  #xe615-prototype .task-list { border-top: 1px solid var(--border); }
-  #xe615-prototype .task-row {
-    display: grid;
-    grid-template-columns: 40px minmax(0, 1fr) auto;
-    gap: 16px;
-    padding: 18px 4px;
-    border-bottom: 1px solid var(--border);
-    align-items: start;
-  }
-
-  #xe615-prototype button.task-row {
-    width: 100%;
-    background: transparent;
-    color: var(--foreground);
-    border-left: 0;
-    border-right: 0;
-    border-top: 0;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  #xe615-prototype button.task-row:hover { background: var(--accent); color: var(--accent-foreground); }
-  #xe615-prototype .task-rank { color: var(--muted-foreground); text-align: center; padding-top: 3px; }
-  #xe615-prototype .task-title { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: 500; }
-  #xe615-prototype .task-meta,
-  #xe615-prototype .task-reason { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 7px; }
-  #xe615-prototype .task-time { text-align: right; white-space: nowrap; font-weight: 500; }
-
-  #xe615-prototype .detail-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 22px;
-  }
-
-  #xe615-prototype .section-heading { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 18px; }
-  #xe615-prototype .section-heading h3 { margin: 0; }
-  #xe615-prototype .facts { display: grid; gap: 0; }
-  #xe615-prototype .fact-row { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 14px; padding: 13px 0; border-bottom: 1px solid var(--border); }
-  #xe615-prototype .fact-row:last-child { border-bottom: 0; }
-  #xe615-prototype .planning-form { display: grid; gap: 15px; }
-  #xe615-prototype .planning-form .form-label { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 14px; align-items: center; }
-  #xe615-prototype .detail-footer { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
-
-  #xe615-prototype .capacity-line { margin-bottom: 26px; }
-  #xe615-prototype .capacity-meta { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 9px; flex-wrap: wrap; }
-  #xe615-prototype .progress { height: 8px; background: var(--muted); overflow: hidden; }
-  #xe615-prototype .progress &gt; span { display: block; height: 100%; background: var(--primary); width: 100%; }
-  #xe615-prototype .update-banner { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 22px; }
-  #xe615-prototype .today-list { border-top: 1px solid var(--border); }
-  #xe615-prototype .today-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 16px; padding: 22px 4px; border-bottom: 1px solid var(--border); align-items: center; }
-  #xe615-prototype .pool-links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
-
-  #xe615-prototype .change-panel { width: min(760px, calc(100% - 42px)); margin: 42px auto; }
-  #xe615-prototype .change-header { padding-bottom: 22px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 18px; align-items: start; }
-  #xe615-prototype .change-header h1 { margin: 0 0 8px; }
-  #xe615-prototype .change-header p { margin: 0; }
-  #xe615-prototype .change-list { display: grid; }
-  #xe615-prototype .change-row { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 14px; padding: 21px 0; border-bottom: 1px solid var(--border); }
-  #xe615-prototype .change-symbol { width: 28px; height: 28px; display: grid; place-items: center; background: var(--secondary); color: var(--secondary-foreground); border-radius: 50%; }
-  #xe615-prototype .change-title { font-weight: 500; margin-bottom: 5px; }
-  #xe615-prototype .change-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 24px; }
-
-  #xe615-prototype .conflict-shell { width: min(860px, calc(100% - 42px)); margin: 36px auto; }
-  #xe615-prototype .conflict-heading { display: flex; gap: 15px; align-items: flex-start; margin-bottom: 26px; }
-  #xe615-prototype .conflict-icon { width: 42px; height: 42px; display: grid; place-items: center; background: var(--destructive); color: var(--primary-foreground); }
-  #xe615-prototype .conflict-heading h1 { margin: 0 0 7px; }
-  #xe615-prototype .conflict-heading p { margin: 0; }
-  #xe615-prototype .conflict-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 26px; }
-  #xe615-prototype .conflict-task { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; padding: 17px 0; border-bottom: 1px solid var(--border); }
-  #xe615-prototype .resolution-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 24px; }
-  #xe615-prototype .resolution-actions .btn { justify-content: flex-start; text-align: left; }
-  #xe615-prototype .resolution-result { margin-top: 20px; display: none; }
-  #xe615-prototype .resolution-result.is-shown { display: block; }
-  #xe615-prototype .resolution-form { display: none; margin-top: 12px; }
-  #xe615-prototype .resolution-form.is-shown { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
-  #xe615-prototype .resolution-form input { width: 120px; }
-
-  #xe615-prototype .viz-badge { white-space: nowrap; }
-  #xe615-prototype .badge-soft { background: var(--muted); color: var(--muted-foreground); }
-  #xe615-prototype .inline-icon { display: inline-flex; align-items: center; gap: 6px; }
-  #xe615-prototype .hidden { display: none !important; }
-
-  @media (max-width: 820px) {
-    #xe615-prototype .prototype-bar { align-items: flex-start; flex-direction: column; }
-    #xe615-prototype .screen-tabs { justify-content: flex-start; }
-    #xe615-prototype .auth-shell { grid-template-columns: 1fr; }
-    #xe615-prototype .brand-panel { min-height: 270px; padding: 34px; }
-    #xe615-prototype .auth-panel { padding: 38px 28px; }
-    #xe615-prototype .app-shell { grid-template-columns: 1fr; }
-    #xe615-prototype .sidebar { border-right: 0; border-bottom: 1px solid var(--border); padding: 14px; }
-    #xe615-prototype .side-brand, #xe615-prototype .side-repo { display: none; }
-    #xe615-prototype .side-nav { display: flex; overflow-x: auto; }
-    #xe615-prototype .side-link { white-space: nowrap; width: auto; }
-    #xe615-prototype .detail-grid { grid-template-columns: 1fr; }
-    #xe615-prototype .conflict-stats, #xe615-prototype .sync-summary { grid-template-columns: 1fr; }
-    #xe615-prototype .resolution-actions { grid-template-columns: 1fr; }
-  }
-
-  @media (max-width: 560px) {
-    #xe615-prototype .setup-body { width: calc(100% - 28px); padding-top: 28px; }
-    #xe615-prototype .setup-topbar, #xe615-prototype .app-topbar { padding-inline: 16px; }
-    #xe615-prototype .content { padding: 22px 16px; }
-    #xe615-prototype .repo-row { grid-template-columns: auto 1fr; }
-    #xe615-prototype .repo-meta { grid-column: 2; justify-content: flex-start; }
-    #xe615-prototype .suggestion-row { grid-template-columns: 1fr; }
-    #xe615-prototype .suggestion-actions { justify-content: flex-start; }
-    #xe615-prototype .task-row, #xe615-prototype .today-row { grid-template-columns: 30px minmax(0, 1fr); }
-    #xe615-prototype .task-time, #xe615-prototype .today-row &gt; .btn { grid-column: 2; justify-self: start; text-align: left; }
-    #xe615-prototype .planning-form .form-label { grid-template-columns: 1fr; gap: 6px; }
-    #xe615-prototype .detail-footer, #xe615-prototype .update-banner, #xe615-prototype .setup-actions { align-items: flex-start; flex-direction: column; }
-    #xe615-prototype .change-actions { justify-content: stretch; flex-direction: column; }
-    #xe615-prototype .change-actions .btn { width: 100%; }
-  }
-&lt;/style&gt;
-
-&lt;div id=&quot;xe615-prototype&quot;&gt;
-  &lt;div class=&quot;prototype-bar&quot; aria-label=&quot;原型页面导航&quot;&gt;
-    &lt;div class=&quot;prototype-title&quot;&gt;
-      &lt;span class=&quot;viz-badge&quot;&gt;可点击原型&lt;/span&gt;
-      &lt;strong&gt;XE6-15 MVP&lt;/strong&gt;
-      &lt;span class=&quot;text-muted text-small&quot; id=&quot;current-screen-label&quot;&gt;01 · 连接 GitHub&lt;/span&gt;
-    &lt;/div&gt;
-    &lt;nav class=&quot;screen-tabs&quot; aria-label=&quot;选择原型页面&quot;&gt;
-      &lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-screen-tab=&quot;1&quot; aria-pressed=&quot;true&quot; data-tooltip=&quot;连接 GitHub&quot;&gt;01&lt;/button&gt;
-      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;2&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;选择单一仓库&quot;&gt;02&lt;/button&gt;
-      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;3&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;同步与时间建议&quot;&gt;03&lt;/button&gt;
-      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;4&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;全部待办&quot;&gt;04&lt;/button&gt;
-      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;5&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;任务详情&quot;&gt;05&lt;/button&gt;
-      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;6&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;今日计划&quot;&gt;06&lt;/button&gt;
-      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;7&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;自动重排&quot;&gt;07&lt;/button&gt;
-      &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-screen-tab=&quot;8&quot; aria-pressed=&quot;false&quot; data-tooltip=&quot;硬截止容量冲突&quot;&gt;08&lt;/button&gt;
-    &lt;/nav&gt;
-  &lt;/div&gt;
-
-  &lt;section class=&quot;screen auth-screen is-active&quot; data-screen=&quot;1&quot; aria-label=&quot;连接 GitHub 页面&quot;&gt;
-    &lt;div class=&quot;auth-shell&quot;&gt;
-      &lt;div class=&quot;brand-panel&quot;&gt;
-        &lt;div class=&quot;brand-mark&quot;&gt;
-          &lt;span class=&quot;brand-mark-box&quot;&gt;&lt;i data-lucide=&quot;check-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;
-          &lt;strong&gt;XE6-15&lt;/strong&gt;
-        &lt;/div&gt;
-        &lt;div class=&quot;brand-copy&quot;&gt;
-          &lt;h2&gt;把 GitHub 任务变成今天可执行的计划&lt;/h2&gt;
-          &lt;p&gt;连接一个你参与的仓库，自动汇总与你有关的 Issue 和 PR Review。&lt;/p&gt;
-        &lt;/div&gt;
-        &lt;span class=&quot;text-small&quot;&gt;个人任务工作台 · MVP&lt;/span&gt;
-      &lt;/div&gt;
-      &lt;div class=&quot;auth-panel&quot;&gt;
-        &lt;div class=&quot;auth-content&quot;&gt;
-          &lt;span class=&quot;viz-badge&quot;&gt;首次使用&lt;/span&gt;
-          &lt;h1&gt;连接 GitHub&lt;/h1&gt;
-          &lt;p class=&quot;text-muted&quot;&gt;授权后选择一个仓库，我们会自动同步与你有关的任务。&lt;/p&gt;
-          &lt;button class=&quot;btn btn-primary btn-block oauth-btn&quot; type=&quot;button&quot; data-go=&quot;2&quot;&gt;
-            &lt;i data-lucide=&quot;git-branch&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;
-            连接 GitHub
-          &lt;/button&gt;
-          &lt;p class=&quot;fine-print text-muted text-small&quot;&gt;将申请读取身份、仓库及 Issue / PR 基础信息。不会替你创建或关闭 GitHub 任务。&lt;/p&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/section&gt;
-
-  &lt;section class=&quot;screen&quot; data-screen=&quot;2&quot; aria-label=&quot;选择单一仓库页面&quot;&gt;
-    &lt;div class=&quot;setup-shell&quot;&gt;
-      &lt;header class=&quot;setup-topbar&quot;&gt;
-        &lt;div class=&quot;brand-lockup&quot;&gt;&lt;span class=&quot;brand-mark-box&quot;&gt;&lt;i data-lucide=&quot;check-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;strong&gt;XE6-15&lt;/strong&gt;&lt;/div&gt;
-        &lt;div class=&quot;user-chip&quot;&gt;&lt;span class=&quot;avatar&quot;&gt;J&lt;/span&gt;&lt;span&gt;@Jiang&lt;/span&gt;&lt;/div&gt;
-      &lt;/header&gt;
-      &lt;main class=&quot;setup-body&quot;&gt;
-        &lt;div class=&quot;setup-heading&quot;&gt;
-          &lt;span class=&quot;viz-badge&quot;&gt;第 1 步，共 2 步&lt;/span&gt;
-          &lt;h1&gt;选择工作仓库&lt;/h1&gt;
-          &lt;p class=&quot;text-muted&quot;&gt;选择一个你有权访问或参与的仓库。MVP 目前一次只支持一个仓库。&lt;/p&gt;
-        &lt;/div&gt;
-        &lt;label class=&quot;form-label search-line&quot;&gt;搜索仓库
-          &lt;input class=&quot;form-control&quot; id=&quot;repo-search&quot; type=&quot;search&quot; placeholder=&quot;输入组织或仓库名称……&quot;&gt;
-        &lt;/label&gt;
-        &lt;div class=&quot;repo-list&quot; id=&quot;repo-list&quot;&gt;
-          &lt;label class=&quot;repo-row&quot; data-repo-name=&quot;1024XEngineer XE6-15&quot;&gt;
-            &lt;input class=&quot;form-check-input&quot; type=&quot;radio&quot; name=&quot;repo&quot; value=&quot;1024XEngineer / XE6-15&quot; checked&gt;
-            &lt;span&gt;&lt;span class=&quot;repo-name&quot;&gt;&lt;i data-lucide=&quot;lock&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;1024XEngineer / XE6-15&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;你是 Contributor&lt;/span&gt;&lt;/span&gt;
-            &lt;span class=&quot;repo-meta&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Private&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;有访问权限&lt;/span&gt;&lt;/span&gt;
-          &lt;/label&gt;
-          &lt;label class=&quot;repo-row&quot; data-repo-name=&quot;1024XEngineer course-examples&quot;&gt;
-            &lt;input class=&quot;form-check-input&quot; type=&quot;radio&quot; name=&quot;repo&quot; value=&quot;1024XEngineer / course-examples&quot;&gt;
-            &lt;span&gt;&lt;span class=&quot;repo-name&quot;&gt;&lt;i data-lucide=&quot;folder-git-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;1024XEngineer / course-examples&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;你是 Contributor&lt;/span&gt;&lt;/span&gt;
-            &lt;span class=&quot;repo-meta&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Public&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;有访问权限&lt;/span&gt;&lt;/span&gt;
-          &lt;/label&gt;
-          &lt;label class=&quot;repo-row&quot; data-repo-name=&quot;Jiang personal-lab&quot;&gt;
-            &lt;input class=&quot;form-check-input&quot; type=&quot;radio&quot; name=&quot;repo&quot; value=&quot;Jiang / personal-lab&quot;&gt;
-            &lt;span&gt;&lt;span class=&quot;repo-name&quot;&gt;&lt;i data-lucide=&quot;lock&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Jiang / personal-lab&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;你是 Owner&lt;/span&gt;&lt;/span&gt;
-            &lt;span class=&quot;repo-meta&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Private&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;有访问权限&lt;/span&gt;&lt;/span&gt;
-          &lt;/label&gt;
-        &lt;/div&gt;
-        &lt;div class=&quot;setup-actions&quot;&gt;
-          &lt;span class=&quot;text-muted text-small&quot;&gt;已选择：&lt;strong id=&quot;selected-repo&quot;&gt;1024XEngineer / XE6-15&lt;/strong&gt;&lt;/span&gt;
-          &lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-go=&quot;3&quot;&gt;连接此仓库 &lt;i data-lucide=&quot;arrow-right&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
-        &lt;/div&gt;
-      &lt;/main&gt;
-    &lt;/div&gt;
-  &lt;/section&gt;
-
-  &lt;section class=&quot;screen&quot; data-screen=&quot;3&quot; aria-label=&quot;同步与时间建议页面&quot;&gt;
-    &lt;div class=&quot;setup-shell&quot;&gt;
-      &lt;header class=&quot;setup-topbar&quot;&gt;
-        &lt;div class=&quot;brand-lockup&quot;&gt;&lt;span class=&quot;brand-mark-box&quot;&gt;&lt;i data-lucide=&quot;check-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;strong&gt;XE6-15&lt;/strong&gt;&lt;/div&gt;
-        &lt;span class=&quot;inline-icon text-small&quot;&gt;&lt;i data-lucide=&quot;circle-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;同步完成&lt;/span&gt;
-      &lt;/header&gt;
-      &lt;main class=&quot;setup-body&quot;&gt;
-        &lt;div class=&quot;setup-heading&quot;&gt;
-          &lt;span class=&quot;viz-badge&quot;&gt;第 2 步，共 2 步&lt;/span&gt;
-          &lt;h1&gt;已找到与你有关的任务&lt;/h1&gt;
-          &lt;p class=&quot;text-muted&quot;&gt;&lt;strong&gt;1024XEngineer / XE6-15&lt;/strong&gt; 的 GitHub 内容会自动保持同步。&lt;/p&gt;
-        &lt;/div&gt;
-        &lt;div class=&quot;sync-summary&quot;&gt;
-          &lt;div class=&quot;card&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;开放 Issue&lt;/span&gt;&lt;div class=&quot;summary-value&quot;&gt;&lt;strong&gt;6&lt;/strong&gt; 项&lt;/div&gt;&lt;/div&gt;
-          &lt;div class=&quot;card&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;待处理 PR Review&lt;/span&gt;&lt;div class=&quot;summary-value&quot;&gt;&lt;strong&gt;1&lt;/strong&gt; 项&lt;/div&gt;&lt;/div&gt;
-          &lt;div class=&quot;card&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;Milestone&lt;/span&gt;&lt;div class=&quot;summary-value&quot;&gt;&lt;strong&gt;2&lt;/strong&gt; 个&lt;/div&gt;&lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div class=&quot;section-heading&quot;&gt;&lt;div&gt;&lt;h3&gt;需要你确认预计投入&lt;/h3&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;建议已明确对应到具体任务，可逐项接受或修改。&lt;/span&gt;&lt;/div&gt;&lt;span class=&quot;viz-badge&quot; id=&quot;suggestion-count&quot;&gt;2 项待确认&lt;/span&gt;&lt;/div&gt;
-        &lt;div class=&quot;suggestion-list&quot;&gt;
-          &lt;div class=&quot;suggestion-row&quot; data-suggestion=&quot;1&quot;&gt;
-            &lt;div&gt;&lt;div class=&quot;suggestion-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #51&lt;/span&gt;更新项目文档&lt;/div&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;系统建议：1h&lt;/span&gt;&lt;/div&gt;
-            &lt;div class=&quot;suggestion-actions&quot;&gt;
-              &lt;div class=&quot;default-suggestion-actions&quot;&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-accept-estimate=&quot;1&quot; data-estimate=&quot;1h&quot;&gt;接受 1h&lt;/button&gt; &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-edit-estimate=&quot;1&quot;&gt;修改&lt;/button&gt;&lt;/div&gt;
-              &lt;div class=&quot;estimate-editor&quot; data-editor=&quot;1&quot;&gt;&lt;label class=&quot;form-label&quot;&gt;预计投入&lt;input class=&quot;form-control&quot; type=&quot;text&quot; value=&quot;1h&quot;&gt;&lt;/label&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-save-estimate=&quot;1&quot;&gt;保存&lt;/button&gt;&lt;/div&gt;
-              &lt;span class=&quot;accepted&quot; data-accepted=&quot;1&quot;&gt;&lt;i data-lucide=&quot;circle-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;已设为 1h&lt;/span&gt;&lt;/span&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-          &lt;div class=&quot;suggestion-row&quot; data-suggestion=&quot;2&quot;&gt;
-            &lt;div&gt;&lt;div class=&quot;suggestion-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;PR #45&lt;/span&gt;审阅任务列表交互&lt;/div&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;系统建议：45min&lt;/span&gt;&lt;/div&gt;
-            &lt;div class=&quot;suggestion-actions&quot;&gt;
-              &lt;div class=&quot;default-suggestion-actions&quot;&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-accept-estimate=&quot;2&quot; data-estimate=&quot;45min&quot;&gt;接受 45min&lt;/button&gt; &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-edit-estimate=&quot;2&quot;&gt;修改&lt;/button&gt;&lt;/div&gt;
-              &lt;div class=&quot;estimate-editor&quot; data-editor=&quot;2&quot;&gt;&lt;label class=&quot;form-label&quot;&gt;预计投入&lt;input class=&quot;form-control&quot; type=&quot;text&quot; value=&quot;45min&quot;&gt;&lt;/label&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-save-estimate=&quot;2&quot;&gt;保存&lt;/button&gt;&lt;/div&gt;
-              &lt;span class=&quot;accepted&quot; data-accepted=&quot;2&quot;&gt;&lt;i data-lucide=&quot;circle-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;已设为 45min&lt;/span&gt;&lt;/span&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div class=&quot;setup-actions&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;可以稍后处理；未确认的任务会进入“待估算”。&lt;/span&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-go=&quot;6&quot;&gt;进入今日计划 &lt;i data-lucide=&quot;arrow-right&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;&lt;/div&gt;
-      &lt;/main&gt;
-    &lt;/div&gt;
-  &lt;/section&gt;
-
-  &lt;section class=&quot;screen&quot; data-screen=&quot;4&quot; aria-label=&quot;全部待办页面&quot;&gt;
-    &lt;div class=&quot;app-shell&quot;&gt;
-      &lt;aside class=&quot;sidebar&quot;&gt;
-        &lt;div class=&quot;side-brand&quot;&gt;&lt;div class=&quot;brand-lockup&quot;&gt;&lt;span class=&quot;brand-mark-box&quot;&gt;&lt;i data-lucide=&quot;check-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;strong&gt;XE6-15&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
-        &lt;nav class=&quot;side-nav&quot; aria-label=&quot;产品导航&quot;&gt;
-          &lt;button class=&quot;side-link&quot; type=&quot;button&quot; data-go=&quot;6&quot;&gt;&lt;i data-lucide=&quot;calendar-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;今日计划&lt;/button&gt;
-          &lt;button class=&quot;side-link is-active&quot; type=&quot;button&quot; data-go=&quot;4&quot;&gt;&lt;i data-lucide=&quot;inbox&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;全部待办&lt;/button&gt;
-          &lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;clock-3&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;待评审&lt;/button&gt;
-          &lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;circle-pause&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;阻塞任务&lt;/button&gt;
-          &lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;settings&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;设置&lt;/button&gt;
-        &lt;/nav&gt;
-        &lt;div class=&quot;side-repo&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;当前仓库&lt;/span&gt;&lt;strong&gt;1024XEngineer / XE6-15&lt;/strong&gt;&lt;/div&gt;
-      &lt;/aside&gt;
-      &lt;div class=&quot;app-main&quot;&gt;
-        &lt;header class=&quot;app-topbar&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;最后同步：刚刚&lt;/span&gt;&lt;div class=&quot;user-chip&quot;&gt;&lt;span class=&quot;avatar&quot;&gt;J&lt;/span&gt;&lt;span&gt;@Jiang&lt;/span&gt;&lt;/div&gt;&lt;/header&gt;
-        &lt;main class=&quot;content&quot;&gt;
-          &lt;div class=&quot;page-heading&quot;&gt;&lt;div&gt;&lt;h1&gt;全部待办&lt;/h1&gt;&lt;p class=&quot;text-muted&quot;&gt;与你有关的 Issue 和 PR Review，按当前优先顺序展示。&lt;/p&gt;&lt;/div&gt;&lt;span class=&quot;viz-badge&quot;&gt;共 7 项&lt;/span&gt;&lt;/div&gt;
-          &lt;div class=&quot;filters&quot;&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot;&gt;全部&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot;&gt;Issue&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot;&gt;PR Review&lt;/button&gt;&lt;/div&gt;
-          &lt;div class=&quot;task-list&quot;&gt;
-            &lt;button class=&quot;task-row&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;1&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #42&lt;/span&gt;提交训练营作业&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;&lt;span&gt;P0&lt;/span&gt;&lt;span&gt;·&lt;/span&gt;&lt;span&gt;今天截止&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;arrow-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;24 小时内到期&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-time&quot;&gt;2h&lt;/span&gt;&lt;/button&gt;
-            &lt;button class=&quot;task-row&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;2&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #31&lt;/span&gt;完成 GitHub 登录页&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;&lt;span&gt;P0&lt;/span&gt;&lt;span&gt;·&lt;/span&gt;&lt;span&gt;7 月 16 日&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;arrow-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;P0&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-time&quot;&gt;2h&lt;/span&gt;&lt;/button&gt;
-            &lt;button class=&quot;task-row&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;3&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;PR #45&lt;/span&gt;审阅任务列表交互&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;&lt;span&gt;P1&lt;/span&gt;&lt;span&gt;·&lt;/span&gt;&lt;span&gt;无硬截止&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;message-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;等待你的 Review&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-time&quot;&gt;45min&lt;/span&gt;&lt;/button&gt;
-            &lt;button class=&quot;task-row&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;4&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #18&lt;/span&gt;补充错误提示&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;&lt;span&gt;P2&lt;/span&gt;&lt;span&gt;·&lt;/span&gt;&lt;span&gt;无硬截止&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;history&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;8 天未活动&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-time&quot;&gt;1h&lt;/span&gt;&lt;/button&gt;
-            &lt;button class=&quot;task-row&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;5&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #51&lt;/span&gt;更新项目文档&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;&lt;span&gt;P2&lt;/span&gt;&lt;span&gt;·&lt;/span&gt;&lt;span&gt;无硬截止&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;timer-off&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;补充预计投入后才能进入今日计划&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;task-time&quot;&gt;待估算&lt;/span&gt;&lt;/button&gt;
-          &lt;/div&gt;
-        &lt;/main&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/section&gt;
-
-  &lt;section class=&quot;screen&quot; data-screen=&quot;5&quot; aria-label=&quot;任务详情页面&quot;&gt;
-    &lt;div class=&quot;app-shell&quot;&gt;
-      &lt;aside class=&quot;sidebar&quot;&gt;
-        &lt;div class=&quot;side-brand&quot;&gt;&lt;div class=&quot;brand-lockup&quot;&gt;&lt;span class=&quot;brand-mark-box&quot;&gt;&lt;i data-lucide=&quot;check-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;strong&gt;XE6-15&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
-        &lt;nav class=&quot;side-nav&quot; aria-label=&quot;产品导航&quot;&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot; data-go=&quot;6&quot;&gt;&lt;i data-lucide=&quot;calendar-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;今日计划&lt;/button&gt;&lt;button class=&quot;side-link is-active&quot; type=&quot;button&quot; data-go=&quot;4&quot;&gt;&lt;i data-lucide=&quot;inbox&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;全部待办&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;clock-3&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;待评审&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;circle-pause&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;阻塞任务&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;settings&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;设置&lt;/button&gt;&lt;/nav&gt;
-        &lt;div class=&quot;side-repo&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;当前仓库&lt;/span&gt;&lt;strong&gt;1024XEngineer / XE6-15&lt;/strong&gt;&lt;/div&gt;
-      &lt;/aside&gt;
-      &lt;div class=&quot;app-main&quot;&gt;
-        &lt;header class=&quot;app-topbar&quot;&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-go=&quot;4&quot;&gt;&lt;i data-lucide=&quot;arrow-left&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;全部待办&lt;/button&gt;&lt;div class=&quot;user-chip&quot;&gt;&lt;span class=&quot;avatar&quot;&gt;J&lt;/span&gt;&lt;span&gt;@Jiang&lt;/span&gt;&lt;/div&gt;&lt;/header&gt;
-        &lt;main class=&quot;content&quot;&gt;
-          &lt;div class=&quot;page-heading&quot;&gt;&lt;div&gt;&lt;div class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #31&lt;/span&gt;&lt;span class=&quot;viz-badge&quot;&gt;On Progress&lt;/span&gt;&lt;/div&gt;&lt;h1&gt;完成 GitHub 登录页&lt;/h1&gt;&lt;p class=&quot;text-muted&quot;&gt;1024XEngineer / XE6-15&lt;/p&gt;&lt;/div&gt;&lt;a class=&quot;btn&quot; href=&quot;https://github.com/1024XEngineer/XE6-15/issues/31&quot; target=&quot;_blank&quot; rel=&quot;noreferrer&quot;&gt;在 GitHub 中查看 &lt;i data-lucide=&quot;external-link&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/a&gt;&lt;/div&gt;
-          &lt;div class=&quot;detail-grid&quot;&gt;
-            &lt;section class=&quot;card&quot;&gt;&lt;div class=&quot;section-heading&quot;&gt;&lt;h3&gt;GitHub 信息&lt;/h3&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;只读&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;facts&quot;&gt;&lt;div class=&quot;fact-row&quot;&gt;&lt;span class=&quot;text-muted&quot;&gt;状态&lt;/span&gt;&lt;span&gt;Open&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;fact-row&quot;&gt;&lt;span class=&quot;text-muted&quot;&gt;Assignee&lt;/span&gt;&lt;span&gt;@Jiang&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;fact-row&quot;&gt;&lt;span class=&quot;text-muted&quot;&gt;Milestone&lt;/span&gt;&lt;span&gt;MVP&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;fact-row&quot;&gt;&lt;span class=&quot;text-muted&quot;&gt;最近更新&lt;/span&gt;&lt;span&gt;7 月 13 日&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;&lt;/section&gt;
-            &lt;section class=&quot;card&quot;&gt;&lt;div class=&quot;section-heading&quot;&gt;&lt;h3&gt;我的规划&lt;/h3&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;仅保存在产品内&lt;/span&gt;&lt;/div&gt;&lt;form class=&quot;planning-form&quot; id=&quot;planning-form&quot;&gt;&lt;label class=&quot;form-label&quot;&gt;优先级&lt;select class=&quot;form-select&quot;&gt;&lt;option selected&gt;P0&lt;/option&gt;&lt;option&gt;P1&lt;/option&gt;&lt;option&gt;P2&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;&lt;label class=&quot;form-label&quot;&gt;硬截止&lt;input class=&quot;form-control&quot; type=&quot;date&quot; value=&quot;2026-07-16&quot;&gt;&lt;/label&gt;&lt;label class=&quot;form-label&quot;&gt;预计投入&lt;input class=&quot;form-control&quot; type=&quot;text&quot; value=&quot;2h&quot;&gt;&lt;/label&gt;&lt;label class=&quot;form-label&quot;&gt;当前安排&lt;input class=&quot;form-control&quot; type=&quot;text&quot; value=&quot;今日计划&quot; disabled&gt;&lt;/label&gt;&lt;/form&gt;&lt;/section&gt;
-          &lt;/div&gt;
-          &lt;div class=&quot;detail-footer&quot;&gt;&lt;span class=&quot;inline-icon text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;arrow-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;当前靠前原因：P0&lt;/span&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; id=&quot;save-planning&quot;&gt;保存并更新计划&lt;/button&gt;&lt;/div&gt;
-        &lt;/main&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/section&gt;
-
-  &lt;section class=&quot;screen&quot; data-screen=&quot;6&quot; aria-label=&quot;今日计划页面&quot;&gt;
-    &lt;div class=&quot;app-shell&quot;&gt;
-      &lt;aside class=&quot;sidebar&quot;&gt;
-        &lt;div class=&quot;side-brand&quot;&gt;&lt;div class=&quot;brand-lockup&quot;&gt;&lt;span class=&quot;brand-mark-box&quot;&gt;&lt;i data-lucide=&quot;check-square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;strong&gt;XE6-15&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
-        &lt;nav class=&quot;side-nav&quot; aria-label=&quot;产品导航&quot;&gt;&lt;button class=&quot;side-link is-active&quot; type=&quot;button&quot; data-go=&quot;6&quot;&gt;&lt;i data-lucide=&quot;calendar-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;今日计划&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot; data-go=&quot;4&quot;&gt;&lt;i data-lucide=&quot;inbox&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;全部待办&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;clock-3&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;待评审&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;circle-pause&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;阻塞任务&lt;/button&gt;&lt;button class=&quot;side-link&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;settings&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;设置&lt;/button&gt;&lt;/nav&gt;
-        &lt;div class=&quot;side-repo&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;当前仓库&lt;/span&gt;&lt;strong&gt;1024XEngineer / XE6-15&lt;/strong&gt;&lt;/div&gt;
-      &lt;/aside&gt;
-      &lt;div class=&quot;app-main&quot;&gt;
-        &lt;header class=&quot;app-topbar&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;1024XEngineer / XE6-15&lt;/span&gt;&lt;div class=&quot;user-chip&quot;&gt;&lt;span class=&quot;avatar&quot;&gt;J&lt;/span&gt;&lt;span&gt;@Jiang&lt;/span&gt;&lt;/div&gt;&lt;/header&gt;
-        &lt;main class=&quot;content&quot;&gt;
-          &lt;div class=&quot;page-heading&quot;&gt;&lt;div&gt;&lt;h1&gt;今日计划&lt;/h1&gt;&lt;p class=&quot;text-muted&quot;&gt;默认首页 · 7 月 14 日 · 按顺序开始下一项任务&lt;/p&gt;&lt;/div&gt;&lt;span class=&quot;viz-badge&quot;&gt;自动同步&lt;/span&gt;&lt;/div&gt;
-          &lt;div class=&quot;capacity-line&quot;&gt;&lt;div class=&quot;capacity-meta&quot;&gt;&lt;span&gt;&lt;strong&gt;今日容量 4h&lt;/strong&gt;&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;已安排 4h · 剩余 0h&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;progress&quot; role=&quot;progressbar&quot; aria-label=&quot;今日容量已安排百分比&quot; aria-valuenow=&quot;100&quot; aria-valuemin=&quot;0&quot; aria-valuemax=&quot;100&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
-          &lt;div class=&quot;card update-banner&quot;&gt;&lt;span&gt;&lt;strong&gt;计划刚刚自动更新&lt;/strong&gt;&lt;br&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;1 项加入，1 项移回规划池&lt;/span&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;7&quot;&gt;查看变化&lt;/button&gt;&lt;/div&gt;
-          &lt;div class=&quot;today-list&quot;&gt;
-            &lt;div class=&quot;today-row&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;1&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #42&lt;/span&gt;提交训练营作业&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;今天截止 · 2h&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;arrow-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;24 小时内到期&lt;/span&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;查看任务&lt;/button&gt;&lt;/div&gt;
-            &lt;div class=&quot;today-row&quot;&gt;&lt;span class=&quot;task-rank&quot;&gt;2&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #31&lt;/span&gt;完成 GitHub 登录页&lt;/span&gt;&lt;span class=&quot;task-meta text-small&quot;&gt;P0 · 7 月 16 日 · 2h&lt;/span&gt;&lt;span class=&quot;task-reason text-muted text-small&quot;&gt;&lt;i data-lucide=&quot;arrow-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;P0&lt;/span&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;查看任务&lt;/button&gt;&lt;/div&gt;
-          &lt;/div&gt;
-          &lt;div class=&quot;pool-links&quot;&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot;&gt;待评审 1 项&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;4&quot;&gt;规划池 3 项&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;3&quot;&gt;处理待估算 1 项&lt;/button&gt;&lt;/div&gt;
-        &lt;/main&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/section&gt;
-
-  &lt;section class=&quot;screen&quot; data-screen=&quot;7&quot; aria-label=&quot;自动重排结果页面&quot;&gt;
-    &lt;div class=&quot;change-panel&quot;&gt;
-      &lt;header class=&quot;change-header&quot;&gt;&lt;div&gt;&lt;span class=&quot;viz-badge&quot;&gt;刚刚&lt;/span&gt;&lt;h1&gt;计划已更新&lt;/h1&gt;&lt;p class=&quot;text-muted&quot;&gt;GitHub 中的任务状态发生变化，今日计划已经自动调整。&lt;/p&gt;&lt;/div&gt;&lt;i data-lucide=&quot;refresh-cw&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/header&gt;
-      &lt;div class=&quot;change-list&quot;&gt;
-        &lt;div class=&quot;change-row&quot;&gt;&lt;span class=&quot;change-symbol&quot;&gt;+&lt;/span&gt;&lt;div&gt;&lt;div class=&quot;change-title&quot;&gt;加入今日计划&lt;/div&gt;&lt;div&gt;Issue #31 · 完成 GitHub 登录页返工 &lt;strong&gt;1h&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;text-muted text-small&quot;&gt;原因：PR 收到 changes requested，需要你继续处理&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
-        &lt;div class=&quot;change-row&quot;&gt;&lt;span class=&quot;change-symbol&quot;&gt;−&lt;/span&gt;&lt;div&gt;&lt;div class=&quot;change-title&quot;&gt;移回规划池&lt;/div&gt;&lt;div&gt;Issue #18 · 补充错误提示 &lt;strong&gt;1h&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;text-muted text-small&quot;&gt;原因：今日容量不足；任务没有被删除或关闭&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
-        &lt;div class=&quot;change-row&quot;&gt;&lt;span class=&quot;change-symbol&quot;&gt;↕&lt;/span&gt;&lt;div&gt;&lt;div class=&quot;change-title&quot;&gt;顺序变化&lt;/div&gt;&lt;div&gt;Issue #42 已移动到第 1 位&lt;/div&gt;&lt;div class=&quot;text-muted text-small&quot;&gt;原因：24 小时内到期&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div class=&quot;change-actions&quot;&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;4&quot;&gt;查看全部待办&lt;/button&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-go=&quot;6&quot;&gt;返回今日计划&lt;/button&gt;&lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/section&gt;
-
-  &lt;section class=&quot;screen&quot; data-screen=&quot;8&quot; aria-label=&quot;硬截止容量冲突页面&quot;&gt;
-    &lt;div class=&quot;conflict-shell&quot;&gt;
-      &lt;header class=&quot;conflict-heading&quot;&gt;&lt;span class=&quot;conflict-icon&quot;&gt;&lt;i data-lucide=&quot;triangle-alert&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;div&gt;&lt;h1&gt;硬截止容量冲突&lt;/h1&gt;&lt;p class=&quot;text-muted&quot;&gt;今天必须完成的任务超过了可用时间，系统无法自动生成可执行计划。&lt;/p&gt;&lt;/div&gt;&lt;/header&gt;
-      &lt;div class=&quot;conflict-stats&quot;&gt;&lt;div class=&quot;card&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;今日剩余容量&lt;/span&gt;&lt;div class=&quot;summary-value&quot;&gt;&lt;strong&gt;2h&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;card&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;必须今日完成&lt;/span&gt;&lt;div class=&quot;summary-value&quot;&gt;&lt;strong&gt;3h&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;card&quot;&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;时间缺口&lt;/span&gt;&lt;div class=&quot;summary-value text-destructive&quot;&gt;&lt;strong&gt;1h&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
-      &lt;section aria-label=&quot;发生冲突的任务&quot;&gt;&lt;div class=&quot;conflict-task&quot;&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #31&lt;/span&gt;完成 GitHub 登录页返工&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;原因：今天截止&lt;/span&gt;&lt;/span&gt;&lt;strong&gt;1h&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;conflict-task&quot;&gt;&lt;span&gt;&lt;span class=&quot;task-title&quot;&gt;&lt;span class=&quot;viz-badge badge-soft&quot;&gt;Issue #42&lt;/span&gt;提交训练营作业&lt;/span&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;原因：今天截止&lt;/span&gt;&lt;/span&gt;&lt;strong&gt;2h&lt;/strong&gt;&lt;/div&gt;&lt;/section&gt;
-      &lt;div class=&quot;section-heading&quot; style=&quot;margin-top:24px&quot;&gt;&lt;div&gt;&lt;h3&gt;请选择处理方向&lt;/h3&gt;&lt;span class=&quot;text-muted text-small&quot;&gt;系统不会预选或自动修改截止承诺。&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
-      &lt;div class=&quot;resolution-actions&quot;&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-resolution=&quot;capacity&quot;&gt;&lt;i data-lucide=&quot;clock-3&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;调高今日容量&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-go=&quot;5&quot;&gt;&lt;i data-lucide=&quot;pencil&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;调整任务范围或预计投入&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-resolution=&quot;remove&quot;&gt;&lt;i data-lucide=&quot;list-minus&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;手动移出一个任务&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-resolution=&quot;delay&quot;&gt;&lt;i data-lucide=&quot;calendar-x&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;接受可能延期&lt;/button&gt;&lt;/div&gt;
-      &lt;div class=&quot;resolution-form&quot; id=&quot;capacity-form&quot;&gt;&lt;label class=&quot;form-label&quot;&gt;新的今日容量&lt;input class=&quot;form-control&quot; id=&quot;new-capacity&quot; type=&quot;text&quot; value=&quot;5h&quot;&gt;&lt;/label&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-confirm-resolution=&quot;已将今日容量调高为 5h，可重新生成计划。&quot;&gt;确认容量&lt;/button&gt;&lt;/div&gt;
-      &lt;div class=&quot;resolution-form&quot; id=&quot;remove-form&quot;&gt;&lt;label class=&quot;form-label&quot;&gt;移出任务&lt;select class=&quot;form-select&quot;&gt;&lt;option&gt;Issue #31 · 登录页返工&lt;/option&gt;&lt;option&gt;Issue #42 · 提交训练营作业&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-confirm-resolution=&quot;已按你的选择移出任务；该任务仍保留在规划池。&quot;&gt;确认移出&lt;/button&gt;&lt;/div&gt;
-      &lt;div class=&quot;card resolution-result&quot; id=&quot;resolution-result&quot; role=&quot;status&quot;&gt;&lt;strong id=&quot;resolution-message&quot;&gt;&lt;/strong&gt;&lt;div style=&quot;margin-top:12px&quot;&gt;&lt;button class=&quot;btn btn-primary&quot; type=&quot;button&quot; data-go=&quot;6&quot;&gt;查看更新后的今日计划&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;
-      &lt;p class=&quot;text-muted text-small&quot; style=&quot;margin-top:18px&quot;&gt;在你选择前，任务截止时间不会被自动修改。&lt;/p&gt;
-    &lt;/div&gt;
-  &lt;/section&gt;
-&lt;/div&gt;
-
-&lt;script&gt;
-  (function () {
-    const root = document.getElementById(&#x27;xe615-prototype&#x27;);
-    const names = {
-      1: &#x27;01 · 连接 GitHub&#x27;,
-      2: &#x27;02 · 选择单一仓库&#x27;,
-      3: &#x27;03 · 同步与时间建议&#x27;,
-      4: &#x27;04 · 全部待办&#x27;,
-      5: &#x27;05 · 任务详情&#x27;,
-      6: &#x27;06 · 今日计划&#x27;,
-      7: &#x27;07 · 自动重排&#x27;,
-      8: &#x27;08 · 硬截止容量冲突&#x27;
-    };
-
-    function showScreen(number) {
-      root.querySelectorAll(&#x27;[data-screen]&#x27;).forEach((screen) =&gt; {
-        screen.classList.toggle(&#x27;is-active&#x27;, screen.dataset.screen === String(number));
-      });
-      root.querySelectorAll(&#x27;[data-screen-tab]&#x27;).forEach((button) =&gt; {
-        const selected = button.dataset.screenTab === String(number);
-        button.classList.toggle(&#x27;btn-primary&#x27;, selected);
-        button.setAttribute(&#x27;aria-pressed&#x27;, String(selected));
-      });
-      root.querySelector(&#x27;#current-screen-label&#x27;).textContent = names[number];
-      root.scrollIntoView({ behavior: &#x27;smooth&#x27;, block: &#x27;start&#x27; });
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <symbol id="i-github" viewBox="0 0 24 24"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7A5.4 5.4 0 0 0 19.4 4 5 5 0 0 0 19.3.5S18.2.1 15 1.8a13.4 13.4 0 0 0-6 0C5.8.1 4.7.5 4.7.5A5 5 0 0 0 4.6 4a5.4 5.4 0 0 0-1.4 3.7c0 5.3 3.5 6.5 6.8 6.9A4.8 4.8 0 0 0 9 18v4"/><path d="M9 18c-3 .9-3-1.5-4-2"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3-1.7 4.3L6 9l4.3 1.7L12 15l1.7-4.3L18 9l-4.3-1.7L12 3Z"/><path d="m5 16-.8 2.2L2 19l2.2.8L5 22l.8-2.2L8 19l-2.2-.8L5 16Z"/><path d="m19 14-1 2.5-2.5 1 2.5 1L19 21l1-2.5 2.5-1-2.5-1L19 14Z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-repo" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/><path d="M9 7h6"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+    <symbol id="i-pr" viewBox="0 0 24 24"><circle cx="6" cy="5" r="3"/><circle cx="18" cy="19" r="3"/><path d="M6 8v8a3 3 0 0 0 3 3h6"/><path d="m15 5 3-3 3 3"/><path d="M18 2v10"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+    <symbol id="i-sync" viewBox="0 0 24 24"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  </svg>
+
+  <main class="prototype-window" aria-label="XE6-15 macOS 桌面端原型">
+    <header class="titlebar">
+      <div class="traffic" aria-label="macOS 窗口控制"><span></span><span></span><span></span></div>
+      <div class="window-title"><strong>XE6-15</strong><span>·</span><span id="current-title">连接 GitHub</span></div>
+      <div class="title-actions">
+        <nav class="step-nav" aria-label="原型页面导航">
+          <button class="step-dot is-active" data-step="1" aria-label="页面 1">01</button><button class="step-dot" data-step="2" aria-label="页面 2">02</button><button class="step-dot" data-step="3" aria-label="页面 3">03</button><button class="step-dot" data-step="4" aria-label="页面 4">04</button><button class="step-dot" data-step="5" aria-label="页面 5">05</button><button class="step-dot" data-step="6" aria-label="页面 6">06</button><button class="step-dot" data-step="7" aria-label="页面 7">07</button><button class="step-dot" data-step="8" aria-label="页面 8">08</button>
+        </nav>
+        <button class="theme-button" id="theme-toggle" aria-label="切换明暗主题"><svg class="icon"><use href="#i-moon"/></svg></button>
+      </div>
+    </header>
+
+    <div class="viewport">
+      <section class="screen is-active" data-screen="1" aria-label="连接 GitHub">
+        <div class="setup-layout">
+          <aside class="setup-aside">
+            <div class="brand"><span class="brand-mark"><svg class="icon"><use href="#i-spark"/></svg></span><span>XE6-15</span></div>
+            <div class="aside-copy"><div class="eyebrow" style="color:#8e8d87">PERSONAL ENGINEERING PLANNER</div><h1>从任务池，<br>到今天就能做。</h1><p>连接一个你参与的 GitHub 仓库，XE6-15 会整理与你有关的 Issue 与 PR Review，并给出一份可执行的今日计划。</p></div>
+            <div class="aside-foot"><span>单仓库 MVP</span><span>·</span><span>只读 GitHub 数据</span></div>
+          </aside>
+          <div class="setup-main">
+            <div class="setup-card narrow">
+              <div class="setup-heading"><span class="eyebrow"><svg class="icon"><use href="#i-spark"/></svg>欢迎使用 XE6-15</span><h1>连接 GitHub</h1><p>首次打开时直接完成授权，不进入空工作台。</p></div>
+              <div class="auth-actions"><button class="btn btn-primary" data-go="2"><svg class="icon"><use href="#i-github"/></svg>使用 GitHub 继续</button><button class="btn"><span class="kbd">⌘</span> 使用其他方式登录</button></div>
+              <div class="trust-list"><div class="trust-item"><svg class="icon"><use href="#i-check"/></svg><span>读取身份、仓库及 Issue / PR 基础信息</span></div><div class="trust-item"><svg class="icon"><use href="#i-lock"/></svg><span>不会替你创建、关闭或修改 GitHub 任务</span></div></div>
+              <div class="auth-note">继续即表示你同意仅将授权用于生成个人计划</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" data-screen="2" aria-label="选择单一仓库">
+        <div class="setup-layout">
+          <aside class="setup-aside">
+            <div class="brand"><span class="brand-mark"><svg class="icon"><use href="#i-spark"/></svg></span><span>XE6-15</span></div>
+            <div class="aside-copy"><div class="eyebrow" style="color:#8e8d87">02 · REPOSITORY</div><h1>选择唯一的<br>工作上下文。</h1><p>MVP 一次只连接一个仓库。公开或私有都可以，只要你拥有访问权限或参与其中。</p></div>
+            <div class="aside-foot"><span class="kbd">/</span><span>聚焦搜索</span><span>·</span><span class="kbd">↵</span><span>选择</span></div>
+          </aside>
+          <div class="setup-main">
+            <div class="setup-card">
+              <div class="setup-heading"><span class="eyebrow">已登录 · @Jiang</span><h1>选择工作仓库</h1><p>XE6-15 将自动同步这个仓库中与你有关的开放任务。</p></div>
+              <div class="search-field"><svg class="icon"><use href="#i-search"/></svg><input id="repo-search" class="field" placeholder="搜索组织或仓库名称…" autocomplete="off"></div>
+              <div class="repo-panel"><div class="repo-panel-head"><span>你的仓库</span><span id="repo-count">3 个可访问</span></div>
+                <button class="repo-option" data-repo="1024XEngineer / XE6-15"><span class="repo-icon"><svg class="icon"><use href="#i-repo"/></svg></span><span><span class="repo-name">1024XEngineer / XE6-15</span><span class="repo-meta">Private · 有访问权限 · 更新于 4 分钟前</span></span><svg class="icon"><use href="#i-chevron"/></svg></button>
+                <button class="repo-option" data-repo="1024XEngineer / course-examples"><span class="repo-icon"><svg class="icon"><use href="#i-repo"/></svg></span><span><span class="repo-name">1024XEngineer / course-examples</span><span class="repo-meta">Public · Contributor · 更新于昨天</span></span><svg class="icon"><use href="#i-chevron"/></svg></button>
+                <button class="repo-option" data-repo="Jiang / personal-lab"><span class="repo-icon"><svg class="icon"><use href="#i-repo"/></svg></span><span><span class="repo-name">Jiang / personal-lab</span><span class="repo-meta">Private · Owner · 更新于 3 天前</span></span><svg class="icon"><use href="#i-chevron"/></svg></button>
+              </div>
+              <div class="repo-footer"><span class="muted small" id="repo-selection">尚未选择仓库</span><div style="display:flex;gap:8px"><button class="btn" data-go="1">返回</button><button class="btn btn-primary" id="repo-continue" disabled>连接此仓库</button></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" data-screen="3" aria-label="同步与时间建议">
+        <div class="setup-layout">
+          <aside class="setup-aside">
+            <div class="brand"><span class="brand-mark"><svg class="icon"><use href="#i-spark"/></svg></span><span>XE6-15</span></div>
+            <div class="aside-copy"><div class="eyebrow" style="color:#8e8d87">03 · FIRST SYNC</div><h1>同步完成。<br>只确认缺失信息。</h1><p>GitHub 事实保持只读；预计投入作为你的个人规划字段逐项确认。</p></div>
+            <div class="aside-foot"><svg class="icon"><use href="#i-sync"/></svg><span>内容将持续自动同步</span></div>
+          </aside>
+          <div class="setup-main">
+            <div class="setup-card">
+              <div class="setup-heading"><span class="eyebrow"><svg class="icon" style="color:var(--green)"><use href="#i-check"/></svg>1024XEngineer / XE6-15 · 同步完成</span><h1>已找到与你有关的任务</h1><p>其余 5 项已有时间信息；下面 2 项需要你确认预计投入。</p></div>
+              <div class="sync-summary"><div class="metric"><strong>6</strong><span>开放 Issue</span></div><div class="metric"><strong>1</strong><span>待处理 PR Review</span></div><div class="metric"><strong>2</strong><span>相关 Milestone</span></div></div>
+              <div class="estimate-list"><div class="estimate-head"><strong>需要确认预计投入</strong><span class="badge accent"><svg class="icon"><use href="#i-spark"/></svg>2 项建议</span></div>
+                <div class="estimate-row"><div><div class="estimate-title"><span class="badge">Issue #51</span>更新项目文档</div><div class="estimate-reason">根据任务范围建议 1h · 可随时修改</div></div><div class="estimate-actions"><button class="btn btn-sm btn-primary accept-estimate" data-value="1h">接受 1h</button><button class="btn btn-sm edit-estimate">修改</button><span class="estimate-editor"><input class="field" value="1.5h"><button class="btn btn-sm save-estimate">保存</button></span></div></div>
+                <div class="estimate-row"><div><div class="estimate-title"><span class="badge purple">PR #45</span>审阅任务列表交互</div><div class="estimate-reason">根据 diff 规模建议 45min · 可随时修改</div></div><div class="estimate-actions"><button class="btn btn-sm btn-primary accept-estimate" data-value="45min">接受 45min</button><button class="btn btn-sm edit-estimate">修改</button><span class="estimate-editor"><input class="field" value="1h"><button class="btn btn-sm save-estimate">保存</button></span></div></div>
+              </div>
+              <div class="repo-footer"><span class="muted small">可以稍后处理，未确认的任务会进入“待估算”。</span><button class="btn btn-primary" data-go="6">进入今日计划<svg class="icon"><use href="#i-chevron"/></svg></button></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" data-screen="4" aria-label="全部待办">
+        <div class="app-layout">
+          <aside class="sidebar">
+            <div class="brand"><span class="brand-mark"><svg class="icon"><use href="#i-spark"/></svg></span><span>XE6-15</span></div>
+            <nav class="side-section"><span class="side-label">工作区</span><button class="side-link" data-go="6"><svg class="icon"><use href="#i-home"/></svg><span>今日计划</span><span class="count">2</span></button><button class="side-link is-active" data-go="4"><svg class="icon"><use href="#i-list"/></svg><span>全部待办</span><span class="count">7</span></button><button class="side-link"><svg class="icon"><use href="#i-pr"/></svg><span>待评审</span><span class="count">1</span></button><button class="side-link"><svg class="icon"><use href="#i-alert"/></svg><span>阻塞任务</span><span class="count">0</span></button><button class="side-link"><svg class="icon"><use href="#i-settings"/></svg><span>设置</span></button></nav>
+            <div class="repo-context"><span class="small">当前仓库</span><span class="mono">1024XEngineer/XE6-15</span></div><div class="profile"><span class="avatar">J</span><span class="small">@Jiang</span></div>
+          </aside>
+          <div class="main"><div class="content">
+            <header class="page-header"><div class="page-header-copy"><span class="eyebrow">PERSONAL TASK POOL</span><h1>全部待办</h1><p class="muted">当前优先顺序 · 共 7 项</p></div><div class="page-header-actions"><span class="badge green"><svg class="icon"><use href="#i-sync"/></svg>刚刚同步</span></div></header>
+            <div class="toolbar"><div class="filter-group"><button class="filter is-active" data-filter="all">全部</button><button class="filter" data-filter="issue">Issue</button><button class="filter" data-filter="pr">PR Review</button></div><div class="search-field"><svg class="icon"><use href="#i-search"/></svg><input class="field" id="task-search" placeholder="搜索任务…"></div></div>
+            <div class="card task-list" id="all-task-list">
+              <button class="task-row" data-kind="issue" data-go="5"><span class="task-rank">01</span><span class="task-main"><span class="task-title"><span class="badge">Issue #42</span>提交训练营作业</span><span class="task-meta"><span class="badge red">P0</span><span>今天截止</span></span><span class="task-reason"><svg class="icon"><use href="#i-clock"/></svg>24 小时内到期</span></span><span class="task-time">2h</span></button>
+              <button class="task-row" data-kind="issue" data-go="5"><span class="task-rank">02</span><span class="task-main"><span class="task-title"><span class="badge">Issue #31</span>完成 GitHub 登录页</span><span class="task-meta"><span class="badge red">P0</span><span>7 月 16 日</span></span><span class="task-reason"><svg class="icon"><use href="#i-alert"/></svg>P0 · 当前最重要</span></span><span class="task-time">2h</span></button>
+              <button class="task-row" data-kind="pr" data-go="5"><span class="task-rank">03</span><span class="task-main"><span class="task-title"><span class="badge purple">PR #45</span>审阅任务列表交互</span><span class="task-meta"><span class="badge yellow">P1</span><span>无硬截止</span></span><span class="task-reason"><svg class="icon"><use href="#i-pr"/></svg>等待你的 Review</span></span><span class="task-time">45m</span></button>
+              <button class="task-row" data-kind="issue" data-go="5"><span class="task-rank">04</span><span class="task-main"><span class="task-title"><span class="badge">Issue #18</span>补充错误提示</span><span class="task-meta"><span class="badge blue">P2</span><span>无硬截止</span></span><span class="task-reason"><svg class="icon"><use href="#i-clock"/></svg>8 天未活动</span></span><span class="task-time">1h</span></button>
+              <button class="task-row" data-kind="issue" data-go="5"><span class="task-rank">05</span><span class="task-main"><span class="task-title"><span class="badge">Issue #51</span>更新项目文档</span><span class="task-meta"><span class="badge blue">P2</span><span>无硬截止</span></span><span class="task-reason"><svg class="icon"><use href="#i-spark"/></svg>补充预计投入后进入计划</span></span><span class="task-time">待估算</span></button>
+            </div>
+          </div></div>
+        </div>
+      </section>
+
+      <section class="screen" data-screen="5" aria-label="任务详情">
+        <div class="app-layout">
+          <aside class="sidebar"><div class="brand"><span class="brand-mark"><svg class="icon"><use href="#i-spark"/></svg></span><span>XE6-15</span></div><nav class="side-section"><span class="side-label">工作区</span><button class="side-link" data-go="6"><svg class="icon"><use href="#i-home"/></svg><span>今日计划</span></button><button class="side-link is-active" data-go="4"><svg class="icon"><use href="#i-list"/></svg><span>全部待办</span></button><button class="side-link"><svg class="icon"><use href="#i-pr"/></svg><span>待评审</span></button><button class="side-link"><svg class="icon"><use href="#i-alert"/></svg><span>阻塞任务</span></button><button class="side-link"><svg class="icon"><use href="#i-settings"/></svg><span>设置</span></button></nav><div class="repo-context"><span class="small">当前仓库</span><span class="mono">1024XEngineer/XE6-15</span></div><div class="profile"><span class="avatar">J</span><span class="small">@Jiang</span></div></aside>
+          <div class="main"><div class="content">
+            <header class="page-header"><div class="page-header-copy"><button class="btn btn-ghost btn-sm" data-go="4" style="width:max-content;padding-left:0">← 返回全部待办</button><div class="task-title"><span class="badge">Issue #31</span><span class="badge green">Open</span></div><h1>完成 GitHub 登录页</h1><p class="muted">1024XEngineer / XE6-15</p></div><div class="page-header-actions"><a class="btn" href="https://github.com/1024XEngineer/XE6-15/issues/31" target="_blank" rel="noreferrer"><svg class="icon"><use href="#i-github"/></svg>在 GitHub 中查看<svg class="icon"><use href="#i-external"/></svg></a></div></header>
+            <div class="detail-grid"><div><section class="card section-card"><div class="section-title"><h2>GitHub 信息</h2><span class="badge">只读</span></div><div class="fact-grid"><div class="fact"><span>状态</span><strong>Open</strong></div><div class="fact"><span>Assignee</span><strong>@Jiang</strong></div><div class="fact"><span>Milestone</span><strong>MVP</strong></div><div class="fact"><span>最近更新</span><strong>7 月 13 日</strong></div><div class="fact"><span>Labels</span><div><span class="badge blue">frontend</span> <span class="badge purple">auth</span></div></div><div class="fact"><span>Repository</span><strong class="mono small">1024XEngineer/XE6-15</strong></div></div></section><section class="detail-note">GitHub 的标题、状态、负责人和里程碑不会在这里被修改；产品仅保存右侧的个人规划字段。</section></div>
+              <section class="card section-card"><div class="section-title"><h2>我的规划</h2><span class="badge accent">仅自己可见</span></div><form class="planning-form" id="planning-form"><div class="form-row"><label for="priority">优先级</label><select class="field" id="priority"><option>P0</option><option>P1</option><option>P2</option></select></div><div class="form-row"><label for="deadline">硬截止</label><input class="field" id="deadline" type="date" value="2026-07-16"></div><div class="form-row"><label for="effort">预计投入</label><input class="field" id="effort" value="2h"></div><div class="form-row"><label>当前安排</label><input class="field" value="今日计划" disabled></div><div class="form-row"><label>排序依据</label><span class="badge red">P0</span></div><button class="btn btn-primary" type="submit" style="margin-top:5px">保存并自动重排</button></form></section></div>
+          </div></div>
+        </div>
+      </section>
+
+      <section class="screen" data-screen="6" aria-label="今日计划">
+        <div class="app-layout">
+          <aside class="sidebar"><div class="brand"><span class="brand-mark"><svg class="icon"><use href="#i-spark"/></svg></span><span>XE6-15</span></div><nav class="side-section"><span class="side-label">工作区</span><button class="side-link is-active" data-go="6"><svg class="icon"><use href="#i-home"/></svg><span>今日计划</span><span class="count">2</span></button><button class="side-link" data-go="4"><svg class="icon"><use href="#i-list"/></svg><span>全部待办</span><span class="count">7</span></button><button class="side-link"><svg class="icon"><use href="#i-pr"/></svg><span>待评审</span><span class="count">1</span></button><button class="side-link"><svg class="icon"><use href="#i-alert"/></svg><span>阻塞任务</span><span class="count">0</span></button><button class="side-link"><svg class="icon"><use href="#i-settings"/></svg><span>设置</span></button></nav><div class="repo-context"><span class="small">当前仓库</span><span class="mono">1024XEngineer/XE6-15</span></div><div class="profile"><span class="avatar">J</span><span class="small">@Jiang</span></div></aside>
+          <div class="main"><div class="content">
+            <header class="page-header"><div class="page-header-copy"><span class="eyebrow">TUESDAY · JUL 14</span><h1>今日计划</h1><p class="muted">两项任务 · 按顺序开始下一项</p></div><div class="page-header-actions"><span class="badge green"><svg class="icon"><use href="#i-sync"/></svg>自动同步</span><button class="btn btn-sm" data-go="7">模拟任务变化</button></div></header>
+            <section class="card capacity-card"><div class="capacity-ring"><span>100%</span></div><div class="capacity-copy"><div style="display:flex;justify-content:space-between"><strong>今日容量</strong><span class="mono small">4h / 4h</span></div><div class="progress"><span></span></div><div class="capacity-stats"><span>已安排 <strong>4h</strong></span><span>剩余 <strong>0h</strong></span><span>待估算 <strong>1 项</strong></span></div></div><span class="badge accent">容量已排满</span></section>
+            <div class="card today-list" id="today-list"><article class="today-task" draggable="true"><span class="drag-handle">⠿</span><div class="task-main"><div class="task-title"><span class="today-index">1</span><span class="badge">Issue #42</span>提交训练营作业</div><div class="task-meta"><span class="badge red">今天截止</span><span>排序依据：24 小时内到期</span></div></div><div style="display:grid;justify-items:end;gap:8px"><strong class="mono">2h</strong><button class="btn btn-sm" data-go="5">查看任务</button></div></article><article class="today-task" draggable="true"><span class="drag-handle">⠿</span><div class="task-main"><div class="task-title"><span class="today-index">2</span><span class="badge">Issue #31</span>完成 GitHub 登录页</div><div class="task-meta"><span class="badge red">P0</span><span>7 月 16 日</span><span>排序依据：P0</span></div></div><div style="display:grid;justify-items:end;gap:8px"><strong class="mono">2h</strong><button class="btn btn-sm" data-go="5">查看任务</button></div></article></div>
+            <div class="pool-footer"><span>待评审 1 项 · 规划池 3 项 · 待估算 1 项</span><div class="pool-actions"><button class="btn btn-sm">查看待评审</button><button class="btn btn-sm" data-go="4">查看规划池</button><button class="btn btn-sm" data-go="3">处理待估算</button></div></div>
+          </div></div>
+        </div>
+      </section>
+
+      <section class="screen" data-screen="7" aria-label="自动重排">
+        <div class="focus-layout"><article class="focus-card"><header class="focus-head"><div class="focus-head-copy"><span class="eyebrow">刚刚 · 已自动生效</span><h1>计划已更新</h1><p class="muted">GitHub 中的任务状态发生变化，今日计划已经自动调整。</p></div><span class="focus-icon"><svg class="icon icon-lg"><use href="#i-sync"/></svg></span></header><div class="change-list"><div class="change-row"><span class="change-symbol add">+</span><div class="change-copy"><strong>加入今日计划</strong><span>Issue #31 · 完成 GitHub 登录页返工 <b class="mono">1h</b></span><span class="muted small">PR 收到 changes requested，需要你继续处理</span></div></div><div class="change-row"><span class="change-symbol remove">−</span><div class="change-copy"><strong>移回规划池</strong><span>Issue #18 · 补充错误提示 <b class="mono">1h</b></span><span class="muted small">今日容量不足且优先级较低，任务没有被删除</span></div></div><div class="change-row"><span class="change-symbol move">↕</span><div class="change-copy"><strong>顺序变化</strong><span>Issue #42 已移动到第 1 位</span><span class="muted small">24 小时内到期</span></div></div></div><footer class="focus-actions"><button class="btn btn-danger btn-sm" data-go="8"><svg class="icon"><use href="#i-alert"/></svg>查看容量冲突状态</button><div class="action-group"><button class="btn" data-go="4">全部待办</button><button class="btn btn-primary" data-go="6">返回今日计划</button></div></footer></article></div>
+      </section>
+
+      <section class="screen" data-screen="8" aria-label="硬截止容量冲突">
+        <div class="focus-layout"><article class="focus-card"><header class="focus-head"><div class="focus-head-copy"><span class="eyebrow" style="color:var(--red)">需要你的决定</span><h1>硬截止容量冲突</h1><p class="muted">今天必须完成的任务超过可用时间，系统无法自动生成可执行计划。</p></div><span class="focus-icon" style="color:var(--red);background:var(--red-soft)"><svg class="icon icon-lg"><use href="#i-alert"/></svg></span></header><div class="conflict-stats"><div class="conflict-stat"><span class="muted small">今日剩余容量</span><strong>2h</strong></div><div class="conflict-stat"><span class="muted small">必须今日完成</span><strong>3h</strong></div><div class="conflict-stat danger"><span class="small">容量缺口</span><strong>−1h</strong></div></div><div class="conflict-tasks"><div class="conflict-task"><span><strong>Issue #31</strong> · 完成 GitHub 登录页返工<br><span class="muted small">排序依据：今天截止</span></span><b class="mono">1h</b></div><div class="conflict-task"><span><strong>Issue #42</strong> · 提交训练营作业<br><span class="muted small">排序依据：今天截止</span></span><b class="mono">2h</b></div></div><div class="resolution"><h3 style="margin-bottom:10px">选择处理方向</h3><div class="resolution-options"><button class="btn resolution-option" data-resolution="capacity"><svg class="icon"><use href="#i-plus"/></svg>调高今日容量</button><button class="btn resolution-option" data-resolution="scope"><svg class="icon"><use href="#i-settings"/></svg>调整任务范围或投入</button><button class="btn resolution-option" data-resolution="remove"><svg class="icon"><use href="#i-list"/></svg>手动移出一个任务</button><button class="btn resolution-option" data-resolution="risk"><svg class="icon"><use href="#i-alert"/></svg>接受可能延期</button></div><div class="resolution-panel" id="resolution-panel"><span id="resolution-copy" class="small">将今日容量调高为</span><input class="field" id="capacity-input" value="3h"><button class="btn btn-primary btn-sm" id="resolve-confirm">确认并重新计算</button></div><p class="muted small" style="margin-top:12px">在你明确选择前，任务截止时间不会被自动修改。</p></div><footer class="focus-actions"><button class="btn btn-ghost" data-go="7">← 返回变化说明</button><span class="muted small">冲突仍然保留</span></footer></article></div>
+      </section>
+
+      <div class="toast" id="toast" role="status"><svg class="icon" style="color:var(--green)"><use href="#i-check"/></svg><span id="toast-copy">已保存</span></div>
+    </div>
+  </main>
+
+  <script>
+    const names = {1:'连接 GitHub',2:'选择工作仓库',3:'同步与时间建议',4:'全部待办',5:'任务详情',6:'今日计划',7:'自动重排',8:'硬截止容量冲突'};
+    const root = document.documentElement;
+    const toast = document.querySelector('#toast');
+    let toastTimer;
+
+    function showToast(message) {
+      document.querySelector('#toast-copy').textContent = message;
+      toast.classList.add('is-visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2200);
     }
 
-    root.addEventListener(&#x27;click&#x27;, (event) =&gt; {
-      const target = event.target.closest(&#x27;[data-go], [data-screen-tab]&#x27;);
-      if (!target || !root.contains(target)) return;
-      const next = target.dataset.go || target.dataset.screenTab;
-      showScreen(Number(next));
+    function go(number, updateHistory = true) {
+      number = Number(number);
+      document.querySelectorAll('[data-screen]').forEach(el => el.classList.toggle('is-active', Number(el.dataset.screen) === number));
+      document.querySelectorAll('[data-step]').forEach(el => el.classList.toggle('is-active', Number(el.dataset.step) === number));
+      document.querySelector('#current-title').textContent = names[number];
+      if (updateHistory) history.replaceState(null, '', `?screen=${number}`);
+    }
+
+    document.addEventListener('click', event => {
+      const target = event.target.closest('[data-go], [data-step]');
+      if (target) go(target.dataset.go || target.dataset.step);
     });
 
-    const repoSearch = root.querySelector(&#x27;#repo-search&#x27;);
-    repoSearch.addEventListener(&#x27;input&#x27;, () =&gt; {
+    document.querySelector('#theme-toggle').addEventListener('click', () => {
+      const dark = root.dataset.theme === 'dark';
+      root.dataset.theme = dark ? 'light' : 'dark';
+      localStorage.setItem('xe615-theme', root.dataset.theme);
+    });
+    root.dataset.theme = localStorage.getItem('xe615-theme') || 'light';
+
+    const repoSearch = document.querySelector('#repo-search');
+    const repoOptions = [...document.querySelectorAll('.repo-option')];
+    repoSearch.addEventListener('input', () => {
       const query = repoSearch.value.trim().toLowerCase();
-      root.querySelectorAll(&#x27;[data-repo-name]&#x27;).forEach((row) =&gt; {
-        row.hidden = query &amp;&amp; !row.dataset.repoName.toLowerCase().includes(query);
+      let visible = 0;
+      repoOptions.forEach(option => { const match = option.textContent.toLowerCase().includes(query); option.hidden = !match; if (match) visible++; });
+      document.querySelector('#repo-count').textContent = `${visible} 个可访问`;
+    });
+    repoOptions.forEach(option => option.addEventListener('click', () => {
+      repoOptions.forEach(item => item.classList.remove('is-selected'));
+      option.classList.add('is-selected');
+      document.querySelector('#repo-selection').textContent = `已选择：${option.dataset.repo}`;
+      document.querySelector('#repo-continue').disabled = false;
+    }));
+    document.querySelector('#repo-continue').addEventListener('click', () => go(3));
+
+    document.querySelectorAll('.accept-estimate').forEach(button => button.addEventListener('click', () => {
+      button.textContent = `已接受 ${button.dataset.value}`;
+      button.classList.add('btn-accent');
+      button.closest('.estimate-actions').querySelector('.edit-estimate').style.display = 'none';
+      showToast(`已保存预计投入 ${button.dataset.value}`);
+    }));
+    document.querySelectorAll('.edit-estimate').forEach(button => button.addEventListener('click', () => {
+      const actions = button.closest('.estimate-actions');
+      actions.querySelector('.accept-estimate').style.display = 'none';
+      button.style.display = 'none';
+      actions.querySelector('.estimate-editor').style.display = 'flex';
+      actions.querySelector('input').focus();
+    }));
+    document.querySelectorAll('.save-estimate').forEach(button => button.addEventListener('click', () => {
+      const actions = button.closest('.estimate-actions');
+      const value = actions.querySelector('input').value || '待估算';
+      actions.querySelector('.estimate-editor').style.display = 'none';
+      const accept = actions.querySelector('.accept-estimate');
+      accept.style.display = 'inline-flex'; accept.textContent = `已保存 ${value}`; accept.classList.add('btn-accent');
+      showToast(`预计投入已修改为 ${value}`);
+    }));
+
+    const filters = [...document.querySelectorAll('[data-filter]')];
+    const taskSearch = document.querySelector('#task-search');
+    function filterTasks() {
+      const kind = document.querySelector('[data-filter].is-active')?.dataset.filter || 'all';
+      const query = taskSearch.value.trim().toLowerCase();
+      document.querySelectorAll('#all-task-list .task-row').forEach(row => {
+        row.hidden = !((kind === 'all' || row.dataset.kind === kind) && row.textContent.toLowerCase().includes(query));
       });
+    }
+    filters.forEach(filter => filter.addEventListener('click', () => { filters.forEach(x => x.classList.remove('is-active')); filter.classList.add('is-active'); filterTasks(); }));
+    taskSearch.addEventListener('input', filterTasks);
+
+    document.querySelector('#planning-form').addEventListener('submit', event => { event.preventDefault(); showToast('个人规划已保存，正在自动重排'); setTimeout(() => go(7), 480); });
+
+    let dragged;
+    const todayList = document.querySelector('#today-list');
+    todayList.addEventListener('dragstart', event => { dragged = event.target.closest('.today-task'); dragged?.classList.add('is-dragging'); });
+    todayList.addEventListener('dragend', () => { dragged?.classList.remove('is-dragging'); dragged = null; [...todayList.querySelectorAll('.today-index')].forEach((el,i) => el.textContent = i+1); showToast('已保存你的手动顺序'); });
+    todayList.addEventListener('dragover', event => { event.preventDefault(); const target = event.target.closest('.today-task'); if (dragged && target && target !== dragged) { const box = target.getBoundingClientRect(); todayList.insertBefore(dragged, event.clientY < box.top + box.height/2 ? target : target.nextSibling); } });
+
+    let resolution = 'capacity';
+    const resolutionPanel = document.querySelector('#resolution-panel');
+    document.querySelectorAll('[data-resolution]').forEach(button => button.addEventListener('click', () => {
+      resolution = button.dataset.resolution;
+      document.querySelectorAll('[data-resolution]').forEach(x => x.classList.remove('btn-primary'));
+      button.classList.add('btn-primary');
+      resolutionPanel.classList.add('is-active');
+      const copy = document.querySelector('#resolution-copy');
+      const input = document.querySelector('#capacity-input');
+      const messages = {capacity:['将今日容量调高为','3h'], scope:['打开任务详情并调整投入','Issue #31'], remove:['选择要移回规划池的任务','Issue #31'], risk:['记录你接受的延期风险','已知风险']};
+      copy.textContent = messages[resolution][0]; input.value = messages[resolution][1]; input.style.display = resolution === 'capacity' ? 'block' : 'none';
+    }));
+    document.querySelector('#resolve-confirm').addEventListener('click', () => {
+      if (resolution === 'scope') return go(5);
+      showToast(resolution === 'risk' ? '已记录延期风险' : '冲突已解决，计划已重新计算');
+      setTimeout(() => go(6), 520);
     });
 
-    root.querySelectorAll(&#x27;input[name=&quot;repo&quot;]&#x27;).forEach((radio) =&gt; {
-      radio.addEventListener(&#x27;change&#x27;, () =&gt; {
-        root.querySelector(&#x27;#selected-repo&#x27;).textContent = radio.value;
-      });
+    document.addEventListener('keydown', event => {
+      if (event.key === '/' && document.activeElement.tagName !== 'INPUT') { event.preventDefault(); if (document.querySelector('[data-screen="2"]').classList.contains('is-active')) repoSearch.focus(); else if (document.querySelector('[data-screen="4"]').classList.contains('is-active')) taskSearch.focus(); }
+      if (!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName) && /^[1-8]$/.test(event.key)) go(event.key);
     });
 
-    let pendingSuggestions = 2;
-    function finishSuggestion(id, value) {
-      const row = root.querySelector(`[data-suggestion=&quot;${id}&quot;]`);
-      row.querySelector(&#x27;.default-suggestion-actions&#x27;).classList.add(&#x27;hidden&#x27;);
-      row.querySelector(`[data-editor=&quot;${id}&quot;]`).classList.remove(&#x27;is-open&#x27;);
-      const accepted = row.querySelector(`[data-accepted=&quot;${id}&quot;]`);
-      accepted.querySelector(&#x27;span&#x27;).textContent = `已设为 ${value}`;
-      if (!accepted.classList.contains(&#x27;is-shown&#x27;)) pendingSuggestions -= 1;
-      accepted.classList.add(&#x27;is-shown&#x27;);
-      root.querySelector(&#x27;#suggestion-count&#x27;).textContent = pendingSuggestions ? `${pendingSuggestions} 项待确认` : &#x27;已全部确认&#x27;;
-      if (window.lucide) window.lucide.createIcons({ attrs: { width: 16, height: 16 } });
-    }
-
-    root.querySelectorAll(&#x27;[data-accept-estimate]&#x27;).forEach((button) =&gt; {
-      button.addEventListener(&#x27;click&#x27;, () =&gt; finishSuggestion(button.dataset.acceptEstimate, button.dataset.estimate));
-    });
-
-    root.querySelectorAll(&#x27;[data-edit-estimate]&#x27;).forEach((button) =&gt; {
-      button.addEventListener(&#x27;click&#x27;, () =&gt; {
-        const id = button.dataset.editEstimate;
-        root.querySelector(`[data-suggestion=&quot;${id}&quot;] .default-suggestion-actions`).classList.add(&#x27;hidden&#x27;);
-        root.querySelector(`[data-editor=&quot;${id}&quot;]`).classList.add(&#x27;is-open&#x27;);
-      });
-    });
-
-    root.querySelectorAll(&#x27;[data-save-estimate]&#x27;).forEach((button) =&gt; {
-      button.addEventListener(&#x27;click&#x27;, () =&gt; {
-        const id = button.dataset.saveEstimate;
-        const value = root.querySelector(`[data-editor=&quot;${id}&quot;] input`).value.trim() || &#x27;待估算&#x27;;
-        finishSuggestion(id, value);
-      });
-    });
-
-    root.querySelector(&#x27;#save-planning&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; showScreen(7));
-
-    const capacityForm = root.querySelector(&#x27;#capacity-form&#x27;);
-    const removeForm = root.querySelector(&#x27;#remove-form&#x27;);
-    const result = root.querySelector(&#x27;#resolution-result&#x27;);
-    root.querySelectorAll(&#x27;[data-resolution]&#x27;).forEach((button) =&gt; {
-      button.addEventListener(&#x27;click&#x27;, () =&gt; {
-        capacityForm.classList.toggle(&#x27;is-shown&#x27;, button.dataset.resolution === &#x27;capacity&#x27;);
-        removeForm.classList.toggle(&#x27;is-shown&#x27;, button.dataset.resolution === &#x27;remove&#x27;);
-        result.classList.remove(&#x27;is-shown&#x27;);
-        if (button.dataset.resolution === &#x27;delay&#x27;) {
-          root.querySelector(&#x27;#resolution-message&#x27;).textContent = &#x27;已记录你接受可能延期；冲突标识将继续保留。&#x27;;
-          result.classList.add(&#x27;is-shown&#x27;);
-        }
-      });
-    });
-
-    root.querySelectorAll(&#x27;[data-confirm-resolution]&#x27;).forEach((button) =&gt; {
-      button.addEventListener(&#x27;click&#x27;, () =&gt; {
-        root.querySelector(&#x27;#resolution-message&#x27;).textContent = button.dataset.confirmResolution;
-        result.classList.add(&#x27;is-shown&#x27;);
-      });
-    });
-  })();
-&lt;/script&gt;
-
-&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
-&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
-&lt;script&gt;
-(() =&gt; {
-  if (window.FloatingUIDOM == null) {
-    return;
-  }
-  const { autoUpdate, computePosition, flip, offset, shift, size } =
-    window.FloatingUIDOM;
-  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
-  const tooltipId = `codex-visualization-tooltip-${
-    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
-  }`;
-  const tooltipGap = 5;
-  const hoverDelay = 700;
-  const skipDelay = 300;
-  let activeTrigger = null;
-  let pendingTrigger = null;
-  let tooltip = null;
-  let openTimeout = null;
-  let autoUpdateCleanup = null;
-  let positionRequest = 0;
-  let skipDelayUntil = 0;
-
-  const getTrigger = (target) =&gt;
-    target?.nodeType === Node.ELEMENT_NODE
-      ? target.closest(&quot;[data-tooltip]&quot;)
-      : null;
-  const containsTarget = (trigger, target) =&gt;
-    target?.nodeType != null &amp;&amp; trigger.contains(target);
-  const getContent = (trigger) =&gt;
-    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
-  const getPlacement = (trigger) =&gt; {
-    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
-    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
-  };
-  const getTooltip = () =&gt; {
-    if (tooltip == null) {
-      tooltip = document.createElement(&quot;div&quot;);
-      tooltip.id = tooltipId;
-      tooltip.className = &quot;tooltip&quot;;
-      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
-    }
-    return tooltip;
-  };
-  const setDescribedBy = (trigger, described) =&gt; {
-    const ids = new Set(
-      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
-        .split(/\s+/)
-        .filter(Boolean),
-    );
-    if (described) {
-      ids.add(tooltipId);
-    } else {
-      ids.delete(tooltipId);
-    }
-    if (ids.size === 0) {
-      trigger.removeAttribute(&quot;aria-describedby&quot;);
-    } else {
-      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
-    }
-  };
-  const clearOpenTimeout = () =&gt; {
-    if (openTimeout != null) {
-      window.clearTimeout(openTimeout);
-      openTimeout = null;
-    }
-    pendingTrigger = null;
-  };
-  const closeTooltip = (activateSkipDelay = true) =&gt; {
-    clearOpenTimeout();
-    positionRequest += 1;
-    autoUpdateCleanup?.();
-    autoUpdateCleanup = null;
-    if (activeTrigger == null) {
-      return;
-    }
-    setDescribedBy(activeTrigger, false);
-    activeTrigger = null;
-    tooltip?.remove();
-    if (activateSkipDelay) {
-      skipDelayUntil = Date.now() + skipDelay;
-    }
-  };
-  const updatePosition = (trigger, floating) =&gt; {
-    const request = ++positionRequest;
-    void computePosition(trigger, floating, {
-      middleware: [
-        offset(tooltipGap),
-        flip({ padding: tooltipGap }),
-        shift({ padding: tooltipGap }),
-        size({
-          padding: tooltipGap,
-          apply({ availableHeight, availableWidth, elements }) {
-            elements.floating.style.setProperty(
-              &quot;--tooltip-available-width&quot;,
-              `${Math.max(0, availableWidth)}px`,
-            );
-            elements.floating.style.setProperty(
-              &quot;--tooltip-available-height&quot;,
-              `${Math.max(0, availableHeight)}px`,
-            );
-          },
-        }),
-      ],
-      placement: getPlacement(trigger),
-      strategy: &quot;fixed&quot;,
-    })
-      .then(({ x, y }) =&gt; {
-        if (activeTrigger !== trigger || request !== positionRequest) {
-          return;
-        }
-        const scale = window.devicePixelRatio || 1;
-        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
-        floating.style.visibility = &quot;visible&quot;;
-      })
-      .catch(() =&gt; {
-        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
-          closeTooltip(false);
-        }
-      });
-  };
-  const openTooltip = (trigger) =&gt; {
-    const content = getContent(trigger);
-    if (!trigger.isConnected || content.length === 0) {
-      return;
-    }
-    clearOpenTimeout();
-    if (activeTrigger === trigger) {
-      return;
-    }
-    closeTooltip();
-    const floating = getTooltip();
-    floating.textContent = content;
-    floating.style.visibility = &quot;hidden&quot;;
-    floating.style.transform = &quot;translate(0, 0)&quot;;
-    document.body.appendChild(floating);
-    activeTrigger = trigger;
-    setDescribedBy(trigger, true);
-    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
-      updatePosition(trigger, floating);
-    });
-  };
-  const requestOpen = (trigger, immediate = false) =&gt; {
-    if (
-      getContent(trigger).length === 0 ||
-      activeTrigger === trigger ||
-      pendingTrigger === trigger
-    ) {
-      return;
-    }
-    clearOpenTimeout();
-    pendingTrigger = trigger;
-    const delay =
-      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
-        ? 0
-        : hoverDelay;
-    if (delay === 0) {
-      openTooltip(trigger);
-      return;
-    }
-    openTimeout = window.setTimeout(() =&gt; {
-      openTimeout = null;
-      pendingTrigger = null;
-      openTooltip(trigger);
-    }, delay);
-  };
-  const handlePointerOpen = (event) =&gt; {
-    if (event.pointerType === &quot;touch&quot;) {
-      return;
-    }
-    const trigger = getTrigger(event.target);
-    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
-      return;
-    }
-    requestOpen(trigger);
-  };
-  const handleLeave = (event) =&gt; {
-    const trigger = getTrigger(event.target);
-    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
-      return;
-    }
-    if (activeTrigger === trigger || pendingTrigger === trigger) {
-      closeTooltip();
-    }
-  };
-  const handleFocusIn = (event) =&gt; {
-    const trigger = getTrigger(event.target);
-    if (trigger?.matches(&quot;:focus-visible&quot;)) {
-      requestOpen(trigger, true);
-    }
-  };
-  const handleKeyDown = (event) =&gt; {
-    if (event.key === &quot;Escape&quot;) {
-      closeTooltip();
-    }
-  };
-  const handleContextMenu = (event) =&gt; {
-    const trigger = getTrigger(event.target);
-    if (activeTrigger === trigger || pendingTrigger === trigger) {
-      closeTooltip();
-    }
-  };
-  const destroy = () =&gt; {
-    closeTooltip(false);
-    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
-    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
-    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
-    document.removeEventListener(&quot;focusout&quot;, handleLeave);
-    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
-    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
-    tooltip = null;
-  };
-
-  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
-  document.addEventListener(&quot;pointerout&quot;, handleLeave);
-  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
-  document.addEventListener(&quot;focusout&quot;, handleLeave);
-  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
-  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
-  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
-})();
-&lt;/script&gt;
-&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
-&lt;script&gt;
-(() =&gt; {
-  const initialize = () =&gt; {
-    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
-  };
-  if (globalThis.lucide != null) {
-    initialize();
-    return;
-  }
-  document
-    .getElementById(&quot;codex-visualization-lucide&quot;)
-    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
-})();
-&lt;/script&gt;
-
-&lt;/body&gt;
-&lt;/html&gt;
-"></iframe>
+    const initial = Math.min(8, Math.max(1, Number(new URLSearchParams(location.search).get('screen')) || 1));
+    go(initial, false);
+  </script>
 </body>
 </html>
