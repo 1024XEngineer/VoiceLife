@@ -2,34 +2,54 @@
 
 整体为六边形结构：内核是四个领域模块经 Workspace Coordinator 串联的单向流水线；外圈是两个方向的适配器——上方 App Shell 为 driving adapter（从外向内驱动 Coordinator），下方 Infra Adapters 为 driven adapter（被内核经端口调用）。依赖永远朝内指。
 
-```text
-                         App Shell  (driving adapter：8 页 / 导航 / 同步状态)
-                                      │  只调 Workspace Coordinator
-                                      ▼
-                          ┌──── Workspace Coordinator —────┐
-                          │   编排事件、路由到 主要页面        │
-                          └────────────────────────────────┘
-              GitHub Connection ──→ Task Pool ──→ Prioritization ──→ Daily Planning
-              (RepositoryContext)    (TaskPoolSnapshot)  (RankingResult)
-                                                ↓
-                            DailyPlan / PlanChangeSet / CapacityConflict
-                          └────────────────────────────────────────────────┘
-                                      ▲  内核经端口调用，不引具体框架
-                                      │
-               Infra Adapters  (driven adapter：GitHub SDK / Keychain / SwiftData 等)
+```mermaid
+flowchart TB
+    subgraph Outer["外圈 · 适配器"]
+        direction TB
+        Shell["App Shell<br/>driving adapter<br/>8 页 / 导航 / 同步状态"]
+        Infra["Infra Adapters<br/>driven adapter<br/>GitHub SDK / Keychain / SwiftData"]
+    end
+
+    subgraph Core["内核"]
+        direction TB
+        Coord["Workspace Coordinator<br/>编排事件 · 路由到 06/07/08"]
+        subgraph Domain["领域模块（单向流水线）"]
+            direction LR
+            GH["GitHub Connection"]
+            TP["Task Pool"]
+            PRIO["Prioritization"]
+            DP["Daily Planning"]
+            GH -->|"RepositoryContext"| TP
+            TP -->|"TaskPoolSnapshot"| PRIO
+            PRIO -->|"RankingResult"| DP
+            DP -->|"DailyPlan / PlanChangeSet / CapacityConflict"| Result(["计划结果"])
+        end
+    end
+
+    Shell -->|"只调 Coordinator"| Coord
+    Coord --> Domain
+    Domain -.->|"经端口调用，不引具体框架"| Infra
+
+    classDef shell fill:#e8f0fe,stroke:#1a73e8
+    classDef infra fill:#fef7e0,stroke:#f9ab00
+    classDef coord fill:#e6f4ea,stroke:#34a853
+    classDef domain fill:#f3e8fd,stroke:#a142f4
+    class Shell shell
+    class Infra infra
+    class Coord coord
+    class GH,TP,PRIO,DP domain
 ```
+
+依赖方向永远朝内指：`App Shell → Coordinator → 领域`，`领域 → Infra`；领域之间为下游消费上游的单向流。
 
 内核流水线（前后依赖，单向）：
 
-```text
-GitHub Connection
-        ↓ RepositoryContext
-Task Pool
-        ↓ TaskPoolSnapshot
-Prioritization
-        ↓ RankingResult
-Daily Planning
-        ↓ DailyPlan / PlanChangeSet / CapacityConflict
+```mermaid
+flowchart TB
+    GH["GitHub Connection"] -->|"RepositoryContext"| TP["Task Pool"]
+    TP -->|"TaskPoolSnapshot"| PRIO["Prioritization"]
+    PRIO -->|"RankingResult"| DP["Daily Planning"]
+    DP -->|"DailyPlan / PlanChangeSet / CapacityConflict"| End(["输出"])
 ```
 
 约束：
