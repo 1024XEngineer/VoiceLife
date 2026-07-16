@@ -1,6 +1,8 @@
 ## 一、模块依赖
 
-整体为六边形结构：内核是四个领域模块经 Workspace Coordinator 串联的单向流水线；外圈是两个方向的适配器——上方 App Shell 为 driving adapter（从外向内驱动 Coordinator），下方 Infra Adapters 为 driven adapter（被内核经端口调用）。依赖永远朝内指。
+整体为六边形结构：内核是三个领域模块经 Workspace Coordinator 串联的单向流水线；外圈是两个方向的适配器——上方 App Shell 为 driving adapter（从外向内驱动 Coordinator），下方 Infra Adapters 为 driven adapter（被内核经端口调用）。依赖永远朝内指。
+
+模块按领域内聚划分（各自守护自己的数据与不变量），不按产品交互流程划分。`Connection` 管身份与仓库绑定上下文，`Task Pool` 管归并后的个人行动及其规划字段，`Planning` 管把行动排成每日计划——其内部排序（`Ranker`）与重排（`Replanner`）是同一领域内的两个职责，不拆成对等模块。模块与端口用中性命名，`GitHub` 只作为 Infra 适配器的具体实现出现，为未来更换 Provider 保留空间。
 
 ```mermaid
 flowchart TB
@@ -15,14 +17,9 @@ flowchart TB
         Coord["Workspace Coordinator<br/>编排事件 · 路由到 06/07/08"]
         subgraph Domain["领域模块（单向流水线）"]
             direction LR
-            GH["GitHub Connection"]
-            TP["Task Pool"]
-            PRIO["Prioritization"]
-            DP["Daily Planning"]
-            GH -->|"RepositoryContext"| TP
-            TP -->|"TaskPoolSnapshot"| PRIO
-            PRIO -->|"RankingResult"| DP
-            DP -->|"DailyPlan / PlanChangeSet / CapacityConflict"| Result(["计划结果"])
+            CONN["Connection"] -->|"RepositoryContext"| TP["Task Pool"]
+            TP -->|"TaskPoolSnapshot"| PL["Planning"]
+            PL -->|"DailyPlan / PlanChangeSet / CapacityConflict"| Result(["计划结果"])
         end
     end
 
@@ -37,48 +34,56 @@ flowchart TB
     class Shell shell
     class Infra infra
     class Coord coord
-    class GH,TP,PRIO,DP domain
+    class CONN,TP,PL domain
 ```
 
 依赖方向永远朝内指：`App Shell → Coordinator → 领域`，`领域 → Infra`；领域之间为下游消费上游的单向流。
 
-内核流水线（前后依赖，单向）：
+内核流水线（前后依赖，单向）。`Planning` 内部先 `Ranker` 纯排序、再 `Replanner` 按容量重排，但这是模块内部职责划分，不构成对等模块：
 
 ```mermaid
 flowchart TB
-    GH["GitHub Connection"] -->|"RepositoryContext"| TP["Task Pool"]
-    TP -->|"TaskPoolSnapshot"| PRIO["Prioritization"]
-    PRIO -->|"RankingResult"| DP["Daily Planning"]
-    DP -->|"DailyPlan / PlanChangeSet / CapacityConflict"| End(["输出"])
+    CONN["Connection"] -->|"RepositoryContext"| TP["Task Pool"]
+    TP -->|"TaskPoolSnapshot"| PL["Planning"]
+    PL -->|"DailyPlan / PlanChangeSet / CapacityConflict"| End(["输出"])
+
+    subgraph PLinner["Planning 内部"]
+        Ranker["Ranker<br/>纯排序，不改计划"] -->|"Ranking"| Replanner["Replanner<br/>按容量重排，改计划"]
+    end
 ```
 
 约束：
 
 - 后级模块只能消费前级输出，不能直接访问前级数据库。
-- GitHub Token 不允许跨模块传递。
-- GitHub 事实、个人规划、每日安排分别由不同模型持有。
+- 凭据（Token）不允许跨模块传递，只在 Connection 持有。
+- 外部事实、个人规划、每日安排分别由不同模型持有。
 - 单机应用由 `Workspace Coordinator` 直接串联，不必引入消息队列。
 - App Shell 只调 Workspace Coordinator，不直连领域模块；Infra 适配器只实现领域端口，不能反向定义业务模型。依赖方向永远朝内：外圈 → Coordinator → 领域，领域之间 = 下游消费上游，任何模块不得 import 下游模块。
-- 领域模块是纯领域代码，不依赖 SwiftUI / SwiftData / GitHub SDK 等具体框架；这些只在两个适配器层出现。
+- 领域模块是纯领域代码，不依赖 SwiftUI / SwiftData / GitHub SDK 等具体框架；这些只在两个适配器层出现。`GitHub` 作为具体 Provider 只在 Infra 适配器名中出现。
+- `Ranker` 是纯计算（同输入同输出、无持久状态），作为 `Planning` 内部的类，不独立成模块；排序"只算不改计划"、重排"才改计划"是 `Planning` 模块的内部约束。
 
 ---
 
-## 二、GitHub Connection
+## 二、Connection
+
+> 领域句：An `Account` binds one `Repository` (and an optional `Milestone`), yielding a `RepositoryContext`; authorization, credential storage, and catalog access are provided through ports, whose MVP implementation is GitHub.
+
+Connection 管身份与仓库绑定上下文。模块与端口用中性命名，`GitHub` 只作为 Infra 适配器的具体实现出现（见第八节）；MVP 阶段只实现 GitHub Provider，但领域不把 GitHub 结构内化进模型。
 
 ### 职责
 
-- GitHub 授权。
+- 外部账户授权（MVP = GitHub OAuth）。
 - 保存当前账户。
 - 查询用户可访问的 Repository。
 - 绑定唯一 Repository。
-- 判断 Token 或仓库权限是否失效。
+- 判断凭据或仓库权限是否失效。
 
 ### 核心模型
 
 ```text
-GitHubAccount
+Account                          // 外部账户投影（MVP 来自 GitHub；字段 githubUserId 保留来源标识）
 - userId
-- githubUserId
+- externalUserId                 // GitHub 侧用户 ID（MVP）
 - login
 - avatarUrl
 
@@ -107,7 +112,7 @@ RepositoryContext
 - currentMilestoneNumber?      // 当前选定的 Milestone；P0 收敛版作用域含仓库 + 当前 Milestone
 ```
 
-`RepositoryContext` 是唯一允许传给 Task Pool 的对象，不包含 Token。Milestone 作用域由 Task Pool 的 `TaskPoolScope` 承载（见第三节），`RepositoryContext` 携带当前 Milestone 是为了让同步范围与展示上下文一致。
+`RepositoryContext` 是唯一允许传给 Task Pool 的对象，不包含凭据（Token）。Milestone 作用域由 Task Pool 的 `TaskPoolScope` 承载（见第三节），`RepositoryContext` 携带当前 Milestone 是为了让同步范围与展示上下文一致。
 
 ### 对 UI 提供的接口
 
@@ -116,7 +121,7 @@ startAuthorization()
 → AuthorizationChallenge
 
 checkAuthorization(challengeId)
-→ pending | authorized(GitHubAccount) | denied | expired
+→ pending | authorized(Account) | denied | expired
 
 listAccessibleRepositories(query?, cursor?)
 → RepositoryPage
@@ -139,22 +144,24 @@ disconnect()
 
 ### 需要基础设施实现的端口
 
+端口为中性命名；GitHub 是 MVP 实现，适配器名带 `GitHub` 前缀（见第八节）。
+
 ```text
-GitHubAuthorizationProvider
-CredentialStore
-GitHubRepositoryCatalog
-GitHubMilestoneCatalog
-AccountStore
-RepositoryBindingStore
+AuthorizationProvider          // MVP 实现：GitHubOAuthAdapter
+CredentialStore                // MVP 实现：KeychainAdapter
+RepositoryCatalog              // MVP 实现：GitHubRepositoryCatalogAdapter
+MilestoneCatalog               // MVP 实现：GitHubMilestoneCatalogAdapter
+AccountStore                   // MVP 实现：SQLiteAdapter
+RepositoryBindingStore         // MVP 实现：SQLiteAdapter
 ```
 
 ### 输出事件
 
 ```text
-GitHubConnected
+Connected
 RepositoryBound
 RepositoryPermissionLost
-GitHubDisconnected
+Disconnected
 ```
 
 ---
@@ -318,7 +325,7 @@ PersonalPlanning
 
 `manualOrderKey` 是有序分数键而非绝对槽位：在同一硬截止分组内，键值大小决定相对先后，新插入任务取相邻两键的中值，避免碰撞与全表 reindex。未手动拖拽的任务 `manualOrderKey = null`，由排序引擎按规则计算位置。键值经长期插入后可能精度退化，由 Task Pool 在同步或重排时按需压实（compaction）：组内按键值排序后重新均匀分配，保持相对顺序不变。
 
-这里不保存 `plannedDate`。任务安排日期由 Daily Planning 独占，避免两个模块同时维护计划状态。
+这里不保存 `plannedDate`。任务安排日期由 Planning 独占，避免两个模块同时维护计划状态。
 
 `estimatedEffortMinutes` 只保存用户确认后的值。AI 预估可作为后置建议呈现（见 `EffortSuggestionProvider`），但 Task Pool 不凭建议落库；缺值时任务带 `missing_estimate` 原因进入待估算区，由用户补填后才参与容量安排。
 
@@ -394,7 +401,7 @@ staleDataAvailable = true
 
 ### TaskPoolSnapshot
 
-传给 Prioritization 的只读投影：
+传给 Planning 的只读投影：
 
 ```text
 TaskPoolSnapshot
@@ -406,20 +413,20 @@ TaskPoolSnapshot
 ### 需要基础设施实现的端口
 
 ```text
-GitHubTaskReader
-PersonalActionStore
-SyncCheckpointStore
-EffortSuggestionProvider
+TaskReader                      // MVP 实现：GitHubTaskReaderAdapter（轮询）
+PersonalActionStore             // MVP 实现：SQLiteAdapter
+SyncCheckpointStore             // MVP 实现：SQLiteAdapter
+EffortSuggestionProvider        // MVP 实现：可返回空建议
 ```
 
-其中 `GitHubTaskReader` 只返回 GitHub 原始节点数据，不产生 `PersonalAction`，也不做归并：
+其中 `TaskReader` 只返回外部源节点数据（MVP = GitHub 原始节点），不产生 `PersonalAction`，也不做归并：
 
 ```text
 readChanges(scope, checkpoint, trackedSourceIds)
-→ GitHubTaskDelta
+→ SourceDelta
 ```
 
-`scope` 为 `TaskPoolScope`（含 Repository 与可选当前 Milestone），`GitHubTaskDelta` 只含源节点增删改；归并由领域层的 `ActionIdentityResolver` 在 Task Pool 内部完成，`GitHubTaskReader` 不感知个人行动。
+`scope` 为 `TaskPoolScope`（含 Repository 与可选当前 Milestone），`SourceDelta` 只含源节点增删改；归并由领域层的 `ActionIdentityResolver` 在 Task Pool 内部完成，`TaskReader` 不感知个人行动。
 
 `EffortSuggestionProvider` 只给出后置预估建议，不落库、不覆盖 `estimatedEffortMinutes`：
 
@@ -430,198 +437,27 @@ suggestEffort(actionId, githubFacts, relatedSources)
 
 `PersonalActionStore` 同时保存源节点缓存与归并后的 `PersonalAction`，以及 `primarySource / evidenceSources` 归属。---
 
-## 四、Prioritization
+## 四、Planning
+
+> 领域句：A pure `Ranker` orders `PersonalAction`s into a `Ranking`; a `Replanner` fits them into a `DailyPlan` under `Capacity`, emitting a `PlanChangeSet` or raising a `CapacityConflict` resolved by `ExclusionRecord` / `LateRiskAcceptance`.
+
+Planning 把行动排成每日计划。模块内部由两个职责组成：`Ranker`（纯排序，不改计划）和 `Replanner`（按容量重排，改计划）。它们是同一领域内的两个类，不拆成对等模块——排序与重排共享 `Ranking`、`PlanBucket`、`Capacity` 等模型，且 Proposal 03 决策"复用排序结果、不定义第二套优先级"正是靠二者同居一模块、`Replanner` 直接消费 `Ranker` 输出来保证。
 
 ### 职责
 
-- 根据任务池快照产生稳定顺序。
-- 为每项任务给出结构化排序理由。
-- 校验手动拖动是否合法。
-- 不修改任务字段。
-- 不修改每日计划。
-- 不写 GitHub。
+- `Ranker`：根据任务池快照产生稳定顺序，给出结构化排序理由，校验手动拖动；纯计算，不改任务字段、不改计划、不写外部。
+- `Replanner`：管理每日容量，消费排序结果生成今日计划，处理待估算/阻塞/待评审/规划池，自动应用可执行重排，记录计划变化，检测硬截止容量冲突；改计划但不改优先级/硬截止/预估。
 
-建议将它设计成纯计算模块：同样的输入、时间和规则版本，必须产生同样的输出。
+### 模块边界（内部约束）
 
-### 输入投影
-
-Prioritization 不直接引用 `PersonalAction` 全量字段，只投影排序所需的视图。投影过程是确定的——从 `PersonalAction` 到 `PrioritizationCandidate` 的映射不含随机、不含时间派生（时间由 `asOf` 统一传入），每次同一快照得到同一 Candidate。
-
-```text
-PrioritizationCandidate
-- actionId                          // ← PersonalAction.actionId
-- workStatus                        // ← PersonalAction.workStatus
-- statusReasons[]                   // ← PersonalAction.statusReasons
-- priority                          // ← PersonalPlanning.priority
-- hardDeadline                      // ← PersonalPlanning.hardDeadline
-- estimatedEffortMinutes            // ← PersonalPlanning.estimatedEffortMinutes（已是分钟，不再换算）
-- manualOrderKey                    // ← PersonalPlanning.manualOrderKey
-- blocked                           // ← PersonalPlanning.blocked
-- sourceUpdatedAt                   // ← PersonalAction.githubFacts.updatedAt（GitHub 上游更新时间，老化计算原点）
-- firstSeenAt                       // ← PersonalAction.firstSeenAt
-```
-
-`workStatus`、`priority`、`statusReasons` 取值：
-
-```text
-workStatus: on_progress | pending_review | done
-statusReasons 候选: waiting_for_review | changes_requested | blocked | missing_estimate | merged | closed_unmerged | issue_closed
-priority: P0 | P1 | P2 | unset
-```
-
-**完成任务的输入边界**：`workStatus = done` 的任务退出可执行任务池与重排（见 Daily Planning），不进入排序候选。Coordinator 在构造 `candidates[]` 前过滤掉 done 任务——排序引擎只处理仍需用户行动的任务（`on_progress`），待评审（`pending_review`）是否参与排序由 Daily Planning 的 plan_bucket 决定，通常不进今日容量排序。
-
-### 排序接口
-
-```text
-rank(request)
-→ RankingResult
-```
-
-```text
-RankingRequest
-- taskPoolSnapshotVersion
-- candidates[]
-- asOf                  // 排序基准时间，"当下"的锚点；老化、24h 置顶都相对它计算
-- policyVersion
-```
-
-纯计算约束：同一 `RankingRequest`（同一 `taskPoolSnapshotVersion` + 同一 `candidates` + 同一 `asOf` + 同一 `policyVersion`）必须产生完全相同的 `RankingResult`。排序引擎内部仅依赖确定逻辑，不含随机、不含黑盒权重。
-
-```text
-RankingResult
-- rankingId
-- sourceSnapshotVersion
-- policyVersion
-- generatedAt          // ≈ asOf 的实际执行时刻
-- rankedItems[]
-```
-
-```text
-RankedItem
-- actionId
-- position             // 0-based 最终排序位置
-- deadlineGroup        // 截止/老化分组标签
-- reasons[]            // 结构化排序理由，按层级顺序
-```
-
-```text
-DeadlineGroup
-- urgent               // DDL ≤ 24h，紧急置顶
-- soon                 // 有 DDL 但 > 24h
-- normal               // 无 DDL，老化级别 0（< 7 天）
-- aging                // 无 DDL，老化级别 ≥ 1（≥ 7 天）
-```
-
-`done` 不作为 `DeadlineGroup` 取值：已完成任务不进入排序候选（见输入边界），没有排序分组。
-
-### 排序原因
-
-排序原因不能只返回展示文字，应返回原因代码；UI 再把代码转为“24 小时内到期”等可读文本。
-
-```text
-RankingReason
-- code
-- parameters
-```
-
-```text
-RankingReasonCode
-- due_within_24_hours        // DDL ≤ 24h 紧急置顶
-- priority_p0                // 优先级 P0
-- priority_p1                // 优先级 P1
-- priority_p2                // 优先级 P2
-- no_priority                // 未设优先级，归入 P2 组末
-- earlier_deadline           // 同组内 DDL 更近
-- no_hard_deadline           // 无 DDL，进入老化通道
-- aging_raised               // 老化上浮
-- shorter_estimate           // 预估用时更短
-- missing_estimate           // 缺预估，排同档末尾
-- review_requested           // 等待你的 Review
-- manual_order_preserved     // 手动拖拽保留
-- completed_sort             // 已完成，沉底（仅在“已结束”视图对 done 任务单独解释，不参与今日排序）
-```
-
-```text
-RankingReasonParams        // 各 code 对应的结构化参数，按需携带
-- hoursUntilDeadline?      // due_within_24_hours：距 DDL 几小时
-- rankInUrgentGroup?       // due_within_24_hours：紧急组内排位（1-based）
-- priorityValue?           // priority_p0/p1/p2："P0"|"P1"|"P2"
-- abovePriority?           // priority_*：排在哪个优先级组之上
-- deadline?                // earlier_deadline：DDL 日期（ISO）
-- rankInDdlGroup?          // earlier_deadline：同 DDL 子组内排位（1-based）
-- groupSize?               // earlier_deadline：同 DDL 子组大小
-- daysSinceUpdate?         // no_hard_deadline：距上次更新天数
-- daysInactive?            // aging_raised：未活动天数
-- band?                    // aging_raised：老化分档 7to14 | 14to21 | over21
-- rankInAgingGroup?        // aging_raised：同档内排位（1-based）
-- estimatedMinutes?        // shorter_estimate：预估用时（分钟）；missing_estimate 恒为 null
-- rankByEstimate?          // shorter_estimate：同组内按预估排位（1-based）
-- manualPosition?          // manual_order_preserved：手动槽位（0-based）
-- completedAt?             // completed_sort：完成时间（ISO）
-```
-
-`groupSize` / `rankInXxxGroup` 这组“组内排位 + 组大小”让 UI 能渲染“同 P0 组里 DDL 最近（3 天后）”这类带相对位置的依据。
-
-### 手动拖动接口
-
-```text
-validateManualMove(request)
-→ accepted(ManualOrderPatch) | rejected(reason)
-```
-
-```text
-ManualMoveRequest
-- actionId              // 被拖拽的任务
-- beforeActionId?       // 拖到某任务之前（与 afterActionId 互斥）
-- afterActionId?        // 拖到某任务之后
-- rankingId             // 当前排序结果 ID，用于校验版本
-- expectedSnapshotVersion   // 期望快照版本，检测并发冲突
-```
-
-校验规则：
-
-- `beforeActionId` 与 `afterActionId` 互斥，同时提供则 `rejected("不能同时指定 before 和 after")`。
-- 目标任务必须存在于当前快照中，否则 `rejected("任务不存在")`。
-- `expectedSnapshotVersion` 与 `rankingId` 对应的快照版本一致，否则 `rejected("排序已过期，请刷新")`。
-- `manualOrderKey` 计算：用有序分数键，不取目标绝对 `position`。设目标位置相邻两任务的键为 `lo` 与 `hi`（拖到最前 `lo = null` 视为 −∞，拖到最后 `hi = null` 视为 +∞），则新键 = `(lo + hi) / 2`。这样 `before` 与 `after` 可靠区分（落在不同区间），且不会与已有键碰撞。
-- 键值精度退化时由 Task Pool 在写入时触发压实：组内按键排序后重新均匀分配键值，相对顺序不变；压实对用户不可见。
-
-```text
-ManualOrderPatch
-- actionId
-- manualOrderKey        // 有序分数键，非整数槽位
-```
-
-与实际写入分离：Prioritization 只返回应保存的 `manualOrderKey`，实际写入仍通过 Task Pool 的 `updatePlanning` 完成。
-
-### 不应提供的接口
-
-以下接口不属于排序模块：
-
-- `setPlannedDate` — 设置计划日期属于容量/计划模块。
-- `changeDailyCapacity` — 修改每日容量属于容量管理模块。
-- `updateGitHubPriority` — 写回 GitHub 标签不属于本模块，本模块只读本地优先级字段。
-- `automaticallyAcceptAISuggestion` — AI 介入排序调整属可选后置层，本模块不自动采纳。
-
----
-
-## 五、Daily Planning
-
-### 职责
-
-- 管理每日容量。
-- 消费排序结果并生成今日计划。
-- 处理待估算、阻塞、待评审和规划池。
-- 自动应用可执行的重排。
-- 记录计划变化。
-- 检测硬截止容量冲突。
-- 不重新解释优先级。
+- `Ranker` 是纯计算：同输入同输出、无持久状态。排序"只算不改计划"。
+- `Replanner` 才改计划（`plan_bucket` / `order` / 计划版本），但不能改任务的 `priority` / `hardDeadline` / `estimatedEffort`（那些归 Task Pool）。
+- `Replanner` 消费 `Ranker` 的 `Ranking`，不重新定义优先级。
 
 ### 核心模型
 
 ```text
-defaultCapacityMinutes           // 默认每日容量，用户首次设置后沿用；由 Daily Planning / Workspace Settings 持有，不藏在 Task Pool
+defaultCapacityMinutes           // 默认每日容量，用户首次设置后沿用；由 Planning 持有，不藏在 Task Pool
 - minutes
 - version
 ```
@@ -641,7 +477,7 @@ effectiveCapacity(date) =
     override != null ? override.totalMinutes : defaultCapacityMinutes
 ```
 
-`DailyCapacity` 不再作为按日期逐一保存的实体，改为“默认值 + 特殊日覆盖”两层：默认容量自动沿用（对应产品规则 5），只有用户显式调整的日期才产生 `DailyCapacityOverride`。这样避免“沿用默认”靠逐日复制实现、且和每日计划耦合过紧。
+默认容量自动沿用（对应产品规则 5），只有用户显式调整的日期才产生 `DailyCapacityOverride`，避免"沿用默认"靠逐日复制实现。
 
 ```text
 PlanBucket
@@ -651,7 +487,7 @@ PlanBucket
 - blocked
 - unestimated
 
-`done` 不作为 PlanBucket 取值：任务完成后退出计划系统，不再持有计划位置。完成通过 `PlanChange` 的 `type = removed` 配合 `reasonCode = merged | closed_unmerged | issue_closed` 表达（对应原型“已结束”区的“已合并 / 已关闭未合并 / Issue 已关闭”标签）。任务被 Reopen 时 `workStatus` 回到 `on_progress`，重新获得 today 或 planning_pool 位置。
+`done` 不作为 PlanBucket 取值：任务完成后退出计划系统，不再持有计划位置。完成通过 `PlanChange` 的 `type = removed` 配合 `reasonCode = merged | closed_unmerged | issue_closed` 表达（对应原型"已结束"区的"已合并 / 已关闭未合并 / Issue 已关闭"标签）。任务被 Reopen 时 `workStatus` 回到 `on_progress`，重新获得 today 或 planning_pool 位置。
 ```
 
 ```text
@@ -661,7 +497,7 @@ DailyPlanItem
 - order
 - allocatedMinutes
 
-`allocatedMinutes` 是计划生成时刻冻结的分配额，不等于每次现算的 `estimate if bucket == today else 0`：只有 today 取该任务 `estimatedEffortMinutes`，其余 bucket 恒为 0（阻塞、待评审、规划池、待估算都不占今日容量，见不变量 #6）。冻结后即使任务 estimate 被改动，本份计划显示的已安排量也不跳变，直至下一次 replan。
+`allocatedMinutes` 是计划生成时刻冻结的分配额：只有 today 取该任务 `estimatedEffortMinutes`，其余 bucket 恒为 0（阻塞、待评审、规划池、待估算都不占今日容量，见不变量 #6）。冻结后即使任务 estimate 被改动，本份计划显示的已安排量也不跳变，直至下一次 replan。
 ```
 
 ```text
@@ -674,6 +510,8 @@ DailyPlan
 - rankingId
 - version
 ```
+
+`DailyPlan` 带 `sourceSnapshotVersion + rankingId`：计划可复现，能说清"这份今日计划是从哪个快照、哪次排序推出来的"。
 
 ```text
 PlanChange
@@ -714,8 +552,8 @@ PlanChangeSet
 `trigger`、`causeEvent`、`reasonCode` 分三层，职责不重叠：
 
 ```text
-trigger     路由级 — 决定 Coordinator 跑哪条链（见第六节差异化表）
-causeEvent  事件级 — 记录“到底发生了什么”，喂给页 07 的变化说明
+trigger     路由级 — 决定 Coordinator 跑哪条链（见第五节差异化表）
+causeEvent  事件级 — 记录"到底发生了什么"，喂给页 07 的变化说明
 reasonCode  任务级 — 每条 PlanChange 自己的原因
 ```
 
@@ -725,6 +563,160 @@ reasonCode  任务级 — 每条 PlanChange 自己的原因
 new_task | pr_resubmitted | changes_requested | issue_reopened
 | blocked | unblocked | hard_deadline_changed | task_closed | pr_merged | date_rollover
 ```
+
+### Ranker —— 纯排序
+
+`Ranker` 不直接引用 `PersonalAction` 全量字段，只投影排序所需的视图。投影过程是确定的——从 `PersonalAction` 到 `RankingCandidate` 的映射不含随机、不含时间派生（时间由 `asOf` 统一传入），每次同一快照得到同一 Candidate。
+
+```text
+RankingCandidate
+- actionId                          // ← PersonalAction.actionId
+- workStatus                        // ← PersonalAction.workStatus
+- statusReasons[]                   // ← PersonalAction.statusReasons
+- priority                          // ← PersonalPlanning.priority
+- hardDeadline                      // ← PersonalPlanning.hardDeadline
+- estimatedEffortMinutes            // ← PersonalPlanning.estimatedEffortMinutes（已是分钟，不再换算）
+- manualOrderKey                    // ← PersonalPlanning.manualOrderKey
+- blocked                           // ← PersonalPlanning.blocked
+- sourceUpdatedAt                   // ← PersonalAction.githubFacts.updatedAt（上游更新时间，老化计算原点）
+- firstSeenAt                       // ← PersonalAction.firstSeenAt
+```
+
+`workStatus`、`priority`、`statusReasons` 取值：
+
+```text
+workStatus: on_progress | pending_review | done
+statusReasons 候选: waiting_for_review | changes_requested | blocked | missing_estimate | merged | closed_unmerged | issue_closed
+priority: P0 | P1 | P2 | unset
+```
+
+**完成任务的输入边界**：`workStatus = done` 的任务退出可执行任务池与重排，不进入排序候选。Coordinator 在构造 `candidates[]` 前过滤掉 done 任务——`Ranker` 只处理仍需用户行动的任务（`on_progress`），待评审（`pending_review`）是否参与排序由 `Replanner` 的 plan_bucket 决定，通常不进今日容量排序。
+
+```text
+Ranker.rank(request)
+→ Ranking
+```
+
+```text
+RankingRequest
+- taskPoolSnapshotVersion
+- candidates[]
+- asOf                  // 排序基准时间，"当下"的锚点；老化、24h 置顶都相对它计算
+- policyVersion
+```
+
+纯计算约束：同一 `RankingRequest`（同一 `taskPoolSnapshotVersion` + 同一 `candidates` + 同一 `asOf` + 同一 `policyVersion`）必须产生完全相同的 `Ranking`。`Ranker` 内部仅依赖确定逻辑，不含随机、不含黑盒权重。
+
+```text
+Ranking
+- rankingId
+- sourceSnapshotVersion
+- policyVersion
+- generatedAt          // ≈ asOf 的实际执行时刻
+- rankedItems[]
+```
+
+```text
+RankedItem
+- actionId
+- position             // 0-based 最终排序位置
+- deadlineGroup        // 截止/老化分组标签
+- reasons[]            // 结构化排序理由，按层级顺序
+```
+
+```text
+DeadlineGroup
+- urgent               // DDL ≤ 24h，紧急置顶
+- soon                 // 有 DDL 但 > 24h
+- normal               // 无 DDL，老化级别 0（< 7 天）
+- aging                // 无 DDL，老化级别 ≥ 1（≥ 7 天）
+```
+
+`done` 不作为 `DeadlineGroup` 取值：已完成任务不进入排序候选，没有排序分组。
+
+#### 排序原因
+
+排序原因不能只返回展示文字，应返回原因代码；UI 再把代码转为"24 小时内到期"等可读文本。
+
+```text
+RankingReason
+- code
+- parameters
+```
+
+```text
+RankingReasonCode
+- due_within_24_hours        // DDL ≤ 24h 紧急置顶
+- priority_p0                // 优先级 P0
+- priority_p1                // 优先级 P1
+- priority_p2                // 优先级 P2
+- no_priority                // 未设优先级，归入 P2 组末
+- earlier_deadline           // 同组内 DDL 更近
+- no_hard_deadline           // 无 DDL，进入老化通道
+- aging_raised               // 老化上浮
+- shorter_estimate           // 预估用时更短
+- missing_estimate           // 缺预估，排同档末尾
+- review_requested           // 等待你的 Review
+- manual_order_preserved     // 手动拖拽保留
+- completed_sort             // 已完成，沉底（仅在"已结束"视图对 done 任务单独解释，不参与今日排序）
+```
+
+```text
+RankingReasonParams        // 各 code 对应的结构化参数，按需携带
+- hoursUntilDeadline?      // due_within_24_hours：距 DDL 几小时
+- rankInUrgentGroup?       // due_within_24_hours：紧急组内排位（1-based）
+- priorityValue?           // priority_p0/p1/p2："P0"|"P1"|"P2"
+- abovePriority?           // priority_*：排在哪个优先级组之上
+- deadline?                // earlier_deadline：DDL 日期（ISO）
+- rankInDdlGroup?          // earlier_deadline：同 DDL 子组内排位（1-based）
+- groupSize?               // earlier_deadline：同 DDL 子组大小
+- daysSinceUpdate?         // no_hard_deadline：距上次更新天数
+- daysInactive?            // aging_raised：未活动天数
+- band?                    // aging_raised：老化分档 7to14 | 14to21 | over21
+- rankInAgingGroup?        // aging_raised：同档内排位（1-based）
+- estimatedMinutes?        // shorter_estimate：预估用时（分钟）；missing_estimate 恒为 null
+- rankByEstimate?          // shorter_estimate：同组内按预估排位（1-based）
+- manualPosition?          // manual_order_preserved：手动槽位（0-based）
+- completedAt?             // completed_sort：完成时间（ISO）
+```
+
+`groupSize` / `rankInXxxGroup` 这组"组内排位 + 组大小"让 UI 能渲染"同 P0 组里 DDL 最近（3 天后）"这类带相对位置的依据。
+
+#### 手动拖动校验
+
+```text
+Ranker.validateManualMove(request)
+→ accepted(ManualOrderPatch) | rejected(reason)
+```
+
+```text
+ManualMoveRequest
+- actionId              // 被拖拽的任务
+- beforeActionId?       // 拖到某任务之前（与 afterActionId 互斥）
+- afterActionId?        // 拖到某任务之后
+- rankingId             // 当前排序结果 ID，用于校验版本
+- expectedSnapshotVersion   // 期望快照版本，检测并发冲突
+```
+
+校验规则：
+
+- `beforeActionId` 与 `afterActionId` 互斥，同时提供则 `rejected("不能同时指定 before 和 after")`。
+- 目标任务必须存在于当前快照中，否则 `rejected("任务不存在")`。
+- `expectedSnapshotVersion` 与 `rankingId` 对应的快照版本一致，否则 `rejected("排序已过期，请刷新")`。
+- `manualOrderKey` 计算：用有序分数键，不取目标绝对 `position`。设目标位置相邻两任务的键为 `lo` 与 `hi`（拖到最前 `lo = null` 视为 −∞，拖到最后 `hi = null` 视为 +∞），则新键 = `(lo + hi) / 2`。这样 `before` 与 `after` 可靠区分（落在不同区间），且不会与已有键碰撞。
+- 键值精度退化时由 Task Pool 在写入时触发压实：组内按键排序后重新均匀分配键值，相对顺序不变；压实对用户不可见。
+
+```text
+ManualOrderPatch
+- actionId
+- manualOrderKey        // 有序分数键，非整数槽位
+```
+
+与实际写入分离：`Ranker` 只返回应保存的 `manualOrderKey`，实际写入仍通过 Task Pool 的 `updatePlanning` 完成。
+
+### Replanner —— 按容量重排
+
+`Replanner` 消费 `Ranker` 的 `Ranking`，结合容量与冲突决策，生成今日计划或暴露冲突。核心数据模型（`DailyPlan` / `PlanChange` / `PlanChangeSet` / 容量两层 / `trigger`·`causeEvent`·`reasonCode` 三层）见上文"核心模型"段，此处只列接口。
 
 ### 冲突解决决策（持久化）
 
@@ -780,7 +772,7 @@ getEffectiveCapacity(date)
 ### 重排接口
 
 ```text
-replan(request)
+Replanner.replan(request)
 → ReplanOutcome
 ```
 
@@ -790,8 +782,8 @@ ReplanRequest
 - trigger
 - causeEvent
 - taskPoolSnapshotVersion
-- rankingResult
-- candidates[]
+- ranking                    // Ranker 产出的 Ranking
+- candidates[]               // 容量计算所需字段（estimate/blocked/hardDeadline），与 Ranking 的 actionId 对齐
 - expectedPlanVersion?
 ```
 
@@ -838,7 +830,7 @@ CapacityConflict
 ```
 
 ```text
-resolveCapacityConflict(conflictId, resolution, expectedVersion)
+Replanner.resolveCapacityConflict(conflictId, resolution, expectedVersion)
 → ReplanOutcome
 ```
 
@@ -861,15 +853,15 @@ revokeConflictDecision(recordId, expectedVersion)
 
 ```text
 TaskPool.updatePlanning(...)
-→ Prioritization.rank(...)
-→ DailyPlanning.replan(...)
+→ Ranker.rank(...)
+→ Replanner.replan(...)
 ```
 
 ---
 
-## 六、模块串联接口
+## 五、模块串联接口
 
-UI 不应该自行连续调用四个模块，建议增加应用层协调器：
+UI 不应该自行连续调用三个领域模块，建议增加应用层协调器：
 
 ```text
 refreshWorkspace(trigger)
@@ -879,62 +871,61 @@ refreshWorkspace(trigger)
 内部流程：
 
 ```text
-1. GitHub Connection.requireActiveRepository()   → 得到 RepositoryContext（含当前 Milestone）
-2. Task Pool.syncTaskPool(scope, trigger)        → scope = RepositoryContext + 当前 Milestone
+1. Connection.requireActiveRepository()        → 得到 RepositoryContext（含当前 Milestone）
+2. Task Pool.syncTaskPool(scope, trigger)      → scope = RepositoryContext + 当前 Milestone
 3. 若 syncResult.status == failed：短路，跳过 4-5，返回上次持久化的 ranking/plan（见不变量 #9）
 4. Task Pool.getTaskPoolSnapshot()
-5. Prioritization.rank()
-6. Daily Planning.replan()
-7. 返回同步摘要、排序结果和计划结果
+5. Planning: Ranker.rank() → Replanner.replan()
+6. 返回同步摘要、排序结果和计划结果
 ```
 
-**同步失败短路**：`syncResult.status == failed` 时，Coordinator 不执行排序与重排——从 stale 数据重排会产生新的计划版本和误导性变更史，尽管并未成功刷新。此时 `WorkspaceRefreshResult` 返回上次成功持久化的 `rankingResult` 与 `planningOutcome`，`syncResult` 标记 `staleDataAvailable = true`，App Shell 据此展示"保留上次数据 + 重试同步"。`not_modified` 不触发短路（数据无变化，可走轻量重排或直接返回缓存）。
+**同步失败短路**：`syncResult.status == failed` 时，Coordinator 不执行排序与重排——从 stale 数据重排会产生新的计划版本和误导性变更史，尽管并未成功刷新。此时 `WorkspaceRefreshResult` 返回上次成功持久化的 `ranking` 与 `planningOutcome`，`syncResult` 标记 `staleDataAvailable = true`，App Shell 据此展示"保留上次数据 + 重试同步"。`not_modified` 不触发短路（数据无变化，可走轻量重排或直接返回缓存）。
 
 ```text
 WorkspaceRefreshResult
 - connectionState
 - syncResult
 - taskPoolSnapshotVersion
-- rankingResult
+- ranking                       // Planning 产出的 Ranking
 - planningOutcome
-- staleRankingAndPlan?      // 同步失败时为 true，表示 ranking/planning 为上次持久化值
+- staleRankingAndPlan?          // 同步失败时为 true，表示 ranking/planning 为上次持久化值
 ```
 
 不同变化只执行必要链路：
 
 | 变化 | 调用链 |
 |---|---|
-| GitHub 数据变化 | Task Pool → Prioritization → Daily Planning |
-| 修改优先级/截止/预计投入 | Task Pool → Prioritization → Daily Planning |
-| 手动拖动 | Prioritization 校验 → Task Pool 保存 → Prioritization → Daily Planning |
-| 切换当前 Milestone | GitHub Connection → Task Pool → Prioritization → Daily Planning |
-| 修改默认容量 / 某日容量覆盖 | Daily Planning |
-| 硬截止冲突·改预计投入 | Task Pool.updatePlanning → Prioritization.rank → Daily Planning.replan |
-| 日期切换 | Prioritization → Daily Planning |
-| 重新授权 | GitHub Connection → Task Pool → Prioritization → Daily Planning |
+| 外部数据变化 | Task Pool → Planning（Ranker → Replanner） |
+| 修改优先级/截止/预计投入 | Task Pool → Planning（Ranker → Replanner） |
+| 手动拖动 | Ranker 校验 → Task Pool 保存 → Planning（Ranker → Replanner） |
+| 切换当前 Milestone | Connection → Task Pool → Planning |
+| 修改默认容量 / 某日容量覆盖 | Planning（Replanner） |
+| 硬截止冲突·改预计投入 | Task Pool.updatePlanning → Ranker.rank → Replanner.replan |
+| 日期切换 | Planning（Ranker → Replanner） |
+| 重新授权 | Connection → Task Pool → Planning |
 
-## 七、必须固定的接口不变量
+## 六、必须固定的接口不变量
 
-1. GitHub Connection 永远不把 Token 传给其他模块。
-2. Task Pool 同步只能更新 `GitHubFacts` 与源节点缓存，不能覆盖 `PersonalPlanning`；归并由 `ActionIdentityResolver` 在领域层完成，`GitHubTaskReader` 不感知个人行动。
-3. Prioritization 不能保存或修改每日计划。
-4. Daily Planning 不能改变优先级、硬截止和预计投入。
-5. 缺少预计投入的任务可以进入排序，但不能进入今日容量安排；`estimatedEffortMinutes` 只保存用户确认后的值，AI 建议不落库。
-6. 阻塞、待评审任务不占今日容量；Done 任务退出计划，不在 DailyPlan.items 中。
-7. 相同输入和规则版本必须得到稳定排序。
-8. 所有写操作携带 `expectedVersion`，防止同步与用户编辑互相覆盖。
-9. 同步失败保留上次成功快照和计划，不能伪装成“没有任务”；Coordinator 在 `syncResult.status == failed` 时短路，不执行排序与重排，返回上次持久化的 ranking/plan，不产生新计划版本或变更史。
-10. 任何模块都不能写回 GitHub Issue、PR、Review 或团队字段。
-11. 每次重排必须携带 causeEvent，记录触发本次重排的具体事件，供变化说明追溯；trigger 只负责路由，不能替代事件级追溯。
-12. 行动归并键稳定：同一 GitHub 节点集合在同样关联关系下始终归并为同一 `actionId`，避免重排时身份漂移。
-13. 每日有效容量 = 该日 override 存在则取 override，否则取 `defaultCapacityMinutes`；默认容量由 Daily Planning 持有，不藏在 Task Pool。
-14. 行动合并/拆分时 `PersonalPlanning` 必须按既定择优/迁移规则保留，不得因 GitHub 关系变化静默丢失优先级、预估、截止或手动顺序。
-15. 冲突解决决策（`manually_exclude` / `accept_late_risk`）必须持久化并带作用域；`replan` 读取当日有效决策，不得在后续重排中重建已被排除的任务或重复报同一冲突。
-16. App Shell 只持有 `WorkspaceCoordinator` 引用，所有用户操作经 Coordinator façade 方法，不直接调用领域模块；领域方法名不出现在 App Shell。
+1. Connection 永远不把凭据（Token）传给其他模块。
+2. Task Pool 同步只能更新 `GitHubFacts` 与源节点缓存，不能覆盖 `PersonalPlanning`；归并由 `ActionIdentityResolver` 在领域层完成，`TaskReader` 不感知个人行动。
+3. Planning 内部：`Ranker` 是纯计算，不能保存或修改每日计划；`Replanner` 才改计划，但不能改变优先级、硬截止和预计投入。
+4. 缺少预计投入的任务可以进入排序，但不能进入今日容量安排；`estimatedEffortMinutes` 只保存用户确认后的值，AI 建议不落库。
+5. 阻塞、待评审任务不占今日容量；Done 任务退出计划，不在 DailyPlan.items 中。
+6. 相同输入和规则版本必须得到稳定排序。
+7. 所有写操作携带 `expectedVersion`，防止同步与用户编辑互相覆盖。
+8. 同步失败保留上次成功快照和计划，不能伪装成“没有任务”；Coordinator 在 `syncResult.status == failed` 时短路，不执行排序与重排，返回上次持久化的 ranking/plan，不产生新计划版本或变更史。
+9. 任何模块都不能写回外部 Issue、PR、Review 或团队字段。
+10. 每次重排必须携带 causeEvent，记录触发本次重排的具体事件，供变化说明追溯；trigger 只负责路由，不能替代事件级追溯。
+11. 行动归并键稳定：同一源节点集合在同样关联关系下始终归并为同一 `actionId`，避免重排时身份漂移。
+12. 每日有效容量 = 该日 override 存在则取 override，否则取 `defaultCapacityMinutes`；默认容量由 Planning 持有，不藏在 Task Pool。
+13. 行动合并/拆分时 `PersonalPlanning` 必须按既定择优/迁移规则保留，不得因外部源关联变化静默丢失优先级、预估、截止或手动顺序。
+14. 冲突解决决策（`manually_exclude` / `accept_late_risk`）必须持久化并带作用域；`replan` 读取当日有效决策，不得在后续重排中重建已被排除的任务或重复报同一冲突。
+15. App Shell 只持有 `WorkspaceCoordinator` 引用，所有用户操作经 Coordinator façade 方法，不直接调用领域模块；领域方法名不出现在 App Shell。
+16. 模块与端口用中性命名，`GitHub` 只作为 Infra 适配器的具体实现出现；领域不把 GitHub 结构内化进模型，为未来更换 Provider 保留空间。
 
 ---
 
-## 八、App Shell（driving adapter）
+## 七、App Shell（driving adapter）
 
 App Shell 是桌面端的外壳层，作为 driving adapter 从外向内驱动 Workspace Coordinator。它只调 Coordinator，不直连任何领域模块，也不含排序、归并、重排等业务逻辑。
 
@@ -951,10 +942,10 @@ App Shell 只持有 `WorkspaceCoordinator` 引用，下表”调用入口”均�
 
 | 原型页 | 用户目标 | App Shell 调 Coordinator 的 façade |
 |---|---|---|
-| 01 连接 GitHub | 完成身份授权 | `coordinator.startGitHubAuthorization()` / `checkAuthorization(challengeId)` |
+| 01 连接 GitHub | 完成身份授权 | `coordinator.startAuthorization()` / `checkAuthorization(challengeId)` |
 | 02 选择单一仓库 | 绑定一个仓库 | `coordinator.listAccessibleRepositories(query?)` / `bindRepository(repositoryId)` / `listMilestones()` / `setCurrentMilestone(milestoneNumber?)` |
 | 03 同步与时间建议 | 确认导入结果、补预计投入 | `coordinator.refreshWorkspace(initial)` → 渲染 `listPendingEffortSuggestions()`；接受后走 `coordinator.updatePlanning(actionId, patch)` |
-| 04 全部待办 | 查看任务池与排序 | `coordinator.getWorkspaceView()`（经 Coordinator 投影 `TaskPoolSnapshot` + `RankingResult`） |
+| 04 全部待办 | 查看任务池与排序 | `coordinator.getWorkspaceView()`（经 Coordinator 投影 `TaskPoolSnapshot` + `Ranking`） |
 | 05 任务详情 | 区分事实与规划、改规划字段 | `coordinator.getAction(actionId)` / `updatePlanning(...)` → 触发重排 |
 | 06 今日计划 | 按今日容量执行 | `coordinator.getTodayPlan()`（含 `DailyPlan` + `getEffectiveCapacity(today)`） |
 | 07 自动重排 | 看变化与原因 | `coordinator.getLatestChangeSet()`（含 `causeEvent` 与逐条 `reasonCode`） |
@@ -963,10 +954,10 @@ App Shell 只持有 `WorkspaceCoordinator` 引用，下表”调用入口”均�
 Coordinator façade 方法清单（部分，按需扩展）：
 
 ```text
-startGitHubAuthorization() / checkAuthorization(challengeId)
+startAuthorization() / checkAuthorization(challengeId)
 listAccessibleRepositories(query?) / bindRepository(repositoryId)
 listMilestones(repositoryId) / setCurrentMilestone(milestoneNumber?)
-refreshWorkspace(trigger)                    // 同步失败时短路，见第六节
+refreshWorkspace(trigger)                    // 同步失败时短路，见第五节
 getWorkspaceView()                           // 04 全部待办投影
 getAction(actionId) / updatePlanning(actionId, patch, expectedVersion)
 listPendingEffortSuggestions()
@@ -993,34 +984,36 @@ App Shell 不直接拼排序文案或变化原因文字——它消费内核返�
 ### 边界约束
 
 - App Shell 只持有 Coordinator 引用，不 import 任何领域模块。
-- 所有用户写操作经 Coordinator 编排，App Shell 不跨模块连续调用四个领域模块。
+- 所有用户写操作经 Coordinator 编排，App Shell 不跨模块连续调用三个领域模块。
 - App Shell 可依赖 SwiftUI 等框架；这些不出现在领域层。
 
 ---
 
-## 九、Infra Adapters（driven adapter）
+## 八、Infra Adapters（driven adapter）
 
 Infra 层为内核的端口提供具体实现。端口定义分散在各领域模块的“需要基础设施实现的端口”小节，由拥有它的模块定义——本节不重复端口定义，只收适配器侧：端口到适配器的映射、骨架期桩实现，以及把规则 C/D 钉成结构约束。
 
 ### 端口 → 适配器映射
 
-| 所属模块 | 端口 | 适配器实现（骨架期先桩） |
+| 所属模块 | 端口（中性） | 适配器实现（骨架期先桩；MVP = GitHub） |
 |---|---|---|
-| GitHub Connection | `GitHubAuthorizationProvider` | GitHub OAuth（loopback redirect / device flow）适配器 |
-| GitHub Connection | `CredentialStore` | Keychain 适配器 |
-| GitHub Connection | `GitHubRepositoryCatalog` | GitHub SDK 仓库列表适配器 |
-| GitHub Connection | `GitHubMilestoneCatalog` | GitHub SDK Milestone 列表适配器 |
-| GitHub Connection | `AccountStore` | SwiftData / SQLite 适配器 |
-| GitHub Connection | `RepositoryBindingStore` | SwiftData / SQLite 适配器 |
-| Task Pool | `GitHubTaskReader` | GitHub SDK Issue/PR/Review 拉取适配器（轮询；桌面端无公网 webhook） |
-| Task Pool | `PersonalActionStore` | SwiftData / SQLite 适配器（源节点缓存 + 归并后行动 + 规划字段） |
-| Task Pool | `SyncCheckpointStore` | SwiftData / SQLite 适配器（同步游标） |
+| Connection | `AuthorizationProvider` | `GitHubOAuthAdapter`（loopback redirect / device flow） |
+| Connection | `CredentialStore` | `KeychainAdapter` |
+| Connection | `RepositoryCatalog` | `GitHubRepositoryCatalogAdapter`（GitHub SDK 仓库列表） |
+| Connection | `MilestoneCatalog` | `GitHubMilestoneCatalogAdapter`（GitHub SDK Milestone 列表） |
+| Connection | `AccountStore` | `SQLiteAdapter` |
+| Connection | `RepositoryBindingStore` | `SQLiteAdapter` |
+| Task Pool | `TaskReader` | `GitHubTaskReaderAdapter`（GitHub SDK Issue/PR/Review 拉取，轮询；桌面端无公网 webhook） |
+| Task Pool | `PersonalActionStore` | `SQLiteAdapter`（源节点缓存 + 归并后行动 + 规划字段） |
+| Task Pool | `SyncCheckpointStore` | `SQLiteAdapter`（同步游标） |
 | Task Pool | `EffortSuggestionProvider` | AI 预估建议适配器（后置建议，不落库；骨架期可返回空） |
-| Daily Planning | 计划/容量/变更史存储端口 | SwiftData / SQLite 适配器（DailyPlan / PlanChangeSet / 容量默认值与覆盖） |
+| Planning | 计划/容量/变更史存储端口 | `SQLiteAdapter`（DailyPlan / PlanChangeSet / 容量默认值与覆盖 / 冲突决策） |
+
+端口名中性，`GitHub` 只出现在适配器名中；未来接 GitLab 等只需新增 `GitLab*Adapter`，领域端口不动。
 
 ### 桌面端同步策略
 
-桌面应用没有公网服务器，无法接收 GitHub webhook。实时同步收敛为客户端轮询 + 手动触发：`GitHubTaskReader` 适配器按 `scheduled_refresh` 周期轮询，App Shell 的“重试同步”调 `refreshWorkspace(manual_retry)`。这同时把战略文档中“webhook / 轮询 / 组合待评审”在桌面 MVP 下拍死为轮询。
+桌面应用没有公网服务器，无法接收 webhook。实时同步收敛为客户端轮询 + 手动触发：`GitHubTaskReaderAdapter` 按 `scheduled_refresh` 周期轮询，App Shell 的“重试同步”调 `refreshWorkspace(manual_retry)`。这同时把战略文档中“webhook / 轮询 / 组合待评审”在桌面 MVP 下拍死为轮询。
 
 ### 骨架期桩实现清单
 
@@ -1033,7 +1026,7 @@ Infra 层为内核的端口提供具体实现。端口定义分散在各领域�
 
 ### 边界约束
 
-- 领域模块是纯领域代码，不 import SwiftUI / SwiftData / GitHub SDK；这些只在 App Shell 与 Infra 出现。
-- 适配器实现领域模块定义的端口，不能反向定义业务模型；`Task` / `PersonalAction` / `RankingResult` / `DailyPlan` 等类型归领域内核，适配器只做存储/网络格式与领域类型之间的翻译。
+- 领域模块是纯领域代码，不 import SwiftUI / SwiftData / GitHub SDK；这些只在 App Shell 与 Infra 出现。`GitHub` 作为具体 Provider 只在 Infra 适配器名中出现。
+- 适配器实现领域模块定义的端口，不能反向定义业务模型；`PersonalAction` / `Ranking` / `DailyPlan` 等类型归领域内核，适配器只做存储/网络格式与领域类型之间的翻译。
 - 依赖方向永远朝内：Infra 依赖领域端口，领域不依赖 Infra；编译期可查（领域模块不得 import 任何适配器具体类型）。
-- 适配器不持有跨模块的领域知识：`GitHubTaskReader` 只产 GitHub 原始节点，不感知 `PersonalAction` 归并；存储适配器按所属模块的端口存取，不跨模块串联业务流程。
+- 适配器不持有跨模块的领域知识：`TaskReader` 只产外部源节点，不感知 `PersonalAction` 归并；存储适配器按所属模块的端口存取，不跨模块串联业务流程。
