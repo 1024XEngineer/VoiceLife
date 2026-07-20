@@ -135,6 +135,6 @@ L --> A
 
 ## 主要参考来源
 
-本报告优先采用了官方与原始资料，包括 Google Assistant Conversation Design、Google Assistant/Google Home 帮助中心、Apple 官方支持与 HomePod 使用手册、Amazon Alexa Developer 文档、华为小艺官网、百度小度隐私页面、小米小爱隐私政策；同时补充了近年的学术研究，用于支撑“低信息密度、少轮次、一步纠错、按紧急度设计打断”等结论。核心来源包括 Google 的确认与纠错设计、Amazon 的提醒授权与错误设计、Apple 的多设备与隐私控制、以及关于语音响应长度、响应密度、对话修复和主动打断的 ACM / Springer / arXiv 论文。citeturn19view1turn11view2turn11view8turn20view0turn11view3turn23view0turn24search1turn21view2turn20view8turn20view9turn22view0
+本报告优先采用了官方与原始资料，包括 Google Assistant Conversation Design、Google Assistant/Google Home 帮助中心、Apple 官方支持与 HomePod 使用手册、Amazon Alexa Developer 文档、华为小艺官网、百度小度隐私页面、小米小爱隐私政策；同时补充了近年的学术研究，用于支撑“低信息密度、少轮次、一步纠错、按紧急度设计打断”等结论。核心来源包括 Google 的确认与纠错设计、Amazon 的提醒授权与错误设计、Apple 的多设备与隐私控制、以及关于语音响应长度、响应密度、对话修复和主动打断的 ACM / Springer / arXiv 论文。
 
 结论上，你要做的不是一个“会聊天的音箱”，而是一个**用很少的话，把提醒安全、可逆、可控地做对**的语音工具。若只保留一句设计总纲，那就是：**默认短、默认可打断、默认可纠错、默认不泄露，只有高风险时才让用户多说一句。** 这正是当前市场成熟方案与近年语音交互研究共同指向的方向。
