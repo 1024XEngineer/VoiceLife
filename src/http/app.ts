@@ -15,6 +15,7 @@ import { CalendarMutationService } from "../services/calendar-mutation-service.j
 import { DemoClock, type Clock } from "../services/clock.js";
 import { ReceiptBus } from "../services/receipt-bus.js";
 import { ReminderService } from "../services/reminder-service.js";
+import { LinxSettingsService } from "../services/linx-settings-service.js";
 import { ShortNoteService } from "../services/short-note-service.js";
 
 interface SseMcpSession {
@@ -27,6 +28,14 @@ interface StreamableHttpMcpSession {
   server: McpServer;
 }
 
+interface VoiceInteractor {
+  speak(text: string): Promise<{
+    spokenText: string | null;
+    audioBytes: number;
+    format: "pcm" | "opus";
+  }>;
+}
+
 export interface ApplicationDependencies {
   config: AppConfig;
   db: CalendarDatabase;
@@ -36,6 +45,8 @@ export interface ApplicationDependencies {
   reminderService: ReminderService;
   mutationService: CalendarMutationService;
   shortNoteService: ShortNoteService;
+  voiceInteractor?: VoiceInteractor;
+  linxSettingsService?: LinxSettingsService;
 }
 
 function isLocalRequest(req: Request): boolean {
@@ -147,6 +158,85 @@ export function createApp(deps: ApplicationDependencies) {
       return;
     }
     res.status(404).end();
+  });
+
+  app.post("/api/voice/interact", async (req, res) => {
+    if (!deps.voiceInteractor) {
+      res.status(503).json({ error: "语音服务尚未连接，请先完成 Mac 语音设备绑定" });
+      return;
+    }
+
+    const text = typeof req.body.text === "string" ? req.body.text.trim() : "";
+    if (!text) {
+      res.status(400).json({ error: "没有识别到可发送的语音内容" });
+      return;
+    }
+    if (text.length > 500) {
+      res.status(400).json({ error: "单次语音内容不能超过 500 个字符" });
+      return;
+    }
+
+    try {
+      const result = await deps.voiceInteractor.speak(text);
+      res.json({
+        ok: true,
+        reply: result.spokenText,
+        audioBytes: result.audioBytes,
+        format: result.format,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "语音交互失败";
+      res.status(502).json({ error: message });
+    }
+  });
+
+  app.get("/api/settings/linx", async (_req, res) => {
+    if (!deps.linxSettingsService) {
+      res.status(503).json({ error: "灵矽设置服务尚未启用" });
+      return;
+    }
+    const status = await deps.linxSettingsService.getStatus();
+    res.json({ ...status, runtimeVoiceReady: Boolean(deps.voiceInteractor) });
+  });
+
+  app.put("/api/settings/linx", async (req, res) => {
+    if (!deps.linxSettingsService) {
+      res.status(503).json({ error: "灵矽设置服务尚未启用" });
+      return;
+    }
+    const status = await deps.linxSettingsService.save({
+      apiKey: req.body.apiKey,
+      agentId: req.body.agentId,
+      voiceId: req.body.voiceId,
+    });
+    res.json({ ...status, restartRequired: true });
+  });
+
+  app.post("/api/settings/linx/mcp-token", async (_req, res) => {
+    if (!deps.linxSettingsService) {
+      res.status(503).json({ error: "灵矽设置服务尚未启用" });
+      return;
+    }
+    res.json(await deps.linxSettingsService.createMcpToken());
+  });
+
+  app.post("/api/settings/linx/activate", async (_req, res) => {
+    if (!deps.linxSettingsService) {
+      res.status(503).json({ error: "灵矽设置服务尚未启用" });
+      return;
+    }
+    res.json({
+      ...await deps.linxSettingsService.activateDevice(),
+      restartRequired: true,
+    });
+  });
+
+  app.post("/api/settings/linx/test", async (_req, res) => {
+    if (!deps.linxSettingsService) {
+      res.status(503).json({ error: "灵矽设置服务尚未启用" });
+      return;
+    }
+    res.json({ ok: true, ...await deps.linxSettingsService.testVoice() });
   });
 
   app.get("/api/receipts", (_req, res) => {

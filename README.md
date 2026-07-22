@@ -28,9 +28,11 @@ npm install
 npm run dev
 ```
 
-打开 <http://localhost:3000> 查看 IM 回执模拟页。
+打开 <http://localhost:3000> 使用原型：在“语音”页签按住按钮说话、松开发送；“消息”页签暂时代替尚未接入的真实 IM，展示操作与提醒回执。左下角“设置”可进入本地灵矽接入教程与连接配置页。
 
 首次运行前请修改 `.env` 中的 `MCP_SHARED_SECRET`。如需连接灵矽 MCP Proxy，在本机 `.env` 中填写 `LINX_API_KEY`。所有密钥和本地 SQLite 数据都不应提交到 Git。
+
+macOS 上首次启用语音时会使用系统自带的 Clang 编译轻量 AudioQueue 播放器，并按源码版本缓存到 `local/bin/`。PCM TTS 到达第一批音频后即可开始播放，无需等待整段回复生成完成。
 
 ## 常用命令
 
@@ -52,11 +54,12 @@ src/
   adapters/    外部平台与主动语音适配器
   clients/     灵矽设备 WebSocket、OTA 激活和音频播放客户端
   domain/      日程、周期和提醒领域模型
-  http/        MCP、IM 与本地调试 HTTP 接口
+  http/        MCP、语音交互、消息回执与本地调试 HTTP 接口
   mcp/         面向语音 Agent 的日程工具
   services/    日程、变更、提醒、临时记录、时钟和回执服务
   storage/     SQLite 持久化
-public/        IM 回执模拟页
+public/        语音、消息回执与灵矽设置页面
+native/        macOS AudioQueue PCM 流式播放器
 tests/         自动化测试
 docs/          原型说明和 Agent 配置文档
 ```

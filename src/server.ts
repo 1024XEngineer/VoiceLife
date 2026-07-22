@@ -16,6 +16,7 @@ import { CalendarMutationService } from "./services/calendar-mutation-service.js
 import { DemoClock, SystemClock } from "./services/clock.js";
 import { ReceiptBus } from "./services/receipt-bus.js";
 import { ReminderService } from "./services/reminder-service.js";
+import { LinxSettingsService } from "./services/linx-settings-service.js";
 import { ShortNoteService } from "./services/short-note-service.js";
 import { CalendarDatabase } from "./storage/database.js";
 
@@ -38,8 +39,9 @@ const mutationService = new CalendarMutationService(
   config.timeZone,
 );
 const shortNoteService = new ShortNoteService(db, clock, receiptBus);
-const proactiveVoice: ProactiveVoiceAdapter = config.linxVoice
-  ? new LinxMacProactiveVoiceAdapter(new LinxMacVoiceClient({
+const linxSettingsService = new LinxSettingsService();
+const linxVoiceClient = config.linxVoice
+  ? new LinxMacVoiceClient({
       webSocketUrl: config.linxVoice.webSocketUrl,
       token: config.linxVoice.token,
       deviceId: config.linxVoice.deviceId,
@@ -47,7 +49,10 @@ const proactiveVoice: ProactiveVoiceAdapter = config.linxVoice
       agentId: config.linxVoice.agentId,
       voiceId: config.linxVoice.voiceId,
       timeoutMs: config.linxVoice.timeoutMs,
-    }))
+    })
+  : undefined;
+const proactiveVoice: ProactiveVoiceAdapter = linxVoiceClient
+  ? new LinxMacProactiveVoiceAdapter(linxVoiceClient)
   : new UnsupportedProactiveVoiceAdapter();
 const reminderService = new ReminderService(
   db,
@@ -65,6 +70,8 @@ const application = createApp({
   reminderService,
   mutationService,
   shortNoteService,
+  voiceInteractor: linxVoiceClient,
+  linxSettingsService,
 });
 const httpServer = createServer(application.app);
 let linxProxyServer: McpServer | undefined;

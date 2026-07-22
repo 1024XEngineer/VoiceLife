@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f1e8" />
+    <title>灵矽设置 · 声活</title>
+    <link rel="stylesheet" href="/settings.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <main class="settings-shell">
+      <header class="topbar">
+        <a class="back-link" href="/">
+          <span aria-hidden="true">←</span>
+          返回语音
+        </a>
+        <div class="brand" aria-label="VoiceLife 声活">
+          <span class="brand-mark" aria-hidden="true">V</span>
+          <span>VoiceLife</span>
+          <span class="brand-cn">声活</span>
+        </div>
+        <span id="overall-status" class="overall-status">读取配置</span>
+      </header>
+
+      <section class="settings-hero">
+        <p class="eyebrow">LINX CONNECTION</p>
+        <h1>连接灵矽</h1>
+        <p>按照左侧教程完成接入，再在本机保存 Agent 和语音配置。</p>
+      </section>
+
+      <div id="restart-notice" class="restart-notice" role="status" hidden>
+        <strong>配置已保存。</strong>
+        主页面需要重启 <code>npm run dev</code> 后加载新配置；本页连接测试会直接使用最新设置。
+      </div>
+
+      <div class="settings-layout">
+        <section class="panel tutorial-panel" aria-labelledby="tutorial-title">
+          <div class="panel-heading">
+            <span class="section-number">01</span>
+            <div>
+              <p class="eyebrow">GUIDE</p>
+              <h2 id="tutorial-title">接入教程</h2>
+            </div>
+          </div>
+
+          <ol class="steps">
+            <li id="step-api" class="step">
+              <span class="step-mark">1</span>
+              <div>
+                <h3>获取并保存 API Key</h3>
+                <p>在灵矽控制台获取 API Key，填写到右侧。它只保存在本机，不会在页面中回显。</p>
+              </div>
+            </li>
+            <li id="step-mcp" class="step">
+              <span class="step-mark">2</span>
+              <div>
+                <h3>开通 MCP 接入点</h3>
+                <p>复制临时 X-MCP-Token，在 MCP 广场添加 Streamable HTTP 接入点。</p>
+                <div class="endpoint-box">
+                  <span>MCP URL</span>
+                  <code>https://xrobo.qiniu.com/v1/mcpproxy/mcp</code>
+                  <span>认证模式</span>
+                  <code>Normal</code>
+                  <span>Header</span>
+                  <code>X-MCP-Token</code>
+                </div>
+                <button id="copy-token" class="secondary-action" type="button">复制 X-MCP-Token</button>
+                <p id="token-result" class="action-result" aria-live="polite"></p>
+              </div>
+            </li>
+            <li id="step-agent" class="step">
+              <span class="step-mark">3</span>
+              <div>
+                <h3>绑定到日程 Agent</h3>
+                <p>在控制台把接入点绑定到目标 Agent，保存角色提示词；如有 Agent ID，可填写到右侧。</p>
+                <a href="https://linx.qiniu.com/docs/" target="_blank" rel="noreferrer">打开灵矽文档 ↗</a>
+              </div>
+            </li>
+            <li id="step-device" class="step">
+              <span class="step-mark">4</span>
+              <div>
+                <h3>绑定 Mac 语音设备</h3>
+                <p>生成设备激活码后，在目标 Agent 的设备管理中新增设备；绑定完成后再次点击刷新。</p>
+                <button id="activate-device" class="secondary-action" type="button">生成或刷新激活码</button>
+                <div id="activation-result" class="activation-result" hidden>
+                  <span>设备激活码</span>
+                  <strong id="activation-code">—</strong>
+                  <p id="activation-message"></p>
+                </div>
+              </div>
+            </li>
+          </ol>
+        </section>
+
+        <section class="panel config-panel" aria-labelledby="config-title">
+          <div class="panel-heading">
+            <span class="section-number">02</span>
+            <div>
+              <p class="eyebrow">LOCAL SETTINGS</p>
+              <h2 id="config-title">连接设置</h2>
+            </div>
+          </div>
+
+          <form id="linx-settings-form" class="settings-form">
+            <label>
+              <span>灵矽 API Key</span>
+              <input id="api-key" name="apiKey" type="password" autocomplete="off" placeholder="输入新的 API Key" />
+              <small id="api-key-status">尚未配置</small>
+            </label>
+            <label>
+              <span>Agent ID <em>可选</em></span>
+              <input id="agent-id" name="agentId" type="text" autocomplete="off" placeholder="目标日程 Agent ID" />
+            </label>
+            <label>
+              <span>音色 ID <em>可选</em></span>
+              <input id="voice-id" name="voiceId" type="text" autocomplete="off" placeholder="留空使用 Agent 默认音色" />
+            </label>
+            <button id="save-settings" class="primary-action" type="submit">保存到本机</button>
+          </form>
+
+          <div class="connection-card">
+            <div class="connection-title">
+              <h3>当前状态</h3>
+              <span id="device-status" class="status-dot">未绑定设备</span>
+            </div>
+            <dl>
+              <div>
+                <dt>API Key</dt>
+                <dd id="summary-api">未配置</dd>
+              </div>
+              <div>
+                <dt>语音设备</dt>
+                <dd id="summary-device">未配置</dd>
+              </div>
+              <div>
+                <dt>设备 ID</dt>
+                <dd id="summary-device-id">—</dd>
+              </div>
+              <div>
+                <dt>服务状态</dt>
+                <dd id="summary-runtime">等待重启</dd>
+              </div>
+            </dl>
+            <button id="test-voice" class="test-action" type="button">播放连接测试</button>
+            <p id="test-result" class="action-result" aria-live="polite"></p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/settings.js"></script>
+  </body>
+</html>

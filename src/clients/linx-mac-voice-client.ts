@@ -1,7 +1,9 @@
-import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import OpusScript from "opusscript";
 import { WebSocket, type RawData } from "ws";
@@ -34,10 +36,20 @@ export interface VoicePlaybackResult {
 
 export interface PcmAudioPlayer {
   play(pcm: Buffer, parameters: Omit<AudioParameters, "format">): Promise<void>;
+  startStream?(parameters: Omit<AudioParameters, "format">): Promise<PcmAudioStream>;
+}
+
+export interface PcmAudioStream {
+  write(pcm: Buffer): Promise<void>;
+  finish(): Promise<void>;
+  abort(): void;
 }
 
 interface PendingSpeech {
   packets: Buffer[];
+  audioBytes: number;
+  stream: PcmAudioStream | null;
+  streamWrites: Promise<void>;
   spokenText: string | null;
   started: boolean;
   resolve: (result: VoicePlaybackResult) => void;
@@ -81,7 +93,126 @@ export function buildWavFile(
   return Buffer.concat([header, pcm]);
 }
 
+let macOsStreamingHelperPromise: Promise<string> | null = null;
+
+async function ensureMacOsStreamingHelper(): Promise<string> {
+  if (process.platform !== "darwin") {
+    throw new Error("macOS 流式语音播放器只能在 macOS 上使用");
+  }
+  if (macOsStreamingHelperPromise) return macOsStreamingHelperPromise;
+
+  macOsStreamingHelperPromise = (async () => {
+    const sourcePath = fileURLToPath(
+      new URL("../../native/macos-pcm-stream-player.c", import.meta.url),
+    );
+    const outputDirectory = path.resolve(path.dirname(sourcePath), "../local/bin");
+    const source = await readFile(sourcePath);
+    const sourceVersion = createHash("sha256").update(source).digest("hex").slice(0, 12);
+    const outputPath = path.join(
+      outputDirectory,
+      `voicelife-pcm-stream-player-${sourceVersion}`,
+    );
+    await mkdir(outputDirectory, { recursive: true });
+
+    const outputInfo = await stat(outputPath).catch(() => null);
+    if (outputInfo?.isFile()) return outputPath;
+
+    const temporaryPath = `${outputPath}.${process.pid}.tmp`;
+    await execFileAsync("/usr/bin/clang", [
+      sourcePath,
+      "-O2",
+      "-o",
+      temporaryPath,
+      "-framework",
+      "AudioToolbox",
+      "-framework",
+      "CoreFoundation",
+    ]);
+    await chmod(temporaryPath, 0o755);
+    await rename(temporaryPath, outputPath);
+    return outputPath;
+  })().catch((error) => {
+    macOsStreamingHelperPromise = null;
+    throw error;
+  });
+  void macOsStreamingHelperPromise.catch(() => undefined);
+
+  return macOsStreamingHelperPromise;
+}
+
+class MacOsPcmStream implements PcmAudioStream {
+  private readonly child;
+  private readonly completion: Promise<void>;
+  private stderr = "";
+  private closed = false;
+
+  public constructor(
+    executablePath: string,
+    parameters: Omit<AudioParameters, "format">,
+  ) {
+    this.child = spawn(executablePath, [String(parameters.sampleRate), String(parameters.channels)], {
+      stdio: ["pipe", "ignore", "pipe"],
+    });
+    this.child.stderr.setEncoding("utf8");
+    this.child.stderr.on("data", (chunk: string) => {
+      if (this.stderr.length < 8_000) this.stderr += chunk;
+    });
+    this.child.stdin.on("error", () => undefined);
+    this.completion = new Promise<void>((resolve, reject) => {
+      this.child.once("error", reject);
+      this.child.once("close", (code, signal) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        const detail = this.stderr.trim()
+          || `退出码 ${code ?? "无"}${signal ? `，信号 ${signal}` : ""}`;
+        reject(new Error(`流式音频播放器异常退出：${detail}`));
+      });
+    });
+    void this.completion.catch(() => undefined);
+  }
+
+  write(pcm: Buffer): Promise<void> {
+    if (this.closed || this.child.stdin.destroyed) {
+      return Promise.reject(new Error("流式音频播放器已经关闭"));
+    }
+    return new Promise<void>((resolve, reject) => {
+      this.child.stdin.write(pcm, (error) => error ? reject(error) : resolve());
+    });
+  }
+
+  async finish(): Promise<void> {
+    if (!this.closed) {
+      this.closed = true;
+      this.child.stdin.end();
+    }
+    await this.completion;
+  }
+
+  abort(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.child.stdin.destroy();
+    this.child.kill("SIGTERM");
+  }
+}
+
 export class MacOsWavPlayer implements PcmAudioPlayer {
+  private readonly streamingHelper = process.platform === "darwin"
+    ? ensureMacOsStreamingHelper()
+    : null;
+
+  async startStream(
+    parameters: Omit<AudioParameters, "format">,
+  ): Promise<PcmAudioStream> {
+    if (!this.streamingHelper) {
+      throw new Error("macOS 流式语音播放器只能在 macOS 上使用");
+    }
+    const executablePath = await this.streamingHelper;
+    return new MacOsPcmStream(executablePath, parameters);
+  }
+
   async play(
     pcm: Buffer,
     parameters: Omit<AudioParameters, "format">,
@@ -228,12 +359,22 @@ export class LinxMacVoiceClient {
       throw new Error("灵矽设备 WebSocket 尚未就绪");
     }
 
+    const stream = this.audioParameters.format === "pcm" && this.audioPlayer.startStream
+      ? await this.audioPlayer.startStream({
+          sampleRate: this.audioParameters.sampleRate,
+          channels: this.audioParameters.channels,
+        })
+      : null;
+
     return new Promise<VoicePlaybackResult>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.failSpeech(new Error("等待灵矽 TTS 音频超时"));
       }, this.config.timeoutMs);
       this.pendingSpeech = {
         packets: [],
+        audioBytes: 0,
+        stream,
+        streamWrites: Promise.resolve(),
         spokenText: null,
         started: false,
         resolve,
@@ -297,7 +438,21 @@ export class LinxMacVoiceClient {
 
   private handleAudio(packet: Buffer): void {
     if (!this.pendingSpeech?.started) return;
-    this.pendingSpeech.packets.push(Buffer.from(packet));
+    const pending = this.pendingSpeech;
+    const copiedPacket = Buffer.from(packet);
+    pending.audioBytes += copiedPacket.length;
+    if (!pending.stream) {
+      pending.packets.push(copiedPacket);
+      return;
+    }
+
+    const write = pending.streamWrites.then(() => pending.stream!.write(copiedPacket));
+    pending.streamWrites = write;
+    void write.catch((error) => {
+      if (this.pendingSpeech === pending) {
+        this.failSpeech(new Error(`流式播放灵矽 TTS 失败：${errorMessage(error)}`));
+      }
+    });
   }
 
   private applyAudioParameters(value: unknown): void {
@@ -318,18 +473,24 @@ export class LinxMacVoiceClient {
     clearTimeout(pending.timeout);
 
     try {
-      if (pending.packets.length === 0) throw new Error("灵矽 TTS 未返回音频数据");
-      const pcm = this.decodeAudio(pending.packets);
-      await this.audioPlayer.play(pcm, {
-        sampleRate: this.audioParameters.sampleRate,
-        channels: this.audioParameters.channels,
-      });
+      if (pending.audioBytes === 0) throw new Error("灵矽 TTS 未返回音频数据");
+      await pending.streamWrites;
+      if (pending.stream) {
+        await pending.stream.finish();
+      } else {
+        const pcm = this.decodeAudio(pending.packets);
+        await this.audioPlayer.play(pcm, {
+          sampleRate: this.audioParameters.sampleRate,
+          channels: this.audioParameters.channels,
+        });
+      }
       pending.resolve({
         spokenText: pending.spokenText,
-        audioBytes: pending.packets.reduce((total, packet) => total + packet.length, 0),
+        audioBytes: pending.audioBytes,
         format: this.audioParameters.format,
       });
     } catch (error) {
+      pending.stream?.abort();
       pending.reject(new Error(`播放灵矽 TTS 失败：${errorMessage(error)}`));
     }
   }
@@ -368,6 +529,7 @@ export class LinxMacVoiceClient {
     if (!pending) return;
     this.pendingSpeech = null;
     clearTimeout(pending.timeout);
+    pending.stream?.abort();
     pending.reject(error);
   }
 }

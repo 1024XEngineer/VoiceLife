@@ -3,57 +3,113 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>日程助手 · IM 回执</title>
+    <meta name="theme-color" content="#f5f1e8" />
+    <title>声活 · 语音日程助手</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
-    <main class="shell">
+  <body data-state="idle">
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <main class="voice-shell">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">VOICE CALENDAR</p>
-          <h1>日程助手</h1>
-          <p class="subtitle">这里仅保留语音操作的消息回执</p>
+        <div class="brand" aria-label="VoiceLife 声活">
+          <span class="brand-mark" aria-hidden="true">V</span>
+          <span>VoiceLife</span>
+          <span class="brand-cn">声活</span>
         </div>
-        <span id="connection" class="connection">连接中</span>
+        <nav class="tabs" role="tablist" aria-label="原型功能">
+          <button
+            id="voice-tab"
+            class="tab active"
+            type="button"
+            role="tab"
+            aria-selected="true"
+            aria-controls="voice-panel"
+          >语音</button>
+          <button
+            id="messages-tab"
+            class="tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="messages-panel"
+          >
+            消息
+            <span id="unread" class="unread" aria-label="未读消息" hidden></span>
+          </button>
+        </nav>
       </header>
 
-      <section class="demo-panel" aria-labelledby="demo-title">
-        <div>
-          <p class="eyebrow">DEMO CLOCK</p>
-          <h2 id="demo-title">演示时间</h2>
-          <p id="clock" class="clock">--</p>
+      <section
+        id="voice-panel"
+        class="tab-panel voice-stage"
+        role="tabpanel"
+        aria-labelledby="voice-tab"
+      >
+        <div class="voice-control">
+          <div class="pulse pulse-outer" aria-hidden="true"></div>
+          <div class="pulse pulse-inner" aria-hidden="true"></div>
+          <button
+            id="talk-button"
+            class="talk-button"
+            type="button"
+            aria-describedby="status-text"
+            aria-label="按住说话，松开发送"
+          >
+            <span class="mic-icon" aria-hidden="true">
+              <svg viewBox="0 0 48 48" role="img">
+                <rect x="17" y="6" width="14" height="25" rx="7"></rect>
+                <path d="M11.5 23.5v1.2C11.5 31.6 17.1 37 24 37s12.5-5.4 12.5-12.3v-1.2M24 37v6M18 43h12"></path>
+              </svg>
+            </span>
+            <span id="button-label" class="button-label">按住说话</span>
+          </button>
         </div>
-        <div class="clock-actions">
-          <button data-advance="1">+1 分钟</button>
-          <button data-advance="10">+10 分钟</button>
-          <button data-advance="60">+1 小时</button>
-          <button id="reset-clock" class="secondary">恢复现在</button>
-        </div>
-        <form id="set-clock" class="clock-form">
-          <label for="clock-input">设置到指定时间</label>
-          <div>
-            <input id="clock-input" type="datetime-local" required />
-            <button type="submit">设置</button>
+
+        <div class="feedback" aria-live="polite" aria-atomic="true">
+          <div class="waveform" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i>
           </div>
-        </form>
+          <p id="status-text" class="status-text">按住按钮，说出你的安排</p>
+          <p id="hint-text" class="hint-text">松开后自动发送 · 回复将从 Mac 扬声器播放</p>
+        </div>
+
+        <p class="privacy-note">语音只用于本次日程交互</p>
       </section>
 
-      <section class="message-section" aria-labelledby="messages-title">
-        <div class="section-heading">
+      <section
+        id="messages-panel"
+        class="tab-panel messages-panel"
+        role="tabpanel"
+        aria-labelledby="messages-tab"
+        hidden
+      >
+        <header class="messages-heading">
           <div>
-            <p class="eyebrow">RECEIPTS</p>
-            <h2 id="messages-title">消息回执</h2>
+            <p class="eyebrow">LOCAL RECEIPTS</p>
+            <h1>消息回执</h1>
+            <p class="messages-intro">暂时代替 IM，保留每次日程操作和提醒结果。</p>
           </div>
-          <button id="refresh" class="secondary">刷新</button>
-        </div>
+          <span id="connection" class="connection">连接中</span>
+        </header>
         <div id="messages" class="messages" aria-live="polite"></div>
         <div id="empty" class="empty">
-          <p>还没有回执</p>
-          <span>请先在灵矽 Web Demo 中用语音创建一条日程。</span>
+          <span class="empty-mark" aria-hidden="true">✓</span>
+          <p>还没有消息</p>
+          <span>完成一次语音操作后，回执会出现在这里。</span>
         </div>
       </section>
+
+      <a class="settings-entry" href="/settings.html" aria-label="打开灵矽设置">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z"></path>
+          <path d="M19 13.1c.05-.36.05-.74 0-1.1l2-1.55-2-3.45-2.48 1a8 8 0 0 0-.95-.55L15.2 4h-4l-.38 3.45c-.33.16-.65.35-.95.55L7.4 7l-2 3.45L7.4 12a8.7 8.7 0 0 0 0 1.1l-2 1.55 2 3.45 2.47-1c.3.2.62.39.95.55L11.2 21h4l.37-3.35c.34-.16.66-.35.96-.55l2.47 1 2-3.45-2-1.55Z"></path>
+        </svg>
+        <span>设置</span>
+      </a>
     </main>
-    <div id="toast" class="toast" role="status"></div>
+
     <script type="module" src="/app.js"></script>
   </body>
 </html>
