@@ -3,6 +3,7 @@ dist/
 coverage/
 .env
 data/
+local/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
