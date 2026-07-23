@@ -6,6 +6,7 @@ import {
   buildWavFile,
   LinxMacVoiceClient,
   type PcmAudioPlayer,
+  VoiceInteractionInterruptedError,
 } from "../src/clients/linx-mac-voice-client.js";
 
 const servers: WebSocketServer[] = [];
@@ -232,6 +233,170 @@ describe("LinxMacVoiceClient", () => {
         text: "测试无会话编号",
       });
       expect(listenMessage).not.toHaveProperty("session_id");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("forwards 16kHz PCM microphone frames and returns Linx STT and TTS", async () => {
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    servers.push(server);
+    await once(server, "listening");
+    const address = server.address() as AddressInfo;
+    const microphonePcm = Buffer.from([0x00, 0x00, 0x20, 0x00, 0xe0, 0xff]);
+    const replyPcm = Buffer.from([0x10, 0x00, 0xf0, 0xff]);
+    const controlMessages: Record<string, unknown>[] = [];
+    const audioFrames: Buffer[] = [];
+
+    server.on("connection", (socket) => {
+      socket.on("message", (data, isBinary) => {
+        if (isBinary) {
+          audioFrames.push(Buffer.from(data as Buffer));
+          return;
+        }
+        const message = JSON.parse(data.toString()) as Record<string, unknown>;
+        if (message.type === "hello") {
+          socket.send(JSON.stringify({
+            type: "hello",
+            transport: "websocket",
+            session_id: "pcm-session",
+            audio_params: { format: "pcm", sample_rate: 16000, channels: 1 },
+          }));
+          return;
+        }
+        controlMessages.push(message);
+        if (message.type === "listen" && message.state === "stop") {
+          socket.send(JSON.stringify({ type: "stt", text: "今天七点提醒我写日报" }));
+          socket.send(JSON.stringify({ type: "tts", state: "start" }));
+          socket.send(JSON.stringify({
+            type: "tts",
+            state: "sentence_start",
+            text: "好的，已创建提醒。",
+          }));
+          socket.send(replyPcm, { binary: true });
+          socket.send(JSON.stringify({ type: "tts", state: "stop", is_aborted: false }));
+        }
+      });
+    });
+
+    const transcriptions: string[] = [];
+    const spokenText: string[] = [];
+    const play = vi.fn<PcmAudioPlayer["play"]>(async () => undefined);
+    const client = new LinxMacVoiceClient(
+      {
+        webSocketUrl: `ws://127.0.0.1:${address.port}`,
+        token: "device-token",
+        deviceId: "AA:BB:CC:DD:EE:FF",
+        clientId: "client-uuid",
+        timeoutMs: 2000,
+      },
+      { play },
+    );
+
+    try {
+      const interaction = await client.startPcmInteraction({
+        onTranscription: (text) => {
+          transcriptions.push(text);
+        },
+        onSpokenText: (text) => {
+          spokenText.push(text);
+        },
+      });
+      interaction.writePcm(microphonePcm);
+      interaction.stopInput();
+      const result = await interaction.result;
+
+      expect(controlMessages).toContainEqual(expect.objectContaining({
+        session_id: "pcm-session",
+        type: "listen",
+        state: "start",
+        mode: "realtime",
+      }));
+      expect(controlMessages).toContainEqual(expect.objectContaining({
+        type: "listen",
+        state: "stop",
+        mode: "realtime",
+      }));
+      expect(audioFrames).toEqual([microphonePcm]);
+      expect(transcriptions).toEqual(["今天七点提醒我写日报"]);
+      expect(spokenText).toEqual(["好的，已创建提醒。"]);
+      expect(play).toHaveBeenCalledWith(replyPcm, { sampleRate: 16000, channels: 1 });
+      expect(result.spokenText).toBe("好的，已创建提醒。");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("aborts Linx TTS and local PCM playback when the user interrupts", async () => {
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    servers.push(server);
+    await once(server, "listening");
+    const address = server.address() as AddressInfo;
+    const controlMessages: Record<string, unknown>[] = [];
+    const playbackEvents: string[] = [];
+
+    server.on("connection", (socket) => {
+      socket.on("message", (data, isBinary) => {
+        if (isBinary) {
+          socket.send(JSON.stringify({ type: "tts", state: "start" }));
+          socket.send(JSON.stringify({ type: "tts", state: "sentence_start", text: "正在回答。" }));
+          socket.send(Buffer.from([0x00, 0x00]), { binary: true });
+          return;
+        }
+        const message = JSON.parse(data.toString()) as Record<string, unknown>;
+        if (message.type === "hello") {
+          socket.send(JSON.stringify({
+            type: "hello",
+            transport: "websocket",
+            session_id: "interrupt-session",
+            audio_params: { format: "pcm", sample_rate: 16000, channels: 1 },
+          }));
+          return;
+        }
+        controlMessages.push(message);
+      });
+    });
+
+    const client = new LinxMacVoiceClient(
+      {
+        webSocketUrl: `ws://127.0.0.1:${address.port}`,
+        token: "device-token",
+        deviceId: "AA:BB:CC:DD:EE:FF",
+        clientId: "client-uuid",
+        timeoutMs: 2000,
+      },
+      {
+        play: async () => undefined,
+        async startStream() {
+          return {
+            async write() {
+              playbackEvents.push("write");
+            },
+            async finish() {
+              playbackEvents.push("finish");
+            },
+            abort() {
+              playbackEvents.push("abort");
+            },
+          };
+        },
+      },
+    );
+
+    try {
+      const interaction = await client.startPcmInteraction();
+      interaction.writePcm(Buffer.from([0x00, 0x00]));
+      await vi.waitFor(() => expect(playbackEvents).toContain("write"));
+      interaction.interrupt();
+
+      await expect(interaction.result).rejects.toBeInstanceOf(VoiceInteractionInterruptedError);
+      await vi.waitFor(() => expect(controlMessages.some((message) =>
+        message.session_id === "interrupt-session"
+        && message.type === "abort"
+        && message.reason === "wake_word_detected",
+      )).toBe(true));
+      expect(playbackEvents).toContain("abort");
+      expect(playbackEvents).not.toContain("finish");
     } finally {
       await client.close();
     }

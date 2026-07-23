@@ -15,15 +15,18 @@ const scheduleDate = document.querySelector("#schedule-date");
 const scheduleCount = document.querySelector("#schedule-count");
 const scheduleItems = document.querySelector("#schedule-items");
 
-const SpeechRecognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-let recognition = null;
 let holding = false;
 let busy = false;
-let sent = false;
-let finalTranscript = "";
-let interimTranscript = "";
 let activePointerId = null;
 let resetTimer = null;
+let voiceSocket = null;
+let voiceSocketPromise = null;
+let listeningWaiter = null;
+let activeCapture = null;
+let recordingSequence = 0;
+let assistantBubble = null;
+let actionResultShown = false;
+let lastTranscription = "";
 let receipts = [];
 let activeTab = "voice";
 let unreadCount = 0;
@@ -63,7 +66,7 @@ const states = {
     button: "正在处理",
   },
   replying: {
-    button: "正在回复",
+    button: "按住打断",
   },
   success: {
     button: "继续说话",
@@ -273,55 +276,232 @@ async function request(url, options = {}) {
   return body;
 }
 
-async function streamVoiceInteraction(text) {
-  const response = await fetch("/api/voice/interact/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-  if (!response.ok) {
-    const body = await response.json();
-    throw new Error(body.error ?? "语音服务暂时不可用");
-  }
-  if (!response.body) throw new Error("浏览器无法读取语音响应流");
+function voiceSocketUrl() {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/api/voice/stream`;
+}
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let completeEvent = null;
-  let assistantBubble = null;
-  let actionResultShown = false;
-  const handleLine = (line) => {
-    if (!line.trim()) return;
-    const event = JSON.parse(line);
-    if (event.type === "message") {
-      setState("replying");
-      if (event.receipt?.type === "calendar_query") {
-        actionResultShown = true;
-        renderScheduleCard(event.receipt);
-      } else if (!actionResultShown && event.text) {
-        if (!assistantBubble?.isConnected) assistantBubble = addConversationBubble("assistant", event.text);
-        else {
-          assistantBubble.textContent = appendReplyText(assistantBubble.textContent, event.text);
-          scheduleConversationBubbleDismissal(assistantBubble);
-        }
+function rejectListeningWaiter(error) {
+  if (!listeningWaiter) return;
+  clearTimeout(listeningWaiter.timeout);
+  listeningWaiter.reject(error);
+  listeningWaiter = null;
+}
+
+function handleVoiceEvent(event) {
+  if (event.type === "listening") {
+    if (listeningWaiter) {
+      clearTimeout(listeningWaiter.timeout);
+      listeningWaiter.resolve(event.audio);
+      listeningWaiter = null;
+    }
+    return;
+  }
+  if (event.type === "processing") {
+    if (!holding) setState("processing");
+    return;
+  }
+  if (event.type === "stt") {
+    const text = String(event.text ?? "").trim();
+    if (text && text !== lastTranscription) {
+      lastTranscription = text;
+      addConversationBubble("user", text);
+    }
+    return;
+  }
+  if (event.type === "message") {
+    setState("replying");
+    if (event.receipt?.type === "calendar_query") {
+      actionResultShown = true;
+      renderScheduleCard(event.receipt);
+    } else if (!actionResultShown && event.text) {
+      if (!assistantBubble?.isConnected) {
+        assistantBubble = addConversationBubble("assistant", event.text);
+      } else {
+        assistantBubble.textContent = appendReplyText(assistantBubble.textContent, event.text);
+        scheduleConversationBubbleDismissal(assistantBubble);
       }
+    }
+    return;
+  }
+  if (event.type === "complete") {
+    busy = false;
+    setState("success");
+    scheduleIdle(3000);
+    return;
+  }
+  if (event.type === "interrupted") {
+    if (!holding) {
+      busy = false;
+      setState("idle");
+    }
+    return;
+  }
+  if (event.type === "error") {
+    const error = new Error(event.error ?? "语音交互失败");
+    rejectListeningWaiter(error);
+    busy = false;
+    holding = false;
+    setState("error");
+    scheduleIdle(3200);
+  }
+}
+
+function ensureVoiceSocket() {
+  if (voiceSocket?.readyState === WebSocket.OPEN) return Promise.resolve(voiceSocket);
+  if (voiceSocketPromise) return voiceSocketPromise;
+
+  voiceSocketPromise = new Promise((resolve, reject) => {
+    const socket = new WebSocket(voiceSocketUrl());
+    socket.binaryType = "arraybuffer";
+    voiceSocket = socket;
+    socket.addEventListener("open", () => resolve(socket), { once: true });
+    socket.addEventListener("message", (message) => {
+      if (typeof message.data !== "string") return;
+      try {
+        handleVoiceEvent(JSON.parse(message.data));
+      } catch {
+        handleVoiceEvent({ type: "error", error: "收到无法解析的语音服务消息" });
+      }
+    });
+    socket.addEventListener("error", () => reject(new Error("无法连接本地语音服务")), { once: true });
+    socket.addEventListener("close", () => {
+      if (voiceSocket === socket) voiceSocket = null;
+      voiceSocketPromise = null;
+      rejectListeningWaiter(new Error("本地语音连接已断开"));
+      if (holding || busy) handleVoiceEvent({ type: "error", error: "本地语音连接已断开" });
+    });
+  }).finally(() => {
+    voiceSocketPromise = null;
+  });
+  return voiceSocketPromise;
+}
+
+async function startServerTurn() {
+  const socket = await ensureVoiceSocket();
+  rejectListeningWaiter(new Error("新的语音输入已开始"));
+  assistantBubble = null;
+  actionResultShown = false;
+  lastTranscription = "";
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      listeningWaiter = null;
+      reject(new Error("等待灵矽进入监听状态超时"));
+    }, 10_000);
+    listeningWaiter = { resolve, reject, timeout };
+    socket.send(JSON.stringify({ type: "start" }));
+  });
+}
+
+function createPcmPacketizer(sourceSampleRate, onFrame) {
+  const targetSampleRate = 16000;
+  const frameSamples = 320;
+  let frame = new Int16Array(frameSamples);
+  let frameOffset = 0;
+  let phase = 0;
+  let accumulator = 0;
+  let accumulatorSamples = 0;
+  const pushSample = (sample) => {
+    const clamped = Math.max(-1, Math.min(1, sample));
+    frame[frameOffset] = clamped < 0
+      ? Math.round(clamped * 0x8000)
+      : Math.round(clamped * 0x7fff);
+    frameOffset += 1;
+    if (frameOffset !== frameSamples) return;
+    onFrame(frame.buffer);
+    frame = new Int16Array(frameSamples);
+    frameOffset = 0;
+  };
+  return (samples) => {
+    if (sourceSampleRate === targetSampleRate) {
+      for (const sample of samples) pushSample(sample);
       return;
     }
-    if (event.type === "error") throw new Error(event.error ?? "语音交互失败");
-    if (event.type === "complete") completeEvent = event;
+    for (const sample of samples) {
+      accumulator += sample;
+      accumulatorSamples += 1;
+      phase += targetSampleRate;
+      if (phase >= sourceSampleRate) {
+        pushSample(accumulator / accumulatorSamples);
+        phase -= sourceSampleRate;
+        accumulator = 0;
+        accumulatorSamples = 0;
+      }
+    }
   };
+}
 
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) handleLine(line);
-    if (done) break;
+async function createPcmCapture(onFrame) {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("当前浏览器无法访问麦克风，请使用 localhost 或 HTTPS 打开页面");
   }
-  if (buffer.trim()) handleLine(buffer);
-  return completeEvent;
+  const AudioContext = window.AudioContext ?? window.webkitAudioContext;
+  if (!AudioContext) throw new Error("当前浏览器不支持实时 PCM 音频采集");
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  });
+  let context;
+  try {
+    context = new AudioContext({ sampleRate: 16000, latencyHint: "interactive" });
+  } catch {
+    context = new AudioContext();
+  }
+  try {
+    const source = context.createMediaStreamSource(stream);
+    const silentOutput = context.createGain();
+    silentOutput.gain.value = 0;
+    let processor;
+    let detachProcessor;
+    if (context.audioWorklet && window.AudioWorkletNode) {
+      await context.audioWorklet.addModule("/pcm-capture-worklet.js");
+      processor = new AudioWorkletNode(context, "pcm-capture", {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+        processorOptions: { targetSampleRate: 16000, frameSamples: 320 },
+      });
+      processor.port.onmessage = (message) => onFrame(message.data);
+      detachProcessor = () => {
+        processor.port.onmessage = null;
+      };
+    } else if (context.createScriptProcessor) {
+      processor = context.createScriptProcessor(1024, 1, 1);
+      const packetize = createPcmPacketizer(context.sampleRate, onFrame);
+      processor.onaudioprocess = (event) => packetize(event.inputBuffer.getChannelData(0));
+      detachProcessor = () => {
+        processor.onaudioprocess = null;
+      };
+    } else {
+      throw new Error("当前浏览器不支持 AudioWorklet 或兼容 PCM 采集接口");
+    }
+    source.connect(processor);
+    processor.connect(silentOutput);
+    silentOutput.connect(context.destination);
+    await context.resume();
+
+    let stopped = false;
+    return {
+      async stop() {
+        if (stopped) return;
+        stopped = true;
+        detachProcessor();
+        source.disconnect();
+        processor.disconnect();
+        silentOutput.disconnect();
+        for (const track of stream.getTracks()) track.stop();
+        await context.close();
+      },
+    };
+  } catch (error) {
+    for (const track of stream.getTracks()) track.stop();
+    await context.close();
+    throw error;
+  }
 }
 
 async function loadReceipts() {
@@ -337,102 +517,9 @@ async function loadReceipts() {
   }
 }
 
-function createRecognition() {
-  const instance = new SpeechRecognition();
-  instance.lang = "zh-CN";
-  instance.continuous = true;
-  instance.interimResults = true;
-  instance.maxAlternatives = 1;
-
-  instance.addEventListener("result", (event) => {
-    interimTranscript = "";
-    for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      const result = event.results[index];
-      const text = result[0]?.transcript ?? "";
-      if (result.isFinal) finalTranscript += text;
-      else interimTranscript += text;
-    }
-  });
-
-  instance.addEventListener("error", (event) => {
-    if (event.error === "aborted" && !holding) return;
-    holding = false;
-    busy = false;
-    sent = true;
-    const denied = event.error === "not-allowed" || event.error === "service-not-allowed";
-    setState("error", {
-      status: denied ? "需要麦克风权限" : "没有听清，请再试一次",
-      hint: denied ? "请在浏览器地址栏允许使用麦克风" : "按住按钮后靠近麦克风说话",
-    });
-    scheduleIdle(3200);
-  });
-
-  instance.addEventListener("end", () => {
-    recognition = null;
-    if (holding) {
-      try {
-        recognition = createRecognition();
-        recognition.start();
-      } catch {
-        holding = false;
-        busy = false;
-        setState("error", { status: "录音意外中断" });
-        scheduleIdle();
-      }
-      return;
-    }
-    void sendTranscript();
-  });
-
-  return instance;
-}
-
-async function sendTranscript() {
-  if (sent) return;
-  sent = true;
-  const text = `${finalTranscript} ${interimTranscript}`.trim();
-  if (!text) {
-    busy = false;
-    setState("error", {
-      status: "没有听到内容",
-      hint: "请按住按钮后再开始说话",
-    });
-    scheduleIdle();
-    return;
-  }
-
-  addConversationBubble("user", text);
-  setState("processing");
-  try {
-    setTimeout(() => {
-      if (busy) setState("replying");
-    }, 450);
-    await streamVoiceInteraction(text);
-    setState("success", {
-      status: "助手已回复",
-    });
-  } catch (error) {
-    setState("error", {
-      status: "语音服务暂时不可用",
-      hint: error instanceof Error ? error.message : "请稍后重试",
-    });
-  } finally {
-    busy = false;
-    scheduleIdle(3000);
-  }
-}
-
-function beginHold(event) {
-  if (busy || holding) return;
+async function beginHold(event) {
+  if (holding) return;
   clearTimeout(resetTimer);
-  if (!SpeechRecognition) {
-    setState("error", {
-      status: "当前浏览器不支持语音识别",
-      hint: "请使用最新版 Chrome 打开此页面",
-    });
-    scheduleIdle(3500);
-    return;
-  }
 
   if (event instanceof PointerEvent) {
     if (!event.isPrimary || event.button !== 0) return;
@@ -441,26 +528,52 @@ function beginHold(event) {
   }
 
   event.preventDefault();
+  const shouldInterrupt = busy;
+  const sequence = ++recordingSequence;
   holding = true;
   busy = true;
-  sent = false;
-  finalTranscript = "";
-  interimTranscript = "";
   navigator.vibrate?.(18);
   setState("listening");
 
   try {
-    recognition = createRecognition();
-    recognition.start();
-  } catch {
+    const socket = await ensureVoiceSocket();
+    if (shouldInterrupt) socket.send(JSON.stringify({ type: "interrupt" }));
+    const queuedFrames = [];
+    let streaming = false;
+    const capture = await createPcmCapture((frame) => {
+      if (streaming && voiceSocket?.readyState === WebSocket.OPEN) {
+        voiceSocket.send(frame);
+      } else if (queuedFrames.length < 50) {
+        queuedFrames.push(frame);
+      }
+    });
+    if (sequence !== recordingSequence) {
+      await capture.stop();
+      return;
+    }
+    activeCapture = capture;
+    await startServerTurn();
+    streaming = true;
+    for (const frame of queuedFrames) socket.send(frame);
+    if (!holding) await finishCapture();
+  } catch (error) {
+    if (sequence !== recordingSequence) return;
     holding = false;
     busy = false;
-    recognition = null;
-    setState("error", {
-      status: "麦克风没有启动",
-      hint: "请检查浏览器的麦克风权限",
-    });
+    activeCapture?.stop();
+    activeCapture = null;
+    setState("error");
+    console.error(error);
     scheduleIdle(3000);
+  }
+}
+
+async function finishCapture() {
+  const capture = activeCapture;
+  activeCapture = null;
+  await capture?.stop();
+  if (voiceSocket?.readyState === WebSocket.OPEN) {
+    voiceSocket.send(JSON.stringify({ type: "stop" }));
   }
 }
 
@@ -472,12 +585,7 @@ function endHold(event) {
   activePointerId = null;
   setState("processing");
   navigator.vibrate?.(10);
-  try {
-    recognition?.stop();
-  } catch {
-    recognition = null;
-    void sendTranscript();
-  }
+  void finishCapture();
 }
 
 talkButton.addEventListener("pointerdown", beginHold);

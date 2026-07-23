@@ -10,6 +10,10 @@ import type { ProactiveVoiceAdapter } from "./adapters/proactive-voice.js";
 import { LinxMacVoiceClient } from "./clients/linx-mac-voice-client.js";
 import { loadConfig } from "./config.js";
 import { createApp } from "./http/app.js";
+import {
+  attachVoiceWebSocketServer,
+  closeVoiceWebSocketServer,
+} from "./http/voice-websocket.js";
 import { createCalendarMcpServer } from "./mcp/calendar-mcp.js";
 import { CalendarService } from "./services/calendar-service.js";
 import { CalendarMutationService } from "./services/calendar-mutation-service.js";
@@ -74,6 +78,10 @@ const application = createApp({
   linxSettingsService,
 });
 const httpServer = createServer(application.app);
+const voiceWebSocketServer = attachVoiceWebSocketServer(httpServer, {
+  db,
+  voiceClient: linxVoiceClient,
+});
 let linxProxyServer: McpServer | undefined;
 let linxProxyTransport: LinxMcpProxyTransport | undefined;
 
@@ -111,6 +119,7 @@ httpServer.listen(config.port, "0.0.0.0", () => {
 async function shutdown(): Promise<void> {
   clearInterval(scheduler);
   httpServer.close();
+  await closeVoiceWebSocketServer(voiceWebSocketServer);
   await application.closeMcpSessions();
   await linxProxyServer?.close();
   await proactiveVoice.close?.();
