@@ -3,14 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f5f1e8" />
+    <meta name="theme-color" content="#f7f6fb" />
     <title>灵矽设置 · 声活</title>
     <link rel="stylesheet" href="/settings.css" />
   </head>
   <body>
-    <div class="ambient ambient-one" aria-hidden="true"></div>
-    <div class="ambient ambient-two" aria-hidden="true"></div>
-
     <main class="settings-shell">
       <header class="topbar">
         <a class="back-link" href="/">
@@ -18,9 +15,10 @@
           返回语音
         </a>
         <div class="brand" aria-label="VoiceLife 声活">
-          <span class="brand-mark" aria-hidden="true">V</span>
-          <span>VoiceLife</span>
-          <span class="brand-cn">声活</span>
+          <span class="brand-mark" aria-hidden="true">
+            <i></i><i></i><i></i>
+          </span>
+          <span class="brand-name">声活</span>
         </div>
         <span id="overall-status" class="overall-status">读取配置</span>
       </header>
@@ -28,7 +26,7 @@
       <section class="settings-hero">
         <p class="eyebrow">LINX CONNECTION</p>
         <h1>连接灵矽</h1>
-        <p>按照左侧教程完成接入，再在本机保存 Agent 和语音配置。</p>
+        <p>四步完成连接。密钥只保存在这台 Mac。</p>
       </section>
 
       <div id="restart-notice" class="restart-notice" role="status" hidden>
@@ -39,9 +37,8 @@
       <div class="settings-layout">
         <section class="panel tutorial-panel" aria-labelledby="tutorial-title">
           <div class="panel-heading">
-            <span class="section-number">01</span>
             <div>
-              <p class="eyebrow">GUIDE</p>
+              <p class="eyebrow">4 STEPS</p>
               <h2 id="tutorial-title">接入教程</h2>
             </div>
           </div>
@@ -97,9 +94,8 @@
 
         <section class="panel config-panel" aria-labelledby="config-title">
           <div class="panel-heading">
-            <span class="section-number">02</span>
             <div>
-              <p class="eyebrow">LOCAL SETTINGS</p>
+              <p class="eyebrow">ON THIS MAC</p>
               <h2 id="config-title">连接设置</h2>
             </div>
           </div>
@@ -146,6 +142,18 @@
             </dl>
             <button id="test-voice" class="test-action" type="button">播放连接测试</button>
             <p id="test-result" class="action-result" aria-live="polite"></p>
+          </div>
+
+          <div class="display-card">
+            <div>
+              <h3>对话显示</h3>
+              <p>选择语音页最多保留几句话。</p>
+            </div>
+            <div class="bubble-limit-options" role="group" aria-label="最多显示的对话数量">
+              <button type="button" data-bubble-limit="1" aria-pressed="false">1 条</button>
+              <button type="button" data-bubble-limit="3" aria-pressed="true">3 条</button>
+              <button type="button" data-bubble-limit="5" aria-pressed="false">5 条</button>
+            </div>
           </div>
         </section>
       </div>

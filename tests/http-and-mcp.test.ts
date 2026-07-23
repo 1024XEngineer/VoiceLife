@@ -42,7 +42,7 @@ describe("HTTP and MCP integration", () => {
     await request(application.app).get("/").set("Host", "example.test").expect(404);
     const page = await request(application.app).get("/").set("Host", "localhost").expect(200);
     expect(page.text).toContain("按住说话");
-    expect(page.text).toContain("消息回执");
+    expect(page.text).toContain("你的日程操作与提醒会留在这里");
     expect(page.text).toContain("/settings.html");
     expect(page.text).not.toContain("DEMO CLOCK");
     const settingsPage = await request(application.app)
@@ -136,6 +136,33 @@ describe("HTTP and MCP integration", () => {
         audioBytes: 1024,
         format: "pcm",
       });
+    } finally {
+      await voiceApplication.closeMcpSessions();
+    }
+  });
+
+  it("streams the reply text before voice playback completes", async () => {
+    const voiceApplication = createApp({
+      config,
+      ...services,
+      voiceInteractor: {
+        async speak(_text, options) {
+          await options?.onSpokenText?.("先显示，再播报。");
+          return { spokenText: "先显示，再播报。", audioBytes: 1024, format: "pcm" };
+        },
+      },
+    });
+
+    try {
+      const response = await request(voiceApplication.app)
+        .post("/api/voice/interact/stream")
+        .set("Host", "localhost")
+        .send({ text: "测试显示顺序" })
+        .expect("Content-Type", /ndjson/)
+        .expect(200);
+      const events = response.text.trim().split("\n").map((line) => JSON.parse(line));
+      expect(events.map((event) => event.type)).toEqual(["message", "complete"]);
+      expect(events[0].text).toBe("先显示，再播报。");
     } finally {
       await voiceApplication.closeMcpSessions();
     }

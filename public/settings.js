@@ -8,10 +8,22 @@ const activateButton = document.querySelector("#activate-device");
 const testButton = document.querySelector("#test-voice");
 const restartNotice = document.querySelector("#restart-notice");
 const toast = document.querySelector("#toast");
+const bubbleLimitButtons = [...document.querySelectorAll("[data-bubble-limit]")];
 
 let currentStatus = null;
 let tokenCopied = false;
 let toastTimer = null;
+
+function currentBubbleLimit() {
+  const value = Number.parseInt(localStorage.getItem("voiceBubbleLimit") ?? "3", 10);
+  return [1, 3, 5].includes(value) ? value : 3;
+}
+
+function renderBubbleLimit(limit) {
+  for (const button of bubbleLimitButtons) {
+    button.setAttribute("aria-pressed", String(Number(button.dataset.bubbleLimit) === limit));
+  }
+}
 
 async function request(url, options = {}) {
   const response = await fetch(url, {
@@ -179,4 +191,14 @@ testButton.addEventListener("click", async () => {
   }
 });
 
+for (const button of bubbleLimitButtons) {
+  button.addEventListener("click", () => {
+    const limit = Number(button.dataset.bubbleLimit);
+    localStorage.setItem("voiceBubbleLimit", String(limit));
+    renderBubbleLimit(limit);
+    showToast(`语音页最多显示 ${limit} 条对话`);
+  });
+}
+
+renderBubbleLimit(currentBubbleLimit());
 void loadStatus();

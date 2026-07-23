@@ -1,7 +1,5 @@
 const talkButton = document.querySelector("#talk-button");
 const buttonLabel = document.querySelector("#button-label");
-const statusText = document.querySelector("#status-text");
-const hintText = document.querySelector("#hint-text");
 const voiceTab = document.querySelector("#voice-tab");
 const messagesTab = document.querySelector("#messages-tab");
 const voicePanel = document.querySelector("#voice-panel");
@@ -10,6 +8,12 @@ const messages = document.querySelector("#messages");
 const empty = document.querySelector("#empty");
 const connection = document.querySelector("#connection");
 const unread = document.querySelector("#unread");
+const conversationFeed = document.querySelector("#conversation-feed");
+const scheduleCard = document.querySelector("#schedule-card");
+const scheduleTitle = document.querySelector("#schedule-title");
+const scheduleDate = document.querySelector("#schedule-date");
+const scheduleCount = document.querySelector("#schedule-count");
+const scheduleItems = document.querySelector("#schedule-items");
 
 const SpeechRecognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
 let recognition = null;
@@ -23,6 +27,11 @@ let resetTimer = null;
 let receipts = [];
 let activeTab = "voice";
 let unreadCount = 0;
+const configuredBubbleLimit = Number.parseInt(localStorage.getItem("voiceBubbleLimit") ?? "3", 10);
+const bubbleLimit = [1, 3, 5].includes(configuredBubbleLimit) ? configuredBubbleLimit : 3;
+const bubbleLifetimeMs = 12_000;
+const bubbleTimers = new WeakMap();
+let bubbleSequence = 0;
 
 const receiptLabels = {
   calendar_created: "日程已创建",
@@ -46,33 +55,21 @@ const receiptLabels = {
 const states = {
   idle: {
     button: "按住说话",
-    status: "按住按钮，说出你的安排",
-    hint: "松开后自动发送 · 回复将从 Mac 扬声器播放",
   },
   listening: {
     button: "松开发送",
-    status: "正在听…",
-    hint: "可以直接说“今晚七点提醒我写日报”",
   },
   processing: {
     button: "正在处理",
-    status: "正在理解你的安排",
-    hint: "请稍候",
   },
   replying: {
     button: "正在回复",
-    status: "助手正在回复",
-    hint: "请留意 Mac 扬声器",
   },
   success: {
     button: "继续说话",
-    status: "这次交互已完成",
-    hint: "按住按钮可以继续",
   },
   error: {
     button: "重新说话",
-    status: "语音交互没有完成",
-    hint: "请按住按钮重试",
   },
 };
 
@@ -80,9 +77,7 @@ function setState(name, overrides = {}) {
   const state = { ...states[name], ...overrides };
   document.body.dataset.state = name;
   buttonLabel.textContent = state.button;
-  statusText.textContent = state.status;
-  hintText.textContent = state.hint;
-  talkButton.setAttribute("aria-label", name === "listening" ? "松开发送" : "按住说话，松开发送");
+  talkButton.setAttribute("aria-label", state.button);
 }
 
 function scheduleIdle(delay = 2200) {
@@ -99,6 +94,100 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function showConversation() {
+  conversationFeed.hidden = false;
+  scheduleCard.hidden = true;
+}
+
+function dismissConversationBubble(bubble) {
+  if (!bubble?.isConnected || bubble.classList.contains("leaving")) return;
+  clearTimeout(bubbleTimers.get(bubble));
+  bubble.classList.add("leaving");
+  setTimeout(() => bubble.remove(), 420);
+}
+
+function scheduleConversationBubbleDismissal(bubble) {
+  clearTimeout(bubbleTimers.get(bubble));
+  bubbleTimers.set(bubble, setTimeout(() => dismissConversationBubble(bubble), bubbleLifetimeMs));
+}
+
+function addConversationBubble(role, text) {
+  if (!text) return null;
+  showConversation();
+  const bubble = document.createElement("p");
+  bubble.className = `conversation-bubble ${role} entering`;
+  bubble.dataset.bubbleId = String(++bubbleSequence);
+  bubble.textContent = text;
+  conversationFeed.append(bubble);
+  requestAnimationFrame(() => bubble.classList.remove("entering"));
+  scheduleConversationBubbleDismissal(bubble);
+
+  const bubbles = [...conversationFeed.querySelectorAll(".conversation-bubble:not(.leaving)")];
+  const excess = Math.max(0, bubbles.length - bubbleLimit);
+  for (const oldBubble of bubbles.slice(0, excess)) {
+    dismissConversationBubble(oldBubble);
+  }
+  return bubble;
+}
+
+function appendReplyText(current, next) {
+  if (!current) return next;
+  const needsSpace = /[a-z0-9]$/i.test(current) && /^[a-z0-9]/i.test(next);
+  return `${current}${needsSpace ? " " : ""}${next}`;
+}
+
+function formatClock(value) {
+  if (!value) return "—";
+  return new Date(value).toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Shanghai",
+  });
+}
+
+function renderScheduleCard(receipt) {
+  const occurrences = Array.isArray(receipt?.data?.occurrences)
+    ? [...receipt.data.occurrences].sort((left, right) =>
+      String(left.effectiveStartAt).localeCompare(String(right.effectiveStartAt)))
+    : [];
+  const rangeStart = receipt?.data?.rangeStart;
+  const rangeDate = rangeStart ? new Date(rangeStart) : null;
+  const todayLabel = new Date().toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai" });
+  const rangeLabel = rangeDate?.toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai" });
+
+  scheduleTitle.textContent = rangeLabel === todayLabel ? "今日日程" : "日程安排";
+  scheduleDate.textContent = rangeDate
+    ? rangeDate.toLocaleDateString("zh-CN", {
+        month: "long",
+        day: "numeric",
+        weekday: "long",
+        timeZone: "Asia/Shanghai",
+      })
+    : "查询结果";
+  scheduleCount.textContent = `${occurrences.length} 项`;
+  scheduleItems.innerHTML = occurrences.length
+    ? occurrences.map((item) => `
+        <article class="schedule-item">
+          <div class="schedule-time start-time">
+            <span>开始</span>
+            <strong>${escapeHtml(formatClock(item.effectiveStartAt))}</strong>
+          </div>
+          <span class="schedule-rule" aria-hidden="true"></span>
+          <div class="schedule-time end-time">
+            <span>截止</span>
+            <strong${item.effectiveEndAt ? "" : ' class="time-unset"'}>${escapeHtml(formatClock(item.effectiveEndAt))}</strong>
+          </div>
+          <div class="schedule-copy">
+            <h3>${escapeHtml(item.title)}</h3>
+            ${item.location ? `<p>${escapeHtml(item.location)}</p>` : ""}
+          </div>
+        </article>`).join("")
+    : '<div class="schedule-empty">这个时间范围内没有日程</div>';
+  conversationFeed.hidden = true;
+  scheduleCard.hidden = false;
 }
 
 function setActiveTab(tab) {
@@ -184,14 +273,67 @@ async function request(url, options = {}) {
   return body;
 }
 
+async function streamVoiceInteraction(text) {
+  const response = await fetch("/api/voice/interact/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!response.ok) {
+    const body = await response.json();
+    throw new Error(body.error ?? "语音服务暂时不可用");
+  }
+  if (!response.body) throw new Error("浏览器无法读取语音响应流");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completeEvent = null;
+  let assistantBubble = null;
+  let actionResultShown = false;
+  const handleLine = (line) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line);
+    if (event.type === "message") {
+      setState("replying");
+      if (event.receipt?.type === "calendar_query") {
+        actionResultShown = true;
+        renderScheduleCard(event.receipt);
+      } else if (!actionResultShown && event.text) {
+        if (!assistantBubble?.isConnected) assistantBubble = addConversationBubble("assistant", event.text);
+        else {
+          assistantBubble.textContent = appendReplyText(assistantBubble.textContent, event.text);
+          scheduleConversationBubbleDismissal(assistantBubble);
+        }
+      }
+      return;
+    }
+    if (event.type === "error") throw new Error(event.error ?? "语音交互失败");
+    if (event.type === "complete") completeEvent = event;
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) handleLine(line);
+    if (done) break;
+  }
+  if (buffer.trim()) handleLine(buffer);
+  return completeEvent;
+}
+
 async function loadReceipts() {
   try {
     const data = await request("/api/receipts");
     receipts = data.receipts;
     renderReceipts();
+    return receipts;
   } catch {
     connection.textContent = "连接失败";
     connection.classList.remove("online");
+    return receipts;
   }
 }
 
@@ -259,21 +401,15 @@ async function sendTranscript() {
     return;
   }
 
+  addConversationBubble("user", text);
   setState("processing");
   try {
-    const request = fetch("/api/voice/interact", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
     setTimeout(() => {
       if (busy) setState("replying");
     }, 450);
-    const response = await request;
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error ?? "语音服务暂时不可用");
+    await streamVoiceInteraction(text);
     setState("success", {
-      status: body.reply ? "助手已回复" : "这次交互已完成",
+      status: "助手已回复",
     });
   } catch (error) {
     setState("error", {

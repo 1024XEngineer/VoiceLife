@@ -29,7 +29,9 @@ interface StreamableHttpMcpSession {
 }
 
 interface VoiceInteractor {
-  speak(text: string): Promise<{
+  speak(text: string, options?: {
+    onSpokenText?: (text: string) => void | Promise<void>;
+  }): Promise<{
     spokenText: string | null;
     audioBytes: number;
     format: "pcm" | "opus";
@@ -187,6 +189,71 @@ export function createApp(deps: ApplicationDependencies) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "语音交互失败";
       res.status(502).json({ error: message });
+    }
+  });
+
+  app.post("/api/voice/interact/stream", async (req, res) => {
+    if (!deps.voiceInteractor) {
+      res.status(503).json({ error: "语音服务尚未连接，请先完成 Mac 语音设备绑定" });
+      return;
+    }
+
+    const text = typeof req.body.text === "string" ? req.body.text.trim() : "";
+    if (!text) {
+      res.status(400).json({ error: "没有识别到可发送的语音内容" });
+      return;
+    }
+    if (text.length > 500) {
+      res.status(400).json({ error: "单次语音内容不能超过 500 个字符" });
+      return;
+    }
+
+    res.status(200);
+    res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const receiptIdsBefore = new Set(deps.db.listReceipts(200).map((receipt) => receipt.id));
+    const sentReceiptIds = new Set<string>();
+    let sentText = false;
+    const writeEvent = (event: Record<string, unknown>) => {
+      if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+    };
+
+    try {
+      const result = await deps.voiceInteractor.speak(text, {
+        onSpokenText: async (spokenText) => {
+          sentText = true;
+          const queryReceipt = [...deps.db.listReceipts(200)]
+            .reverse()
+            .find((receipt) =>
+              receipt.type === "calendar_query"
+              && !receiptIdsBefore.has(receipt.id)
+              && !sentReceiptIds.has(receipt.id));
+          if (queryReceipt) sentReceiptIds.add(queryReceipt.id);
+          writeEvent({ type: "message", text: spokenText, receipt: queryReceipt ?? null });
+          await new Promise((resolve) => setTimeout(resolve, 220));
+        },
+      });
+      if (!sentText && result.spokenText) {
+        const queryReceipt = [...deps.db.listReceipts(200)]
+          .reverse()
+          .find((receipt) => receipt.type === "calendar_query" && !receiptIdsBefore.has(receipt.id));
+        writeEvent({ type: "message", text: result.spokenText, receipt: queryReceipt ?? null });
+      }
+      writeEvent({
+        type: "complete",
+        audioBytes: result.audioBytes,
+        format: result.format,
+      });
+    } catch (error) {
+      writeEvent({
+        type: "error",
+        error: error instanceof Error ? error.message : "语音交互失败",
+      });
+    } finally {
+      res.end();
     }
   });
 

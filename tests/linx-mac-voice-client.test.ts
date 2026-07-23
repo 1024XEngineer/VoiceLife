@@ -127,6 +127,7 @@ describe("LinxMacVoiceClient", () => {
         if (message.type === "listen") {
           socket.send(JSON.stringify({ type: "tts", state: "start" }));
           socket.send(firstPacket, { binary: true });
+          socket.send(JSON.stringify({ type: "tts", state: "sentence_start", text: "先显示这句话。" }));
           setTimeout(() => {
             events.push("server-stop");
             socket.send(secondPacket, { binary: true });
@@ -165,9 +166,14 @@ describe("LinxMacVoiceClient", () => {
     );
 
     try {
-      const result = await client.speak("测试流式播放");
+      const result = await client.speak("测试流式播放", {
+        onSpokenText(text) {
+          events.push(`text:${text}`);
+        },
+      });
       expect(events).toEqual([
         "stream-start:16000:1",
+        "text:先显示这句话。",
         `write:${firstPacket.toString("hex")}`,
         "server-stop",
         `write:${secondPacket.toString("hex")}`,
@@ -175,6 +181,7 @@ describe("LinxMacVoiceClient", () => {
       ]);
       expect(play).not.toHaveBeenCalled();
       expect(result.audioBytes).toBe(firstPacket.length + secondPacket.length);
+      expect(result.spokenText).toBe("先显示这句话。");
     } finally {
       await client.close();
     }

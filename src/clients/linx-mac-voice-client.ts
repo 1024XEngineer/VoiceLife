@@ -34,6 +34,10 @@ export interface VoicePlaybackResult {
   format: "pcm" | "opus";
 }
 
+export interface SpeakOptions {
+  onSpokenText?: (text: string) => void | Promise<void>;
+}
+
 export interface PcmAudioPlayer {
   play(pcm: Buffer, parameters: Omit<AudioParameters, "format">): Promise<void>;
   startStream?(parameters: Omit<AudioParameters, "format">): Promise<PcmAudioStream>;
@@ -47,9 +51,13 @@ export interface PcmAudioStream {
 
 interface PendingSpeech {
   packets: Buffer[];
+  preTextPackets: Buffer[];
   audioBytes: number;
   stream: PcmAudioStream | null;
   streamWrites: Promise<void>;
+  playbackGate: Promise<void>;
+  textSeen: boolean;
+  onSpokenText?: SpeakOptions["onSpokenText"];
   spokenText: string | null;
   started: boolean;
   resolve: (result: VoicePlaybackResult) => void;
@@ -324,10 +332,10 @@ export class LinxMacVoiceClient {
     }
   }
 
-  speak(text: string): Promise<VoicePlaybackResult> {
+  speak(text: string, options: SpeakOptions = {}): Promise<VoicePlaybackResult> {
     const trimmed = text.trim();
     if (!trimmed) return Promise.reject(new Error("播报文本不能为空"));
-    const task = this.speechQueue.then(() => this.performSpeak(trimmed));
+    const task = this.speechQueue.then(() => this.performSpeak(trimmed, options));
     this.speechQueue = task.catch(() => undefined);
     return task;
   }
@@ -353,7 +361,7 @@ export class LinxMacVoiceClient {
     });
   }
 
-  private async performSpeak(text: string): Promise<VoicePlaybackResult> {
+  private async performSpeak(text: string, options: SpeakOptions): Promise<VoicePlaybackResult> {
     await this.connect();
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN || !this.handshakeComplete) {
       throw new Error("灵矽设备 WebSocket 尚未就绪");
@@ -372,9 +380,13 @@ export class LinxMacVoiceClient {
       }, this.config.timeoutMs);
       this.pendingSpeech = {
         packets: [],
+        preTextPackets: [],
         audioBytes: 0,
         stream,
         streamWrites: Promise.resolve(),
+        playbackGate: Promise.resolve(),
+        textSeen: false,
+        onSpokenText: options.onSpokenText,
         spokenText: null,
         started: false,
         resolve,
@@ -424,7 +436,17 @@ export class LinxMacVoiceClient {
       return;
     }
     if (message.state === "sentence_start" && typeof message.text === "string") {
-      this.pendingSpeech.spokenText = message.text;
+      const pending = this.pendingSpeech;
+      pending.spokenText = pending.spokenText
+        ? `${pending.spokenText}${message.text}`
+        : message.text;
+      pending.textSeen = true;
+      pending.playbackGate = pending.playbackGate.then(async () => {
+        await pending.onSpokenText?.(message.text as string);
+      });
+      for (const packet of pending.preTextPackets.splice(0)) {
+        this.queueStreamPacket(pending, packet);
+      }
       return;
     }
     if (message.state === "stop") {
@@ -445,8 +467,17 @@ export class LinxMacVoiceClient {
       pending.packets.push(copiedPacket);
       return;
     }
+    if (!pending.textSeen) {
+      pending.preTextPackets.push(copiedPacket);
+      return;
+    }
+    this.queueStreamPacket(pending, copiedPacket);
+  }
 
-    const write = pending.streamWrites.then(() => pending.stream!.write(copiedPacket));
+  private queueStreamPacket(pending: PendingSpeech, packet: Buffer): void {
+    const write = pending.streamWrites
+      .then(() => pending.playbackGate)
+      .then(() => pending.stream!.write(packet));
     pending.streamWrites = write;
     void write.catch((error) => {
       if (this.pendingSpeech === pending) {
@@ -474,6 +505,11 @@ export class LinxMacVoiceClient {
 
     try {
       if (pending.audioBytes === 0) throw new Error("灵矽 TTS 未返回音频数据");
+      if (pending.stream && pending.preTextPackets.length) {
+        for (const packet of pending.preTextPackets.splice(0)) {
+          this.queueStreamPacket(pending, packet);
+        }
+      }
       await pending.streamWrites;
       if (pending.stream) {
         await pending.stream.finish();

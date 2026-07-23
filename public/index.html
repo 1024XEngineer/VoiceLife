@@ -3,20 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f5f1e8" />
+    <meta name="theme-color" content="#f7f6fb" />
     <title>声活 · 语音日程助手</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body data-state="idle">
-    <div class="ambient ambient-one" aria-hidden="true"></div>
-    <div class="ambient ambient-two" aria-hidden="true"></div>
-
     <main class="voice-shell">
       <header class="topbar">
-        <div class="brand" aria-label="VoiceLife 声活">
-          <span class="brand-mark" aria-hidden="true">V</span>
-          <span>VoiceLife</span>
-          <span class="brand-cn">声活</span>
+        <div class="topbar-leading">
+          <div class="brand" aria-label="VoiceLife 声活">
+            <span class="brand-mark" aria-hidden="true">
+              <i></i><i></i><i></i>
+            </span>
+            <span class="brand-name">声活</span>
+          </div>
+          <a class="settings-entry" href="/settings.html" aria-label="打开灵矽设置">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z"></path>
+              <path d="M19 13.1c.05-.36.05-.74 0-1.1l2-1.55-2-3.45-2.48 1a8 8 0 0 0-.95-.55L15.2 4h-4l-.38 3.45c-.33.16-.65.35-.95.55L7.4 7l-2 3.45L7.4 12a8.7 8.7 0 0 0 0 1.1l-2 1.55 2 3.45 2.47-1c.3.2.62.39.95.55L11.2 21h4l.37-3.35c.34-.16.66-.35.96-.55l2.47 1 2-3.45-2-1.55Z"></path>
+            </svg>
+            <span>设置</span>
+          </a>
         </div>
         <nav class="tabs" role="tablist" aria-label="原型功能">
           <button
@@ -47,35 +54,40 @@
         role="tabpanel"
         aria-labelledby="voice-tab"
       >
-        <div class="voice-control">
-          <div class="pulse pulse-outer" aria-hidden="true"></div>
-          <div class="pulse pulse-inner" aria-hidden="true"></div>
-          <button
-            id="talk-button"
-            class="talk-button"
-            type="button"
-            aria-describedby="status-text"
-            aria-label="按住说话，松开发送"
-          >
-            <span class="mic-icon" aria-hidden="true">
-              <svg viewBox="0 0 48 48" role="img">
-                <rect x="17" y="6" width="14" height="25" rx="7"></rect>
-                <path d="M11.5 23.5v1.2C11.5 31.6 17.1 37 24 37s12.5-5.4 12.5-12.3v-1.2M24 37v6M18 43h12"></path>
-              </svg>
-            </span>
-            <span id="button-label" class="button-label">按住说话</span>
-          </button>
+        <div id="voice-output" class="voice-output">
+          <div id="conversation-feed" class="conversation-feed" aria-live="polite"></div>
+          <section id="schedule-card" class="schedule-card" aria-labelledby="schedule-title" hidden>
+            <header class="schedule-header">
+              <div>
+                <p id="schedule-date" class="schedule-date"></p>
+                <h2 id="schedule-title">日程</h2>
+              </div>
+              <span id="schedule-count" class="schedule-count"></span>
+            </header>
+            <div id="schedule-items" class="schedule-items"></div>
+          </section>
         </div>
 
-        <div class="feedback" aria-live="polite" aria-atomic="true">
-          <div class="waveform" aria-hidden="true">
-            <i></i><i></i><i></i><i></i><i></i>
+        <div class="voice-dock">
+          <div class="voice-control">
+            <div class="pulse pulse-outer" aria-hidden="true"></div>
+            <div class="pulse pulse-inner" aria-hidden="true"></div>
+            <button
+              id="talk-button"
+              class="talk-button"
+              type="button"
+              aria-label="按住说话，松开发送"
+            >
+              <span class="mic-icon" aria-hidden="true">
+                <svg viewBox="0 0 48 48" role="img">
+                  <rect x="17" y="6" width="14" height="25" rx="7"></rect>
+                  <path d="M11.5 23.5v1.2C11.5 31.6 17.1 37 24 37s12.5-5.4 12.5-12.3v-1.2M24 37v6M18 43h12"></path>
+                </svg>
+              </span>
+              <span id="button-label" class="button-label">按住说话</span>
+            </button>
           </div>
-          <p id="status-text" class="status-text">按住按钮，说出你的安排</p>
-          <p id="hint-text" class="hint-text">松开后自动发送 · 回复将从 Mac 扬声器播放</p>
         </div>
-
-        <p class="privacy-note">语音只用于本次日程交互</p>
       </section>
 
       <section
@@ -87,27 +99,19 @@
       >
         <header class="messages-heading">
           <div>
-            <p class="eyebrow">LOCAL RECEIPTS</p>
-            <h1>消息回执</h1>
-            <p class="messages-intro">暂时代替 IM，保留每次日程操作和提醒结果。</p>
+            <p class="eyebrow">MESSAGE RECEIPTS</p>
+            <h1>消息</h1>
+            <p class="messages-intro">你的日程操作与提醒会留在这里。</p>
           </div>
           <span id="connection" class="connection">连接中</span>
         </header>
         <div id="messages" class="messages" aria-live="polite"></div>
         <div id="empty" class="empty">
-          <span class="empty-mark" aria-hidden="true">✓</span>
+          <span class="empty-mark" aria-hidden="true">✦</span>
           <p>还没有消息</p>
           <span>完成一次语音操作后，回执会出现在这里。</span>
         </div>
       </section>
-
-      <a class="settings-entry" href="/settings.html" aria-label="打开灵矽设置">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z"></path>
-          <path d="M19 13.1c.05-.36.05-.74 0-1.1l2-1.55-2-3.45-2.48 1a8 8 0 0 0-.95-.55L15.2 4h-4l-.38 3.45c-.33.16-.65.35-.95.55L7.4 7l-2 3.45L7.4 12a8.7 8.7 0 0 0 0 1.1l-2 1.55 2 3.45 2.47-1c.3.2.62.39.95.55L11.2 21h4l.37-3.35c.34-.16.66-.35.96-.55l2.47 1 2-3.45-2-1.55Z"></path>
-        </svg>
-        <span>设置</span>
-      </a>
     </main>
 
     <script type="module" src="/app.js"></script>
