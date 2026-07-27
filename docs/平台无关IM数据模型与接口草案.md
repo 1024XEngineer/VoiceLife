@@ -78,8 +78,11 @@ IM 辅助模块内部可以有投递和入站处理任务，但它们是模块�
 | `external_conversation_id` | 企业微信发送一对一消息所需的接收者标识。 |
 | `status` | `active`、`unbound`、`unreachable`。 |
 | `bound_at` / `unbound_at` | 绑定审计时间。 |
+| `created_at` / `updated_at` | 建立记录与最后一次变更时间。 |
 
 约束：一期 `user_id` 和 `(platform, external_user_id)` 都唯一。`user_id` 是产品内部身份；`external_user_id` 是企业微信成员身份，不能用昵称或展示名代替。
+
+`im_bindings` 是授权与身份映射关系，不是投递队列。解绑时将状态改为 `unbound` 并记录 `unbound_at`，不物理删除原记录，以保留历史卡片和回调的可追溯性；记录至少保留到关联卡片、操作审计不再需要时，再按账户注销和隐私策略脱敏或清理外部身份字段。
 
 ### 2. 业务事件 `business_events`
 
@@ -117,6 +120,18 @@ IM 辅助模块内部可以有投递和入站处理任务，但它们是模块�
 
 约束：`(business_event_id, binding_id, kind)` 唯一；`platform_task_id` 在同一平台内唯一。重试不得重新生成 `platform_task_id`。
 
+允许的状态迁移：
+
+```text
+pending → sending → accepted
+             │
+             └→ failed → pending
+
+pending / sending / failed → dead_letter
+```
+
+`sending` 表示投递任务已被认领；平台已接受后进入终态 `accepted`。可重试失败进入 `failed`，到达下一次重试时间后回到 `pending`；超过重试上限、卡片过期或出现不可恢复错误时进入终态 `dead_letter`。状态更新必须通过上述迁移完成，数据库实现应以枚举约束限制合法取值。
+
 ### 4. 卡片操作 `im_card_actions`
 
 每个可点击按钮一条记录，同时承担回调收件和操作授权的职责；一期无需将两者拆成独立模型。
@@ -132,9 +147,23 @@ IM 辅助模块内部可以有投递和入站处理任务，但它们是模块�
 | `operation_id` | 服务端生成的稳定业务幂等键。 |
 | `callback_dedupe_key` | 回调持久化后的去重键；由平台任务、按钮、成员和时间等真实回调字段生成。 |
 | `status` | `pending`、`received`、`processing`、`executed`、`rejected`、`retryable_failed`、`expired`。 |
+| `created_at` | 按钮授权创建时间。 |
 | `received_at` / `processed_at` / `expires_at` | 回调、处理和有效期审计时间。 |
 
 约束：`action_key_hash` 唯一；同一回调去重键只接受一次。处理时必须原子地取得执行权，恢复处理始终复用 `operation_id`。明文按钮标识不写入数据库或日志。
+
+允许的状态迁移：
+
+```text
+pending → received → processing → executed
+                 │        ├──→ rejected
+                 │        └──→ retryable_failed → processing
+                 └──→ expired
+
+pending → expired
+```
+
+`received` 表示回调已可靠持久化、可以 ACK 平台，但尚未执行业务操作；`processing` 只能由一个处理者原子认领。授权过期进入 `expired`，成员/卡片/按钮校验失败进入 `rejected`，两者均为终态；依赖暂时不可用时进入 `retryable_failed`，恢复任务重新认领后回到 `processing`。数据库实现应以枚举约束限制合法取值。
 
 企业微信适配时，`platform_task_id` 对应回调 `TaskId`，`action_key_hash` 对应 `EventKey` 的哈希；回调成员必须与卡片 `binding_id` 对应的用户一致。
 
@@ -181,7 +210,7 @@ interface BusinessActionService {
 }
 ```
 
-IM 模块只能通过此幂等接口请求业务服务执行操作；业务服务负责校验当前业务状态并生成结果事件。
+IM 模块只能通过此幂等接口请求业务服务执行操作；业务服务负责校验当前业务状态并生成结果事件。映射规则固定如下：卡片创建时生成一次 `im_card_actions.operation_id`，处理回调和崩溃恢复时都将它原样传给 `BusinessActionService.execute.operationId`；业务服务在同一事务以该值写入 `business_events.operation_id`。因此重复回调、工作者重试和业务服务重试都会命中同一个业务结果事件，而不会重复关闭或推迟提醒。若该调用跨 HTTP 边界，同一个值还必须作为 `Idempotency-Key` 传递。
 
 ### 2. 企业微信适配器
 
