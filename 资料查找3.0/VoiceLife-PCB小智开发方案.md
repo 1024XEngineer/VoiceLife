@@ -11,7 +11,7 @@
 ```
 用户语音 → 板载 I2S 麦克风 → ESP-SR 唤醒词检测
     ↓ "小鹏小鹏"
-ESP32 Wi-Fi → 云端灵矽 LLM（仅做语音理解 + Function Calling）
+ESP32 Wi-Fi → 云端灵矽（ASR 语音识别 + LLM 理解 + Function Calling + TTS 语音合成）
     ↓ Function Calling 结果返回
 ESP32 本地 L3 领域服务（日历/提醒/撤销/变更/备忘录）
     ↓
@@ -22,7 +22,7 @@ SQLite 本地数据库（日程/提醒/备忘录/撤销快照）
 Wi-Fi → 飞书 Webhook 推送 IM 回执
 ```
 
-> 云端只做 LLM 推理。所有业务逻辑、数据存储、定时任务均在 ESP32 本地闭环。
+> 云端负责语音处理（ASR/TTS）+ LLM 推理。业务逻辑、数据存储、定时任务在 ESP32 本地闭环。音频数据经加密传输到灵矽云端，处理后返回。
 
 ### 与 B/S 架构的关键区别
 
@@ -91,7 +91,7 @@ VoiceLife 改造：
 | --- | --- | --- |
 | `main/application.cc` | 替换 System Prompt 为日程助手；修改初始化流程 | 0.5 天 |
 | `main/mcp_server.cc` | 替换 MCP tool schema 为五大领域服务 | 1 天 |
-| `main/audio/wake_words/custom_wake_word.cc` | "小鹏小鹏"替换默认唤醒词 | 0.5 天 |
+| `main/audio/wake_words/custom_wake_word.cc` | "小鹏小鹏"替换默认唤醒词（需确认 ESP-SR 模型支持自定义唤醒词训练） | 0.5-1 天 |
 | 新增 `components/voice_life/` | L3 五大服务实现（日历/提醒/撤销/变更/备忘录） | 3-4 天 |
 | 新增 `components/sqlite_db/` | SQLite 数据库集成 + 建表 + CRUD 封装 | 1-2 天 |
 | 新增 `components/im_push/` | 飞书 Webhook HTTP 客户端 | 1 天 |
@@ -149,17 +149,21 @@ idf.py -p /dev/cu.usbmodem* flash monitor
 
 ### 5.1 SQLite 怎么集成到 ESP32？
 
-ESP-IDF 自带 SQLite 组件，只需在 `CMakeLists.txt` 中添加依赖：
+通过 ESP-IDF 组件管理器添加 SQLite：
 
-```cmake
-# main/CMakeLists.txt
-idf_component_register(
-    SRCS ...
-    REQUIRES sqlite
-)
+```bash
+cd main
+idf.py add-dependency espressif/sqlite3
 ```
 
-无需移植、无需交叉编译——ESP-IDF 已编译好 `libsqlite3.a`。
+或在 `main/idf_component.yml` 中手动添加：
+
+```yaml
+dependencies:
+  espressif/sqlite3: "^1.0"
+```
+
+> 不是 ESP-IDF 自带组件，需通过组件管理器拉取。版本、VFS 配置和 WAL 模式需在集成时确认。
 
 ### 5.2 能存多少条数据？
 
@@ -180,14 +184,14 @@ idf_component_register(
 | **Flash（SPIFFS/LittleFS）** | 无需额外硬件，读写快 | 擦写寿命 ~10 万次，写坏了整个板子报废 |
 | **TF 卡（推荐）** | 可插拔更换，数据可拔卡在电脑查看 | 需确认 PCB 版是否有 TF 卡槽 |
 
-> 如果 PCB 版无 TF 卡槽：Flash 完全够用。ESP32 的 NOR Flash 有磨损均衡（wear leveling），日常使用数年内不会写坏。
+> 如果 PCB 版无 TF 卡槽：Flash 日常使用可支撑数年。需配置 ESP-IDF 的 wear leveling 和 SPIFFS/LittleFS 磨损均衡，避免 SQLite 写放大集中在固定扇区。
 
 ### 5.4 断网了怎么办？
 
 | 功能 | 断网表现 |
 | --- | --- |
 | 语音创建/查询 | 不可用（LLM 需要网络） |
-| 已存数据查询 | **可用**（SQLite 本地） |
+| 已存数据查询 | 不可用（无屏无本地语音识别，无法输入查询指令） |
 | 提醒触发 | **可用**（本地定时器 + NTP 最后一次对时） |
 | 时间准确性 | 漂移 < 1 秒/小时（无 RTC 硬件），断网几小时内影响可忽略 |
 | IM 回执 | 不可用（需网络），网络恢复后补发 |
@@ -206,7 +210,7 @@ ESP32 双核 FreeRTOS：一个核跑音频管道（音频采集 + Opus 编码）
 
 ### 5.7 OTA 升级怎么做？
 
-小智源码自带 OTA（`main/ota.cc`），直接复用。通过 Wi-Fi 下载新固件 → 校验 → 写入 OTA 分区 → 重启。16MB Flash 支持双 OTA 分区（factory + ota_0 + ota_1），升级失败自动回滚。
+小智源码自带 OTA（`main/ota.cc`），可复用。通过 Wi-Fi 下载新固件 → 校验 → 写入 OTA 分区 → 重启。自动回滚依赖分区表配置和 Bootloader 的 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`，需在 menuconfig 中显式开启。
 
 ### 5.8 功耗和供电？
 
