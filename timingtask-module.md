@@ -9,6 +9,14 @@
 
 ## 2. 模块接口
 
+### 2.0 范围参数约定
+
+- `changeScope=single`：只影响某一次具体实例，必须同时提供 `targetOccurrenceAt` 或 `instanceId`。
+- `changeScope=future`：影响“从某次开始及以后”的所有实例，必须同时提供 `effectiveFrom`。
+- `changeScope=series`：影响整个周期任务，不需要额外指定单次边界。
+- `targetOccurrenceAt`：目标实例原计划触发时间，用于唯一定位周期中的某一次。
+- `effectiveFrom`：从哪个时间点开始向后生效，通常用于“本次及以后”。
+
 ### 2.1 任务管理
 
 - `RegisterTimerTask`：注册定时任务
@@ -30,6 +38,9 @@
   - `recurrenceRule`：更新后的周期规则。
   - `reminderConfig`：更新后的提醒配置。
   - `changeScope`：修改范围，`single` / `series` / `future`。
+  - `instanceId`：当 `changeScope=single` 时可直接指定目标实例 ID。
+  - `targetOccurrenceAt`：当 `changeScope=single` 时，用原计划触发时间定位要修改的那一次。
+  - `effectiveFrom`：当 `changeScope=future` 时，表示从哪一次开始向后生效。
   出参：
   - `taskId`：被更新的任务 ID。
   - `status`：更新后的任务状态。
@@ -40,6 +51,9 @@
   - `taskId`：定时任务 ID。
   - `scheduleId`：关联日程 ID。
   - `changeScope`：取消范围，`single` / `series` / `future`。
+  - `instanceId`：当 `changeScope=single` 时可直接指定目标实例 ID。
+  - `targetOccurrenceAt`：当 `changeScope=single` 时，用原计划触发时间定位要取消的那一次。
+  - `effectiveFrom`：当 `changeScope=future` 时，表示从哪一次开始向后取消。
   出参：
   - `taskId`：被取消的任务 ID。
   - `status`：通常为 `canceled`。
@@ -128,6 +142,8 @@
 - 一条 `TimerTask` 可以派生出一条或多条 `TimerInstance`。
 - 一次性日程通常对应 1 个实例。
 - 周期日程通常会不断生成后续实例，但一般只维护最近一次或一个较小时间窗口内的实例。
+- 当用户修改“单次”时，通常是对某个 `TimerInstance` 做例外处理，不直接改变整条 `TimerTask` 的周期规则。
+- 当用户修改“本次及以后”时，需要以 `effectiveFrom` 为边界，重算该时间点之后的任务和实例。
 
 ### 3.1 `TimerTask`
 
@@ -185,5 +201,5 @@
 ## 4. 待确认项
 
 - 定时任务最终是否完全落在开发板本地
-- 是否支持 `PauseTimerTask` / `ResumeTimerTask`
+- `PauseTimerTask` / `ResumeTimerTask` 的精确定义，是暂停调度还是仅静音提醒
 - 工作日语义是否需要单独字段 `byWorkDay`
