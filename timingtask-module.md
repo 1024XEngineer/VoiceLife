@@ -12,25 +12,107 @@
 ### 2.1 任务管理
 
 - `RegisterTimerTask`：注册定时任务
-- `UpdateTimerTask`：更新定时任务
-- `CancelTimerTask`：取消定时任务
+  入参：
+  - `scheduleId`：日程 ID。
+  - `startAt`：首次触发时间。
+  - `recurrenceRule`：周期规则；一次性日程可为空。
+  - `reminderConfig`：提醒配置。
+  出参：
+  - `taskId`：生成的定时任务 ID。
+  - `status`：注册结果状态，通常为 `active`。
+  - `nextTriggerAt`：下一次预计触发时间。
 
-```
+- `UpdateTimerTask`：更新定时任务
+  入参：
+  - `taskId`：定时任务 ID。
+  - `scheduleId`：关联日程 ID。
+  - `startAt`：更新后的开始时间。
+  - `recurrenceRule`：更新后的周期规则。
+  - `reminderConfig`：更新后的提醒配置。
+  - `changeScope`：修改范围，`single` / `series` / `future`。
+  出参：
+  - `taskId`：被更新的任务 ID。
+  - `status`：更新后的任务状态。
+  - `nextTriggerAt`：重算后的下一次触发时间。
+
+- `CancelTimerTask`：取消定时任务
+  入参：
+  - `taskId`：定时任务 ID。
+  - `scheduleId`：关联日程 ID。
+  - `changeScope`：取消范围，`single` / `series` / `future`。
+  出参：
+  - `taskId`：被取消的任务 ID。
+  - `status`：通常为 `canceled`。
+
 - `PauseTimerTask`：暂停定时任务
+  入参：
+  - `taskId`：定时任务 ID。
+  - `reason`：暂停原因，可选。
+  出参：
+  - `taskId`：被暂停的任务 ID。
+  - `status`：通常为 `paused`。
+
 - `ResumeTimerTask`：恢复定时任务
-是否考虑？
-```
+  入参：
+  - `taskId`：定时任务 ID。
+  - `resumeAt`：恢复后从何时开始重新计算下一次触发，可选。
+  出参：
+  - `taskId`：被恢复的任务 ID。
+  - `status`：通常为 `active`。
+  - `nextTriggerAt`：恢复后重新计算出的下一次触发时间。
 
 ### 2.2 周期实例
 
 - `GenerateInstances`：生成周期实例
+  入参：
+  - `taskId`：定时任务 ID。
+  - `windowStart`：生成窗口开始时间。
+  - `windowEnd`：生成窗口结束时间。
+  - `limit`：最多生成多少个实例，避免无限展开。
+  出参：
+  - `taskId`：所属任务 ID。
+  - `instances`：生成出的实例列表。
+
 - `ListInstances`：查询实例列表
+  入参：
+  - `taskId`：定时任务 ID，可选。
+  - `scheduleId`：日程 ID，可选。
+  - `rangeStart`：查询开始时间。
+  - `rangeEnd`：查询结束时间。
+  - `status`：实例状态过滤条件，可选。
+  出参：
+  - `instances`：符合条件的实例列表。
+  - `total`：实例总数。
+
 - `SnoozeInstance`：推迟某个实例
+  入参：
+  - `instanceId`：实例 ID。
+  - `delayMinutes`：推迟时长，单位分钟。
+  出参：
+  - `instanceId`：被推迟的实例 ID。
+  - `status`：通常为 `snoozed`。
+  - `triggerAt`：推迟后的实际触发时间。
+  - `snoozeCount`：推迟后的累计次数。
+
 - `DismissInstance`：关闭某个实例
+  入参：
+  - `instanceId`：实例 ID。
+  出参：
+  - `instanceId`：被关闭的实例 ID。
+  - `status`：通常为 `dismissed`。
 
 ### 2.3 回执
 
 - `SendReceipt`：发送 IM 回执
+  入参：
+  - `instanceId`：实例 ID。
+  - `eventType`：事件类型，`triggered` / `snoozed` / `dismissed`。
+  - `receiptChannel`：发送通道。
+  - `payload`：要发送的具体内容。
+  出参：
+  - `receiptId`：回执记录 ID。
+  - `sendStatus`：发送状态。
+  - `retryCount`：当前重试次数。
 
 ## 3. 数据模型
 
@@ -103,4 +185,5 @@
 ## 4. 待确认项
 
 - 定时任务最终是否完全落在开发板本地
-- 工作日是否包含
+- 是否支持 `PauseTimerTask` / `ResumeTimerTask`
+- 工作日语义是否需要单独字段 `byWorkDay`
