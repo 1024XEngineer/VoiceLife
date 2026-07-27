@@ -31,7 +31,7 @@ Wi-Fi → 飞书 Webhook 推送 IM 回执
 | 开发板 = 瘦客户端，所有逻辑在服务端 | 开发板 = 全栈主机，本地处理一切 |
 | 数据库在服务器上 | SQLite 在 ESP32 Flash/TF 卡上 |
 | 定时任务靠服务端 cron | ESP32 本地 FreeRTOS 定时器 + NTP 对时 |
-| 断网不可用 | 断网时已存数据可查询（仅 LLM 功能不可用） |
+| 断网不可用 | 断网时不可查询（无本地识别入口）（仅 LLM 功能不可用） |
 | 需要维护服务器 | 插电即用 |
 
 ---
@@ -149,21 +149,14 @@ idf.py -p /dev/cu.usbmodem* flash monitor
 
 ### 5.1 SQLite 怎么集成到 ESP32？
 
-通过 ESP-IDF 组件管理器添加 SQLite：
-
-```bash
-cd main
-idf.py add-dependency espressif/sqlite3
-```
-
-或在 `main/idf_component.yml` 中手动添加：
+通过 ESP-IDF 组件管理器添加 SQLite。先在 [ESP Component Registry](https://components.espressif.com) 确认可用的 SQLite 组件名称和版本号，然后添加到 `main/idf_component.yml`：
 
 ```yaml
 dependencies:
-  espressif/sqlite3: "^1.0"
+  <sqlite-component-name>: "<version>"
 ```
 
-> 不是 ESP-IDF 自带组件，需通过组件管理器拉取。版本、VFS 配置和 WAL 模式需在集成时确认。
+> 组件名和版本需在集成时从官方 Registry 确认。还需验证 VFS 挂载、WAL 模式、线程安全模式和断电恢复行为——不能假设默认配置适用于本场景。
 
 ### 5.2 能存多少条数据？
 
@@ -172,10 +165,10 @@ dependencies:
 | 100 条日程 + 50 条记录 | 日常使用 | ~10KB |
 | 1000 条日程 + 500 条记录 | 重度使用 | ~60KB |
 | 10000 条日程 + 撤销快照 | 全年数据 | ~500KB |
-| **16MB Flash 可用空间** | 扣除系统+OTA | **~10MB** |
-| **理论上限** | | **~20 万条** |
+| **16MB Flash 可用空间** | 扣除系统+OTA | **~待实测** |
+| **理论上限** | | **~待实测（依赖分区表、固件体积、索引开销）** |
 
-> 结论：个人使用一辈子也填不满。真正的限制不是存储容量，而是查询性能——万条以上建议定期归档（SQLite 自带 `VACUUM`）。
+> 结论：个人使用待实测后确认
 
 ### 5.3 SQLite 存 Flash 还是 TF 卡？
 
