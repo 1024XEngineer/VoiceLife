@@ -1,0 +1,90 @@
+原生 xiaozhi-esp32 的 Flash 主要存固件、配置和资源 原生小智的 v2 分区表
+
+# ESP-IDF Partition Table
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,    0x4000,
+otadata,  data, ota,     0xd000,    0x2000,
+phy_init, data, phy,     0xf000,    0x1000,
+ota_0,    app,  ota_0,   0x20000,   0x3f0000,
+ota_1,    app,  ota_1,   ,          0x3f0000,
+assets,   data, spiffs,  0x800000,  8M
+
+小智合并固件大小 资料查找3.0/《PCB版你好！小智》教程工具大全/HelloZhi_tool/bin/merged-
+  binary.bin -> 4.47 MiB -> 存储到 合并包一般会碰到的是 otadata、ota_0、assets
+
+灵矽官方已经把长期记忆放在云端；
+ESP32 板端更适合保存日程、提醒等必须准确的数据，以及少量短期上下文。
+
+本地 SQLite 定位为 业务事实库
+把灵矽长期记忆定位为 云端记忆服务
+中间用统一接口连接。
+不把完整聊天历史、向量库和长期画像塞进 16MB Flash。
+
+1. 当前问题
+    本地设计里有三类数据容易被混在一起：
+    - 一轮对话的短期上下文
+    - 日程、提醒等业务事实
+    - 跨会话的长期记忆。
+
+    可靠性要求不同：只保存短期上下文，默认会过期/SQLite方案负责业务事实/长期记忆缺失
+
+2. 确认的事实
+
+灵矽官方长期记忆 API 已经提供：
+  - 每个 Agent 一个记忆容器；
+  - 用 identify_id 区分设备、用户或声纹身份；
+  - 结构化记忆变量 attentions；
+  - 非结构化记忆片段 nodes；
+  - memory/infer 从对话提炼记忆；
+  - memory/recall 召回记忆；
+  - MCP 接口 mcp.memory.search(agent_id, identify_id, query)。
+
+3. 小智官方仓库
+
+  源码中能确认的有
+
+  - NVS 配置；
+  - Wi-Fi、设备设置；
+  - 临时连接状态；
+  - 服务端返回的 session_id；
+  - assets 资源加载和更新。
+
+  无：
+
+  - SQLite；
+  - 板端聊天记录数据库；
+  - 向量数据库；
+  - 板端长期 AI 记忆。
+
+4. 可能架构
+
+  语音服务 / MCP
+         |
+         v
+  MemoryFacade
+     |        |
+     |        +--> 灵矽长期记忆
+     |
+     +-----------> 板端 SQLite
+
+  板端 SQLite 只保存，事实
+  灵矽云端保存：长期记忆
+  读数据时，先查板端确定事实，再查云端记忆补充上下文。
+  写数据时，业务事实先写板端；成功后再把适合长期保留的异步送到云端。
+
+
+5. 公开仓库-记忆管理
+
+  - xinnan-tech/xiaozhi-esp32-server
+    (https://github.com/xinnan-tech/xiaozhi-esp32-server)：
+服务端已提供mem0ai、PowerMem、本地短期记忆等接入，适合参考服务端架构。
+
+  - mem0ai/mem0 (https://github.com/mem0ai/mem0)：通用 AI 记忆层，适合云端或服务器，不适合直接放 ESP32。
+
+  - oceanbase/powermem (https://github.com/oceanbase/powermem)：支持 SQLite 的服务端记忆方案，需要 LLM 和 embedding，不是板端组件。
+
+  - nopnop2002/esp32-idf-sqlite3
+    (https://github.com/nopnop2002/esp32-idf-sqlite3)：面向 ESP-IDF 5的改版，能作为板端 PoC 起点，但小智主线已经迁移到 ESP-IDF6.0.2，必须重新编译验证。
+
+  - asg017/sqlite-vec (https://github.com/asg017/sqlite-vec)：SQLite
+    向量扩展，不等于完整记忆系统。
