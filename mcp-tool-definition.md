@@ -1,12 +1,20 @@
 # MCP Tool 定义
 
 > 当前 Tool 返回的数据均为 JSON 数据，后续可返回文本+JSON 的形式
+>
+> 核心只需要看每个 Tool前三个内容；返回为这个工具最终响应给模型的一个 JSON 数据（文档中为 mock 数据）
+>
+> 工具名称，示例：create_schedule
+>
+> 工具描述，示例：创建一条日程……不创建。
+>
+> 工具参数，示例：参数：表格
 
 ## 日程 Tools
 
 ### create_schedule
 
-创建一条日程。如果时间冲突且未忽略冲突，则仅返回冲突列表而不创建。
+创建一条日程。如果时间冲突且未忽略冲突，则仅返回冲突列表且不创建。
 
 **参数：**
 
@@ -41,7 +49,9 @@
     "start_time": "2026-07-29T10:00:00+08:00",
     "end_time": "2026-07-29T11:00:00+08:00",
     "location": "301会议室",
-    "notes": null
+    "notes": null,
+    "status": "active",
+    "reminder_id": null
   },
   "conflicts": [],
   "error": null
@@ -82,7 +92,7 @@
 
 ### query_schedule
 
-根据日程 ID、关键词或时间范围查询日程。多个查询条件之间为 AND 关系，结果按开始时间升序排列。
+根据日程 ID、关键词或时间范围查询日程。多个查询条件之间为 AND 关系，结果按开始时间升序排列。不传任何参数默认查询所有日程。
 
 **参数：**
 
@@ -92,7 +102,7 @@
 | keyword | string \| null | 否 | 事件标题关键词，支持模糊匹配 |
 | start_from | datetime \| null | 否 | 开始时间范围的下限 |
 | start_to | datetime \| null | 否 | 开始时间范围的上限 |
-| status | string \| null | 否 | 状态筛选，默认 active；all 表示全部状态 |
+| status | string \| null | 否 | 状态筛选，默认 active；all 表示全部状态；cancelled 已取消日程 |
 | limit | number \| null | 否 | 返回条数，默认 10，最大 50 |
 | offset | number \| null | 否 | 分页偏移量，默认 0 |
 
@@ -125,7 +135,7 @@
 
 ### update_schedule
 
-修改一条已有日程。调用前应先查询并确定目标日程的 `schedule_id`。
+修改一条已有日程。调用前应先查询并确定目标日程的 `schedule_id`。如果时间冲突且未忽略冲突，则仅返回冲突列表且不修改任何字段；另外修改时只调整部分字段的话，不需要调整的字段值为原始值（原来是空现在还是空，原来是什么值，现在还是什么值）。
 
 **参数：**
 
@@ -169,7 +179,7 @@
 
 ### delete_schedule
 
-删除一条日程。调用前应先查询并确定目标日程的 `schedule_id`。该 Tool 不会自动删除关联提醒。
+删除/取消一条日程。调用前应先查询并确定目标日程的 `schedule_id`。该 Tool 不会自动删除关联提醒。
 
 **参数：**
 
@@ -195,7 +205,7 @@
 
 ### query_recent_operations
 
-查询当前用户最近 15 分钟内可撤销的日程操作。如需撤销应先调用该 Tool，找到用户想撤销的操作记录。
+查询当前用户最近 15 分钟内可撤销的日程操作（限制：仅允许撤销最近 10 条操作，不可调整）。如需撤销应先调用该 Tool，找到用户想撤销的操作记录。
 
 **参数：**
 
@@ -212,18 +222,31 @@
 {
   "operations": [
     {
-      "operation_id": 102,
+      "operation_id": 100,
       "type": "update",
-      "schedule_id": 12,
+      "schedule_id": 1,
       "schedule_event": "项目周会",
-      "operated_at": "2026-07-29T09:55:00+08:00"
+      "operated_at": "2026-07-27T15:05:00+08:00",
+      "previous": {  // 本次操作前的数据
+        "schedule_id": 1,
+        "event": "项目周会",
+        "start_time": "2026-07-28T10:00:00+08:00",
+        "end_time": "2026-07-28T11:00:00+08:00",
+        "location": "301会议室",
+        "notes": null,
+        "reminder_id": 1,
+        "status": "active",
+        "created_at": "2026-07-27T14:30:00+08:00",
+        "updated_at": "2026-07-27T14:30:00+08:00"
+      }
     },
     {
       "operation_id": 101,
       "type": "create",
       "schedule_id": 12,
       "schedule_event": "项目周会",
-      "operated_at": "2026-07-29T09:50:00+08:00"
+      "operated_at": "2026-07-29T09:50:00+08:00",
+      "previous": null   // 新建日程前没有该日程的相关数据
     }
   ],
   "error": null
