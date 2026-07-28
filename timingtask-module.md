@@ -1,31 +1,42 @@
-# 定时任务
+# 定时任务模块
 
-## 1. 范围说明
+## 1. 本模块职责与上下游关系说明
 
-- 本文档只描述“日程创建之后”的定时、周期、触发、推迟、关闭、回执逻辑。
-- `CreateSchedule` 属于日程模块，不属于本模块职责。
-- 本模块接收日程模块输出的日程数据，并把它转换为可执行的定时任务与实例。
-- 字段命名统一采用 `snake_case`。
-- 外键统一使用 `<entity>_id`。
-- 布尔字段统一使用 `is_` 前缀。
-- 时间字段统一使用 `_at` 后缀，时间值采用 ISO 8601。
-- 状态字段统一使用 snake_case 字符串，并按实体状态机定义，不描述动作。
+### 1.1 本模块职责
+本模块的角色为`taskmannager`，负责任务的定时触发。
+
+### 1.2 上下游关系
+上游： `日程管理`模块
+
+下游：`IM`模块、`语音(输出)`模块
+
+### 1.3 与日程管理模块的辨析
+日程管理解决`What`，定时任务解决`When`，
+日程管理负责业务数据的增删改查，
+定时任务负责事件驱动的问题解决。
+
 
 ## 2. 模块接口
 
-### 2.0 范围参数约定
+基本关系：`Schedule`日程(上游,What) -> `TimerTask`任务系列(具体到Title，如每周六提醒的吃药) -> `Instance`(具体到时间，如系列提醒中7月25日周六的吃药)
+- `schedule`：日程模块中的业务记录，表示“用户想在什么时间做什么事”。
+- `timer_task`：定时任务模块中的调度记录，表示“系统根据这条日程，应该如何安排后续触发”。
+- `timer_instance`：某一次具体触发实例，表示“这一次提醒本身”。
+- 上游 `schedule` 的状态遵循 `active` / `completed` / `cancelled`，本模块只读取不维护。
 
-- `change_scope=single`：只影响某一次具体实例，必须同时提供 `instance_id` 或 `target_occurrence_at`。
-- `change_scope=future`：影响“从某次开始及以后”的所有实例，必须同时提供 `effective_from`。
-- `change_scope=series`：影响整个周期任务，不需要额外指定单次边界。
-- `target_occurrence_at`：目标实例原计划触发时间，用于唯一定位周期中的某一次。
-- `effective_from`：从哪个时间点开始向后生效，通常用于“本次及以后”。
-- `timer_task.status`：`active` / `paused` / `terminated`。
-- `timer_instance.status`：`pending` / `triggered` / `snoozed` / `dismissed` / `skipped` / `modified`。
+约束:
+- 一条 `schedule` 可以对应一条 `timer_task`。
+- 一条 `timer_task` 可以派生出一条或多条 `timer_instance`。
+- 一次性日程通常对应 1 个实例。
+- 周期日程通常会不断生成后续实例，但一般只维护最近一次或一个较小时间窗口内的实例。
+- 当用户修改“单次”时，通常是对某个 `timer_instance` 做例外处理，不直接改变整条 `timer_task` 的周期规则。
+- 当用户修改“本次及以后”时，需要以 `effective_from` 为边界，重算该时间点之后的任务和实例。
 
-### 2.1 任务管理
+三者为上下游关系，影响自上而下，且不可反向影响。
 
-- `RegisterTimerTask`：注册定时任务。
+### 2.1 TimerTask
+
+- `RegisterTimerTask`：**注册定时任务。**把一条日程转成可调度的任务。
   入参：
   - `schedule_id`：日程 ID。
   - `start_at`：首次触发时间。
@@ -36,56 +47,47 @@
   - `status`：注册结果状态，通常为 `active`。
   - `next_trigger_at`：下一次预计触发时间。
 
-- `UpdateTimerTask`：更新定时任务。
+---
+
+- `UpdateTimerTask`：**更新定时任务。**根据上游 Schedule 更新变更定时任务。
   入参：
   - `task_id`：定时任务 ID。
   - `schedule_id`：关联日程 ID。
   - `start_at`：更新后的开始时间。
-  - `recurrence_rule`：更新后的周期规则。
+  - `recurrence_rule`：更新后的周期规则。`change_scope=single`时不适用。
   - `reminder_config`：更新后的提醒配置。
-  - `change_scope`：修改范围，`single` / `series` / `future`。
+  - `change_scope`：修改范围，`single` 某一instance/ `range` 某一范围instance/ `future` 未来所有。
   - `instance_id`：当 `change_scope=single` 时可直接指定目标实例 ID。
   - `target_occurrence_at`：当 `change_scope=single` 时，用原计划触发时间定位要修改的那一次。
-  - `effective_from`：当 `change_scope=future` 时，表示从哪一次开始向后生效。
+  - `effective_from`：当 `change_scope=future` `change_scope=range` 时，表示从哪一次开始向后生效。
+  - `effective_to`：当 `change_scope=range` 时，表示从哪一次开始结束生效。
   出参：
   - `task_id`：被更新的任务 ID。
   - `status`：更新后的任务状态；若 `change_scope=single`，目标实例状态通常为 `modified`。
   - `next_trigger_at`：重算后的下一次触发时间。
+  - `instance_id`：(single)目标修改的实例id。
+  - `override_fields`：(single)本次实例相对原规则的覆盖字段，仅当 `status=modified` 时使用。
 
-- `CancelTimerTask`：取消定时任务。
+
+---
+
+- `CancelTimerTask`：**取消定时任务。**取消单次还未触发的 Instance 。
   入参：
   - `task_id`：定时任务 ID。
   - `schedule_id`：关联日程 ID。
-  - `change_scope`：取消范围，`single` / `series` / `future`。
+  - `change_scope`：取消范围，`single` / `range` / `future`。具体定义同上。
   - `instance_id`：当 `change_scope=single` 时可直接指定目标实例 ID。
   - `target_occurrence_at`：当 `change_scope=single` 时，用原计划触发时间定位要取消的那一次。
   - `effective_from`：当 `change_scope=future` 时，表示从哪一次开始向后取消。
   出参：
   - `task_id`：被取消的任务 ID。
+  - `instance_id`：(single)目标取消的实例id。
   - `status`：通常为 `terminated`；若 `change_scope=single`，目标实例状态通常为 `skipped`。
 
-- `PauseTimerTask`：暂停定时任务。
-  入参：
-  - `task_id`：定时任务 ID。
-  - `reason`：暂停原因，可选。
-  出参：
-  - `task_id`：被暂停的任务 ID。
-  - `status`：通常为 `paused`。
-  - `paused_until`：计划恢复时间，可选。
 
-- `ResumeTimerTask`：恢复定时任务。
-  入参：
-  - `task_id`：定时任务 ID。
-  - `resume_at`：恢复后从何时开始重新计算下一次触发，可选。
-  出参：
-  - `task_id`：被恢复的任务 ID。
-  - `status`：通常为 `active`。
-  - `paused_until`：恢复后置空。
-  - `next_trigger_at`：恢复后重新计算出的下一次触发时间。
+### 2.2 Instance
 
-### 2.2 周期实例
-
-- `GenerateInstances`：生成周期实例。
+- `GenerateInstances`：**生成周期实例。** 在一个滑动窗口内生成TimerTask对应的系列实例。
   入参：
   - `task_id`：定时任务 ID。
   - `window_start`：生成窗口开始时间。
@@ -95,7 +97,9 @@
   - `task_id`：所属任务 ID。
   - `instances`：生成出的实例列表。
 
-- `ListInstances`：查询实例列表。
+---
+
+- `ListInstances`：**查询实例列表。** 查询某一段时间范围内的实例内容。
   入参：
   - `task_id`：定时任务 ID，可选。
   - `schedule_id`：日程 ID，可选。
@@ -106,7 +110,9 @@
   - `instances`：符合条件的实例列表。
   - `total`：实例总数。
 
-- `SnoozeInstance`：推迟某个实例。
+---
+
+- `SnoozeInstance`：**推迟某个实例。** 用户响应推迟某一实例。
   入参：
   - `instance_id`：实例 ID。
   - `delay_minutes`：推迟时长，单位分钟。
@@ -116,43 +122,17 @@
   - `trigger_at`：推迟后的实际触发时间。
   - `delay_count`：推迟后的累计次数。
 
-- `DismissInstance`：关闭某个实例。
+---
+
+- `DismissInstance`：**关闭某个实例。** 用户响应确定某一实例的发生事实。
   入参：
   - `instance_id`：实例 ID。
   出参：
   - `instance_id`：被关闭的实例 ID。
   - `status`：通常为 `dismissed`。
 
-### 2.3 回执
-
-- `SendReceipt`：发送 IM 回执。
-  入参：
-  - `instance_id`：实例 ID。
-  - `event_type`：事件类型，`triggered` / `snoozed` / `dismissed`。
-  - `receipt_channel`：发送通道。
-  - `payload`：要发送的具体内容。
-  出参：
-  - `receipt_id`：回执记录 ID。
-  - `status`：发送状态。
-  - `retry_count`：当前重试次数。
 
 ## 3. 数据模型
-
-### 3.0 `schedule`、`timer_task`、`timer_instance` 的关系
-
-- `schedule`：日程模块中的业务记录，表示“用户想在什么时间做什么事”。
-- `timer_task`：定时任务模块中的调度记录，表示“系统根据这条日程，应该如何安排后续触发”。
-- `timer_instance`：某一次具体触发实例，表示“这一次提醒本身”。
-- 上游 `schedule` 的状态遵循 `active` / `completed` / `cancelled`，本模块只读取不维护。
-
-关系说明：
-
-- 一条 `schedule` 可以对应一条 `timer_task`。
-- 一条 `timer_task` 可以派生出一条或多条 `timer_instance`。
-- 一次性日程通常对应 1 个实例。
-- 周期日程通常会不断生成后续实例，但一般只维护最近一次或一个较小时间窗口内的实例。
-- 当用户修改“单次”时，通常是对某个 `timer_instance` 做例外处理，不直接改变整条 `timer_task` 的周期规则。
-- 当用户修改“本次及以后”时，需要以 `effective_from` 为边界，重算该时间点之后的任务和实例。
 
 ### 3.1 `timer_task`
 
@@ -194,34 +174,6 @@
 - `updated_at`：实例最后一次更新时间。
 - `deleted_at`：软删除时间，NULL 表示未删除。
 
-### 3.4 `reminder_config`
 
-- `mode`：提醒方式，当前固定为 `voice_plus_ring`，即语音 + 铃声。
-- `voice_template_id`：语音播报模板 ID。
-- `ringtone_id`：铃声资源 ID。
-- `is_snooze_allowed`：是否允许用户执行“推迟”操作。
-- `is_dismiss_allowed`：是否允许用户执行“关闭”操作。
-- `snooze_options`：可选的推迟时长集合，例如 5 分钟、10 分钟、30 分钟。
-- `receipt_channel`：回执发送通道，先预留，后续再确定是否接微信等 IM。
-- `created_at`：配置创建时间。
-- `updated_at`：配置最后一次更新时间。
-- `deleted_at`：软删除时间，NULL 表示未删除。
 
-### 3.5 `receipt_outbox`
 
-- `id`：回执消息记录唯一标识。
-- `instance_id`：关联的实例 ID，表示这条回执是由哪次提醒产生的。
-- `event_type`：业务事件类型，`triggered` 表示已触发，`snoozed` 表示已推迟，`dismissed` 表示已关闭。
-- `payload`：发送给 IM 通道的具体消息内容。
-- `status`：发送状态，例如 `pending`、`sent`、`failed`。
-- `retry_count`：当前已重试次数。
-- `next_retry_at`：下次重试发送时间。
-- `created_at`：记录创建时间。
-- `updated_at`：记录最后一次更新时间。
-- `deleted_at`：软删除时间，NULL 表示未删除。
-
-## 4. 待确认项
-
-- 定时任务最终是否完全落在开发板本地。
-- `PauseTimerTask` / `ResumeTimerTask` 的精确定义，是暂停调度还是仅静音提醒。
-- 工作日语义是否需要单独字段 `by_work_day`。
