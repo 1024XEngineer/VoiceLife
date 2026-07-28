@@ -1,426 +1,516 @@
-# 硬件语音助手的 IM 辅助通道架构草案
+# 一期 IM 数据模型与接口
 
-> 状态：一期架构草案。本文只描述“硬件语音主交互 + 企业微信单聊辅助”的主干，不以现有 live demo 或已有代码为依据。
+> 状态：设计草案。
+>
+> 一期使用企业微信智能机器人 WebSocket；保留通用 `ImPlatformAdapter`，后续可增加其他平台适配器。
+>
+> 本文只定义 IM、设备绑定和设备投递的数据模型与接口。日程、提醒和语音业务不属于 IM Gateway。
 
-## 一、需求与边界
+## 一、数据模型
 
-产品运行在硬件上，用户主要通过语音完成交互。IM 只是语音播报的辅助通道：提供可回看、可点击的卡片，不是第二个聊天入口。
+### 1. 设备 `devices`
 
-一期支持：
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 内部设备 ID，主键 |
+| `device_id` | string | ESP32 稳定设备标识，唯一 |
+| `device_name` | string | 设备展示名称 |
+| `hardware_model` | string | 硬件型号 |
+| `device_secret_hash` | string | 设备认证密钥哈希 |
+| `firmware_version` | string | 固件版本 |
+| `status` | enum | `unbound`、`pairing`、`bound`、`retired` |
+| `last_seen_at` | datetime? | 最近有效心跳时间 |
+| `created_at` / `updated_at` | datetime | 审计时间 |
 
-- 企业微信智能机器人 WebSocket；
-- 一个硬件用户绑定一个企业微信成员，使用一对一会话；
-- 业务事件主动发送模板卡片；
-- 卡片按钮触发“知道了”“10 分钟后提醒”等受控操作；
-- 用户查询今日日程时，语音播报摘要，同时发送日程卡片。
+约束：一个非 `retired` 设备最多存在一个有效绑定；在线状态由 `device_connections` 表示。
 
-一期不支持群聊、文本指令、多 IM 平台路由、聊天记录同步、已读状态和附件。
+### 2. 配对会话 `pairing_sessions`
 
-## 二、核心决策与风险
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 配对会话 ID，主键 |
+| `device_id` | string | 关联设备 |
+| `code_hash` | string | 一次性配对码哈希 |
+| `status` | enum | `pending`、`awaiting_confirmation`、`confirmed`、`cancelled`、`expired`、`rejected` |
+| `requested_external_user_id` | string? | 输入配对码的平台用户 ID |
+| `confirmation_task_id` | string? | 确认卡片的平台任务 ID |
+| `attempt_count` | integer | 校验失败次数 |
+| `expires_at` | datetime | 过期时间 |
+| `confirmed_at` | datetime? | 确认时间 |
+| `created_at` / `updated_at` | datetime | 审计时间 |
 
-| 决策 | 结论 |
-| --- | --- |
-| 主入口 | 硬件语音；IM 仅辅助。 |
-| 一期平台 | 企业微信智能机器人 WebSocket，便于公司内部用户联调。 |
-| 状态归属 | 业务服务是提醒、日程和操作结果的唯一事实来源。 |
-| 双通道关系 | 同一业务事件并行驱动语音和 IM；任何一侧失败不阻塞另一侧或业务状态。 |
-| 上行方式 | 业务操作只接受模板卡片按钮回调；设备绑定允许严格格式的“绑定 <配对码>”系统文本命令，不解析 IM 自由文本执行提醒或日程操作。 |
-| 使用Gateway接企业微信 | 实现简单，便于后续支持多种 IM 平台 |
+约束：
 
-一期支持：
+- 同一设备最多一个未过期的 `pending` 或 `awaiting_confirmation` 会话；
+- 只保存配对码哈希，不保存明文；
+- 确认者必须等于 `requested_external_user_id`；
+- 成功、取消、过期或超过尝试上限后不可复用。
 
-- 一台 ESP32-S3 设备绑定一个企业微信用户；
-- 一个企业微信用户绑定一台主要设备；
-- 企业微信智能机器人 WebSocket 长连接；
-- 文本消息接收；
-- 模板卡片回复；
-- 模板卡片按钮点击事件；
-- 卡片更新；
-- LED 显示配对码、绑定结果和连接状态；
-- 设备主动连接 Gateway；
-- 设备断线重连；
-- 绑定、解绑和重新绑定；
-- 卡片事件幂等处理。
+### 3. IM 绑定 `im_bindings`
 
-一期不支持
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 绑定 ID，主键 |
+| `user_id` | string | VoiceLife 内部用户 ID |
+| `device_id` | string | 关联设备 |
+| `platform` | string | 一期为 `wecom` |
+| `account_id` | string | Gateway 中的平台账号配置 ID |
+| `external_user_id` | string | 平台用户 ID；企微为 `userid` |
+| `external_conversation_id` | string? | 平台会话 ID |
+| `status` | enum | `active`、`unbound`、`revoked` |
+| `bound_at` | datetime | 绑定时间 |
+| `unbound_at` | datetime? | 解绑时间 |
+| `created_at` / `updated_at` | datetime | 审计时间 |
 
-- 扫码绑定；
-- 群聊中绑定设备；
-- 一个设备同时绑定多个用户；
-- 一个机器人多实例双活连接；
-- 让 ESP32 直接实现完整企业微信协议；
-- 通过企业微信自由文本直接执行高风险业务操作；
-- 用户仅凭设备编号远程抢占设备；
-- 未经确认自动替换已有绑定；
-- 把企业微信智能机器人 WebSocket 和企业微信自建应用 HTTP 回调混用。
+约束：
 
-## 三、模块架构
+- `(platform, account_id, external_user_id)` 最多一个 `active` 绑定；
+- `device_id` 最多一个 `active` 绑定；
+- 平台身份使用 `platform + account_id + external_user_id`，不能使用昵称；
+- 解绑保留历史记录。
 
-业务服务在修改业务状态时，可靠地记录一条业务事件。提交后，内部任务将同一事件分别投影到硬件语音通道和 IM 辅助模块。两个通道独立投递、重试和记录失败，任何一侧失败不阻塞另一侧或回滚业务状态；这个内部事件分发任务是业务服务的实现细节，不单独展开为架构模块。
+### 4. IM 卡片 `im_cards`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 卡片 ID，主键 |
+| `business_event_id` | string | 业务事件 ID，逻辑引用 |
+| `binding_id` | string | 关联 IM 绑定 |
+| `kind` | enum | `reminder_due`、`action_result`、`daily_schedule`、`binding_confirmation` |
+| `platform_task_id` | string | 平台任务 ID；企微为 `task_id` |
+| `content` | json | 平台无关卡片快照 |
+| `status` | enum | `pending`、`sending`、`accepted`、`failed`、`dead_letter` |
+| `external_message_id` | string? | 平台消息 ID |
+| `attempt_count` | integer | 投递次数 |
+| `next_attempt_at` | datetime? | 下次重试时间 |
+| `expires_at` | datetime? | 失效时间 |
+| `created_at` / `updated_at` | datetime | 审计时间 |
+
+约束：
+
+- `(business_event_id, binding_id, kind)` 唯一；
+- `platform_task_id` 在同一平台账号内唯一；
+- 投递重试必须复用同一个 `platform_task_id`；
+- `accepted` 只表示平台接受消息，不表示用户已读。
+
+### 5. 卡片操作 `im_card_actions`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 操作 ID，主键 |
+| `card_id` | string | 关联卡片 |
+| `action_type` | enum | `acknowledge`、`snooze_10_minutes`、`bind_confirm`、`bind_cancel` |
+| `action_key_hash` | string | 按钮 key 哈希 |
+| `actor_user_id` | string? | 允许操作的内部用户 ID |
+| `operation_id` | string | 调用业务服务的稳定幂等键 |
+| `callback_message_id` | string? | 平台事件 ID；企微为 `msgid` |
+| `external_user_id` | string? | 实际点击者的平台用户 ID |
+| `status` | enum | `pending`、`received`、`processing`、`executed`、`rejected`、`retryable_failed`、`expired` |
+| `received_at` / `processed_at` | datetime? | 处理时间 |
+| `expires_at` | datetime | 授权失效时间 |
+| `created_at` | datetime | 创建时间 |
+
+约束：
+
+- `action_key_hash` 唯一；
+- `(platform, account_id, callback_message_id)` 在平台账号范围内唯一；
+- 处理和恢复始终复用 `operation_id`；
+- 点击者必须与绑定用户一致；
+- 重复事件返回既有结果，不重复执行业务操作。
+
+### 6. 设备连接 `device_connections`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 连接记录 ID，主键 |
+| `device_id` | string | 关联设备 |
+| `connection_id` | string | Gateway 连接 ID |
+| `protocol_version` | string | 设备协议版本 |
+| `status` | enum | `connecting`、`online`、`offline`、`closed` |
+| `connected_at` | datetime | 建连时间 |
+| `last_seen_at` | datetime | 最近心跳时间 |
+| `closed_at` | datetime? | 关闭时间 |
+| `close_reason` | string? | 关闭原因 |
+
+约束：同一设备最多一个 `online` 连接；新连接认证成功后旧连接失效。
+
+### 7. 设备消息 `device_messages`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 内部记录 ID，主键 |
+| `message_id` | string | 设备协议幂等 ID，唯一 |
+| `device_id` | string | 关联设备 |
+| `direction` | enum | `to_device`、`from_device` |
+| `message_type` | string | 如 `binding.result`、`voice.play`、`state.sync` |
+| `payload` | json | 消息体 |
+| `status` | enum | `pending`、`sent`、`acked`、`failed`、`expired` |
+| `attempt_count` | integer | 投递次数 |
+| `next_attempt_at` | datetime? | 下次重试时间 |
+| `expires_at` | datetime? | 过期时间 |
+| `created_at` / `acked_at` | datetime? | 审计时间 |
+
+约束：设备按 `message_id` 去重；重复消息不重复执行但仍返回 ACK；`acked` 只表示设备收到消息。
+
+### 8. 关系
 
 ```text
-┌──────────────────────────────┐
-│        企业微信客户端         │
-│  用户消息 / 绑定卡片 / 按钮    │
-└──────────────┬───────────────┘
-               │
-               ▼
-┌──────────────────────────────────────┐
-│ 企业微信智能机器人                    │
-│ BotID + 长连接专用 Secret             │
-└──────────────┬───────────────────────┘
-               │ 单一 WSS 长连接
-               ▼
-┌──────────────────────────────────────┐
-│ IM Gateway                           │
-│                                      │
-│  WeCom Adapter                       │
-│  ├─ WebSocket 认证、心跳、重连        │
-│  ├─ 文本消息接收                      │
-│  ├─ 模板卡片发送                      │
-│  ├─ 卡片事件接收与更新                │
-│  └─ 企业微信消息去重                  │
-│                                      │
-│  Binding Service                      │
-│  ├─ 配对码生成与校验                  │
-│  ├─ 绑定确认                          │
-│  ├─ 解绑与换绑                        │
-│  └─ 用户 / 设备关系维护               │
-│                                      │
-│  Device Gateway                       │
-│  ├─ 设备认证                          │
-│  ├─ 设备连接管理                      │
-│  ├─ 绑定结果通知                      │
-│  ├─ 设备消息投递                      │
-│  └─ 离线队列与重连补偿                │
-│                                      │
-│  Persistence                          │
-│  ├─ devices                           │
-│  ├─ pairing_sessions                   │
-│  ├─ im_bindings                        │
-│  ├─ device_connections                 │
-│  ├─ device_messages                    │
-│  └─ binding_actions                    │
-└──────────────┬───────────────────────┘
-               │ 设备主动建立 TLS 连接
-               ▼
-┌──────────────────────────────────────┐
-│ ESP32-S3 小智机器人                  │
-│                                      │
-│  Device Client                        │
-│  ├─ 设备认证                          │
-│  ├─ 心跳                              │
-│  ├─ 重连                              │
-│  ├─ 绑定模式                          │
-│  └─ 消息收发                          │
-│                                      │
-│  UI / Voice                           │
-│  ├─ LED 显示配对码                    │
-│  ├─ LED 显示绑定结果                  │
-│  ├─ 按键                              │
-│  ├─ ASR / TTS                         │
-│  └─ 本地设备控制                      │
-└──────────────────────────────────────┘
-```
-
-当前企业微信 Demo 使用 Node.js SDK：
-
-```text
-@wecom/aibot-node-sdk
-```
-
-该 SDK 运行在 Node.js 环境，而ESP32-S3 固件通常使用 C/C++ 或 ESP-IDF，不能直接运行 Node.js 依赖，出于开发难度考虑，建议增加 Gateway 。
-
-## 四、平台无关的数据模型
-
-以下是一期必须落地的逻辑模型。它们可以实现为四张表，也可以在同一数据库中按服务边界拆分；本文固定字段语义与约束，不限制具体 ORM 或存储引擎。
-
-### 1. 设备主表 `devices`
-
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 内部设备 ID |
-| `device_id` | ESP32 的稳定设备标识，唯一 |
-| `device_name` | 展示名，例如“小智-1234” |
-| `hardware_model` | 例如 `esp32-s3-xiaozhi` |
-| `status` | `unregistered`、`online_unbound`、`pairing`、`online_bound`、`offline_bound`、`retired` |
-| `device_secret_hash` | 设备认证 Secret 的哈希 |
-| `firmware_version` | 固件版本 |
-| `last_seen_at` | 最近心跳时间 |
-| `created_at` | 创建时间 |
-| `updated_at` | 更新时间 |
-
-约束：
-
-- `device_id` 唯一；
-- `device_secret_hash` 不进入普通业务日志；
-- `retired` 设备不能重新使用原设备身份。
-
-### 2. 一次性配对会话 `pairing_sessions`
-
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 配对会话 ID |
-| `device_id` | 目标设备 |
-| `code_hash` | 配对码哈希 |
-| `status` | `pending`、`confirmed`、`expired`、`cancelled`、`rejected` |
-| `requested_external_user_id` | 发起绑定消息的企业微信 userid |
-| `confirmation_task_id` | 确认卡片的 task_id |
-| `attempt_count` | 校验失败次数 |
-| `expires_at` | 过期时间 |
-| `confirmed_at` | 确认时间 |
-| `created_at` | 创建时间 |
-| `updated_at` | 更新时间 |
-
-约束：
-
-- 同一设备最多一个未过期 `pending` 会话；
-- `code_hash` 不保存明文配对码；
-- `confirmation_task_id` 唯一；
-- 过期、取消、确认后不能再次使用；
-- 绑定确认必须由发起配对消息的同一 `userid` 完成。
-
-
-### 3. 用户绑定 `im_bindings`
-
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 内部绑定 ID |
-| `user_id` | VoiceLife 内部用户 ID |
-| `device_id` | ESP32 设备 ID |
-| `platform` | 一期固定为 `wecom` |
-| `external_user_id` | 企业微信 userid |
-| `external_conversation_id` | 企业微信单聊会话标识 |
-| `status` | `active`、`unbound`、`revoked` |
-| `bound_at` | 绑定时间 |
-| `unbound_at` | 解绑时间 |
-| `created_at` | 创建时间 |
-| `updated_at` | 最后更新时间 |
-
-约束：
-
-- `(platform, external_user_id)` 最多一个 active 绑定；
-- `device_id` 最多一个 active 主绑定；
-- 解绑采用状态变更，不物理删除历史记录；
-- 用户身份使用 `external_user_id`，不使用昵称。
-
-### 4. 设备连接状态与会话 `device_connections`
-
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 连接记录 ID |
-| `device_id` | 设备 ID |
-| `connection_id` | Gateway 生成的连接 ID |
-| `status` | `connecting`、`online`、`offline`、`closed` |
-| `client_version` | 设备协议版本 |
-| `remote_address_hash` | 可选，脱敏后的网络审计信息 |
-| `connected_at` | 建连时间 |
-| `last_seen_at` | 最近心跳时间 |
-| `closed_at` | 断开时间 |
-| `close_reason` | 断开原因 |
-
-同一设备只能有一个 active 设备连接。新连接建立时，旧连接应被关闭或标记为失效。
-
-### 5. Gateway 与设备之间的可靠消息收发记录 `device_messages`
-
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 内部消息 ID |
-| `device_id` | 目标设备 |
-| `direction` | `to_device`、`from_device` |
-| `message_id` | Gateway 生成的幂等消息 ID |
-| `message_type` | `binding.result`、`im.event`、`business.event` 等 |
-| `payload` | 规范化后的消息内容 |
-| `status` | `pending`、`sent`、`acked`、`failed`、`expired` |
-| `attempt_count` | 投递次数 |
-| `next_attempt_at` | 下次重试时间 |
-| `created_at` | 创建时间 |
-| `acked_at` | 确认时间 |
-
-约束：
-
-- `message_id` 唯一；
-- 设备重复收到同一个消息时不得重复执行；
-- 设备 ACK 不等于业务操作成功；
-- 业务执行结果仍由业务服务产生。
-
-### 6.绑定卡片按钮事件的收件与幂等记录 `binding_actions`
-
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 内部操作 ID |
-| `pairing_session_id` | 配对会话 |
-| `task_id` | 企业微信模板卡片 task_id |
-| `event_key` | `bind_confirm` 或 `bind_cancel` |
-| `external_user_id` | 点击者 userid |
-| `callback_msg_id` | 企业微信事件 msgid |
-| `status` | `received`、`processing`、`executed`、`rejected`、`expired` |
-| `operation_id` | 稳定业务幂等键 |
-| `created_at` | 回调时间 |
-| `processed_at` | 处理时间 |
-
-唯一约束建议：
-
-```text
-(platform, callback_msg_id)
-(task_id, event_key, external_user_id)
+devices 1 ── N pairing_sessions
+devices 1 ── N device_connections
+devices 1 ── N device_messages
+devices 1 ── N im_bindings（最多一个 active）
+im_bindings 1 ── N im_cards
+im_cards 1 ── N im_card_actions
+business_event 1 ── N im_cards（逻辑引用，由业务服务持有）
 ```
 
 ---
 
-## 五、接口契约
+## 二、内部模块接口
 
-企业微信智能机器人 WebSocket 适配器设计
+> 以下是进程内 Port，不是 HTTP API 或设备 WebSocket 协议。
 
-企业微信智能机器人 Adapter 只处理企业微信协议，不处理日程和提醒业务。
+### 1. 平台适配器
 
 ```ts
-interface WeComChannelAdapter {
+type ImPlatform = "wecom" | "feishu" | "dingtalk" | "wechat";
+
+interface ImPlatformAdapter {
+  readonly platform: ImPlatform;
+  readonly accountId: string;
+
   start(): Promise<void>;
+  stop(): Promise<void>;
+  sendText(input: SendTextInput): Promise<SendMessageResult>;
+  sendCard(input: SendCardInput): Promise<SendMessageResult>;
+  updateCard(input: UpdateCardInput): Promise<void>;
+  onMessage(handler: (message: NormalizedImMessage) => Promise<void>): void;
+  onCardEvent(handler: (event: NormalizedCardEvent) => Promise<void>): void;
+  getCapabilities(): ImCapabilities;
+}
 
-  replyText(input: {
-    requestId: string;
-    content: string;
-  }): Promise<void>;
-
-  replyTemplateCard(input: {
-    requestId: string;
-    taskId: string;
-    card: TemplateCard;
-  }): Promise<void>;
-
-  updateTemplateCard(input: {
-    requestId: string;
-    taskId: string;
-    card: TemplateCard;
-  }): Promise<void>;
-
-  onTextMessage(
-    handler: (message: NormalizedImMessage) => Promise<void>,
-  ): void;
-
-  onTemplateCardEvent(
-    handler: (event: NormalizedCardEvent) => Promise<void>,
-  ): void;
+interface ImCapabilities {
+  receiveText: boolean;
+  sendText: boolean;
+  sendCard: boolean;
+  updateCard: boolean;
+  cardActions: boolean;
+  proactiveMessage: boolean;
+  requiresPriorConversation: boolean;
+  requiresPublicCallbackUrl: boolean;
 }
 ```
 
-### 1. 规范化文本消息
+一期实现：
+
+```ts
+class WeComAdapter implements ImPlatformAdapter {
+  readonly platform = "wecom" as const;
+  // 使用企业微信智能机器人 WebSocket SDK 实现。
+}
+```
+
+### 2. 规范化事件
 
 ```ts
 interface NormalizedImMessage {
-  platform: "wecom";
+  platform: ImPlatform;
+  accountId: string;
   callbackMessageId: string;
-  requestId: string;
+  requestId?: string;
   externalUserId: string;
   externalConversationId?: string;
   conversationType: "single" | "group";
-  text: string;
+  messageType: "text" | "image" | "voice" | "file";
+  text?: string;
+  receivedAt: number;
+}
+
+interface NormalizedCardEvent {
+  platform: ImPlatform;
+  accountId: string;
+  callbackMessageId: string;
+  requestId?: string;
+  platformTaskId?: string;
+  actionKey: string;
+  externalUserId: string;
+  externalConversationId?: string;
   receivedAt: number;
 }
 ```
 
-一期绑定只接受：
-
-```text
-conversationType === "single"
-```
-
-群聊中的绑定消息直接返回提示，不进入绑定流程。
-
-### 2. 规范化卡片事件
+### 3. IM 投影服务
 
 ```ts
-interface NormalizedCardEvent {
-  platform: "wecom";
-  callbackMessageId: string;
-  requestId: string;
-  taskId: string;
-  eventKey: string;
-  externalUserId: string;
-  receivedAt: number;
+interface ImAssistService {
+  projectBusinessEvent(input: {
+    businessEventId: string;
+  }): Promise<{ cardId?: string; duplicate: boolean }>;
+
+  recordCardEvent(input: {
+    event: NormalizedCardEvent;
+  }): Promise<{ actionId: string; duplicate: boolean }>;
+
+  processCardAction(input: {
+    actionId: string;
+  }): Promise<{
+    outcome: "executed" | "duplicate" | "rejected" | "retryable_failed";
+    resultBusinessEventId?: string;
+  }>;
 }
 ```
 
-### 3. 企业微信时限
+### 4. 绑定服务
 
-- 普通消息可使用 `replyTemplateCard` 返回卡片；
-- 模板卡片点击事件必须在回调后 5 秒内调用 `updateTemplateCard`；
-- `updateTemplateCard` 必须使用事件对应的 `requestId/req_id`；
-- 更新卡片时 `task_id` 必须保持一致；
-- 企业微信机器人同一时间只允许一个有效 WSS 连接；
-- Gateway 需要维护心跳和自动重连。
+```ts
+interface BindingService {
+  startPairing(input: {
+    deviceId: string;
+    ttlSeconds?: number;
+  }): Promise<{
+    pairingId: string;
+    displayCode: string;
+    expiresAt: number;
+  }>;
 
-收到回调后不能先等待 LLM 或业务服务完成再响应卡片事件。正确顺序是：
+  requestBinding(input: {
+    platform: ImPlatform;
+    accountId: string;
+    pairingCode: string;
+    externalUserId: string;
+    externalConversationId?: string;
+    callbackMessageId: string;
+  }): Promise<{
+    status: "confirmation_required" | "invalid" | "expired" | "already_bound";
+    confirmationCardId?: string;
+  }>;
 
-```text
-接收事件
-  ↓
-校验 frame 字段、用户、卡片和状态
-  ↓
-可靠持久化
-  ↓
-5 秒内更新卡片或返回协议响应
-  ↓
-异步执行后续业务
+  confirmBinding(input: {
+    cardEvent: NormalizedCardEvent;
+  }): Promise<{
+    status: "bound" | "cancelled" | "duplicate" | "rejected" | "expired";
+    bindingId?: string;
+    deviceId?: string;
+  }>;
+
+  unbind(input: {
+    bindingId: string;
+    operationId: string;
+  }): Promise<{ status: "unbound" | "duplicate" | "rejected" }>;
+}
 ```
 
-## 六、主干流程
+### 5. 业务操作接口
 
-### 1. 绑定设备
+```ts
+interface BusinessActionService {
+  execute(input: {
+    operationId: string;
+    userId: string;
+    actionType: "acknowledge" | "snooze_10_minutes";
+    targetType: string;
+    targetId: string;
+  }): Promise<{
+    resultBusinessEventId: string;
+    duplicate: boolean;
+  }>;
+}
+```
 
-1. 用户通过物理按键进入配对模式，向 Gateway 发送绑定请求。
-2. Gateway 收到请求后，返回一次性配对码并使设备进入配对状态。
-3. 用户使用企业微信向机器人单聊发送严格格式的 `绑定 <配对码>` 系统命令；该命令只用于配对码校验，不执行提醒或日程业务。
-4. 配对码匹配成功后，发送绑定确认卡片“请确认将当前企业微信账号绑定到该设备”，提供“确认”“取消”按钮，等待用户确认。
-5. 用户确认后校验 `task_id`、`event_key`、点击者 `userid`、配对会话有效期和设备状态；通过后建立绑定关系并可靠通知硬件。
+重复调用必须复用 `operationId`，不得重复关闭或推迟提醒。
 
-### 2. 提醒到达
+---
 
-1. 业务服务完成提醒到期状态变更，并可靠记录“提醒到达”事件。
-2. 事件分发任务分别创建硬件语音投影和 IM 投影；两条投影独立投递、重试和记录状态。
-3. 硬件语音投影通过 Device Gateway 向绑定的 ESP32 投递播报消息；IM 投影创建提醒卡片和“知道了”“10 分钟后提醒”按钮，并通过 IM Gateway 异步投递到企业微信。
-4. 任一通道投递失败只重试对应通道，不回滚提醒状态，也不阻塞另一通道。
+## 三、企业微信 Adapter 映射
 
-### 3. 用户点击 IM 卡片
+| 企业微信字段 | 平台无关字段 |
+| --- | --- |
+| `body.msgid` | `callbackMessageId` |
+| `headers.req_id` | `requestId` |
+| `body.from.userid` | `externalUserId` |
+| `body.chatid` 或单聊 userid | `externalConversationId` |
+| `body.chattype` | `conversationType` |
+| `body.event.task_id` | `platformTaskId` |
+| `body.event.event_key` | `actionKey` |
 
-1. 企业微信通过 WebSocket 推送 `template_card_event`；适配器从 frame 中解析 `msgid`、`req_id`、`task_id`、`event_key` 和点击者 `userid`。
-2. IM 模块去重并校验卡片、按钮、绑定用户和有效期后，持久化该操作。
-3. 在事件回调后的 5 秒内，使用原始 `req_id` 和相同 `task_id` 更新卡片为“正在处理”或快速最终结果；业务操作不等待 LLM 或其他耗时任务。
-4. 后台以该按钮固定的操作 ID 调用业务服务执行确认或推迟；重复点击只得到同一个业务结果。
-5. 业务服务产生“操作完成”事件；IM 通道发送结果卡片，设备通道只接收状态同步，是否语音播报由事件来源和投递策略决定。
+一期约束：
 
-### 4. 用户查询今日日程
+- 绑定只接受单聊文本 `绑定 <配对码>`；
+- 提醒和日程业务不解析 IM 自由文本；
+- 卡片事件必须先去重、校验用户并持久化；
+- 更新卡片使用原事件 `req_id` 和相同 `task_id`；
+- 模板卡片事件需在 5 秒内更新；
+- 同一 BotID 同时只运行一个有效 WebSocket 连接。
 
-1. 用户通过硬件发起查询；业务服务按用户时区生成一次日程展示快照，并可靠记录查询结果事件。
-2. 硬件语音投影通过 Device Gateway 向发起查询的设备播报摘要；IM 投影使用同一份快照向绑定的企业微信用户发送完整日程卡片。
-3. 一期日程卡片只用于查看，不提供 IM 上行按钮。
+---
 
-### 5. 设备离线与恢复
+## 四、Gateway 与 ESP32 WebSocket 接口
 
-1. Device Gateway 心跳超时后将设备标记为 `offline`，待发送设备消息进入有界队列。
-2. IM 通道继续独立工作；业务事件不因设备离线而回滚。
-3. 设备重新连接并认证后，Gateway 按消息 TTL 和业务有效性筛选待投递消息。
-4. ESP32 以稳定 `message_id` 去重并返回设备 ACK；设备 ACK 只表示消息收到，不表示业务操作完成。
+### 1. 连接与公共结构
 
-以下内容是实现要求，不是新增业务模块：
+```text
+wss://<gateway-host>/v1/devices/connect
+```
 
-- 业务状态变更与业务事件必须一起成功或一起失败；常见实现是事务外盒（outbox）。
-- 卡片事件在 5 秒响应窗口内必须完成必要的持久化和卡片更新；耗时业务放到异步任务。
-- 平台响应、IM 事件持久化、业务操作完成和设备 ACK 是不同状态，不能统一称为 ACK。
-- 每个按钮有一次性、短期有效的服务端标识；处理时必须原子认领，并始终复用同一个业务操作 ID。
-- 业务事件、卡片和操作处理都必须支持重复投递；结果卡片只由“操作完成”业务事件生成一次。
-- 企业微信 `task_id` 在重试和卡片更新时保持不变，避免回调无法关联历史卡片。
+必须使用 TLS；建连后的第一条消息必须是 `device.authenticate`；未认证连接不能发送其他消息。
 
-## 八、一期验收与演进
+```ts
+interface DeviceFrame<T = unknown> {
+  version: "1.0";
+  type: string;
+  message_id: string;
+  device_id: string;
+  timestamp: number;
+  payload: T;
+}
+```
 
-上线前以真实企业微信智能机器人长连接完成闭环验证：
+`message_id` 是幂等键，重试时保持不变。
 
-1. 测试用户已先与智能机器人建立会话，能收到一对一模板卡片；
-2. “知道了”“10 分钟后提醒”按钮能收到 `template_card_event`，并在 5 秒内更新卡片；
-3. 重放同一事件、并发点击同一按钮、Gateway 在卡片更新后中断，均只产生一次业务变更；
-4. 业务状态提交后、语音和 IM 分发前中断，重启后仍会补发两个通道；
-5. 查询今日日程时，语音和 IM 使用同一份快照；
-6. 设备离线期间，IM 投递和设备消息队列互不阻塞，设备恢复后只补发仍有效的消息。
+### 2. 设备认证
 
-后续如果接入微信，作为独立渠道新增适配器、身份绑定和卡片/回调协议；不复用企业微信的凭证、回调格式或 `task_id` 规则。多渠道路由、群聊和文本命令都必须在新的架构变更中单独评估。
+ESP32 → Gateway：
+
+```json
+{
+  "version": "1.0",
+  "type": "device.authenticate",
+  "message_id": "auth-001",
+  "device_id": "xiaozhi-0001",
+  "timestamp": 1785216000,
+  "payload": {
+    "credential": "<device-credential>",
+    "firmware_version": "0.3.0"
+  }
+}
+```
+
+Gateway → ESP32：
+
+```json
+{
+  "version": "1.0",
+  "type": "device.authenticate.result",
+  "message_id": "auth-result-001",
+  "device_id": "xiaozhi-0001",
+  "timestamp": 1785216001,
+  "payload": {
+    "authenticated": true,
+    "connection_id": "conn-001",
+    "heartbeat_interval_seconds": 30
+  }
+}
+```
+
+### 3. 心跳
+
+ESP32 → Gateway：
+
+```json
+{
+  "version": "1.0",
+  "type": "device.heartbeat",
+  "message_id": "heartbeat-001",
+  "device_id": "xiaozhi-0001",
+  "timestamp": 1785216030,
+  "payload": { "uptime_seconds": 3600 }
+}
+```
+
+### 4. 开始配对
+
+ESP32 → Gateway：
+
+```json
+{
+  "version": "1.0",
+  "type": "pairing.start",
+  "message_id": "pair-start-001",
+  "device_id": "xiaozhi-0001",
+  "timestamp": 1785216040,
+  "payload": { "ttl_seconds": 300 }
+}
+```
+
+Gateway → ESP32：
+
+```json
+{
+  "version": "1.0",
+  "type": "pairing.started",
+  "message_id": "pair-started-001",
+  "device_id": "xiaozhi-0001",
+  "timestamp": 1785216041,
+  "payload": {
+    "pairing_id": "pair-001",
+    "display_code": "K7M2-9QPX",
+    "expires_at": 1785216341
+  }
+}
+```
+
+### 5. 绑定结果
+
+Gateway → ESP32：
+
+```json
+{
+  "version": "1.0",
+  "type": "binding.result",
+  "message_id": "binding-result-001",
+  "device_id": "xiaozhi-0001",
+  "timestamp": 1785216100,
+  "payload": {
+    "status": "bound",
+    "binding_id": "binding-001"
+  }
+}
+```
+
+### 6. 消息 ACK
+
+接收方 → 发送方：
+
+```json
+{
+  "version": "1.0",
+  "type": "message.ack",
+  "message_id": "ack-001",
+  "device_id": "xiaozhi-0001",
+  "timestamp": 1785216101,
+  "payload": {
+    "acked_message_id": "binding-result-001",
+    "status": "received"
+  }
+}
+```
+
+规则：重复消息不重复执行，但再次返回 ACK；ACK 只表示消息收到；超过 `expires_at` 的消息不再投递。
+
+### 7. 错误消息
+
+```json
+{
+  "version": "1.0",
+  "type": "error",
+  "message_id": "error-001",
+  "device_id": "xiaozhi-0001",
+  "timestamp": 1785216102,
+  "payload": {
+    "request_message_id": "pair-start-001",
+    "code": "PAIRING_ALREADY_ACTIVE",
+    "retryable": false,
+    "message": "设备已有有效配对会话"
+  }
+}
+```
+
+| 错误码 | 可重试 | 说明 |
+| --- | --- | --- |
+| `AUTH_FAILED` | 否 | 设备认证失败 |
+| `UNSUPPORTED_VERSION` | 否 | 协议版本不支持 |
+| `INVALID_MESSAGE` | 否 | 消息结构无效 |
+| `PAIRING_ALREADY_ACTIVE` | 否 | 已有有效配对会话 |
+| `PAIRING_EXPIRED` | 否 | 配对会话已过期 |
+| `DEVICE_RETIRED` | 否 | 设备已吊销 |
+| `TEMPORARILY_UNAVAILABLE` | 是 | Gateway 暂时不可用 |
