@@ -4,7 +4,7 @@
 
 ### 1.1 模块定位
 
-提醒模块运行在硬件设备本地，负责管理与执行所有提醒任务。它是一个完全独立的服务——提醒本身不持有任何外部引用（不存储 target_type、target_id），只关心"什么时间、说什么话"。外部模块（如日程）通过持有 `reminder_id` 来关联提醒，关联关系由 LLM 在调用侧维护。
+搜集用户提醒相关的需求结构化存储起来——交给下游完成具体的提醒动作（本模块也可以完成提醒相关的动作）。
 
 对外暴露一组函数接口，供上层 LLM Agent 通过 Function Calling 调用。提醒触发时，通过系统事件通知 TTS 模块进行语音播报。
 
@@ -114,6 +114,8 @@ LLM Agent
 
 ### 4.1 状态机
 
+> 提醒时遇到的一些状况，遇到什么情况，怎么办
+
 ```
 target_time 到点
   │
@@ -191,10 +193,10 @@ triggered（retry_count=1，TTS 播报）
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `target_description` | string | ✅ | 提醒事项的描述，用于生成 TTS 播报文本 |
-| `target_time` | string (ISO 8601) | ✅ | 提醒的目标时刻 |
-| `advance_minutes` | number \| null | ✅ | 弱提醒提前分钟数。**默认 `15`**，null 或 0 到点提醒 |
-| `strong_enabled` | boolean | ✅ | 是否启用强提醒。`true` 时 `max_retries` 和 `retry_interval_minutes` 生效 |
+| `target_description` | string | 是 | 提醒事项的描述，用于生成 TTS 播报文本 |
+| `target_time` | string (ISO 8601) | 是 | 提醒的目标时刻 |
+| `advance_minutes` | number \| null | 是 | 弱提醒提前分钟数。**默认 `15`**，null 或 0 到点提醒 |
+| `strong_enabled` | boolean | 是 | 是否启用强提醒。`true` 时 `max_retries` 和 `retry_interval_minutes` 生效 |
 | `max_retries` | number | 否 | 强提醒最大播放次数，默认 `3` |
 | `retry_interval_minutes` | number | 否 | 无回应时的重试间隔，默认 `10` |
 
@@ -472,9 +474,9 @@ triggered（retry_count=1，TTS 播报）
 
 ---
 
-## 7. 错误码
+## 7. 错误消息
 
-| 错误码 | 说明 | 触发场景 |
+| 错误 | 说明 | 触发场景 |
 |--------|------|----------|
 | `REMINDER_NOT_FOUND` | 提醒不存在 | update / remove / snooze / dismiss 时传入无效的 reminder_id |
 | `INVALID_ADVANCE_MINUTES` | 弱提醒参数不合法 | advance_minutes < 0 或超过上限（如 > 1440 分钟） |
