@@ -18,7 +18,9 @@ export function loadConfig(env = process.env, cwd = process.cwd()) {
     dataFile: path.resolve(cwd, env.DATA_FILE || "./data/state.json"),
     deviceApiKey: env.DEVICE_API_KEY || "change-me",
     demoMode: bool(env.DEMO_MODE, true),
+    runtime: env.IM_RUNTIME || "koishi-satori",
     wechat: {
+      account: env.WECHAT_ACCOUNT || "",
       token: env.WECHAT_TOKEN || "voicelife-demo-token",
       appId: env.WECHAT_APP_ID || "",
       appSecret: env.WECHAT_APP_SECRET || "",
@@ -33,6 +35,11 @@ export function loadConfig(env = process.env, cwd = process.cwd()) {
       detailUrl: env.WECHAT_TEMPLATE_DETAIL_URL || "",
       actionTokenSecret: env.WECHAT_ACTION_TOKEN_SECRET || env.DEVICE_API_KEY || "change-me",
       actionTokenTtlSeconds: number(env.WECHAT_ACTION_TOKEN_TTL_SECONDS, 7 * 24 * 60 * 60)
+    },
+    koishi: {
+      selfUrl: env.KOISHI_SELF_URL || env.BASE_URL || "http://localhost:8787",
+      satoriPath: env.SATORI_PATH || "/satori",
+      satoriToken: env.SATORI_TOKEN || env.DEVICE_API_KEY || "change-me"
     },
     xiaozhi: {
       endpoint: env.XIAOZHI_MCP_ENDPOINT || "",

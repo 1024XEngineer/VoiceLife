@@ -37,7 +37,7 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function formatChinaTime(value) {
+export function formatChinaTime(value) {
   return new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai",
     month: "long",
@@ -48,7 +48,7 @@ function formatChinaTime(value) {
   }).format(new Date(value));
 }
 
-function actionPage({ reminder, token }) {
+export function actionPage({ reminder, token }) {
   return `<!doctype html>
 <html lang="zh-CN">
 <meta charset="utf-8">
@@ -93,7 +93,7 @@ button{width:100%;min-height:54px;border:0;border-radius:14px;font:600 17px syst
 </html>`;
 }
 
-function resultPage({ title, detail }) {
+export function resultPage({ title, detail }) {
   return `<!doctype html>
 <html lang="zh-CN">
 <meta charset="utf-8">
@@ -110,7 +110,7 @@ h1{margin:0 0 10px;font-size:27px}p{margin:0;color:#68736d;font-size:16px}
 </html>`;
 }
 
-function errorPage(message) {
+export function errorPage(message) {
   return `<!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>无法处理提醒</title><style>

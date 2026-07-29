@@ -1,17 +1,51 @@
-import { createApp } from "./app.js";
+import { createRequire } from "node:module";
 import { loadConfig } from "./config.js";
 import { loadDotEnv } from "./env.js";
+import { createVoiceLifeKoishiPlugin } from "./koishi-plugin.js";
 import { VoiceLifeService } from "./service.js";
 import { JsonStore } from "./store.js";
 import { WechatApi } from "./wechat-api.js";
 import { XiaozhiMcpBridge } from "./xiaozhi-mcp.js";
+
+// Koishi 4.18 的顶层 ESM Loader 与 Node.js 26 存在互操作问题。
+// CommonJS 入口可正常提供完整 Context，并保持官方插件生命周期。
+const require = createRequire(import.meta.url);
+const { Context } = require("koishi");
+const { HTTP } = require("@koishijs/plugin-http");
+const { WechatOfficialBot } = require("@koishijs/plugin-adapter-wechat-official");
+const server = require("@koishijs/plugin-server").default;
+const satoriServer = require("@koishijs/plugin-server-satori").default;
 
 loadDotEnv();
 const config = loadConfig();
 const store = new JsonStore(config.dataFile);
 const wechatApi = new WechatApi(config.wechat);
 const service = new VoiceLifeService({ store, wechatApi });
-const app = createApp({ config, service, wechatApi });
+const app = new Context();
+app.plugin(HTTP);
+app.plugin(server, {
+  host: "0.0.0.0",
+  port: config.port,
+  selfUrl: config.koishi.selfUrl
+});
+app.plugin(createVoiceLifeKoishiPlugin({ config, service, wechatApi }));
+if (config.wechat.account) {
+  app.plugin(WechatOfficialBot, {
+    account: config.wechat.account,
+    appid: config.wechat.appId,
+    secret: config.wechat.appSecret,
+    token: config.wechat.token,
+    aesKey: config.wechat.aesKey,
+    customerService: false
+  });
+} else {
+  console.warn("[koishi] 缺少 WECHAT_ACCOUNT，先保留旧回调；收到微信消息后可从日志取得 gh_... 原始 ID");
+}
+app.plugin(satoriServer, {
+  path: config.koishi.satoriPath,
+  token: config.koishi.satoriToken,
+  webhooks: []
+});
 const bridge = new XiaozhiMcpBridge({
   endpoint: config.xiaozhi.endpoint,
   deviceId: config.xiaozhi.deviceId,
@@ -24,16 +58,17 @@ const scheduler = setInterval(() => {
 }, 1000);
 scheduler.unref();
 
-app.listen(config.port, () => {
-  console.info(`VoiceLife demo: ${config.baseUrl}`);
-  console.info(`WeChat callback: ${config.baseUrl}/wechat/callback`);
-  console.info(`WeChat outbound mode: ${config.wechat.outboundMode}`);
-  bridge.start();
-});
+await app.start();
+console.info(`VoiceLife demo: http://localhost:${config.port}`);
+console.info(`Koishi WeChat callback: ${config.koishi.selfUrl}/wechat-official`);
+console.info(`Satori endpoint: ${config.koishi.selfUrl}${config.koishi.satoriPath}/v1`);
+console.info(`WeChat outbound mode: ${config.wechat.outboundMode}`);
+bridge.start();
 
-function shutdown() {
+async function shutdown() {
   bridge.stop();
-  app.close(() => process.exit(0));
+  await app.stop();
+  process.exit(0);
 }
 
 process.on("SIGINT", shutdown);

@@ -1,19 +1,22 @@
-# VoiceLife 微信公众号 × 小智 Demo
+# VoiceLife Koishi + Satori × 微信公众号 × 小智 Demo
 
-这是一个零第三方依赖的最小验证服务，串起：
+这是一个使用 Koishi 作为 IM 运行时、Satori 作为统一协议出口的验证服务：
 
 ```text
+微信公众号 ─┐
+未来其他 IM ─┼→ Koishi 标准 Session → VoiceLife 业务插件
+             └→ Satori HTTP / WebSocket
+
 小智语音 → MCP 工具 → VoiceLife 提醒 → 微信公众号模板消息
                                           ↓
-                 点击消息 → H5“知道了/推迟 10 分钟”
-                                          ↓
-                                  VoiceLife 状态
+                 点击消息 → H5“知道了/推迟 10 分钟” → VoiceLife 状态
 ```
 
 已实现：
 
-- 微信公众平台服务器 URL 校验；
-- 明文模式和 AES 安全模式；
+- Koishi 官方微信公众号适配器和标准 Session；
+- Satori HTTP / WebSocket 协议服务；
+- 旧 `/wechat/callback` 到 Koishi `/wechat-official` 的迁移兼容入口；
 - 接收文字、语音、关注、扫码、取消关注事件；
 - 用短绑定码或带参数二维码绑定小智设备与公众号 OpenID；
 - 定时提醒和模板消息发送；
@@ -33,7 +36,13 @@
 - 微信公众平台测试号，或者认证服务号；
 - 真实微信联调时需要一个公网 HTTPS 地址。
 
-项目没有 npm 运行时依赖，不需要执行 `npm install`。
+安装依赖：
+
+```bash
+npm install
+```
+
+核心依赖为 Koishi 4.18、微信公众号适配器和 Satori Server。
 
 ## 2. 先跑本地闭环
 
@@ -109,11 +118,10 @@ XIAOZHI_MCP_DEBUG=true
 
 `ping` 是小智 MCP 接入点的 JSON-RPC 保活请求，服务必须返回空结果 `{}`。如果连接成功后周期性断开，先开启调试模式，检查最后一个方法和关闭码；桥接器会使用指数退避重连，避免固定频率持续冲击接入点。
 
-公众号收到消息时，服务端应出现：
+公众号消息进入 Koishi 后，服务端应出现：
 
 ```text
-[wechat] 收到消息回调：mode=plain bytes=...
-[wechat] 回调处理成功：replyBytes=...
+[I] voicelife wechat message user=...
 ```
 
 如果微信里没有回复且服务端完全没有这两行，问题位于公网回调 URL、Tunnel、端口转发或发送的公众号账号，不在消息处理逻辑。
@@ -166,6 +174,7 @@ XIAOZHI_MCP_DEBUG=true
 
 需要取得：
 
+- 公众号原始 ID（`gh_...`）；
 - AppID；
 - AppSecret；
 - 自己设置的 Token；
@@ -177,7 +186,7 @@ XIAOZHI_MCP_DEBUG=true
 微信服务器必须能访问本机的：
 
 ```text
-https://你的公网域名/wechat/callback
+https://你的公网域名/wechat-official
 ```
 
 可使用已有服务器反向代理，也可以在开发阶段使用可信的 HTTPS Tunnel。Tunnel 应转发到本机 `8787` 端口。
@@ -185,14 +194,15 @@ https://你的公网域名/wechat/callback
 设置：
 
 ```dotenv
-BASE_URL=https://你的公网域名
+KOISHI_SELF_URL=https://你的公网域名
+WECHAT_ACCOUNT=gh_公众号原始ID
 WECHAT_TOKEN=与公众平台服务器配置完全一致的Token
 ```
 
 公众平台“服务器配置”填写：
 
 ```text
-URL:      https://你的公网域名/wechat/callback
+URL:      https://你的公网域名/wechat-official
 Token:    与 WECHAT_TOKEN 相同
 消息加密: 初次验证可选明文；正式建议安全模式
 ```
@@ -203,6 +213,10 @@ Token:    与 WECHAT_TOKEN 相同
 WECHAT_APP_ID=wx...
 WECHAT_AES_KEY=公众平台的43字符EncodingAESKey
 ```
+
+`/wechat/callback` 暂时保留为迁移兼容入口。未配置 `WECHAT_ACCOUNT` 时，
+向旧入口发送一条公众号消息，服务端日志会打印公众号原始 ID；补入 `.env`
+并重启后，再把公众平台 URL 切到 `/wechat-official`。
 
 ### 4.3 配置真实模板发送
 
@@ -287,7 +301,8 @@ curl http://localhost:8787/api/state \
 | 方法 | 路径 | 作用 |
 |---|---|---|
 | GET | `/health` | 配置与健康状态 |
-| GET/POST | `/wechat/callback` | 微信校验、消息与事件回调 |
+| GET/POST | `/wechat-official` | Koishi 官方微信适配器回调 |
+| GET/POST | `/wechat/callback` | 迁移期旧回调兼容入口 |
 | GET/POST | `/reminders/action` | 带签名的提醒快捷操作页 |
 | GET | `/api/state` | 查看 Demo 全部状态 |
 | POST | `/api/binding-codes` | 创建设备绑定码，可选参数二维码 |
@@ -301,7 +316,51 @@ curl http://localhost:8787/api/state \
 Authorization: Bearer <DEVICE_API_KEY>
 ```
 
-## 7. Demo 边界
+## 7. Satori 接口
+
+Satori Server 默认监听：
+
+```text
+HTTP API:  /satori/v1/{resource}.{method}
+WebSocket: /satori/v1/events
+```
+
+配置：
+
+```dotenv
+SATORI_PATH=/satori
+SATORI_TOKEN=一段独立随机密钥
+```
+
+调用时携带：
+
+```text
+Authorization: Bearer <SATORI_TOKEN>
+Satori-Platform: wechat-official
+Satori-User-ID: <WECHAT_ACCOUNT>
+```
+
+例如读取当前 Bot：
+
+```bash
+curl -X POST http://localhost:8787/satori/v1/login.get \
+  -H 'Authorization: Bearer change-me' \
+  -H 'Satori-Platform: wechat-official' \
+  -H 'Satori-User-ID: gh_xxx' \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+## 8. Koishi 与微信原生能力边界
+
+- 普通文字、图片、语音、关注和取消关注由 Koishi 适配器标准化；
+- 模板消息、模板发送回执、参数二维码和 H5 动作仍是微信专属能力；
+- 当前官方适配器未把 `SCAN` 和 `TEMPLATESENDJOBFINISH` 转换成标准 Session，
+  Demo 在 Koishi 路由边界补充处理这两个明文事件；
+- 以后接入其他 IM 时，通用消息进入同一个 VoiceLife Koishi 插件，平台卡片、
+  模板和回执继续放在各 Adapter 能力扩展中。
+
+## 9. Demo 边界
 
 - JSON 文件存储仅用于 PoC，生产应换成数据库和事务 Outbox；
 - Mock 模式不代表微信真实送达；
@@ -309,9 +368,11 @@ Authorization: Bearer <DEVICE_API_KEY>
 - 当前语音回调只展示微信 `Recognition` 或 `MediaId`，尚未连接正式 ASR；
 - 当前是 H5 操作页，不是微信小程序；快捷隧道也没有生产可用性保证；
 - “知道了”是明确的业务操作，不等同于微信消息的系统已读状态；
+- 微信官方适配器的 `SCAN`/模板回执补充处理当前只验证了明文模式；
+- Satori 统一的是通用聊天模型，不会自动抹平各平台的模板、卡片和主动消息限制；
 - MCP 接入点 URL、微信 AppSecret、AESKey 都是密钥，不要提交到 Git。
 
-## 8. 相关资料
+## 10. 相关资料
 
 - [小智 ESP32 官方仓库](https://github.com/78/xiaozhi-esp32)
 - [小智 WebSocket 协议](https://github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md)
@@ -319,3 +380,6 @@ Authorization: Bearer <DEVICE_API_KEY>
 - [微信公众号接收普通消息](https://developers.weixin.qq.com/doc/offiaccount/Message_Management/Receiving_standard_messages.html)
 - [微信公众号接收事件](https://developers.weixin.qq.com/doc/offiaccount/Message_Management/Receiving_event_pushes.html)
 - [微信公众号模板消息](https://developers.weixin.qq.com/doc/offiaccount/Message_Management/Template_Message_Interface.html)
+- [Koishi 微信公众号适配器](https://koishi.chat/zh-CN/plugins/adapter/wechat-official)
+- [Koishi Satori Server](https://koishi.chat/zh-CN/plugins/develop/server-satori)
+- [Satori Protocol](https://satori.chat/en-US/protocol/)

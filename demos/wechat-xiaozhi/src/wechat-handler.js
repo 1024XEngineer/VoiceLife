@@ -12,6 +12,13 @@ import {
   textReplyXml,
   xmlField
 } from "./xml.js";
+import {
+  deactivateWechatBinding,
+  handleWechatBindingEvent,
+  handleWechatText,
+  handleWechatVoice,
+  helpText
+} from "./wechat-domain.js";
 
 function responseText(message, content) {
   return textReplyXml({
@@ -21,61 +28,21 @@ function responseText(message, content) {
   });
 }
 
-function bindingCodeFromEvent(message) {
-  if (!message.EventKey) return "";
-  return message.EventKey.replace(/^qrscene_/i, "");
-}
-
-function helpText() {
-  return [
-    "VoiceLife 微信 Demo",
-    "发送“绑定 ABC123”绑定小智设备",
-    "发送“关闭”关闭最近提醒",
-    "发送“推迟10分钟”推迟最近提醒"
-  ].join("\n");
-}
-
 export async function handleWechatMessage(message, service) {
   const type = message.MsgType.toLowerCase();
   if (type === "text") {
-    const content = message.Content.trim();
-    const bindMatch = content.match(/^绑定\s*([A-Z0-9]{4,32})$/i);
-    if (bindMatch) {
-      try {
-        const binding = service.bindOpenId(bindMatch[1], message.FromUserName);
-        return responseText(message, `绑定成功：${binding.deviceId}`);
-      } catch (error) {
-        return responseText(message, `绑定失败：${error.message}`);
-      }
-    }
-    if (/^(关闭|完成|取消提醒)$/i.test(content)) {
-      try {
-        const reminder = service.dismiss({ openId: message.FromUserName });
-        return responseText(message, `已关闭：${reminder.title}`);
-      } catch (error) {
-        return responseText(message, error.message);
-      }
-    }
-    const snoozeMatch = content.match(/^推迟\s*(\d{1,4})\s*分钟$/);
-    if (snoozeMatch) {
-      try {
-        const reminder = service.snooze({
-          openId: message.FromUserName,
-          minutes: Number(snoozeMatch[1])
-        });
-        return responseText(message, `已推迟到 ${reminder.dueAt}`);
-      } catch (error) {
-        return responseText(message, `推迟失败：${error.message}`);
-      }
-    }
-    return responseText(message, helpText());
+    return responseText(message, handleWechatText({
+      content: message.Content,
+      openId: message.FromUserName,
+      service
+    }));
   }
 
   if (type === "voice") {
-    if (message.Recognition) {
-      return responseText(message, `已收到语音识别文本：${message.Recognition}\nDemo 下一步可把它交给日程解析器。`);
-    }
-    return responseText(message, `已收到语音，MediaId=${message.MediaId || "未知"}；当前 Demo 未配置语音转写。`);
+    return responseText(message, handleWechatVoice({
+      recognition: message.Recognition,
+      mediaId: message.MediaId
+    }));
   }
 
   if (type === "event") {
@@ -89,22 +56,14 @@ export async function handleWechatMessage(message, service) {
       return "";
     }
     if (event === "subscribe" || event === "scan") {
-      const code = bindingCodeFromEvent(message);
-      if (!code) return responseText(message, helpText());
-      try {
-        const binding = service.bindOpenId(code, message.FromUserName);
-        return responseText(message, `扫码绑定成功：${binding.deviceId}`);
-      } catch (error) {
-        return responseText(message, `扫码绑定失败：${error.message}`);
-      }
+      return responseText(message, handleWechatBindingEvent({
+        eventKey: message.EventKey,
+        openId: message.FromUserName,
+        service
+      }));
     }
     if (event === "unsubscribe") {
-      const binding = service.findDeviceByOpenId(message.FromUserName);
-      if (binding) {
-        service.store.mutate((state) => {
-          state.bindings[binding.deviceId].active = false;
-        });
-      }
+      deactivateWechatBinding({ openId: message.FromUserName, service });
       return "";
     }
   }
