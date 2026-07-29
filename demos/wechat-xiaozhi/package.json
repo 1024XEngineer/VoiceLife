@@ -1,0 +1,15 @@
+{
+  "name": "voicelife-wechat-xiaozhi-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "VoiceLife 微信公众号 + 小智 MCP 最小闭环 Demo",
+  "scripts": {
+    "start": "node src/server.js",
+    "demo": "node scripts/demo-flow.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
