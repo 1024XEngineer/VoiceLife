@@ -1,0 +1,333 @@
+{
+  "schema_version": 1,
+  "mode": "architecture",
+  "template_type": "architecture",
+  "style": 1,
+  "composition": {
+    "profile": "showcase",
+    "max_bends_per_edge": 3,
+    "max_total_bends": 12,
+    "max_bridged_crossings": 2,
+    "min_segment_length": 8
+  },
+  "width": 1400,
+  "height": 960,
+  "title": "VoiceLife IM 模块架构",
+  "subtitle": "Koishi 统一连接与会话；Satori 提供可选协议出口；平台专属能力保留原生扩展",
+  "containers": [
+    {
+      "id": "business-layer",
+      "x": 40,
+      "y": 105,
+      "width": 1320,
+      "height": 115,
+      "label": "01 业务与设备入口"
+    },
+    {
+      "id": "domain-layer",
+      "x": 40,
+      "y": 260,
+      "width": 1320,
+      "height": 155,
+      "label": "02 IM 领域层（稳定边界）"
+    },
+    {
+      "id": "gateway-layer",
+      "x": 40,
+      "y": 455,
+      "width": 1320,
+      "height": 160,
+      "label": "03 通用 IM Gateway"
+    },
+    {
+      "id": "channel-layer",
+      "x": 40,
+      "y": 665,
+      "width": 1320,
+      "height": 185,
+      "label": "04 平台通道与原生能力"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "xiaozhi",
+      "kind": "user_avatar",
+      "x": 90,
+      "y": 140,
+      "width": 220,
+      "height": 58,
+      "label": "小智 / 业务事件",
+      "sublabel": "提醒 · 绑定 · 用户操作",
+      "fill": "#eff6ff",
+      "stroke": "#2563eb",
+      "flat": true
+    },
+    {
+      "id": "core",
+      "kind": "double_rect",
+      "x": 550,
+      "y": 140,
+      "width": 300,
+      "height": 58,
+      "label": "VoiceLife Core",
+      "sublabel": "Reminder · Binding · Action",
+      "fill": "#f0fdf4",
+      "stroke": "#16a34a",
+      "flat": true
+    },
+    {
+      "id": "other-services",
+      "kind": "rect",
+      "x": 1090,
+      "y": 140,
+      "width": 220,
+      "height": 58,
+      "label": "其他业务服务",
+      "sublabel": "统一调用 IM Port",
+      "fill": "#ffffff",
+      "stroke": "#94a3b8",
+      "flat": true
+    },
+    {
+      "id": "im-module",
+      "kind": "double_rect",
+      "x": 420,
+      "y": 305,
+      "width": 560,
+      "height": 72,
+      "label": "IM Gateway Port + Application Services",
+      "sublabel": "Identity · Binding · Delivery · Receipt · Action · Outbox",
+      "fill": "#f0fdf4",
+      "stroke": "#16a34a",
+      "flat": true
+    },
+    {
+      "id": "im-store",
+      "kind": "cylinder",
+      "x": 1130,
+      "y": 301,
+      "width": 180,
+      "height": 80,
+      "label": "IM Data",
+      "sublabel": "幂等 · 状态 · 审计",
+      "fill": "#f0fdfa",
+      "stroke": "#0f766e"
+    },
+    {
+      "id": "koishi",
+      "kind": "double_rect",
+      "x": 500,
+      "y": 500,
+      "width": 400,
+      "height": 74,
+      "label": "Koishi Gateway",
+      "sublabel": "Runtime + VoiceLife Plugin + Domain Mapper",
+      "fill": "#faf5ff",
+      "stroke": "#9333ea",
+      "flat": true
+    },
+    {
+      "id": "satori",
+      "kind": "rect",
+      "x": 970,
+      "y": 500,
+      "width": 220,
+      "height": 74,
+      "label": "Satori Server",
+      "sublabel": "可选 HTTP / WS 出口",
+      "fill": "#faf5ff",
+      "stroke": "#9333ea",
+      "flat": true
+    },
+    {
+      "id": "satori-clients",
+      "kind": "rect",
+      "x": 1230,
+      "y": 500,
+      "width": 105,
+      "height": 74,
+      "label": "外部客户端",
+      "sublabel": "Bot / Service",
+      "fill": "#ffffff",
+      "stroke": "#94a3b8",
+      "flat": true
+    },
+    {
+      "id": "wechat",
+      "kind": "rect",
+      "x": 70,
+      "y": 715,
+      "width": 280,
+      "height": 92,
+      "label": "微信公众号 Channel",
+      "sublabel": "Koishi Adapter + 模板 / QR / 回执 / H5",
+      "fill": "#fff7ed",
+      "stroke": "#ea580c",
+      "flat": true
+    },
+    {
+      "id": "wecom",
+      "kind": "rect",
+      "x": 390,
+      "y": 715,
+      "width": 280,
+      "height": 92,
+      "label": "企业微信 Channel",
+      "sublabel": "Koishi / 原生 WSS + 卡片能力",
+      "fill": "#fff7ed",
+      "stroke": "#ea580c",
+      "flat": true
+    },
+    {
+      "id": "feishu",
+      "kind": "rect",
+      "x": 730,
+      "y": 715,
+      "width": 280,
+      "height": 92,
+      "label": "飞书 Channel",
+      "sublabel": "Koishi / SDK + 互动卡片能力",
+      "fill": "#fff7ed",
+      "stroke": "#ea580c",
+      "flat": true
+    },
+    {
+      "id": "dingtalk",
+      "kind": "rect",
+      "x": 1050,
+      "y": 715,
+      "width": 280,
+      "height": 92,
+      "label": "钉钉 Channel",
+      "sublabel": "Koishi Stream + 互动卡片能力",
+      "fill": "#fff7ed",
+      "stroke": "#ea580c",
+      "flat": true
+    }
+  ],
+  "arrows": [
+    {
+      "id": "event-to-core",
+      "source": "xiaozhi",
+      "target": "core",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "control",
+      "label": "业务事件"
+    },
+    {
+      "id": "service-to-core",
+      "source": "other-services",
+      "target": "core",
+      "source_port": "left",
+      "target_port": "right",
+      "flow": "read",
+      "label": "调用"
+    },
+    {
+      "id": "core-to-im",
+      "source": "core",
+      "target": "im-module",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "control",
+      "label": "只依赖领域 Port"
+    },
+    {
+      "id": "im-to-store",
+      "source": "im-module",
+      "target": "im-store",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "write"
+    },
+    {
+      "id": "im-to-koishi",
+      "source": "im-module",
+      "target": "koishi",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "feedback",
+      "label": "统一事件 / 发送意图（双向）"
+    },
+    {
+      "id": "koishi-to-satori",
+      "source": "koishi",
+      "target": "satori",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "data",
+      "dashed": true
+    },
+    {
+      "id": "satori-to-clients",
+      "source": "satori",
+      "target": "satori-clients",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "data",
+      "dashed": true
+    },
+    {
+      "id": "koishi-to-wechat",
+      "source": "koishi",
+      "target": "wechat",
+      "source_port": "left",
+      "target_port": "right",
+      "flow": "read"
+    },
+    {
+      "id": "koishi-to-wecom",
+      "source": "koishi",
+      "target": "wecom",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "read"
+    },
+    {
+      "id": "koishi-to-feishu",
+      "source": "koishi",
+      "target": "feishu",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "read"
+    },
+    {
+      "id": "koishi-to-dingtalk",
+      "source": "koishi",
+      "target": "dingtalk",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "read"
+    }
+  ],
+  "legend_orientation": "horizontal",
+  "legend_x": 48,
+  "legend_y": 875,
+  "legend_locked": true,
+  "legend": [
+    {
+      "flow": "control",
+      "label": "业务命令"
+    },
+    {
+      "flow": "feedback",
+      "label": "领域事件 / 发送意图"
+    },
+    {
+      "flow": "write",
+      "label": "持久化"
+    },
+    {
+      "flow": "data",
+      "label": "可选协议出口"
+    },
+    {
+      "flow": "read",
+      "label": "平台双向收发"
+    }
+  ],
+  "footer": "MVP：微信公众号已接通 · 后续：企业微信 / 飞书 / 钉钉按 Channel 扩展",
+  "footer_x": 48,
+  "footer_y": 930
+}
