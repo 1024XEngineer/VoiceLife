@@ -201,3 +201,126 @@ list_tools——获取全部已注册的工具
 
 
 
+## 5. MCP Tool
+
+### 1. 日程管理相关Tool
+
+#### 1）创建日程
+
+**工具描述：**创建一条日程。如果时间冲突且未忽略冲突，则仅返回冲突列表且不创建。
+
+**入参：**
+
+- **event(String，必填）:** 事件标题
+- **start_time(String， 可选）：**事件开始时间
+- **end_time(datetime，可选）：**事件结束时间
+- **location（datetime，可选）：**事件地点
+
+- **notes（String，可选）：**事件备注
+- **ignore_conflict(Boolean, 可选，默认 False）：**是否忽略与其他日程的时间冲突
+
+**出参：**
+
+**message（String）：**对此次创建的一些说明，比如：”created successful“。
+
+**schedule（Schedule 实体对象）：**创建完成后的 Schedule 实体对象。
+
+**conflicts（Schedule[]）：**创建成功时此字段为空，日程冲突时为冲突日程实体。
+
+**error（String）：**无错误时为空。和 message 字段的区别是，error 字段更加突出，message 字段适合常规信息。
+
+#### 2）查询日程
+
+**工具描述：**根据日程 ID、关键词或时间范围查询日程。多个查询条件之间为 AND 关系，结果按开始时间升序排列。不传任何参数默认查询所有日程。
+
+**入参：**
+
+- **schedule_id(Number，可选）：**日程 ID，提供后按 ID 精确查询
+- **keyword(String，可选）：**事件标题关键词，支持模糊匹配
+- **start_from(datetime，可选）：**开始时间范围的下限
+- **start_to(datetime，可选）：**开始时间范围的上限
+- **status(String，可选，默认 active）：**状态筛选；all 表示全部状态，cancelled 表示已取消日程
+- **limit(Number，可选，默认 10，最大 50）：**返回条数
+- **offset(Number，可选，默认 0）：**分页偏移量
+
+**出参：**
+
+**schedules（Schedule[]）：**符合条件的日程列表。
+
+**total（Number）：**符合条件的日程总数，不受 limit 和 offset 影响。
+
+**error（String）：**调用失败时的错误信息；无错误时为空。
+
+#### 3）修改日程
+
+**工具描述：**修改一条已有日程。调用前应先查询并确定目标日程的 schedule_id。如果时间冲突且未忽略冲突，则仅返回冲突列表且不修改任何字段。
+
+**入参：**
+
+- **schedule_id(Number，必填）：**要修改的日程 ID
+- **event(String，可选）：**新的事件标题
+- **start_time(datetime，可选）：**新的开始时间
+- **end_time(datetime，可选）：**新的结束时间
+- **location(String，可选）：**新的地点
+- **notes(String，可选）：**新的备注
+- **reminder_id(Number，可选）：**关联的提醒 ID
+- **ignore_conflict(Boolean，可选，默认 False）：**是否忽略时间冲突
+
+**出参：**
+
+**message（String）：**对此次修改的一些说明。
+
+**schedule（Schedule 实体对象）：**修改后的完整日程；未修改时为空。
+
+**conflicts（Schedule[]）：**修改后发生冲突的日程；无冲突时为空数组。
+
+**error（String）：**调用失败时的错误信息；无错误时为空。
+
+#### 4）删除日程
+
+**工具描述：**删除/取消一条日程。调用前应先查询并确定目标日程的 schedule_id。该接口不会自动删除关联提醒。
+
+**入参：**
+
+- **schedule_id(Number，必填）：**要删除的日程 ID
+
+**出参：**
+
+**schedule_id（Number）：**被删除的日程 ID。
+
+**deleted（Boolean）：**是否成功删除日程。
+
+**error（String）：**调用失败时的错误信息；无错误时为空。
+
+#### 5）查询最近日程操作
+
+**工具描述：**查询当前用户最近 10 条日程操作。如需撤销，应先调用该接口找到用户想撤销的操作记录。
+
+**入参：**
+
+无。
+
+**出参：**
+
+**operations（Operation[]）：**可撤销的操作记录（包含操作和日程状态），按操作时间倒序排列。
+
+**error（String）：**调用失败时的错误信息；无错误时为空。
+
+#### 6）撤销日程操作
+
+**工具描述：**撤销当前用户最近 15 分钟内指定的一条日程创建、修改或删除操作。
+
+**入参：**
+
+- **operation_id(Number，必填）：**要撤销的操作记录 ID，由 query_recent_operations 接口获取
+
+**出参：**
+
+**undone（Boolean）：**是否成功撤销。
+
+**operation（Operation 实体对象）：**被撤销的操作信息（撤销前的状态）；无操作时为空。
+
+**schedule（Schedule 实体对象）：**撤销完成后的日程（撤销后的状态）；撤销创建操作时为空。
+
+**error（String）：**操作不存在、已过期或调用失败时的错误信息；无错误时为空。
+
