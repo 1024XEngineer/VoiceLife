@@ -45,7 +45,7 @@
   </defs>
   <rect data-graph-role="background" width="1400.0" height="960.0" fill="#ffffff"/>
   <text x="700.0" y="56" text-anchor="middle" class="title">VoiceLife IM 模块架构</text>
-  <text x="700.0" y="82" text-anchor="middle" class="subtitle">Koishi 统一连接与会话；Satori 提供可选协议出口；平台专属能力保留原生扩展</text>
+  <text x="700.0" y="82" text-anchor="middle" class="subtitle">所有平台统一通过 Koishi Adapter；VoiceLife Capability Plugin 补齐平台专属能力</text>
   <g id="business-layer" data-graph-role="container" data-container-id="business-layer" data-semantic-role="boundary" data-graph-bounds="40,105,1360,220">
   <rect data-graph-role="container" x="40.0" y="105.0" width="1320.0" height="115.0" rx="16.0" fill="none" stroke="#dbe5f1" stroke-width="1.4" stroke-dasharray="6 5"/>
   <text x="58.0" y="129.0" class="section">01 业务与设备入口</text>
@@ -63,8 +63,8 @@
   </g>
   <g id="channel-layer" data-graph-role="container" data-container-id="channel-layer" data-semantic-role="boundary" data-graph-bounds="40,665,1360,850">
   <rect data-graph-role="container" x="40.0" y="665.0" width="1320.0" height="185.0" rx="16.0" fill="none" stroke="#dbe5f1" stroke-width="1.4" stroke-dasharray="6 5"/>
-  <text x="58.0" y="689.0" class="section">04 平台通道与原生能力</text>
-    <rect id="channel-layer-header" data-graph-role="reserved" data-reserved-kind="container-header" x="48" y="671" width="166.76" height="30" fill="none" stroke="none"/>
+  <text x="58.0" y="689.0" class="section">04 KOISHI ADAPTERS 与平台能力扩展</text>
+    <rect id="channel-layer-header" data-graph-role="reserved" data-reserved-kind="container-header" x="48" y="671" width="248.92" height="30" fill="none" stroke="none"/>
   </g>
   <path id="event-to-core" data-graph-role="edge" data-edge-id="event-to-core" data-source="xiaozhi" data-target="core" data-edge-kind="flow" data-topic-id="" data-flow="control" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 310,169 L 550,169" fill="none" stroke="#7c3aed" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowA)"/>
   <path id="service-to-core" data-graph-role="edge" data-edge-id="service-to-core" data-source="other-services" data-target="core" data-edge-kind="flow" data-topic-id="" data-flow="read" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 1090,169 L 850,169" fill="none" stroke="#2563eb" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowC)"/>
@@ -101,7 +101,7 @@
   <g id="node-im-module" data-graph-role="node" data-node-id="im-module" data-semantic-role="double_rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="420,305,980,377">
   <rect x="420.0" y="305.0" width="560.0" height="72.0" rx="10.0" fill="#f0fdf4" stroke="#16a34a" stroke-width="2.0"/>
   <rect x="426.0" y="311.0" width="548.0" height="60.0" rx="7.0" fill="none" stroke="#16a34a" stroke-width="1.2" opacity="0.65"/>
-  <text x="700.0" y="341.0" text-anchor="middle" class="node-title" font-size="18.0">IM Gateway Port + Application Services</text>
+  <text x="700.0" y="341.0" text-anchor="middle" class="node-title" font-size="18.0">ImGatewayPort + Application Services</text>
   <text x="700.0" y="363.0" text-anchor="middle" class="node-sub">Identity · Binding · Delivery · Receipt · Action · Outbox</text>
   </g>
   <g id="node-im-store" data-graph-role="node" data-node-id="im-store" data-semantic-role="cylinder" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="1130,301,1310,381">
@@ -117,7 +117,7 @@
   <rect x="500.0" y="500.0" width="400.0" height="74.0" rx="10.0" fill="#faf5ff" stroke="#9333ea" stroke-width="2.0"/>
   <rect x="506.0" y="506.0" width="388.0" height="62.0" rx="7.0" fill="none" stroke="#9333ea" stroke-width="1.2" opacity="0.65"/>
   <text x="700.0" y="537.0" text-anchor="middle" class="node-title" font-size="18.0">Koishi Gateway</text>
-  <text x="700.0" y="559.0" text-anchor="middle" class="node-sub">Runtime + VoiceLife Plugin + Domain Mapper</text>
+  <text x="700.0" y="559.0" text-anchor="middle" class="node-sub">Runtime + VoiceLife Koishi Plugin + Domain Mapper</text>
   </g>
   <g id="node-satori" data-graph-role="node" data-node-id="satori" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="970,500,1190,574">
   <rect x="970.0" y="500.0" width="220.0" height="74.0" rx="10.0" fill="#faf5ff" stroke="#9333ea" stroke-width="1.8"/>
@@ -131,23 +131,23 @@
   </g>
   <g id="node-wechat" data-graph-role="node" data-node-id="wechat" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="70,715,350,807">
   <rect x="70.0" y="715.0" width="280.0" height="92.0" rx="10.0" fill="#fff7ed" stroke="#ea580c" stroke-width="1.8"/>
-  <text x="210.0" y="761.0" text-anchor="middle" class="node-title" font-size="18.0">微信公众号 Channel</text>
-  <text x="210.0" y="783.0" text-anchor="middle" class="node-sub">Koishi Adapter + 模板 / QR / 回执 / H5</text>
+  <text x="210.0" y="761.0" text-anchor="middle" class="node-title" font-size="18.0">Koishi WeChat Adapter</text>
+  <text x="210.0" y="783.0" text-anchor="middle" class="node-sub">官方 Adapter + WeChat Capability</text>
   </g>
   <g id="node-wecom" data-graph-role="node" data-node-id="wecom" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="390,715,670,807">
   <rect x="390.0" y="715.0" width="280.0" height="92.0" rx="10.0" fill="#fff7ed" stroke="#ea580c" stroke-width="1.8"/>
-  <text x="530.0" y="761.0" text-anchor="middle" class="node-title" font-size="18.0">企业微信 Channel</text>
-  <text x="530.0" y="783.0" text-anchor="middle" class="node-sub">Koishi / 原生 WSS + 卡片能力</text>
+  <text x="530.0" y="761.0" text-anchor="middle" class="node-title" font-size="18.0">Koishi WeCom Adapter</text>
+  <text x="530.0" y="783.0" text-anchor="middle" class="node-sub">官方自建应用 / 自定义 AI Bot WSS</text>
   </g>
   <g id="node-feishu" data-graph-role="node" data-node-id="feishu" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="730,715,1010,807">
   <rect x="730.0" y="715.0" width="280.0" height="92.0" rx="10.0" fill="#fff7ed" stroke="#ea580c" stroke-width="1.8"/>
-  <text x="870.0" y="761.0" text-anchor="middle" class="node-title" font-size="18.0">飞书 Channel</text>
-  <text x="870.0" y="783.0" text-anchor="middle" class="node-sub">Koishi / SDK + 互动卡片能力</text>
+  <text x="870.0" y="761.0" text-anchor="middle" class="node-title" font-size="18.0">Koishi Lark Adapter</text>
+  <text x="870.0" y="783.0" text-anchor="middle" class="node-sub">官方 Adapter + Lark Capability</text>
   </g>
   <g id="node-dingtalk" data-graph-role="node" data-node-id="dingtalk" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="1050,715,1330,807">
   <rect x="1050.0" y="715.0" width="280.0" height="92.0" rx="10.0" fill="#fff7ed" stroke="#ea580c" stroke-width="1.8"/>
-  <text x="1190.0" y="761.0" text-anchor="middle" class="node-title" font-size="18.0">钉钉 Channel</text>
-  <text x="1190.0" y="783.0" text-anchor="middle" class="node-sub">Koishi Stream + 互动卡片能力</text>
+  <text x="1190.0" y="761.0" text-anchor="middle" class="node-title" font-size="18.0">Koishi DingTalk Adapter</text>
+  <text x="1190.0" y="783.0" text-anchor="middle" class="node-sub">官方 HTTP/WS + DingTalk Capability</text>
   </g>
   <g id="event-to-core-label" data-graph-role="label" data-owner="event-to-core" data-graph-bounds="399,138,461,158">
   <rect x="399.0" y="138.0" width="62.0" height="20" rx="6" fill="#ffffff" opacity="0.94"/>
@@ -178,7 +178,7 @@
     <line data-graph-role="decoration" x1="587.6" y1="875.0" x2="617.6" y2="875.0" stroke="#2563eb" stroke-width="2.4" marker-end="url(#arrowC)"/>
     <text data-graph-role="decoration" x="627.6" y="879.0" class="legend">平台双向收发</text>
   </g>
-  <g id="footer" data-graph-role="reserved" data-graph-bounds="48,918,356,934">
-  <text x="48.0" y="930.0" class="footnote">MVP：微信公众号已接通 · 后续：企业微信 / 飞书 / 钉钉按 Channel 扩展</text>
+  <g id="footer" data-graph-role="reserved" data-graph-bounds="48,918,580,934">
+  <text x="48.0" y="930.0" class="footnote">MVP：Koishi WeChat Adapter 已接通 · 后续平台均按 Koishi Adapter + Capability Plugin 扩展</text>
   </g>
 </svg>

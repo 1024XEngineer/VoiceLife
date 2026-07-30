@@ -13,7 +13,7 @@
   "width": 1400,
   "height": 960,
   "title": "VoiceLife IM 模块架构",
-  "subtitle": "Koishi 统一连接与会话；Satori 提供可选协议出口；平台专属能力保留原生扩展",
+  "subtitle": "所有平台统一通过 Koishi Adapter；VoiceLife Capability Plugin 补齐平台专属能力",
   "containers": [
     {
       "id": "business-layer",
@@ -45,7 +45,7 @@
       "y": 665,
       "width": 1320,
       "height": 185,
-      "label": "04 平台通道与原生能力"
+      "label": "04 Koishi Adapters 与平台能力扩展"
     }
   ],
   "nodes": [
@@ -95,7 +95,7 @@
       "y": 305,
       "width": 560,
       "height": 72,
-      "label": "IM Gateway Port + Application Services",
+      "label": "ImGatewayPort + Application Services",
       "sublabel": "Identity · Binding · Delivery · Receipt · Action · Outbox",
       "fill": "#f0fdf4",
       "stroke": "#16a34a",
@@ -121,7 +121,7 @@
       "width": 400,
       "height": 74,
       "label": "Koishi Gateway",
-      "sublabel": "Runtime + VoiceLife Plugin + Domain Mapper",
+      "sublabel": "Runtime + VoiceLife Koishi Plugin + Domain Mapper",
       "fill": "#faf5ff",
       "stroke": "#9333ea",
       "flat": true
@@ -159,8 +159,8 @@
       "y": 715,
       "width": 280,
       "height": 92,
-      "label": "微信公众号 Channel",
-      "sublabel": "Koishi Adapter + 模板 / QR / 回执 / H5",
+      "label": "Koishi WeChat Adapter",
+      "sublabel": "官方 Adapter + WeChat Capability",
       "fill": "#fff7ed",
       "stroke": "#ea580c",
       "flat": true
@@ -172,8 +172,8 @@
       "y": 715,
       "width": 280,
       "height": 92,
-      "label": "企业微信 Channel",
-      "sublabel": "Koishi / 原生 WSS + 卡片能力",
+      "label": "Koishi WeCom Adapter",
+      "sublabel": "官方自建应用 / 自定义 AI Bot WSS",
       "fill": "#fff7ed",
       "stroke": "#ea580c",
       "flat": true
@@ -185,8 +185,8 @@
       "y": 715,
       "width": 280,
       "height": 92,
-      "label": "飞书 Channel",
-      "sublabel": "Koishi / SDK + 互动卡片能力",
+      "label": "Koishi Lark Adapter",
+      "sublabel": "官方 Adapter + Lark Capability",
       "fill": "#fff7ed",
       "stroke": "#ea580c",
       "flat": true
@@ -198,8 +198,8 @@
       "y": 715,
       "width": 280,
       "height": 92,
-      "label": "钉钉 Channel",
-      "sublabel": "Koishi Stream + 互动卡片能力",
+      "label": "Koishi DingTalk Adapter",
+      "sublabel": "官方 HTTP/WS + DingTalk Capability",
       "fill": "#fff7ed",
       "stroke": "#ea580c",
       "flat": true
@@ -327,7 +327,7 @@
       "label": "平台双向收发"
     }
   ],
-  "footer": "MVP：微信公众号已接通 · 后续：企业微信 / 飞书 / 钉钉按 Channel 扩展",
+  "footer": "MVP：Koishi WeChat Adapter 已接通 · 后续平台均按 Koishi Adapter + Capability Plugin 扩展",
   "footer_x": 48,
   "footer_y": 930
 }
