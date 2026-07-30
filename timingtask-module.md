@@ -43,7 +43,7 @@
 
 ## 3. 核心业务流程
 
-系统的运作主要分为三大流程：
+系统的运作主要分为四类流程：
 
 ### 流程一：上游日程接入与任务注册
 
@@ -66,6 +66,13 @@
 3. 用户如果取消日程，本模块会停止后续实例生成，并将对应任务标记为终止态。
 4. 整个过程中，`schedule` 作为上游业务意图，`timer_task` 作为调度规则载体，`timer_instance` 作为最终执行结果，三者职责分离、单向影响。
 
+### 流程四：用户查询与时间范围展开
+
+1. 当用户查询“明天有什么安排”“下个月 5 号有哪些安排”时，系统应优先基于 `timer_task` 与 `recurrence_rule` 在目标时间范围内展开 occurrence。
+2. 查询过程中需合并该范围内已存在的 `timer_instance`，用于叠加单次修改、推迟、跳过、关闭等例外状态。
+3. 若某个未来 occurrence 尚未进入实例生成窗口，只要其规则可被展开，仍应在查询结果中返回。
+4. 因此，用户查询结果不以实例是否已预生成作为前提；`timer_instance` 主要服务于执行态承接与例外持久化。
+
 
 ---
 
@@ -84,7 +91,10 @@
 - 一条 `timer_task` 可以派生出一条或多条 `timer_instance`。
 - 一次性日程通常对应 1 个实例。
 - 周期日程通常会不断生成后续实例，但一般只维护最近一次或一个较小时间窗口内的实例。
+- `timer_instance` 主要承接执行态和例外态；未来时间范围查询不应仅依赖实例表。
+- 用户查询某个未来时间范围时，应基于 `timer_task` + `recurrence_rule` 展开 occurrence，并叠加实例级例外。
 - 当用户修改“单次”时，通常是对某个 `timer_instance` 做例外处理，不直接改变整条 `timer_task` 的周期规则。
+- `single` 场景下允许仅通过 `target_occurrence_at` 定位某个 future occurrence；若对应实例尚不存在，服务端可按需创建一个 `timer_instance` 用于承载本次例外。
 - 当用户修改“本次及以后”时，需要以 `effective_from` 为边界，重算该时间点之后的任务和实例。
 - `change_scope` 语义如下：
   - `single`：仅作用于某一个 `timer_instance`。
@@ -93,6 +103,7 @@
 - `UpdateTimerTask` 的 `all` 场景会保留历史终态实例，仅重算当前未终态实例与后续规则。
 - `CancelTimerTask` 的 `all` 场景会将 `timer_task` 置为 `terminated`，并将所有未终态实例标记为 `skipped`，历史终态实例保留。
 - `GenerateInstances` 需保证实例级幂等，同一 `task_id` 下相同 `planned_at` 不应重复生成。
+- `GenerateInstances` 的目标是为提醒执行、近端调度和例外操作物化实例，不作为未来日程查询正确性的唯一保障。
 - `RegisterTimerTask` 对同一 `schedule_id` 采用幂等 upsert，已存在时更新原 `timer_task`，不重复创建。
 - `taskId` 为主标识，`schedule_id` 为辅助来源字段；若传入则必须与 `taskId` 绑定记录一致，未传则按 `taskId` 处理。
 - 所有时间字段统一使用 ISO 8601 表示，实例生成与重算优先采用 `recurrence_rule.timezone`，未配置时默认 `+08:00`。
@@ -107,6 +118,7 @@
 | UpdateTimerTask | PATCH | `/v1/timer-tasks/{taskId}` | 更新定时任务 |
 | CancelTimerTask | DELETE | `/v1/timer-tasks/{taskId}` | 取消定时任务 |
 | GenerateInstances | POST | `/v1/timer-tasks/{taskId}/instances` | 基于任务生成实例 |
+| ListCalendarView | GET | `/v1/calendar-view` | 按时间范围查询用户可见安排 |
 | ListInstances | GET | `/v1/timer-instances` | 查询实例列表 |
 | SnoozeInstance | POST | `/v1/timer-instances/{instanceId}/snooze` | 推迟实例 |
 | DismissInstance | POST | `/v1/timer-instances/{instanceId}/dismiss` | 关闭实例 |
@@ -200,7 +212,54 @@
 | task_id | string | 唯一 | 所属任务 ID |
 | instances | array<object> | 可空 | 生成出的实例列表 |
 
-#### 2.2.5 ListInstances
+#### 2.2.5 ListCalendarView
+
+**请求参数**
+
+| 参数名 | 类型 | 位置 | 必填 | 约束 | 说明 |
+| --- | --- | --- | --- | --- | --- |
+| range_start | datetime | query | 是 | ISO 8601 | 查询开始时间 |
+| range_end | datetime | query | 是 | ISO 8601，且必须大于 `range_start` | 查询结束时间 |
+| schedule_id | string | query | 否 | 可为空 | 指定日程 ID；为空时表示查询用户可访问范围内的全部日程 |
+| status | string | query | 否 | 枚举 | 查询结果状态过滤，通常为用户视图状态 |
+| page | integer | query | 否 | 大于 0 | 页码，从 1 开始 |
+| page_size | integer | query | 否 | 1 到 100 | 每页数量 |
+| sort_by | string | query | 否 | 枚举 | 排序字段，默认 `planned_start_at` |
+| sort_order | string | query | 否 | 枚举 | 排序方向，`asc` / `desc` |
+
+约束：
+- `ListCalendarView` 面向用户查询语义，服务端应基于 `timer_task` 与 `recurrence_rule` 展开目标时间范围内的 occurrence。
+- 服务端应合并该时间范围内已存在的 `timer_instance`，用于叠加 `modified` / `snoozed` / `skipped` / `dismissed` 等例外状态。
+- 即使目标 occurrence 尚未进入实例生成窗口，只要符合规则且未被取消，仍应返回到结果中。
+
+**返回参数**
+
+| 参数名 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| occurrences | array<object> | 可空 | 用户在该时间范围内可见的安排列表 |
+| total | integer | 大于等于 0 | 安排总数 |
+| page | integer | 大于 0 | 当前页码 |
+| page_size | integer | 大于 0 | 每页数量 |
+| has_more | boolean | 非空 | 是否还有下一页 |
+
+`occurrences` 建议最小字段：
+
+| 字段名 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| occurrence_id | string | 非空 | 本次 occurrence 的稳定标识，可由 `task_id + planned_start_at` 派生 |
+| schedule_id | string | 非空 | 所属日程 ID |
+| task_id | string | 非空 | 所属定时任务 ID |
+| instance_id | string | 可空 | 若该 occurrence 已物化为实例，则返回实例 ID |
+| title | string | 可空 | 用户可见标题，由上游业务提供 |
+| planned_start_at | datetime | 非空 | 按规则展开得到的原始开始时间 |
+| planned_end_at | datetime | 可空 | 按规则展开得到的原始结束时间 |
+| actual_trigger_at | datetime | 可空 | 若被推迟或改单次触发时间，则返回实际触发时间 |
+| status | string | 枚举 | 用户视图下的当前有效状态 |
+| is_recurring | boolean | 非空 | 是否来自周期规则 |
+| is_exception | boolean | 非空 | 是否叠加了单次例外 |
+| override_fields | object | 可空 | 单次覆盖字段 |
+
+#### 2.2.6 ListInstances
 
 **请求参数**
 
@@ -219,6 +278,8 @@
 约束：
 - 至少提供 `task_id`、`schedule_id` 或 `range_start` + `range_end` 中的一组条件，否则服务端返回参数错误。
 - `page` 和 `page_size` 仅在查询结果分页时生效。
+- `ListInstances` 仅返回已物化的 `timer_instance`；若某个未来 occurrence 尚未生成实例，则不会出现在结果中。
+- `ListInstances` 适用于提醒执行态、实例操作态和审计场景，不承担未来时间范围内完整日程查询职责。
 
 **返回参数**
 
@@ -230,7 +291,7 @@
 | page_size | integer | 大于 0 | 每页数量 |
 | has_more | boolean | 非空 | 是否还有下一页 |
 
-#### 2.2.6 SnoozeInstance
+#### 2.2.7 SnoozeInstance
 
 **请求参数**
 
@@ -248,7 +309,7 @@
 | trigger_at | datetime | 可空 | 推迟后的实际触发时间 |
 | delay_count | integer | 大于等于 0 | 推迟后的累计次数 |
 
-#### 2.2.7 DismissInstance
+#### 2.2.8 DismissInstance
 
 **请求参数**
 
@@ -307,6 +368,9 @@
     - `modified -> triggered / dismissed / skipped`
     - `triggered -> dismissed / snoozed`
   - `dismissed`、`skipped` 为终态，不再回退。
+- `calendar_view_occurrence.status`
+  - 查询态候选值可复用实例语义，如 `pending`、`modified`、`snoozed`、`dismissed`、`skipped`。
+  - 若某个 occurrence 尚未物化实例，但按规则在查询范围内有效，可返回 `pending` 作为默认可见状态。
 
 
 ## 3. 数据模型
@@ -356,3 +420,30 @@
 | created_at | datetime | 非空 | 创建时间 |
 | updated_at | datetime | 非空 | 最后一次更新时间 |
 | deleted_at | datetime | 可空 | 软删除时间，`NULL` 表示未删除 |
+
+补充说明：
+- `timer_instance` 是持久化对象，可由近端调度窗口预生成，也可在单次修改、单次取消等需要承载例外时按需生成。
+- 同一 `task_id` 下，`planned_at` 应具备唯一性约束，用于保障实例幂等与例外合并。
+
+### 3.4 `calendar_view_occurrence`
+
+> 非持久化查询视图对象，由服务端在查询时基于规则展开并叠加实例例外后返回。
+
+| 字段名 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| occurrence_id | string | 非空 | occurrence 稳定标识，建议由 `task_id + planned_start_at` 派生 |
+| task_id | string | 非空 | 所属定时任务 ID |
+| schedule_id | string | 非空 | 所属日程 ID |
+| instance_id | string | 可空 | 已物化实例的 ID；未物化时为空 |
+| planned_start_at | datetime | 非空 | 基于规则展开得到的原始开始时间 |
+| planned_end_at | datetime | 可空 | 基于规则展开得到的原始结束时间 |
+| actual_trigger_at | datetime | 可空 | 叠加推迟或单次修改后的实际触发时间 |
+| status | string | 枚举，非空 | 用户查询视图中的当前有效状态 |
+| is_recurring | boolean | 非空 | 是否来自周期规则 |
+| is_exception | boolean | 非空 | 是否叠加了实例级例外 |
+| override_fields | object | 可空 | 该次 occurrence 的覆盖字段 |
+| payload | object | 可空 | 上游展示所需字段快照，如标题、备注、地点等 |
+
+约束：
+- `calendar_view_occurrence` 仅作为查询返回结构，不参与提醒调度，不要求落库。
+- 查询实现应先展开规则，再合并实例级例外；若两者冲突，以实例级例外为准。
