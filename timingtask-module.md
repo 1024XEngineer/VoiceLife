@@ -263,7 +263,36 @@
 | instance_id | string | 唯一 | 被关闭的实例 ID |
 | status | string | 枚举 | 通常为 `dismissed` |
 
-### 2.3 状态约定
+
+### 2.3 下游契约
+
+
+
+适用对象：
+- `IM` 模块
+- `语音(输出)`模块
+
+建议最小契约字段：
+
+| 字段名 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| event_type | string | 是 | 事件类型，如 `instance_triggered` / `instance_snoozed` / `instance_dismissed` / `task_paused` / `task_resumed` / `task_cancelled` / `task_updated` |
+| event_id | string | 是 | 事件唯一标识，用于幂等 |
+| task_id | string | 是 | 定时任务 ID |
+| instance_id | string | 否 | 实例 ID；非实例级事件可为空 |
+| schedule_id | string | 是 | 关联日程 ID |
+| planned_at | datetime | 否 | 原始计划触发时间 |
+| trigger_at | datetime | 是 | 实际触发时间或生效时间 |
+| status | string | 是 | 事件对应状态 |
+| payload | object | 否 | 下游展示或播报所需内容 |
+| occurred_at | datetime | 是 | 事件产生时间 |
+
+约束：
+- 同一 `event_id` 在下游必须幂等处理。
+- 定时任务模块不定义 IM 的落库、展示和重试实现。
+
+
+### 2.4 状态约定
 
 - `timer_task.status`
   - `active`：运行中。
