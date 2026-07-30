@@ -299,13 +299,13 @@
   - `paused`：暂停中，恢复前不生成新实例。
   - `terminated`：终止态，不再生成新实例。
 - `timer_instance.status`
-  - 非终态：`pending`、`snoozed`、`modified`。
-  - 终态：`triggered`、`dismissed`、`skipped`。
+  - 非终态：`pending`、`snoozed`、`modified`、`triggered`。
+  - 终态：`dismissed`、`skipped`。
   - 允许流转：
     - `pending -> snoozed / modified / triggered / dismissed / skipped`
     - `snoozed -> snoozed / modified / triggered / dismissed / skipped`
     - `modified -> triggered / dismissed / skipped`
-    - `triggered -> dismissed`
+    - `triggered -> dismissed / snoozed`
   - `dismissed`、`skipped` 为终态，不再回退。
 
 
