@@ -324,3 +324,218 @@ list_tools——获取全部已注册的工具
 
 **error（String）：**操作不存在、已过期或调用失败时的错误信息；无错误时为空。
 
+
+
+
+
+
+## 提醒 Tools
+
+说明：
+
+- 对于绑定 `schedule` 的提醒，本节 Tool 对应的是 `timingtask` 的 reminder rule / reminder trigger 能力。
+- “修改提醒策略”属于配置态，内部会编排 `UpsertReminderRules` / `DeleteReminderRule`。
+- “推迟 / 关闭强提醒”属于运行态，内部会编排 `ListReminderTriggers`、`SnoozeReminderTrigger`、`DismissReminderTrigger`。
+
+### update_schedule_reminders
+
+为一条已有日程创建、修改或关闭提醒策略。该 Tool 面向“再提前 30 分钟提醒我一次”“取消 10 分钟前提醒”“把强提醒改成可推迟 2 次”这类需求。
+
+内部编排：
+
+1. 先根据 `schedule_id` 查询并确认对应的 `task_id`。
+2. 根据请求内容将提醒配置转换成一组 `reminder_rule`。
+3. 内部调用 `UpsertReminderRules(task_id, rules)` 创建或更新提醒规则。
+4. 若请求要求关闭某条已有提醒规则，则内部调用 `DeleteReminderRule(reminder_rule_id)`。
+
+**参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| schedule_id | number | 是 | 要修改提醒策略的日程 ID |
+| change_scope | string \| null | 否 | 生效范围：`future` / `all`；默认 `all` |
+| weak_reminders | array<object> \| null | 否 | 弱提醒策略列表；空数组可表示移除全部弱提醒 |
+| strong_reminder | object \| null | 否 | 强提醒策略；传 null 可表示关闭强提醒 |
+
+`weak_reminders` 子项建议字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| reminder_rule_id | string \| null | 否 | 更新已有弱提醒规则时传入 |
+| offset_minutes | number | 是 | 相对事件开始时间的偏移分钟，通常为负数 |
+| enabled | boolean | 否 | 是否启用，默认 true |
+| channel | string \| null | 否 | 提醒渠道，如 `voice` / `im` |
+
+`strong_reminder` 建议字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| reminder_rule_id | string \| null | 否 | 更新已有强提醒规则时传入 |
+| enabled | boolean | 否 | 是否启用，默认 true |
+| can_snooze | boolean | 否 | 是否允许推迟，默认 true |
+| max_snooze_count | number \| null | 否 | 最大推迟次数 |
+| snooze_interval_minutes | number \| null | 否 | 默认推迟间隔 |
+| channel | string \| null | 否 | 提醒渠道 |
+
+**返回：**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| updated | boolean | 是否成功更新提醒策略 |
+| schedule_id | number | 日程 ID |
+| task_id | string \| null | 对应定时任务 ID |
+| reminder_rules | ReminderRule[] | 更新后的提醒规则列表 |
+| error | Error \| null | 调用失败时的错误信息；无错误时为 null |
+
+```json
+{
+  "updated": true,
+  "schedule_id": 12,
+  "task_id": "task_12",
+  "reminder_rules": [
+    {
+      "reminder_rule_id": "rr_weak_10",
+      "reminder_type": "weak",
+      "offset_minutes": -10,
+      "enabled": true,
+      "channel": "voice",
+      "status": "active"
+    },
+    {
+      "reminder_rule_id": "rr_weak_30",
+      "reminder_type": "weak",
+      "offset_minutes": -30,
+      "enabled": true,
+      "channel": "im",
+      "status": "active"
+    },
+    {
+      "reminder_rule_id": "rr_strong_0",
+      "reminder_type": "strong",
+      "offset_minutes": 0,
+      "enabled": true,
+      "can_snooze": true,
+      "max_snooze_count": 2,
+      "snooze_interval_minutes": 10,
+      "status": "active"
+    }
+  ],
+  "error": null
+}
+```
+
+### query_active_strong_reminders
+
+查询当前可响应的强提醒触发。适用于用户说“把刚才那个提醒推迟十分钟”“关闭这个提醒”之前，让 Agent 先定位当前正在触发或刚触发的强提醒。
+
+内部编排：
+
+1. 内部调用 `ListReminderTriggers`，筛选 `reminder_type=strong`。
+2. 默认优先返回 `status in (triggered, snoozed)` 的提醒触发。
+3. 若传入 `schedule_id` 或 `keyword`，则进一步结合 `schedule` 主数据做筛选。
+
+**参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| schedule_id | number \| null | 否 | 指定某条日程对应的强提醒 |
+| keyword | string \| null | 否 | 事件标题关键词 |
+| limit | number \| null | 否 | 返回条数，默认 10，最大 20 |
+| offset | number \| null | 否 | 分页偏移量，默认 0 |
+
+**返回：**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| strong_reminders | StrongReminderTrigger[] | 当前可响应的强提醒触发列表 |
+| total | number | 符合条件的提醒总数 |
+| error | Error \| null | 调用失败时的错误信息；无错误时为 null |
+
+```json
+{
+  "strong_reminders": [
+    {
+      "reminder_trigger_id": "rtg_9001",
+      "schedule_id": 12,
+      "task_id": "task_12",
+      "instance_id": "ins_20260729_1000",
+      "event": "项目周会",
+      "planned_trigger_at": "2026-07-29T10:00:00+08:00",
+      "actual_trigger_at": "2026-07-29T10:00:00+08:00",
+      "status": "triggered",
+      "can_snooze": true,
+      "snooze_count": 0
+    }
+  ],
+  "total": 1,
+  "error": null
+}
+```
+
+### snooze_strong_reminder
+
+推迟当前正在触发的强提醒。仅适用于 `timingtask` 中 `reminder_type=strong` 且允许 snooze 的触发。
+
+内部编排：
+
+1. 若调用方未直接提供 `reminder_trigger_id`，可先调用 `query_active_strong_reminders` 定位目标提醒。
+2. 内部调用 `SnoozeReminderTrigger(reminder_trigger_id, delay_minutes)`。
+
+**参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| reminder_trigger_id | string | 是 | 要推迟的强提醒触发 ID |
+| snooze_minutes | number \| null | 否 | 推迟分钟数；未指定时使用该触发对应规则的默认推迟间隔 |
+
+**返回：**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| reminder_trigger_id | string | 被推迟的强提醒触发 ID |
+| snoozed | boolean | 是否成功推迟 |
+| next_trigger_at | datetime \| null | 推迟后的下一次触发时间 |
+| snooze_count | number | 推迟后的累计次数 |
+| error | Error \| null | 调用失败时的错误信息；无错误时为 null |
+
+```json
+{
+  "reminder_trigger_id": "rtg_9001",
+  "snoozed": true,
+  "next_trigger_at": "2026-07-29T10:20:00+08:00",
+  "snooze_count": 1,
+  "error": null
+}
+```
+
+### dismiss_strong_reminder
+
+关闭当前正在触发或已 snooze 的强提醒，关闭后不再继续播放。
+
+内部编排：
+
+1. 若调用方未直接提供 `reminder_trigger_id`，可先调用 `query_active_strong_reminders` 定位目标提醒。
+2. 内部调用 `DismissReminderTrigger(reminder_trigger_id)`。
+
+**参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| reminder_trigger_id | string | 是 | 要关闭的强提醒触发 ID |
+
+**返回：**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| reminder_trigger_id | string | 被关闭的强提醒触发 ID |
+| dismissed | boolean | 是否成功关闭 |
+| error | Error \| null | 调用失败时的错误信息；无错误时为 null |
+
+```json
+{
+  "reminder_trigger_id": "rtg_9001",
+  "dismissed": true,
+  "error": null
+}
+```
+
