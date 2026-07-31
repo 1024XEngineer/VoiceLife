@@ -2,7 +2,7 @@
 
 > 文档状态：模块架构草案
 > 
-> 基线日期：2026-07-30
+> 基线日期：2026-07-31
 > 
 > 适用范围：VoiceLife MVP（小智设备 + XRobot + 本地日程/调度 + VoiceLife IM Gateway + 微信）
 
@@ -30,11 +30,13 @@ VoiceLife MVP 整体架构覆盖：
 - 断网/离线运行场景
 - Satori 对外协议
 
+**运行假设**：MVP 运行期间设备保持联网，XRobot/灵矽语音服务可用；系统不承诺断网时的语音交互、播报或日程操作能力。
+
 ### 1.3 核心质量目标
 
 | 优先级 | 质量目标 | 可验证场景 |
 | --- | --- | --- |
-| P0 | 数据归属清晰 | 本地日程、任务和实例是完整事实源，IM 与 XRobot 不保存可替代副本 |
+| P0 | 数据归属清晰 | 本地日程、任务、实例、提醒规则和提醒触发是完整事实源，IM 与 XRobot 不保存可替代副本 |
 | P0 | 跨边界幂等 | 工具调用、提醒投递、平台回执或用户动作重复到达时，不产生重复日程或重复业务动作 |
 | P0 | 状态可追踪 | 一次语音操作能从 `sessionId` 追踪到 `toolCallId`、`scheduleId`、`taskId` 和 IM `deliveryId` |
 | P1 | 外部能力可替换 | 业务模块不依赖 XRobot 原始消息、Koishi Session、微信 XML 或平台专属字段 |
@@ -56,8 +58,8 @@ VoiceLife MVP 整体架构覆盖：
 - **`VoiceSessionCoordinator`**：管理 Session/Turn/Generation，编排录音/播放，处理 XRobot WebSocket 连接与重连。不负责日程 CRUD 或 IM 投递。
 - **`MCP Server`**：工具注册、Schema 校验、`tools/list`、`tools/call`、结果封装。不拥有日程或提醒状态。
 - **`Schedule Service`**：日程 CRUD、冲突检测、操作记录、撤销。回答"用户安排了什么"。
-- **`TimingTask`**：重复规则、提醒策略、任务注册、实例生成、触发、单次例外、关闭与推迟。回答"系统何时、以何种规则触发哪一次"。
-- **`IM Application`**：身份绑定、路由选择、通知投递、回执归并、动作校验、Outbox。不修改日程事实。
+- **`TimingTask`**：重复规则、提醒规则、任务注册、Occurrence 实例生成、提醒触发、单次例外、关闭与推迟。回答"事件何时发生、围绕事件何时提醒、某次提醒如何响应"。
+- **`IM Application`**：身份绑定、路由选择、通知投递、回执归并和动作执行入口。不修改日程事实。
 - **`Koishi Gateway`**：通用 IM Session、收发适配、标准事件归一化。不包含 VoiceLife 业务规则。
 - **`Platform Capability Plugin`**：微信/企微/飞书/钉钉专属模板、卡片、验签和回调。不涉及平台无关业务规则。
 
@@ -68,7 +70,7 @@ VoiceLife MVP 整体架构覆盖：
 | 语音会话 | `sessionId`、`turnId`、`generation` | 隔离轮次、取消和迟到音频 |
 | 工具调用 | `toolCallId`、`requestId` | 工具幂等与结果回传 |
 | 日程业务 | `scheduleId`、`operationRecordId` | 业务事实与撤销 |
-| 调度执行 | `taskId`、`reminderPolicyId`、`instanceId`、`plannedAt` | 周期规则、提醒策略和某次触发 |
+| 调度执行 | `taskId`、`instanceId`、`reminderRuleId`、`reminderTriggerId`、`plannedAt` | 周期规则、Occurrence、提醒规则和单次提醒动作 |
 | 业务事件 | `eventId`、`correlationId` | 跨服务去重和链路追踪 |
 | IM 投递 | `notificationIntentId`、`deliveryId`、`attemptId` | 投递与重试审计 |
 | 用户动作 | `actionId`、`operationId` | 防止重复关闭或推迟 |
@@ -96,13 +98,13 @@ sequenceDiagram
   Voice->>XR: 音频 + Session/Turn
   XR-->>Voice: ASR / ToolCall
   Voice->>MCP: tools/call(requestId)
-  MCP->>S: CreateSchedule
+  MCP->>S: create_schedule
   S->>S: 冲突检测
   S->>DB: BEGIN；保存 schedule / operation
   DB-->>S: scheduleId / operationId
   S->>T: RegisterTimerTask(scheduleId)
-  T->>DB: 保存 task / instance（同一事务）
-  T-->>S: taskId / instanceId
+  T->>DB: 保存 task / reminder_rule（同一事务）
+  T-->>S: taskId / reminderRuleIds
   S->>DB: COMMIT
   S-->>MCP: 真实业务结果
   S-->>IM: ScheduleReceiptIntent
@@ -121,8 +123,8 @@ sequenceDiagram
   participant K as Koishi Gateway
   participant WX as 微信
 
-  T->>DB: 原子更新 instance=triggered
-  T-->>IM: NotificationIntent
+  T->>DB: 原子更新 reminder_trigger=triggered
+  T-->>IM: NotificationIntent(reminderTriggerId)
   IM->>IM: 校验 eventId、解析有效绑定
   IM->>K: 创建 Delivery 并发送
   K->>WX: 模板/消息
@@ -142,12 +144,12 @@ sequenceDiagram
   participant T as 本地 TimingTask
 
   User->>WX: 知道了 / 推迟 10 分钟
-  WX->>K: 平台回调
-  K->>IM: action.triggered
-  IM->>IM: 验签、绑定、Token、Delivery、operationId 幂等校验
+  WX->>K: Action UI POST / interaction/button
+  K->>IM: ReminderActionHandler → IM Application.Action
+  IM->>IM: 验签、版本、身份、Delivery、operationId 幂等校验
   IM-->>User: 已接收 / 待设备确认
-  IM->>T: ReminderActionCommand
-  T->>T: DismissInstance / SnoozeInstance
+  IM->>T: ReminderActionCommand(reminderTriggerId)
+  T->>T: DismissReminderTrigger / SnoozeReminderTrigger
   T-->>IM: succeeded / failed
   IM-->>WX: 更新消息或 H5 结果
 ```
@@ -176,20 +178,20 @@ VoiceLife 是一个"语音优先、IM 辅助"的日程提醒系统。MVP 的部�
 | **VoiceSessionCoordinator** | 管理会话/轮次，编排语音交互，连接 XRobot | 会话运行态 |
 | **MCP Server** | 工具注册、参数校验、调用路由 | 工具定义表 |
 | **Schedule Service** | 日程 CRUD、冲突检测、操作记录与撤销 | `schedule`、`operation_record` |
-| **TimingTask** | 重复规则解析、实例生成、触发、推迟/关闭 | `timer_task`、`timer_instance` |
+| **TimingTask** | 重复规则解析、Occurrence 实例与提醒触发生成、推迟/关闭强提醒 | `timer_task`、`timer_instance`、`reminder_rule`、`reminder_trigger` |
 | **IM Application** | 身份绑定、通知投递、回执归并、用户动作校验 | IM 领域表（独立服务端） |
 
 ### 关键边界决策
 
 1. **Schedule 与 TimingTask 分离**：Schedule 回答"用户安排了什么"，TimingTask 回答"系统何时、以何种规则触发哪一次"。
-2. **一个日程对应一个定时任务**：MVP 中一条 Schedule 对应一个 TimerTask，一个 TimerTask 包含多个具名 `ReminderPolicy`；实例通过 `reminderPolicyId` 表明由哪条提醒策略生成。
+2. **Occurrence 与提醒动作分离**：MVP 中一条 Schedule 对应一个 TimerTask；TimerTask 派生 TimerInstance，并维护零到多条 `ReminderRule`；每个 TimerInstance 与生效规则共同派生 `ReminderTrigger`。推迟/关闭作用于强提醒 Trigger，不改变 Occurrence 本身。
 3. **MCP Registry 与语音 ToolGateway 是同一逻辑模块**：本地只保留一份工具定义和路由。
 4. **业务回执由领域模块产生**：例如 Schedule 事务提交成功后，由 Schedule 向 IM Application 发送 `ScheduleReceiptIntent`；MCP 只转发工具结果。
-5. **IM 用户动作不直写本地库**：动作经过绑定、Token、目标实例和 `operationId` 校验后，以命令回传本地 TimingTask。
+5. **IM 用户动作不直写本地库**：动作经过绑定、Token、目标 ReminderTrigger 和 `operationId` 校验后，以命令回传本地 TimingTask。
 
 ### 设计原则
 
-1. **本地优先，IM 辅助**：Schedule、TimerTask 和 TimerInstance 的权威数据位于本地。IM 服务端只保存外部身份、绑定、通知投递和用户动作审计。
+1. **本地优先，IM 辅助**：Schedule、TimerTask、TimerInstance、ReminderRule 和 ReminderTrigger 的权威数据位于本地。IM 服务端只保存外部身份、绑定、通知投递和用户动作审计。
 2. **领域事实与适配器分离**：XRobot、Koishi 和微信类型不进入业务核心模型。MCP 不拥有业务状态，Koishi Session 不进入领域逻辑。
 3. **命令同步确认，事件异步传播**：进程内领域操作使用同步 Port；跨网络回执、通知和状态传播使用异步事件，必须携带幂等标识。
 
@@ -346,6 +348,7 @@ Reminder 到点 → 提交 Announcement
 - **注册器（Registry）**：所有工具统一注册，校验合法性，保证名称不重复
 - **工具（Tool）**：OpenAI 格式工具定义 + 业务逻辑 handler
 - **Tool Definition**：约束各模块工具定义标准
+- **业务 Tool**：面向 Agent 暴露的稳定语义接口；负责在 Schedule 与 TimingTask 之间编排，不让 Agent 直接操作底层调度实体
 
 ### 3. 核心业务流程
 
@@ -359,8 +362,16 @@ Reminder 到点 → 提交 Announcement
 
 1. 灵矽平台发 `tools/call` 请求（含工具名和参数）
 2. Registry 查找工具，校验参数
-3. 调用 handler 执行业务逻辑
+3. 调用 handler 执行业务逻辑；日程 Tool 在内部编排 Schedule 与 TimingTask Port
 4. 返回标准 JSON-RPC 响应
+
+**流程三：日程与提醒 Tool 编排**
+
+1. `create_schedule` 先创建 `schedule` 和 `operation_record`，成功后再注册 `timer_task`
+2. `update_schedule` / `delete_schedule` 根据 `change_scope` 同步更新或终止调度
+3. `query_calendar_view` 通过 `ListCalendarView` 展开周期事项，不能只查询已物化实例
+4. `update_schedule_reminders` 将配置编译为 `reminder_rule`
+5. `snooze_strong_reminder` / `dismiss_strong_reminder` 先定位强提醒 `reminder_trigger`，再执行运行态操作
 
 ### 4. 核心数据模型
 
@@ -377,13 +388,31 @@ ToolDefinition
 
 #### 5.1 接口总览
 
+**Registry 内部接口**
+
 | 方法 | 说明 |
 | --- | --- |
 | `register_tool(name, description, input, handler)` | 注册一个工具定义 |
 | `get_tool(name)` | 查询已注册的工具 |
 | `list_tools()` | 获取全部已注册工具 |
 
-**MCP 协议接口**：`initialize`、`ping`、`tools/list`、`tools/call`、`notifications/tools/list_changed`
+**当前 XRobot JSON-RPC 接口**：`tools/list`、`tools/call`。`initialize`、`ping` 或工具列表变更通知仅在灵矽接入协议明确要求时补充，不作为当前业务基线。
+
+**面向 Agent 的业务 Tool**
+
+| Tool | 说明 | 内部主要编排 |
+| --- | --- | --- |
+| `create_schedule` | 创建日程并检测冲突 | Schedule 写入 → `RegisterTimerTask` / `UpdateTimerTask` |
+| `query_schedule` | 查询日程主记录 | Schedule Query |
+| `update_schedule` | 修改日程与调度范围 | Schedule Update → `UpdateTimerTask` |
+| `delete_schedule` | 删除/取消日程 | Schedule Delete → `CancelTimerTask` |
+| `query_calendar_view` | 查询时间范围内的用户可见安排 | `ListCalendarView` |
+| `query_recent_operations` | 查询最近 15 分钟内最多 10 条可撤销操作 | Operation Query |
+| `undo_operation` | 撤销指定日程操作 | Schedule Undo → TimingTask 补偿 |
+| `update_schedule_reminders` | 创建、修改或关闭提醒规则 | `UpsertReminderRules` / `DeleteReminderRule` |
+| `query_active_strong_reminders` | 定位可响应的强提醒触发 | `ListReminderTriggers` |
+| `snooze_strong_reminder` | 推迟强提醒 | `SnoozeReminderTrigger` |
+| `dismiss_strong_reminder` | 关闭强提醒 | `DismissReminderTrigger` |
 
 #### 5.2 关键接口参数
 
@@ -400,7 +429,7 @@ ToolDefinition
 
 ```json
 // 请求
-{ "jsonrpc": "2.0", "id": "req-001", "method": "tools/call", "params": { "name": "voicelife.schedule.create", "arguments": { "event": "明天下午三点开会" } } }
+{ "jsonrpc": "2.0", "id": "req-001", "method": "tools/call", "params": { "name": "create_schedule", "arguments": { "event": "明天下午三点开会" } } }
 // 响应
 { "jsonrpc": "2.0", "id": "req-001", "result": { "content": [{ "type": "text", "text": "日程创建成功" }], "isError": false } }
 // 未知工具
@@ -412,8 +441,8 @@ ToolDefinition
 - 注册时校验命名唯一性与 JSON Schema
 - MVP 采用进程内直接调用 Application Port
 - Handler 抛错必须转换为结构化 ToolResult，不能悬空请求
-
-**推荐命名空间**：`voicelife.schedule.*`、`voicelife.timer.*`、`voicelife.binding.*`
+- Tool 返回结构化业务结果，不把底层 Port 或数据库对象直接暴露给 Agent
+- 提醒配置态操作面向 `reminder_rule`；强提醒推迟/关闭面向 `reminder_trigger`
 
 ---
 
@@ -457,6 +486,7 @@ erDiagram
     datetime end_time
     string location
     string notes
+    int reminder_id
     int status
     datetime created_at
     datetime updated_at
@@ -478,12 +508,13 @@ erDiagram
 
 | 工具名 | 说明 |
 | --- | --- |
-| `voicelife.schedule.create` | 创建日程（含冲突检测） |
-| `voicelife.schedule.query` | 查询日程（ID/关键词/时间范围） |
-| `voicelife.schedule.update` | 修改日程（含冲突检测） |
-| `voicelife.schedule.cancel` | 取消日程（不会自动删除关联提醒） |
-| `voicelife.schedule.listOperations` | 查询最近操作（最多 10 条） |
-| `voicelife.schedule.undo` | 撤销操作（最近 15 分钟内） |
+| `create_schedule` | 创建日程（含冲突检测），有时间语义时注册 TimingTask |
+| `query_schedule` | 查询日程主记录（ID/关键词/时间范围） |
+| `update_schedule` | 修改日程并按范围同步 TimingTask |
+| `delete_schedule` | 删除/取消日程并终止对应后续调度 |
+| `query_calendar_view` | 按时间范围展开周期事项并合并单次例外 |
+| `query_recent_operations` | 查询最近 15 分钟内最多 10 条可撤销操作 |
+| `undo_operation` | 撤销操作并补偿同步 TimingTask |
 
 #### 5.2 关键接口参数
 
@@ -498,9 +529,11 @@ erDiagram
 | `end_time` | String | 否 | 事件结束时间 |
 | `location` | String | 否 | 事件地点 |
 | `notes` | String | 否 | 事件备注 |
+| `recurrence_rule` | Object | 否 | 周期规则；不传表示单次事项 |
+| `reminder_config` | Object | 否 | 提醒配置；不传表示仅记录日程 |
 | `ignore_conflict` | Boolean | 否 | 是否忽略时间冲突，默认 False |
 
-出参：`message`、`schedule`、`conflicts`（冲突列表）、`error`
+出参：`created`、`schedule`、`task_id`、`conflicts`（冲突列表）、`error`
 
 **查询日程**
 
@@ -523,10 +556,11 @@ erDiagram
 
 ### 6. 关键约定
 
-- 创建事务顺序：写入 Schedule + OperationRecord → 调用 TimingTask 注册 → 提交 → IM 回执
+- 创建事务顺序：写入 Schedule + OperationRecord → 调用 TimingTask 注册 → 提交 → IM 回执；不得先注册 TimingTask 再保存日程
 - 取消 Schedule 必须同步终止关联 TimerTask 和未终态实例
 - 每次修改同时写入 OperationRecord
 - 撤销限制最近 15 分钟内操作
+- `query_schedule` 返回主记录；“明天有什么安排”一类查询必须走 `query_calendar_view`
 
 ---
 
@@ -540,17 +574,26 @@ erDiagram
 | --- | --- | --- | --- |
 | Schedule（业务） | Event | Event | VEVENT |
 | TimerTask（调度） | Master Event | Series Master | RRULE |
-| Instance（执行） | Instance | Occurrence | RECURRENCE-ID |
+| TimerInstance（Occurrence） | Instance | Occurrence | RECURRENCE-ID |
+| ReminderRule / Trigger（提醒） | Reminder Override | Reminder | VALARM |
 
-三层拆分：业务模型（What）、调度模型（How）、执行模型（When）。
+四层职责：业务意图（What）、调度规则（How）、Occurrence（Which occurrence）、提醒动作（Which reminder）。
 
 ### 2. 核心概念定义
 
 - **`schedule_id`**：对上游日程的引用，解决 What 的问题
-- **`task_id`**：模块核心实体，承载调度策略和参数。解决"如何安排触发"的问题
-- **`instance_id`**：单次执行实体，代表具体触发时刻。解决"这一次触发是什么"的问题
+- **`task_id`**：承载开始时间、周期规则和调度参数，解决"如何展开事件"的问题
+- **`instance_id`**：单次 Occurrence 实体，承载某次事件和单次例外，解决"这一次事件是什么"的问题
+- **`reminder_rule_id`**：围绕每次 Occurrence 的提醒规则；允许多条弱提醒和一条到点强提醒
+- **`reminder_trigger_id`**：由 Instance 与 ReminderRule 派生的单次提醒动作；只有强提醒支持 snooze / dismiss
 
-三者单向影响，不可反向：`schedule → task → instance`
+实体单向派生，不可反向污染上游事实：
+
+```text
+Schedule → TimerTask → TimerInstance
+                 └── ReminderRule
+TimerInstance + ReminderRule → ReminderTrigger
+```
 
 `change_scope` 语义：
 
@@ -562,22 +605,27 @@ erDiagram
 
 ### 3. 核心业务流程
 
-**流程一：上游日程接入与任务注册**
+**流程一：任务注册与规则编译**
 
-1. 上游传入日程内容、开始时间、循环规则
-2. 以 `schedule_id` 创建/更新 `timer_task`，保存 `next_trigger_at`、`recurrence_rule` 等
+1. Schedule 成功保存主记录和 OperationRecord 后，传入 `schedule_id`、开始时间、循环规则和 `reminder_config`
+2. 以 `schedule_id` 幂等创建/更新 `timer_task`
+3. 将非空 `reminder_config` 编译为 `reminder_rule`；产品默认配置可包含提前 10 分钟的弱提醒和事件开始时的强提醒；未传配置时可仅保留日程/调度，不生成提醒规则
 
-**流程二：实例生成与触发**
+**流程二：Occurrence 与提醒触发生成**
 
-1. 到达 `next_trigger_at` 时生成 `timer_instance`
-2. 执行完成后推进下一次触发时间
-3. 实例生成需保证幂等：同一 `task_id` 下相同 `planned_at` 不重复生成
+1. 在近端调度窗口内生成 `timer_instance`
+2. 对每个 Instance 与生效的 ReminderRule 派生 `reminder_trigger`
+3. 弱提醒在偏移时间自动触发并结束，不允许 snooze
+4. 强提醒在事件开始时间触发，允许 snooze / dismiss
+5. 失败只回写本次 ReminderTrigger，不破坏整条 TimerTask
+6. 同一 `(task_id, planned_at)` 不重复生成 Instance；同一 `(instance_id, reminder_rule_id)` 不重复生成 Trigger
 
-**流程三：单次改动与例外处理**
+**流程三：单次改动、规则变更与例外处理**
 
 1. "单次"修改 → 只影响一个 `timer_instance`，不改整条 `timer_task`
-2. "本次及以后" → 以 `effective_from` 为边界重算后续规则和实例
-3. 取消日程 → 停止实例生成，标记任务为 `terminated`
+2. "本次及以后" → 以 `effective_from` 为边界重算后续规则、实例和提醒触发
+3. 关闭弱提醒规则 → 只取消该规则未来派生的 Trigger，不取消 Occurrence
+4. 取消日程 → 停止后续 Instance/Trigger 生成，任务进入 `terminated`
 
 **流程四：时间范围查询**
 
@@ -585,37 +633,58 @@ erDiagram
 2. 合并已有 `timer_instance` 叠加例外状态
 3. 尚未物化的 occurrence 只要规则有效仍应返回
 
+**流程五：强提醒响应**
+
+1. 查询 `reminder_type=strong` 且状态为 `triggered` / `snoozed` 的 Trigger
+2. 推迟调用 `SnoozeReminderTrigger`，只修改 Trigger 的实际触发时间和次数
+3. 关闭调用 `DismissReminderTrigger`；不得把 TimerInstance 置为 dismissed
+
 ### 4. 核心数据模型
 
 ```mermaid
 erDiagram
-  TIMER_TASK ||--|{ REMINDER_POLICY : "包含"
-  REMINDER_POLICY ||--o{ TIMER_INSTANCE : "生成"
+  TIMER_TASK ||--o{ TIMER_INSTANCE : "展开"
+  TIMER_TASK ||--o{ REMINDER_RULE : "维护"
+  TIMER_INSTANCE ||--|{ REMINDER_TRIGGER : "派生"
+  REMINDER_RULE ||--o{ REMINDER_TRIGGER : "命中"
 
   TIMER_TASK {
     string id PK
     int schedule_id FK
     json recurrence_rule
+    json default_reminder_config
     datetime next_trigger_at
     string status
-  }
-
-  REMINDER_POLICY {
-    string id PK
-    string task_id FK
-    int offset_seconds
-    string channel_policy
-    bool enabled
   }
 
   TIMER_INSTANCE {
     string id PK
     string task_id FK
-    string reminder_policy_id FK
+    int schedule_id
     datetime planned_at
-    datetime trigger_at
+    datetime planned_end_at
     string status
     json override_fields
+  }
+
+  REMINDER_RULE {
+    string id PK
+    string task_id FK
+    string reminder_type
+    int offset_minutes
+    bool can_snooze
+    string channel
+    string status
+  }
+
+  REMINDER_TRIGGER {
+    string id PK
+    string instance_id FK
+    string reminder_rule_id FK
+    datetime planned_trigger_at
+    datetime actual_trigger_at
+    string status
+    int snooze_count
   }
 ```
 
@@ -624,9 +693,11 @@ erDiagram
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | `id` | string | PK | 定时任务唯一标识 |
-| `schedule_id` | string | FK, Unique | 关联日程 ID |
+| `schedule_id` | integer | FK, Unique | 关联日程 ID，与 Schedule 主键类型一致 |
 | `status` | string | Not Null | `active` / `paused` / `terminated` |
 | `next_trigger_at` | datetime | Nullable | 下次预计触发时间 |
+| `default_reminder_config` | json | Nullable | 写入侧提醒配置快照 |
+| `paused_until` | datetime | Nullable | 暂停恢复时间 |
 | `created_at` / `updated_at` | datetime | Not Null | 创建/更新时间 |
 
 #### 4.2 `recurrence_rule`
@@ -635,7 +706,10 @@ erDiagram
 | --- | --- | --- | --- |
 | `frequency` | string | Not Null | `day` / `week` / `month` / `year` |
 | `interval` | integer | >= 1 | 周期间隔 |
+| `start_at` | datetime | Not Null | 周期锚点 |
 | `timezone` | string | Not Null | 时区，统一 `+08:00` |
+| `by_weekdays` / `by_month_day` / `by_month` | array | Nullable | 周/月/年的限定条件 |
+| `by_work_day` | boolean | Nullable | 是否使用工作日语义 |
 | `end_type` | string | Not Null | `none` / `until` / `count` |
 | `end_at` | datetime | Nullable | `until` 的结束时间 |
 | `count` | integer | Nullable | 执行次数 |
@@ -646,11 +720,45 @@ erDiagram
 | --- | --- | --- | --- |
 | `id` | string | PK | 实例唯一标识 |
 | `task_id` | string | FK, Not Null | 所属定时任务 |
-| `planned_at` | datetime | Not Null | 原始计划触发时间 |
-| `trigger_at` | datetime | Not Null | 实际触发时间 |
-| `status` | string | Not Null | 状态枚举 |
-| `delay_count` | integer | >= 0 | 已推迟次数 |
-| `override_fields` | json | Nullable | 覆盖字段 |
+| `schedule_id` | integer | Not Null | 所属日程 |
+| `planned_at` | datetime | Not Null | Occurrence 原始开始时间 |
+| `planned_end_at` | datetime | Nullable | Occurrence 原始结束时间 |
+| `status` | string | Not Null | `pending` / `modified` / `triggered` / `completed` / `skipped` |
+| `override_fields` | json | Nullable | 单次例外覆盖 |
+| `last_action_at` | datetime | Nullable | 最近状态变更时间 |
+
+#### 4.4 `reminder_rule`
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `id` | string | PK | 提醒规则 ID |
+| `task_id` | string | FK, Not Null | 所属任务 |
+| `schedule_id` | integer | FK, Not Null | 所属日程 |
+| `reminder_type` | string | Not Null | `weak` / `strong` |
+| `offset_minutes` | integer | Not Null | 相对 Occurrence 开始时间的偏移分钟 |
+| `enabled` | boolean | Not Null | 是否启用 |
+| `can_snooze` | boolean | Not Null | 弱提醒必须为 false |
+| `max_snooze_count` | integer | Nullable | 强提醒最大推迟次数 |
+| `snooze_interval_minutes` | integer | Nullable | 强提醒默认推迟间隔 |
+| `channel` | string | Nullable | `voice` / `im` 等 |
+| `source` | string | Not Null | `system_default` / `user_defined` |
+| `status` | string | Not Null | `active` / `disabled` |
+
+#### 4.5 `reminder_trigger`
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `id` | string | PK | 单次提醒触发 ID |
+| `reminder_rule_id` / `task_id` / `instance_id` | string | FK, Not Null | 来源规则、任务与 Occurrence |
+| `schedule_id` | integer | FK, Not Null | 所属日程 |
+| `reminder_type` | string | Not Null | `weak` / `strong` |
+| `planned_trigger_at` | datetime | Not Null | 规则计算出的提醒时间 |
+| `actual_trigger_at` | datetime | Not Null | 当前实际触发时间，snooze 后变化 |
+| `status` | string | Not Null | 提醒触发状态 |
+| `can_snooze` | boolean | Not Null | 是否允许推迟 |
+| `snooze_count` | integer | Not Null | 已推迟次数 |
+| `delivered_at` / `last_action_at` | datetime | Nullable | 送达和最近操作时间 |
+| `payload` | json | Nullable | 下游播报/展示快照 |
 
 ### 5. 模块接口
 
@@ -662,10 +770,13 @@ erDiagram
 | PATCH | `/v1/timer-tasks/{taskId}` | 更新定时任务 |
 | DELETE | `/v1/timer-tasks/{taskId}` | 取消定时任务 |
 | POST | `/v1/timer-tasks/{taskId}/instances` | 生成实例 |
+| PUT | `/v1/timer-tasks/{taskId}/reminder-rules` | 创建或更新提醒规则 |
+| DELETE | `/v1/reminder-rules/{reminderRuleId}` | 关闭提醒规则 |
 | GET | `/v1/calendar-view` | 按时间范围查询用户可见安排 |
 | GET | `/v1/timer-instances` | 查询实例列表 |
-| POST | `/v1/timer-instances/{instanceId}/snooze` | 推迟实例 |
-| POST | `/v1/timer-instances/{instanceId}/dismiss` | 关闭实例 |
+| GET | `/v1/reminder-triggers` | 查询提醒触发 |
+| POST | `/v1/reminder-triggers/{reminderTriggerId}/snooze` | 推迟强提醒触发 |
+| POST | `/v1/reminder-triggers/{reminderTriggerId}/dismiss` | 关闭强提醒触发 |
 
 #### 5.2 关键接口参数
 
@@ -673,7 +784,7 @@ erDiagram
 
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `schedule_id` | string | 是 | 关联日程 ID |
+| `schedule_id` | integer | 是 | 关联日程 ID |
 | `start_at` | datetime | 是 | 首次触发时间 |
 | `recurrence_rule` | object | 否 | 周期规则；一次性日程可为空 |
 | `reminder_config` | object | 否 | 提醒配置 |
@@ -696,6 +807,17 @@ erDiagram
 | `window_end` | datetime | 是 | 生成窗口结束 |
 | `limit` | integer | 否 | 最大数量 |
 
+出参同时返回 `instances` 与由实例和规则派生的 `reminder_triggers`。
+
+**UpsertReminderRules**
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `taskId` | string | 是 | 所属 TimerTask |
+| `rules` | Array | 是 | 弱/强提醒规则列表 |
+
+约束：同一 Task 只允许一条启用的 `strong + offset_minutes=0` 规则；弱提醒 `can_snooze=false`。
+
 ### 6. 状态模型
 
 **`timer_task.status`**：`active`（运行中）→ `paused`（暂停）→ `terminated`（终止）
@@ -703,34 +825,47 @@ erDiagram
 **`timer_instance.status`**：
 
 ```text
-非终态：pending / snoozed / modified / triggered
-终态：dismissed / skipped
+非终态：pending / modified / triggered
+终态：completed / skipped
 
-pending → snoozed / modified / triggered / dismissed / skipped
-snoozed → snoozed / modified / triggered / dismissed / skipped
-triggered → dismissed / snoozed
+pending → modified / triggered / skipped
+modified → triggered / skipped
+triggered → completed / skipped
+```
+
+**`reminder_rule.status`**：`active` / `disabled`
+
+**`reminder_trigger.status`**：
+
+```text
+弱提醒：pending → triggered → delivered / failed；也可 skipped / cancelled
+强提醒：pending → triggered → delivered / snoozed / dismissed / failed
+                          snoozed → triggered / dismissed / failed
 ```
 
 ### 7. 下游事件契约
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `event_type` | string | `instance_triggered` / `instance_snoozed` / `instance_dismissed` / `task_cancelled` 等 |
+| `event_type` | string | `instance_created` / `reminder_triggered` / `reminder_snoozed` / `reminder_dismissed` / `task_cancelled` 等 |
 | `event_id` | string | 事件唯一标识，下游幂等 |
 | `task_id` / `instance_id` | string | 关联 ID |
-| `schedule_id` | string | 关联日程 ID |
+| `reminder_rule_id` / `reminder_trigger_id` | string | 提醒级事件关联 ID |
+| `schedule_id` | integer | 关联日程 ID |
 | `trigger_at` | datetime | 实际触发时间 |
 | `payload` | object | 播报或展示所需内容 |
 
 ### 8. 关键约定
 
 - `timer_task.schedule_id` 唯一，注册幂等 upsert
-- 实例以 `(taskId, reminderPolicyId, plannedAt)` 唯一
+- Instance 以 `(task_id, planned_at)` 唯一
+- Trigger 以 `(instance_id, reminder_rule_id)` 唯一
 - 无限重复规则必须用 `windowStart/windowEnd/limit` 限制窗口
-- `dismissed`、`skipped` 为实例终态，不可回退
+- `completed`、`skipped` 为实例终态；`dismissed` 属于强提醒 Trigger 终态
 - 撤销日程必须同时触发 TimingTask 补偿更新
 - `ListCalendarView` 基于规则展开 + 合并实例例外
 - `ListInstances` 仅返回已物化实例，适用于执行态和审计
+- 弱提醒可创建、修改和关闭，但不可 snooze；强提醒的 snooze / dismiss 只作用于 `reminder_trigger`
 
 ---
 
@@ -751,9 +886,8 @@ triggered → dismissed / snoozed
 
 | 方案 | 结论 |
 | --- | --- |
-| 分别维护原生 Adapter | **不推荐**：重复维护连接和消息模型 |
-| 只用 Koishi Adapter | 不足以满足业务：模板、卡片仍可能缺失 |
-| **Koishi Gateway + Adapter + Capability Plugin** | **推荐** |
+| 分别维护原生 Adapter | 可行但复杂：重复维护 SDK、鉴权与协议 |
+| **Koishi Adapter + Capability Plugin** | **采用**：基础消息统一，专属模板/卡片能力按需补充 |
 | 业务核心通过 Satori 接入 | 仅作可选外部出口 |
 
 ### 2. 核心概念定义
@@ -764,39 +898,63 @@ triggered → dismissed / snoozed
 | `ChannelAccount` | 可独立鉴权的平台应用配置 |
 | `ExternalIdentity` | 用户在通道中的平台身份 |
 | `ImBinding` | 内部用户/设备与外部身份的绑定关系 |
+| `ConversationRef` | 平台内的直接会话或群会话目标 |
 | `NotificationIntent` | 业务向 IM 提交的语义化通知 |
+| `ActionIntent` | `acknowledge` / `snooze` / `bind_confirm` / `bind_cancel` / `open_url` 等平台无关动作 |
 | `Delivery` | 一次通知经一个绑定的投递记录 |
 | `DeliveryAttempt` | 一次真实平台 API 调用（重试递增） |
+| `DeliveryReceipt` | 平台明确返回的 `delivered` / `failed` 证据；用户动作单独记入 Action |
 | `NormalizedImEvent` | 规范化入站事件 |
+| `ChannelCapabilities` | Adapter 原生能力与 Action UI 补充能力的合并结果 |
 
 ### 3. 核心业务流程
 
-**流程一：业务提醒投递**
+**流程一：身份绑定**
+
+1. 设备或业务服务创建一次性 PairingSession
+2. Adapter 将配对码/扫码事件转为 `binding.requested`
+3. 统一 `BindingHandler` 校验并经 `IM Application.Binding` 调用 Binding Service Port
+4. 用户确认后创建 `ImBinding`；解绑置为 `unbound`
+
+**流程二：业务提醒投递**
 
 1. 消费 `NotificationIntent`，创建平台无关通知
-2. 查找有效 `ImBinding` 和 `ChannelAccount`
-3. 每个目标绑定生成一个 `Delivery`，Renderer 转为平台内容
-4. 平台返回回执，临时失败重试，永久失败入死信
+2. 查找有效 `ImBinding`、`ChannelAccount` 与 `ConversationRef`
+3. 根据 `ChannelCapabilities` 选择原生卡片或模板/文本 + Action UI
+4. 每个目标绑定生成一个 `Delivery`，Renderer 转为平台内容
+5. 平台返回回执，临时失败重试，永久失败入死信
 
-**流程二：用户动作处理**
+**流程三：平台消息与提醒动作分流**
 
-1. Adapter 验签接收 Webhook/WebSocket 回调
-2. 转为 `NormalizedImEvent`，`externalEventId` 去重
-3. 校验绑定和 `operationId` 后执行动作
+1. Adapter 接收平台消息；只有绑定相关输入进入 `BindingHandler`
+2. H5/小程序经 `plugin-server` 进入 VoiceLife Koishi Plugin 的 Action Route，不经过平台 Adapter，也不构造 Koishi Session
+3. 原生卡片由 Adapter/Capability Plugin 转为 `interaction/button`
+4. 两条动作入口统一为 `{token, action, params?}`，交给 `ReminderActionHandler`
+5. Handler 验签、校验版本与幂等后调用 `IM Application.Action`，再通过 Reminder Command Port 回传本地 TimingTask
+6. 微信公众号文字仅用于绑定，不解析“知道了/推迟”
 
-**流程三：平台回执更新**
+**流程四：平台回执更新**
 
 1. 平台发送结果转为 `delivery.updated` 事件
 2. 通过 `externalMessageId` 找到对应 Delivery
-3. 幂等更新 Receipt，不允许状态倒退
+3. 幂等写入 `delivered` / `failed` Receipt，不允许状态倒退；用户动作写入独立 Action
 
 ### 4. 总体架构
 
 ```text
-VoiceLife Core → IM Application（Binding / Delivery / Action Service）
-  → VoiceLife Koishi Plugin（Session Mapper / Bot Router / Capability Registry）
-    → Koishi Runtime（WeChat / WeCom / Lark / DingTalk Adapter + Capability Plugin）
+平台 IM → Koishi Adapter → Binding Handler → IM Application.Binding → Binding Service Port
+
+H5/小程序 → plugin-server → VoiceLife Koishi Plugin / Action Route ─┐
+未来原生卡片 → Adapter / Capability Plugin → interaction/button ——───┤
+                                                                   └→ ReminderActionHandler
+                                                                       → IM Application.Action
+                                                                       → Reminder Command Port
+
+NotificationIntent → IM Application.Delivery → Renderer / ImChannelPort
+  → Koishi Runtime（WeChat / WeCom / Lark / DingTalk Adapter + Capability Plugin）
 ```
+
+`BindingHandler` 与 `ReminderActionHandler` 是共享应用入口，不是平台 Adapter。当前 Demo 可单进程组合部署，但 Handler 不得直接依赖具体业务 Service；生产拆分时只替换 Port 的 IPC/RPC 实现。H5/小程序是同一微信公众号渠道的 Action UI，不是第二个 Adapter。
 
 ### 5. 核心数据模型
 
@@ -822,12 +980,18 @@ ImBinding（内部用户与平台身份的绑定）
   ├── priority            // 绑定优先级
   └── status              // active / unbound / revoked
 
+PairingSession（一次性配对会话）
+  ├── id / display_code
+  ├── user_id / device_id
+  ├── expires_at
+  └── status              // pending / confirmed / expired / cancelled
+
 Delivery（一次业务投递记录）
   ├── id                  // uuid, PK
   ├── business_event_id   // 业务事件ID
   ├── correlation_id      // 关联ID
   ├── binding_id          // FK
-  ├── status              // pending → sending → accepted → delivered → acted
+  ├── status              // pending → sending → accepted → delivered / failed
   ├── external_message_id // 平台消息ID
   └── last_error_code
 
@@ -844,32 +1008,46 @@ NormalizedImEvent（规范化入站事件）
   ├── channel_account_id
   ├── external_event_id // 平台事件ID，用于去重
   └── payload        // 平台无关结构化数据
+
+DeliveryReceipt（平台投递证据）
+  ├── delivery_id / attempt_id
+  ├── stage          // delivered / failed
+  └── dedupe_key     // Unique
+
+Action（用户动作）
+  ├── delivery_id / action_type
+  ├── operation_id   // Unique
+  ├── expected_identity_id / actual_identity_id
+  └── status / result / expires_at
 ```
 
 ### 6. 模块接口
 
 #### 6.1 接口总览
 
-**内部业务 API**
+**业务 API**
 
 | Method | Path | 说明 |
 | --- | --- | --- |
-| POST | `/internal/v1/im/pairing-sessions` | 创建配对会话 |
-| GET | `/internal/v1/im/pairing-sessions/{id}` | 查询配对状态 |
-| GET | `/internal/v1/im/bindings` | 查询绑定 |
-| DELETE | `/internal/v1/im/bindings/{id}` | 解绑 |
-| POST | `/internal/v1/im/notifications` | 提交通知意图 |
-| GET | `/internal/v1/im/deliveries/{id}` | 查询投递状态 |
-| POST | `/internal/v1/im/deliveries/{id}/retry` | 人工重试死信 |
+| POST | `/v1/im/channel-accounts` | 创建通道账号 |
+| GET | `/v1/im/channel-accounts/{accountId}/health` | 查询 Koishi Bot/Adapter 健康状态 |
+| POST | `/v1/im/pairing-sessions` | 创建配对会话 |
+| GET | `/v1/im/pairing-sessions/{pairingSessionId}` | 查询配对状态 |
+| GET | `/v1/im/bindings` | 查询绑定 |
+| DELETE | `/v1/im/bindings/{bindingId}` | 解绑 |
+| POST | `/v1/im/notifications` | 提交通知意图 |
+| GET | `/v1/im/deliveries/{deliveryId}` | 查询投递与回执 |
+| POST | `/v1/im/deliveries/{deliveryId}/retry` | 人工重试死信 |
 | POST | `/internal/v1/im/events` | 接收 NormalizedImEvent |
 
-**Webhook / H5**
+同进程部署时，VoiceLife Koishi Plugin 直接调用同一应用服务接口，不经过 HTTP。
+
+**Action UI**
 
 | Method | Path | 说明 |
 | --- | --- | --- |
-| GET/POST | `/webhooks/im/wechat-official/{account_id}` | 微信事件 |
-| GET | `/im/actions/{token}` | H5 操作页 |
-| POST | `/im/actions/{token}` | 执行 H5 动作 |
+| GET | `/voicelife/reminder-actions/{token}` | 展示 H5/小程序动作页 |
+| POST | `/voicelife/reminder-actions/{token}` | 执行统一提醒动作 |
 
 **跨模块事件**
 
@@ -884,38 +1062,41 @@ NormalizedImEvent（规范化入站事件）
 **提交通知意图**
 
 ```http
-POST /internal/v1/im/notifications
+POST /v1/im/notifications
 Idempotency-Key: reminder-occurrence-8899
 ```
 
 ```json
 {
-  "business_event_id": "evt-reminder-8899",
-  "correlation_id": "corr-reminder-8899",
+  "businessEventId": "evt-reminder-8899",
+  "correlationId": "corr-reminder-8899",
   "kind": "reminder_due",
-  "recipient": { "user_id": "user-01", "device_id": "xiaozhi-demo-01" },
+  "recipient": { "userId": "user-01", "deviceId": "xiaozhi-demo-01" },
   "content": { "title": "喝水", "body": "该喝水了" },
   "actions": [
-    { "type": "acknowledge", "label": "知道了" },
-    { "type": "snooze", "label": "推迟 10 分钟", "params": { "minutes": 10 } }
+    { "kind": "command", "type": "acknowledge", "label": "知道了" },
+    { "kind": "command", "type": "snooze", "label": "推迟 10 分钟", "params": { "minutes": 10 } }
   ]
 }
 ```
 
-响应：`{ "business_event_id": "...", "status": "accepted", "deliveries": [{ "delivery_id": "...", "binding_id": "...", "status": "pending" }] }`
+响应：`{ "businessEventId": "...", "status": "accepted", "deliveries": [{ "deliveryId": "...", "bindingId": "...", "status": "pending" }] }`
 
 ### 7. 能力降级策略
 
 ```text
-原生互动卡片 → 模板/富文本 + H5 → 纯文本 + H5 → 纯文本提示"回复 知道了/推迟10分钟"
+原生互动卡片 → 模板/富文本 + H5 → 纯文本 + H5
 ```
 
 ### 8. 投递状态机
 
 ```text
-pending → sending → accepted → delivered → read → acted
-                              ↘ retryable_failed → pending
-                                  ↘ permanent_failed / dead_letter
+Delivery：pending → sending → accepted → delivered
+                    ↘ retryable_failed → pending
+                    ↘ permanent_failed / dead_letter
+
+Receipt：delivered / failed
+Action：pending → processing → succeeded / failed / expired
 ```
 
 ### 9. 幂等策略
@@ -924,6 +1105,7 @@ pending → sending → accepted → delivered → read → acted
 | --- | --- |
 | 消费业务事件 | `business_event_id` |
 | 平台入站事件 | `channel_account_id + external_event_id` |
+| 平台投递回执 | `dedupe_key` |
 | 用户业务动作 | `operation_id` |
 | 发送 API 请求 | `delivery_id + attempt_no` |
 
@@ -931,9 +1113,12 @@ pending → sending → accepted → delivered → read → acted
 
 - 本地业务事务不依赖 IM 是否成功
 - IM 用户动作不直写本地库
-- 回执状态 `accepted` ≠ `delivered` ≠ `acted`，不可合并
+- HTTP JSON 使用 camelCase，数据库字段使用 snake_case；时间使用 ISO 8601，数据库保存 UTC
+- 平台受理记录在 DeliveryAttempt，`delivered` / `failed` 记录在 DeliveryReceipt，用户动作记录在 Action，三者不可合并
 - 凭据加密保存，不存明文 Secret
 - H5 Token 需签名，含 `action_id`、`delivery_id`、`expires_at`，不放身份明文
+- 一个 IM 平台只保留一个 Koishi Adapter；Action UI 不计为 Adapter
+- 业务层只能依据 `ChannelCapabilities` 选能力，不得按平台名称分支
 
 ---
 
@@ -942,11 +1127,12 @@ pending → sending → accepted → delivered → read → acted
 | 边界 | 接口方式 | 说明 |
 | --- | --- | --- |
 | Voice ↔ XRobot | WebSocket | 上行音频、下行 TTS、MCP 控制消息 |
-| XRobot ↔ MCP Server | JSON-RPC | `initialize` / `ping` / `tools/list` / `tools/call` |
-| MCP Server ↔ Schedule | MCP Tool | `voicelife.schedule.*` 命名空间 |
-| Schedule ↔ TimingTask | 同步 Port | `RegisterTimerTask` / `UpdateTimerTask` / `CancelTimerTask` / `SnoozeInstance` / `DismissInstance` / `ListCalendarView` |
+| XRobot ↔ MCP Server | JSON-RPC | 当前基线：`tools/list` / `tools/call` |
+| MCP Server ↔ Schedule/TimingTask | MCP Tool + Application Port | `create_schedule` / `query_calendar_view` / `update_schedule_reminders` / `snooze_strong_reminder` 等 |
+| Schedule ↔ TimingTask | 同步 Port | `RegisterTimerTask` / `UpdateTimerTask` / `CancelTimerTask` / `UpsertReminderRules` / `DeleteReminderRule` / `ListCalendarView` |
+| MCP/IM ↔ TimingTask 运行态 | 同步 Port / Command | `ListReminderTriggers` / `SnoozeReminderTrigger` / `DismissReminderTrigger` |
 | 本地 ↔ IM Gateway | Intent / Command | `ScheduleReceiptIntent` / `NotificationIntent` / `ReminderActionCommand` |
-| IM Application ↔ Koishi | Port | 出站：发送意图；入站：`NormalizedImEvent` |
+| IM Application ↔ Koishi | Handler + `ImChannelPort` | 出站：发送意图；入站：`BindingHandler` / `ReminderActionHandler` / `NormalizedImEvent` |
 
 ---
 
@@ -966,6 +1152,7 @@ pending → sending → accepted → delivered → read → acted
 | `end_time` | datetime | Nullable | 结束时间 |
 | `location` | varchar(100) | Nullable | 地点 |
 | `notes` | varchar(200) | Nullable | 备注 |
+| `reminder_id` | integer | Nullable | 日程模块保留的可选提醒关联；集成调度的权威关联为 `timer_tasks.schedule_id` |
 | `status` | tinyint | Not Null, Default 1 | 1:有效 / 2:已取消 |
 | `created_at` | datetime | Not Null | 创建时间 |
 | `updated_at` | datetime | Not Null | 更新时间 |
@@ -976,8 +1163,8 @@ pending → sending → accepted → delivered → read → acted
 | --- | --- | --- | --- |
 | `id` | integer | PK, AutoIncrement | 自增主键 |
 | `type` | tinyint | Not Null | 1:create / 2:update / 3:delete |
-| `schedule_id` | integer | FK, Not Null | 关联日程 |
-| `schedule_event` | varchar(100) | Not Null | 操作时的事件标题 |
+| `schedule_id` | integer | Not Null | 涉及的日程 ID；删除后仍需保留审计记录，不强制数据库 FK |
+| `schedule_event` | varchar(100) | Not Null | 操作时的事件标题；delete 保存删除前标题 |
 | `operated_at` | datetime | Not Null | 操作时间 |
 | `previous` | json | Nullable | 操作前完整快照（create 为 NULL） |
 
@@ -986,24 +1173,34 @@ pending → sending → accepted → delivered → read → acted
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | `id` | varchar(64) | PK | 任务ID |
-| `schedule_id` | varchar(64) | FK, Unique | 关联日程 |
+| `schedule_id` | integer | FK, Unique | 关联日程，与 `schedules.id` 类型一致 |
 | `recurrence_rule` | json | Nullable | 重复规则 |
+| `default_reminder_config` | json | Nullable | 提醒配置快照，用于编译提醒规则 |
 | `next_trigger_at` | datetime | Nullable | 下次触发时间 |
 | `status` | varchar(16) | Not Null | active / paused / terminated |
+| `paused_until` | datetime | Nullable | 暂停恢复时间 |
 | `created_at` | datetime | Not Null | 创建时间 |
 | `updated_at` | datetime | Not Null | 更新时间 |
 
-#### 1.4 `reminder_policies`
+#### 1.4 `reminder_rules`
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| `id` | varchar(64) | PK | 策略ID |
+| `id` | varchar(64) | PK | 提醒规则 ID |
 | `task_id` | varchar(64) | FK, Not Null | 关联定时任务 |
-| `offset_seconds` | integer | Not Null | 提前偏移秒数 |
-| `channel_policy` | varchar(16) | Not Null | voice / im / both |
+| `schedule_id` | integer | FK, Not Null | 关联日程 |
+| `reminder_type` | varchar(16) | Not Null | weak / strong |
+| `offset_minutes` | integer | Not Null | 相对 Occurrence 的偏移分钟 |
 | `enabled` | boolean | Not Null | 是否启用 |
+| `can_snooze` | boolean | Not Null | 弱提醒必须为 false |
+| `max_snooze_count` | integer | Nullable | 强提醒最大推迟次数 |
+| `snooze_interval_minutes` | integer | Nullable | 默认推迟间隔 |
+| `channel` | varchar(16) | Nullable | voice / im |
+| `source` | varchar(16) | Not Null | system_default / user_defined |
+| `status` | varchar(16) | Not Null | active / disabled |
+| `created_at` / `updated_at` | datetime | Not Null | 创建/更新时间 |
 
-复合唯一：`(task_id, id)`。
+约束：同一 `task_id` 仅一条启用的 `strong + offset_minutes=0` 规则。
 
 #### 1.5 `timer_instances`
 
@@ -1011,16 +1208,37 @@ pending → sending → accepted → delivered → read → acted
 | --- | --- | --- | --- |
 | `id` | varchar(64) | PK | 实例ID |
 | `task_id` | varchar(64) | FK, Not Null | 关联定时任务 |
-| `reminder_policy_id` | varchar(64) | FK, Not Null | 关联提醒策略 |
-| `planned_at` | datetime | Not Null | 计划触发时间 |
-| `trigger_at` | datetime | Nullable | 实际触发时间 |
-| `status` | varchar(16) | Not Null | pending / triggered / snoozed / dismissed / skipped / modified |
-| `delay_count` | integer | Not Null, Default 0 | 推迟次数 |
+| `schedule_id` | integer | FK, Not Null | 关联日程 |
+| `planned_at` | datetime | Not Null | Occurrence 原始开始时间 |
+| `planned_end_at` | datetime | Nullable | Occurrence 原始结束时间 |
+| `status` | varchar(16) | Not Null | pending / modified / triggered / completed / skipped |
 | `override_fields` | json | Nullable | 单次例外覆盖 |
+| `last_action_at` | datetime | Nullable | 最近状态变化时间 |
 | `created_at` | datetime | Not Null | 创建时间 |
 | `updated_at` | datetime | Not Null | 更新时间 |
 
-复合唯一：`(task_id, reminder_policy_id, planned_at)`。
+复合唯一：`(task_id, planned_at)`。
+
+#### 1.6 `reminder_triggers`
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `id` | varchar(64) | PK | 提醒触发 ID |
+| `reminder_rule_id` | varchar(64) | FK, Not Null | 来源提醒规则 |
+| `task_id` | varchar(64) | FK, Not Null | 所属任务 |
+| `instance_id` | varchar(64) | FK, Not Null | 所属 Occurrence |
+| `schedule_id` | integer | FK, Not Null | 所属日程 |
+| `reminder_type` | varchar(16) | Not Null | weak / strong |
+| `planned_trigger_at` | datetime | Not Null | 原始提醒时间 |
+| `actual_trigger_at` | datetime | Not Null | 当前实际触发时间 |
+| `status` | varchar(16) | Not Null | pending / triggered / delivered / snoozed / dismissed / skipped / cancelled / failed |
+| `can_snooze` | boolean | Not Null | 是否允许推迟 |
+| `snooze_count` | integer | Not Null, Default 0 | 已推迟次数 |
+| `delivered_at` / `last_action_at` | datetime | Nullable | 送达和最近操作时间 |
+| `payload` | json | Nullable | 播报/展示快照 |
+| `created_at` / `updated_at` | datetime | Not Null | 创建/更新时间 |
+
+复合唯一：`(instance_id, reminder_rule_id)`。
 
 ### 2. IM 服务端核心表
 
@@ -1030,14 +1248,27 @@ pending → sending → accepted → delivered → read → acted
 | --- | --- | --- | --- |
 | `id` | uuid | PK | 主键 |
 | `platform` | varchar(32) | Not Null | 平台类型 |
-| `name` | varchar(128) | | 展示名称 |
-| `tenant_external_id` | varchar(128) | | 公众号 AppID 等 |
-| `credential_ref` | varchar(256) | | 凭据引用 |
-| `connection_mode` | varchar(16) | | webhook / websocket |
-| `status` | varchar(16) | | active / disabled / error |
+| `tenant_external_id` | varchar(128) | Not Null | 公众号 AppID 等非密钥标识 |
+| `koishi_bot_id` | varchar(128) | Not Null | Koishi Runtime 内 Bot 标识 |
+| `credential_ref` | varchar(256) | Not Null | 凭据引用 |
+| `connection_mode` | varchar(16) | Not Null | webhook / websocket / both |
+| `capability_config` | jsonb | Nullable | 模板、卡片等非敏感配置 |
+| `status` | varchar(16) | Not Null | active / disabled / error |
 | `created_at` | timestamptz | Not Null | 创建时间 |
 
-#### 2.2 `im_external_identities`
+#### 2.2 `im_pairing_sessions`
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `id` | uuid | PK | 配对会话 ID |
+| `display_code_hash` | varchar(128) | Unique, Not Null | 一次性配对码哈希 |
+| `user_id` | varchar(128) | Nullable | 内部用户 ID |
+| `device_id` | varchar(128) | Not Null | 设备 ID |
+| `allowed_platforms` | jsonb | Nullable | 允许绑定的平台 |
+| `status` | varchar(16) | Not Null | pending / confirmed / expired / cancelled |
+| `expires_at` | timestamptz | Not Null | 过期时间 |
+
+#### 2.3 `im_external_identities`
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
@@ -1049,7 +1280,7 @@ pending → sending → accepted → delivered → read → acted
 
 复合唯一：`(channel_account_id, external_user_id_hash)`。
 
-#### 2.3 `im_bindings`
+#### 2.4 `im_bindings`
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
@@ -1063,7 +1294,7 @@ pending → sending → accepted → delivered → read → acted
 
 索引：`(user_id, status, priority)`。
 
-#### 2.4 `im_deliveries`
+#### 2.5 `im_deliveries`
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
@@ -1071,14 +1302,17 @@ pending → sending → accepted → delivered → read → acted
 | `business_event_id` | varchar(128) | Not Null | 业务事件ID |
 | `correlation_id` | varchar(128) | Not Null | 关联ID |
 | `binding_id` | uuid | FK, Not Null | 关联绑定 |
+| `channel_account_id` | uuid | FK, Not Null | 发送通道快照 |
 | `kind` | varchar(64) | | reminder_due 等 |
+| `semantic_payload` | jsonb | Not Null | 平台无关通知快照 |
+| `presentation_type` | varchar(32) | Not Null | 卡片 / 模板 / Action UI / 文本 |
 | `status` | varchar(32) | | pending / sending / accepted / delivered / failed |
 | `external_message_id` | varchar(256) | Nullable | 平台消息ID |
 | `expires_at` | timestamptz | Nullable | 过期时间 |
 
 复合唯一：`(business_event_id, binding_id, kind)`。
 
-#### 2.5 `im_delivery_attempts`
+#### 2.6 `im_delivery_attempts`
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
@@ -1086,12 +1320,41 @@ pending → sending → accepted → delivered → read → acted
 | `delivery_id` | uuid | FK, Not Null | 关联投递 |
 | `attempt_no` | integer | Not Null | 从1递增 |
 | `request_id` | varchar(128) | Unique | 请求标识 |
+| `rendered_payload` | jsonb | Not Null | 脱敏后的平台载荷 |
 | `status` | varchar(24) | | sending / accepted / retryable_failed / permanent_failed |
 | `started_at` | timestamptz | Not Null | 开始时间 |
 
 复合唯一：`(delivery_id, attempt_no)`。
 
-#### 2.6 `im_inbound_events`
+#### 2.7 `im_delivery_receipts`
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `id` | uuid | PK | 回执 ID |
+| `delivery_id` | uuid | FK, Not Null | 所属投递 |
+| `attempt_id` | uuid | FK, Nullable | 对应发送尝试 |
+| `stage` | varchar(16) | Not Null | delivered / failed |
+| `dedupe_key` | varchar(256) | Unique, Not Null | 回执幂等键 |
+| `external_event_id` | varchar(256) | Nullable | 平台回执事件 ID |
+| `detail` | jsonb | Nullable | 脱敏状态信息 |
+| `occurred_at` / `received_at` | timestamptz | | 平台发生/系统接收时间 |
+
+#### 2.8 `im_actions`
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `id` | uuid | PK | 用户动作 ID |
+| `delivery_id` | uuid | FK, Not Null | 所属投递 |
+| `action_type` | varchar(32) | Not Null | acknowledge / snooze |
+| `action_params` | jsonb | Nullable | 动作参数 |
+| `action_key_hash` | varchar(128) | Unique, Not Null | Token/平台 action key 哈希 |
+| `operation_id` | varchar(128) | Unique, Not Null | 业务动作幂等 ID |
+| `expected_identity_id` / `actual_identity_id` | uuid | FK | 预期/实际执行身份 |
+| `status` | varchar(32) | Not Null | 动作状态 |
+| `result` | jsonb | Nullable | 业务执行结果 |
+| `expires_at` | timestamptz | Not Null | 过期时间 |
+
+#### 2.9 `im_inbound_events`
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
@@ -1110,15 +1373,20 @@ pending → sending → accepted → delivered → read → acted
 ```text
 本地数据库：
 schedules 1 ── 1 timer_tasks
-timer_tasks 1 ── N reminder_policies
-reminder_policies 1 ── N timer_instances
+timer_tasks 1 ── N timer_instances
+timer_tasks 1 ── N reminder_rules
+timer_instances 1 ── N reminder_triggers
+reminder_rules 1 ── N reminder_triggers
 schedules 1 ── N operation_records
 
 IM 服务端：
 im_channel_accounts 1 ── N im_external_identities
+im_pairing_sessions 1 ── 0..1 im_bindings
 im_external_identities 1 ── N im_bindings
 im_bindings 1 ── N im_deliveries
 im_deliveries 1 ── N im_delivery_attempts
+im_deliveries 1 ── N im_delivery_receipts
+im_deliveries 1 ── N im_actions
 im_channel_accounts 1 ── N im_inbound_events
 ```
 
@@ -1130,7 +1398,7 @@ VoiceLife MVP 以**本地日程 + 定时任务**为业务事实源，以**语音
 
 - **语音模块**负责交互编排，不执行业务
 - **MCP 模块**负责工具路由，不持有状态
-- **日程 + 定时任务**负责业务事实与调度，是系统核心（三层模型：Schedule → TimerTask → Instance）
-- **IM 模块**负责消息通道，不解耦业务（Koishi Gateway + Capability Plugin 隔离平台差异）
+- **日程 + 定时任务**负责业务事实与调度，是系统核心（`Schedule → TimerTask → TimerInstance`，并由 `ReminderRule + TimerInstance` 派生 `ReminderTrigger`）
+- **IM 模块**负责消息通道，通过 Handler、Application Port、Koishi Adapter 与 Capability Plugin 隔离业务语义和平台差异
 
 数据流向：`用户语音 → 意图 → 日程 → 定时 → 触发 → 提醒投递 → 用户动作 → 闭环`
