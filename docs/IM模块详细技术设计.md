@@ -4,11 +4,12 @@
 
 技术实现采用 Koishi-Centric 架构：
 
-- 所有 IM 平台通过 Koishi Adapter 接入；
+- 所有平台 IM 消息与平台事件通过 Koishi Adapter 接入；
 - IM Use Case Layer（绑定、投递、动作、回执）通过 `ImChannelPort` 使用通道能力；
 - VoiceLife Koishi Plugin 负责 `Koishi Session`、`NormalizedImEvent` 和发送意图之间的转换；
 - VoiceLife Koishi Plugin 实现 `ImChannelPort`；该 Port 只是代码边界，不是独立网关服务；
-- 模板、卡片、二维码、回执和 H5 等平台专属能力由 Capability Plugin 补充；
+- 模板、卡片、二维码和平台回执由 Capability Plugin 补充；
+- H5/小程序是 Action UI，经 `@koishijs/plugin-server` 进入 VoiceLife Koishi Plugin 的 Action Route，不登记为平台 Adapter；
 - VoiceLife 业务服务不直接依赖 Koishi `Session`、`Bot` 或平台原始报文；
 - Satori Server 仅作为可选的外部 HTTP/WebSocket 协议出口。
 
@@ -46,12 +47,37 @@
 
 同进程部署时，VoiceLife Koishi Plugin 直接调用相同的应用服务接口，不经过 HTTP。
 
-### 1.5 用户 H5 动作（降级入口）
+路由规则：
 
-- `GET    /v1/im/actions/{token}` —— 展示“知道了/推迟”等操作页面
-- `POST   /v1/im/actions/{token}` —— 执行用户动作
+- 各平台 Adapter 产生的 `binding.requested` 统一进入 `Binding Handler`；
+- 普通消息不进入 `Binding Handler`；
+- 原生卡片按钮优先通过 Koishi `interaction/button` 进入 `ReminderActionHandler`；
+- 仅在 Koishi Gateway 独立部署时，才把相同动作转换为 `action.triggered` 并提交到内部事件接口。
 
-H5 接口只用于微信公众号等没有原生交互卡片、需要用网页承载动作的平台。企业微信、飞书和钉钉的卡片回调由 Koishi Adapter 或 Capability Plugin 接收，转换为 `action.triggered` 类型的 `NormalizedImEvent` 后调用同一个 Action Use Case，不调用上述 H5 接口。各平台原始回调地址不作为业务 API 对外开放。
+### 1.5 用户提醒动作（Action UI 入口）
+
+- `GET    /voicelife/reminder-actions/{token}` —— 展示当前 H5 Action UI
+- `POST   /voicelife/reminder-actions/{token}` —— H5/小程序提交统一提醒动作
+
+该接口是 VoiceLife 产品接口，不属于通用 IM API，也不属于任何平台 Adapter。它物理运行在 Koishi Runtime 的 `plugin-server` 上，逻辑归属 VoiceLife Koishi Plugin。
+
+```text
+H5 / 小程序
+  → @koishijs/plugin-server
+  → VoiceLife Koishi Plugin
+  → Action Route
+  → ReminderActionHandler
+  → IM Application.Action
+
+原生卡片
+  → Platform Adapter / Capability Plugin
+  → interaction/button
+  → VoiceLife Koishi Plugin
+  → ReminderActionHandler
+  → IM Application.Action
+```
+
+两条链路统一为 `{ token, action, params? }`，由同一个 `ReminderActionHandler` 完成验签、版本校验、幂等与业务转发，再调用 `IM Application.Action`。H5 可以替换为小程序，不新增第二个微信公众号 Adapter。各平台原始回调地址不作为业务 API 对外开放。
 
 ## 2. 通用接口约定
 
@@ -278,24 +304,28 @@ H5 接口只用于微信公众号等没有原生交互卡片、需要用网页�
   - `eventId`（string）。
   - `status`（string）：`accepted` 或 `duplicate`。
 - 幂等键：`channelAccountId + externalEventId`。
+- 路由：
+  - `binding.requested` → 共享 `Binding Handler`；
+  - `action.triggered` → `ReminderActionHandler`，仅用于跨进程或无法直接产生 Koishi `interaction/button` 的兼容场景；
+  - `message.received` → Message Handler，不得隐式解析成提醒动作。
 
-### 14）展示 H5 动作页面
+### 14）展示 Action UI
 
-- 方法与路径：`GET /v1/im/actions/{token}`
-- 说明：展示微信公众号等不支持原生交互卡片平台的“知道了/推迟”操作页。原生卡片平台不使用该接口。
+- 方法与路径：`GET /voicelife/reminder-actions/{token}`
+- 说明：当前返回 H5“知道了/推迟”页面；未来可由小程序替代展示层。
 - 约束：
   - Token 必须签名并包含 `actionId`、`deliveryId`、绑定摘要、过期时间和版本。
   - URL 中不得出现裸 OpenID、UserID 或 reminderId。
 - 出参：HTML 页面。
 
-### 15）执行 H5 动作
+### 15）执行 Action UI 动作
 
-- 方法与路径：`POST /v1/im/actions/{token}`
-- 说明：仅处理上述 H5 页面提交的动作。原生卡片动作通过 `NormalizedImEvent` 进入同一个 Action Use Case。
+- 方法与路径：`POST /voicelife/reminder-actions/{token}`
+- 说明：接收 H5/小程序提交的提醒动作，并调用统一 `ReminderActionHandler`。原生卡片不调用此 HTTP 接口，而是通过 `interaction/button` 进入同一 Handler。
 - 请求头：
   - `Idempotency-Key`（string，必填）。
 - 入参（Body）：
-  - `action`（string，必填）：`acknowledge` 或 `snooze`。
+  - `action`（string，必填）：`dismiss` 或 `snooze`。
   - `params`（object，可选）：例如 `{"minutes": 10}`。
 - 出参（Body）：
   - `status`（string）：`executed` 或 `duplicate`。
@@ -305,6 +335,27 @@ H5 接口只用于微信公众号等没有原生交互卡片、需要用网页�
   - `ACTION_EXPIRED`：动作已过期。
   - `ACTION_INVALID`：动作已失效或被新版本替代。
   - `IDENTITY_MISMATCH`：用户身份与目标绑定不一致。
+
+边界约束：
+
+1. Action Route 只负责解析 HTTP 和返回 H5/小程序结果。
+2. `ReminderActionHandler` 负责验签、规范化、幂等和转发。
+3. `IM Application.Action` 接收规范化动作，并通过业务端口下发 Dismiss/Snooze 命令。
+4. 不允许 H5、小程序和卡片回调分别实现提醒状态变更。
+
+Demo 以单进程方式组合这些模块，但仍保持同样的依赖边界：
+
+```text
+Action Route / interaction/button
+  → ReminderActionHandler
+  → IM Application.Action
+  → Reminder Command Port
+  → VoiceLifeService / TimingTask Demo Adapter
+```
+
+`Binding Handler` 同理只调用 `IM Application.Binding`，平台 Adapter 必须先把
+OpenID、UserID 等字段转换成 `ExternalIdentity`。生产拆分部署时替换 Port
+实现即可，不允许让 Handler 回退为直接调用产品 Service。
 
 ---
 
@@ -447,7 +498,7 @@ H5 接口只用于微信公众号等没有原生交互卡片、需要用网页�
 | `channel_account_id` | uuid | Not Null, FK | 发送通道快照 |
 | `kind` | varchar(64) | Not Null | 通知类型 |
 | `semantic_payload` | jsonb | Not Null | 平台无关通知快照 |
-| `presentation_type` | varchar(32) | Not Null | 卡片、模板、H5 或文本 |
+| `presentation_type` | varchar(32) | Not Null | 卡片、模板、Action UI 或文本 |
 | `status` | varchar(32) | Not Null | 投递状态 |
 | `external_message_id` | varchar(256) | Nullable | 平台消息 ID |
 | `accepted_at` | timestamptz | Nullable | 平台接受时间 |
@@ -523,7 +574,7 @@ H5 接口只用于微信公众号等没有原生交互卡片、需要用网页�
 | `delivery_id` | uuid | Not Null, FK | 所属投递 |
 | `action_type` | varchar(32) | Not Null | `acknowledge`、`snooze` 等 |
 | `action_params` | jsonb | Nullable | 如 `{"minutes": 10}` |
-| `action_key_hash` | varchar(128) | Not Null | H5 Token 或平台 action key 哈希 |
+| `action_key_hash` | varchar(128) | Not Null | Action Token 或平台 action key 哈希 |
 | `operation_id` | varchar(128) | Not Null | 业务动作幂等 ID |
 | `expected_identity_id` | uuid | Not Null, FK | 允许执行的身份 |
 | `actual_identity_id` | uuid | Nullable, FK | 实际执行身份 |
