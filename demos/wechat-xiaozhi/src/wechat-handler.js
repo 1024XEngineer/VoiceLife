@@ -15,7 +15,7 @@ import {
 import {
   deactivateWechatBinding,
   handleWechatBindingEvent,
-  handleWechatText,
+  handleWechatBindingText,
   handleWechatVoice,
   helpText
 } from "./wechat-domain.js";
@@ -28,13 +28,15 @@ function responseText(message, content) {
   });
 }
 
-export async function handleWechatMessage(message, service) {
+export async function handleWechatMessage(message, { bindingHandler, receiptService }) {
   const type = message.MsgType.toLowerCase();
   if (type === "text") {
-    return responseText(message, handleWechatText({
+    return responseText(message, handleWechatBindingText({
+      channelAccountId: message.ToUserName,
       content: message.Content,
+      eventId: message.MsgId,
       openId: message.FromUserName,
-      service
+      bindingHandler
     }));
   }
 
@@ -48,7 +50,7 @@ export async function handleWechatMessage(message, service) {
   if (type === "event") {
     const event = message.Event.toLowerCase();
     if (event === "templatesendjobfinish") {
-      service.recordTemplateReceipt({
+      receiptService.recordTemplateReceipt({
         messageId: message.MsgId,
         status: message.Status,
         openId: message.FromUserName
@@ -57,13 +59,20 @@ export async function handleWechatMessage(message, service) {
     }
     if (event === "subscribe" || event === "scan") {
       return responseText(message, handleWechatBindingEvent({
+        channelAccountId: message.ToUserName,
+        eventId: message.MsgId || `${message.CreateTime}:${event}`,
         eventKey: message.EventKey,
         openId: message.FromUserName,
-        service
+        bindingHandler
       }));
     }
     if (event === "unsubscribe") {
-      deactivateWechatBinding({ openId: message.FromUserName, service });
+      deactivateWechatBinding({
+        channelAccountId: message.ToUserName,
+        eventId: message.MsgId || `${message.CreateTime}:${event}`,
+        openId: message.FromUserName,
+        bindingHandler
+      });
       return "";
     }
   }
@@ -110,7 +119,13 @@ export async function verifyWechatUrl(url, config) {
   return echo;
 }
 
-export async function processWechatCallback({ url, body, config, service }) {
+export async function processWechatCallback({
+  url,
+  body,
+  config,
+  bindingHandler,
+  receiptService
+}) {
   const timestamp = url.searchParams.get("timestamp") || "";
   const nonce = url.searchParams.get("nonce") || "";
   const encrypted = xmlField(body, "Encrypt");
@@ -143,7 +158,10 @@ export async function processWechatCallback({ url, body, config, service }) {
     throw new Error("微信明文消息签名校验失败");
   }
 
-  const reply = await handleWechatMessage(parseWechatXml(plainXml), service);
+  const reply = await handleWechatMessage(parseWechatXml(plainXml), {
+    bindingHandler,
+    receiptService
+  });
   if (!reply || !safeMode) return reply || "success";
 
   const responseTimestamp = String(Math.floor(Date.now() / 1000));

@@ -19,8 +19,8 @@ export function parseReminderButtonId(value) {
   return token ? { action, token } : null;
 }
 
-export function createReminderInteractionHandler({
-  service,
+export function createReminderActionHandler({
+  actionApplication,
   tokenSecret,
   now = () => Date.now()
 }) {
@@ -30,7 +30,7 @@ export function createReminderInteractionHandler({
 
   return {
     inspect(token) {
-      return service.findActionIntentTarget(verify(token));
+      return actionApplication.inspect(verify(token));
     },
 
     execute({ token, action }) {
@@ -39,7 +39,7 @@ export function createReminderInteractionHandler({
         action: assertAction(action)
       };
       if (action === "snooze") command.minutes = 10;
-      const reminder = service.executeReminderAction(command);
+      const reminder = actionApplication.execute(command);
       return action === "dismiss"
         ? {
             action,
@@ -59,7 +59,7 @@ export function createReminderInteractionHandler({
   };
 }
 
-export async function updateReminderInteractionMessage(session, result) {
+export async function updateReminderActionMessage(session, result) {
   if (
     session.channelId &&
     session.messageId &&
@@ -83,22 +83,22 @@ export async function updateReminderInteractionMessage(session, result) {
   return "skipped";
 }
 
-export async function handleReminderButtonInteraction(
+export async function handleReminderButtonAction(
   session,
-  interaction,
-  { updateMessage = updateReminderInteractionMessage } = {}
+  actionHandler,
+  { updateMessage = updateReminderActionMessage } = {}
 ) {
   const input = parseReminderButtonId(session.event?.button?.id);
   if (!input) return false;
-  const result = interaction.execute(input);
+  const result = actionHandler.execute(input);
   await updateMessage(session, result);
   return true;
 }
 
-export function registerReminderInteractionHandler(ctx, interaction) {
+export function registerReminderActionHandler(ctx, actionHandler) {
   return ctx.on("interaction/button", async (session) => {
     try {
-      await handleReminderButtonInteraction(session, interaction);
+      await handleReminderButtonAction(session, actionHandler);
     } catch (error) {
       if (typeof session.send === "function") {
         await session.send(`操作失败：${error.message}`);

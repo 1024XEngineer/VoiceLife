@@ -3,14 +3,26 @@
 这是一个使用 Koishi 作为 IM 运行时、Satori 作为统一协议出口的验证服务：
 
 ```text
-微信公众号 ─┐
-未来其他 IM ─┼→ Koishi 标准 Session → VoiceLife 业务插件
-             └→ Satori HTTP / WebSocket
+微信公众号渠道
+├─ 微信公众号 IM → WeChat Adapter → binding.requested → Binding Handler
+└─ Action UI（H5）→ plugin-server → Action Route ───────────────┐
+未来原生卡片 → Platform Adapter → interaction/button ──────────┤
+                                                            ↓
+                                              ReminderActionHandler
+                                                            ↓
+                                                IM Application.Action
+                                                            ↓
+                                                Reminder Command Port
+
+未来其他 IM → Koishi Adapter → VoiceLife 业务插件
+Koishi Runtime → 可选 Satori HTTP / WebSocket
 
 小智语音 → MCP 工具 → VoiceLife 提醒 → 微信公众号模板消息
                                           ↓
-                 点击消息 → H5/原生卡片 → 统一动作入口 → VoiceLife 状态
+                 点击消息 → Action UI → 统一动作入口 → VoiceLife 状态
 ```
+
+微信公众号只有一个 Koishi Adapter。H5 是同一渠道的 Action UI 补充，未来可以换成小程序，但不会因此增加第二个微信公众号 Adapter。
 
 已实现：
 
@@ -23,7 +35,9 @@
 - `TEMPLATESENDJOBFINISH` 发送完成事件；
 - 模板消息跳转到带签名的 H5 快捷操作页；
 - 网页一键“知道了”或“推迟 10 分钟”；
-- 公众号回复“关闭”“推迟 10 分钟”；
+- 公众号文字消息仅用于设备绑定；
+- 平台绑定输入统一规范化为 `ExternalIdentity` 和 `binding.requested`；
+- H5 与原生卡片动作统一经过 `IM Application.Action` 和 `Reminder Command Port`；
 - 小智 MCP 接入点 WebSocket 客户端；
 - 生成绑定码、创建/查询/关闭/推迟提醒五种 MCP 工具；
 - 本地 JSON 持久化、发送幂等和 Mock 模式。
@@ -230,7 +244,7 @@ WECHAT_TEMPLATE_ID=...
 WECHAT_TEMPLATE_TITLE_FIELD=thing1
 WECHAT_TEMPLATE_TIME_FIELD=time2
 WECHAT_TEMPLATE_STATUS_FIELD=thing3
-WECHAT_TEMPLATE_DETAIL_URL=https://你的公网域名/reminders/action
+WECHAT_TEMPLATE_DETAIL_URL=https://你的公网域名/voicelife/reminder-actions
 WECHAT_ACTION_TOKEN_SECRET=一段独立随机密钥
 ```
 
@@ -260,7 +274,7 @@ WECHAT_ACTION_TOKEN_SECRET=一段独立随机密钥
 7. 点击“知道了”或“推迟 10 分钟”。
 
 操作链接包含签名令牌，不暴露 OpenID。推迟后旧链接立即失效，再次到点会生成新链接。
-公众号文字回复“关闭”或“推迟10分钟”仍然保留，作为兼容入口。
+公众号文字消息只处理“绑定”；提醒动作统一从 H5 或未来原生卡片进入。
 
 也可以调用 API 生成带参数二维码：
 
@@ -294,11 +308,12 @@ curl http://localhost:8787/api/state \
   -H 'Authorization: Bearer change-me'
 ```
 
-公众号没有通用已读回执。用户点击 H5 的“知道了/推迟 10 分钟”或发送对应文字，才是 VoiceLife 可确认的业务回执。
+公众号没有通用已读回执。用户点击 H5 的“知道了/推迟 10 分钟”，才是 VoiceLife 可确认的业务回执。
 
 H5 和未来原生卡片不各自实现提醒逻辑。Koishi 插件中的 H5 Route 与
-`interaction/button` Handler 都调用同一个 `ReminderInteractionHandler`；
-该 Handler 校验令牌并把动作交给 `VoiceLifeService.executeReminderAction()`。
+`interaction/button` Handler 都调用同一个 `ReminderActionHandler`；
+该 Handler 校验令牌后调用 `IM Application.Action`，再经
+`Reminder Command Port` 交给 Demo 中模拟本地 `TimingTask` 的业务实现。
 卡片操作完成后优先通过 Koishi 通用 `bot.editMessage()` 更新原消息。
 
 ## 6. HTTP API
@@ -308,7 +323,7 @@ H5 和未来原生卡片不各自实现提醒逻辑。Koishi 插件中的 H5 Rou
 | GET | `/health` | 配置与健康状态 |
 | GET/POST | `/wechat-official` | Koishi 官方微信适配器回调 |
 | GET/POST | `/wechat/callback` | 迁移期旧回调兼容入口 |
-| GET/POST | `/reminders/action` | 带签名的提醒快捷操作页 |
+| GET/POST | `/voicelife/reminder-actions/:token` | VoiceLife 产品的提醒 Action UI |
 | GET | `/api/state` | 查看 Demo 全部状态 |
 | POST | `/api/binding-codes` | 创建设备绑定码，可选参数二维码 |
 | POST | `/api/demo/bind` | Mock 模式模拟 OpenID 绑定 |
@@ -360,16 +375,26 @@ curl -X POST http://localhost:8787/satori/v1/login.get \
 
 - 普通文字、图片、语音、关注和取消关注由 Koishi 适配器标准化；
 - 模板消息、模板发送回执和参数二维码仍是微信专属能力；
+- 微信公众号在产品上只有一个渠道、一个 WeChat Adapter；
+- H5 是该渠道的 Action UI，不是 Adapter；以后替换为小程序时仍调用同一动作入口；
 - H5 Route 与标准 `interaction/button` 位于 VoiceLife Koishi Plugin，
   只负责接收、校验和转发动作，不直接修改提醒状态；
+- `Binding Handler` 只接收规范化的 `ExternalIdentity`，不读取 OpenID 等平台字段；
+- Handler 只依赖 `IM Application`；Demo 业务实现通过 Binding Service Port 和
+  Reminder Command Port 注入；
 - 当前官方适配器未把 `SCAN` 和 `TEMPLATESENDJOBFINISH` 转换成标准 Session，
   Demo 在 Koishi 路由边界补充处理这两个明文事件；
+- 未来平台 Adapter 将绑定相关输入规范化为 `binding.requested`，复用同一个
+  `Binding Handler`；普通消息和提醒动作不会进入该 Handler；
 - 以后接入其他 IM 时，通用消息进入同一个 VoiceLife Koishi 插件，平台卡片、
   模板和回执继续放在各 Adapter 能力扩展中。
 
 ## 9. Demo 边界
 
 - JSON 文件存储仅用于 PoC，生产应换成数据库和事务 Outbox；
+- Demo 为便于一条命令运行，将 Koishi Runtime 与模拟的本地 `TimingTask`
+  组合在同一 Node.js 进程；两者通过端口连接，生产部署时端口可替换为 IPC/RPC，
+  Handler 和 Adapter 无需修改；
 - Mock 模式不代表微信真实送达；
 - 模板能否用于“用户自建日程提醒”必须由真实服务号类目和模板审核确认；
 - 当前语音回调只展示微信 `Recognition` 或 `MediaId`，尚未连接正式 ASR；

@@ -39,19 +39,24 @@ export class VoiceLifeService {
     return { code, deviceId, expiresAt };
   }
 
-  bindOpenId(code, openId) {
+  bindExternalIdentity(code, externalIdentity) {
     const normalized = String(code || "").trim().toUpperCase().replace(/^QRSCENE_/, "");
     const binding = this.store.state.bindCodes[normalized];
     if (!binding) throw new Error("绑定码不存在");
     if (binding.usedAt) throw new Error("绑定码已经使用");
     if (Date.parse(binding.expiresAt) < this.now()) throw new Error("绑定码已经过期");
-    if (!openId) throw new Error("OpenID 不能为空");
+    if (!externalIdentity?.platform || !externalIdentity?.userId) {
+      throw new Error("ExternalIdentity 不能为空");
+    }
     const boundAt = iso(this.now());
     this.store.mutate((state) => {
       state.bindCodes[normalized].usedAt = boundAt;
       state.bindings[binding.deviceId] = {
         deviceId: binding.deviceId,
-        openId,
+        externalIdentity: {
+          platform: String(externalIdentity.platform),
+          userId: String(externalIdentity.userId)
+        },
         boundAt,
         active: true
       };
@@ -59,10 +64,22 @@ export class VoiceLifeService {
     return structuredClone(this.store.state.bindings[binding.deviceId]);
   }
 
-  findDeviceByOpenId(openId) {
+  findDeviceByExternalIdentity(externalIdentity) {
     return Object.values(this.store.state.bindings).find(
-      (binding) => binding.openId === openId && binding.active
+      (binding) =>
+        binding.externalIdentity.platform === externalIdentity.platform &&
+        binding.externalIdentity.userId === externalIdentity.userId &&
+        binding.active
     );
+  }
+
+  deactivateExternalIdentity(externalIdentity) {
+    const binding = this.findDeviceByExternalIdentity(externalIdentity);
+    if (!binding) return false;
+    this.store.mutate((state) => {
+      state.bindings[binding.deviceId].active = false;
+    });
+    return true;
   }
 
   createReminder({ deviceId, title, dueAt }) {
@@ -94,24 +111,6 @@ export class VoiceLifeService {
       .filter((item) => includeDone || ["scheduled", "sent"].includes(item.status))
       .sort((left, right) => Date.parse(left.dueAt) - Date.parse(right.dueAt))
       .map((item) => structuredClone(item));
-  }
-
-  findActionTarget(openId, reminderId) {
-    const binding = this.findDeviceByOpenId(openId);
-    if (!binding) throw new Error("当前微信尚未绑定设备");
-    if (reminderId) {
-      const exact = this.store.state.reminders[reminderId];
-      if (!exact || exact.deviceId !== binding.deviceId) throw new Error("提醒不存在");
-      return exact;
-    }
-    const candidates = this.listReminders(binding.deviceId, { includeDone: false });
-    if (!candidates.length) throw new Error("没有待处理提醒");
-    return candidates[0];
-  }
-
-  dismiss({ openId, reminderId }) {
-    const target = this.findActionTarget(openId, reminderId);
-    return this.dismissTarget(target);
   }
 
   dismissTarget(target) {
@@ -156,15 +155,6 @@ export class VoiceLifeService {
       return this.snoozeTarget(target, amount);
     }
     throw new Error("未知操作");
-  }
-
-  snooze({ openId, reminderId, minutes = 10 }) {
-    const amount = Number(minutes);
-    if (!Number.isInteger(amount) || amount < 1 || amount > 1440) {
-      throw new Error("推迟分钟数必须是 1～1440 的整数");
-    }
-    const target = this.findActionTarget(openId, reminderId);
-    return this.snoozeTarget(target, amount);
   }
 
   snoozeTarget(target, minutes) {
@@ -225,8 +215,11 @@ export class VoiceLifeService {
       return { ok: false, reminderId, error: "not_bound" };
     }
     try {
+      if (binding.externalIdentity.platform !== "wechat-official") {
+        throw new Error(`Demo 尚未安装 ${binding.externalIdentity.platform} 投递 Adapter`);
+      }
       const response = await this.wechatApi.sendTemplate({
-        openId: binding.openId,
+        openId: binding.externalIdentity.userId,
         reminder
       });
       const sentAt = iso(this.now());
@@ -239,7 +232,7 @@ export class VoiceLifeService {
         current.error = null;
         state.outbound.push({
           reminderId,
-          openId: binding.openId,
+          externalIdentity: binding.externalIdentity,
           sentAt,
           response
         });

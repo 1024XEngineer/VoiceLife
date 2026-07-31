@@ -11,6 +11,19 @@ function emptyState() {
   };
 }
 
+function migrateState(state) {
+  for (const binding of Object.values(state.bindings)) {
+    if (!binding.externalIdentity && binding.openId) {
+      binding.externalIdentity = {
+        platform: "wechat-official",
+        userId: binding.openId
+      };
+      delete binding.openId;
+    }
+  }
+  return state;
+}
+
 export class JsonStore {
   constructor(filePath) {
     this.filePath = filePath;
@@ -20,7 +33,10 @@ export class JsonStore {
 
   load() {
     try {
-      this.state = { ...emptyState(), ...JSON.parse(fs.readFileSync(this.filePath, "utf8")) };
+      this.state = migrateState({
+        ...emptyState(),
+        ...JSON.parse(fs.readFileSync(this.filePath, "utf8"))
+      });
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -48,7 +64,7 @@ export class JsonStore {
 
 export class MemoryStore {
   constructor(initial = {}) {
-    this.state = { ...emptyState(), ...structuredClone(initial) };
+    this.state = migrateState({ ...emptyState(), ...structuredClone(initial) });
   }
 
   snapshot() {

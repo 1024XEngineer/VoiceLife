@@ -62,12 +62,13 @@ export class WechatApi {
     };
     if (this.config.detailUrl) {
       const detail = new URL(this.config.detailUrl);
-      detail.searchParams.set("token", createReminderActionToken({
+      const token = createReminderActionToken({
         reminder,
         secret: this.config.actionTokenSecret,
         now: this.now(),
         ttlSeconds: this.config.actionTokenTtlSeconds
-      }));
+      });
+      detail.pathname = `${detail.pathname.replace(/\/+$/, "")}/${encodeURIComponent(token)}`;
       body.url = detail.toString();
     }
     const response = await this.fetch(url, {

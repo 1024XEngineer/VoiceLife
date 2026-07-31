@@ -3,10 +3,10 @@ import test from "node:test";
 import { createReminderActionToken } from "../src/action-token.js";
 import {
   createReminderButtonId,
-  createReminderInteractionHandler,
-  handleReminderButtonInteraction,
-  updateReminderInteractionMessage
-} from "../src/reminder-interaction.js";
+  createReminderActionHandler,
+  handleReminderButtonAction,
+  updateReminderActionMessage
+} from "../src/reminder-action.js";
 
 function fixture() {
   const reminder = {
@@ -15,12 +15,12 @@ function fixture() {
     status: "sent"
   };
   const commands = [];
-  const service = {
-    findActionIntentTarget(input) {
+  const actionApplication = {
+    inspect(input) {
       assert.equal(input.reminderId, reminder.id);
       return reminder;
     },
-    executeReminderAction(command) {
+    execute(command) {
       commands.push(command);
       return command.action === "snooze"
         ? { ...reminder, status: "scheduled", dueAt: "2026-07-31T10:10:00.000Z" }
@@ -33,18 +33,18 @@ function fixture() {
     now: 1_000,
     ttlSeconds: 600
   });
-  const interaction = createReminderInteractionHandler({
-    service,
+  const actionHandler = createReminderActionHandler({
+    actionApplication,
     tokenSecret: "action-secret",
     now: () => 1_000
   });
-  return { commands, interaction, reminder, token };
+  return { actionHandler, commands, reminder, token };
 }
 
 test("H5 与原生卡片复用同一个提醒动作处理器", async () => {
-  const { commands, interaction, token } = fixture();
+  const { actionHandler, commands, token } = fixture();
 
-  interaction.execute({ token, action: "dismiss" });
+  actionHandler.execute({ token, action: "dismiss" });
   const session = {
     event: {
       button: {
@@ -53,9 +53,9 @@ test("H5 与原生卡片复用同一个提醒动作处理器", async () => {
     }
   };
   let cardResult;
-  const handled = await handleReminderButtonInteraction(
+  const handled = await handleReminderButtonAction(
     session,
-    interaction,
+    actionHandler,
     {
       async updateMessage(_session, result) {
         cardResult = result;
@@ -89,7 +89,7 @@ test("卡片更新优先使用 Koishi bot.editMessage", async () => {
     }
   };
 
-  const mode = await updateReminderInteractionMessage(session, {
+  const mode = await updateReminderActionMessage(session, {
     message: "✅ 已知道"
   });
 
@@ -112,7 +112,7 @@ test("平台不支持修改消息时降级为 Koishi session.send", async () => 
     }
   };
 
-  const mode = await updateReminderInteractionMessage(session, {
+  const mode = await updateReminderActionMessage(session, {
     message: "✅ 已知道"
   });
 

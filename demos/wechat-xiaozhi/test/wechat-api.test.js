@@ -57,7 +57,7 @@ test("模板消息详情地址包含签名操作令牌", async () => {
       outboundMode: "live",
       templateId: "template",
       templateFields: { title: "thing1", time: "time2", status: "thing3" },
-      detailUrl: "https://example.com/reminders/action",
+      detailUrl: "https://example.com/voicelife/reminder-actions",
       actionTokenSecret: "action-secret",
       actionTokenTtlSeconds: 600
     },
@@ -80,7 +80,7 @@ test("模板消息详情地址包含签名操作令牌", async () => {
   });
 
   const detail = new URL(sentBody.url);
-  assert.equal(detail.pathname, "/reminders/action");
-  assert.ok(detail.searchParams.get("token"));
+  assert.match(detail.pathname, /^\/voicelife\/reminder-actions\/[^/]+$/);
+  assert.equal(detail.searchParams.has("token"), false);
   assert.equal(detail.searchParams.has("reminder_id"), false);
 });

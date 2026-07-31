@@ -2,12 +2,14 @@ import {
   actionPage,
   errorPage,
   formatChinaTime,
+  REMINDER_ACTION_ROUTE,
   resultPage
-} from "./app.js";
+} from "./action-ui.js";
+import { createBindingHandler } from "./binding-handler.js";
 import {
-  createReminderInteractionHandler,
-  registerReminderInteractionHandler
-} from "./reminder-interaction.js";
+  createReminderActionHandler,
+  registerReminderActionHandler
+} from "./reminder-action.js";
 import {
   processWechatCallback,
   verifyWechatUrl
@@ -15,7 +17,7 @@ import {
 import {
   deactivateWechatBinding,
   handleWechatBindingEvent,
-  handleWechatText,
+  handleWechatBindingText,
   handleWechatVoice
 } from "./wechat-domain.js";
 import { parseWechatXml } from "./xml.js";
@@ -53,9 +55,18 @@ function logWechatAccount(logger, body) {
   return message;
 }
 
-export function createVoiceLifeKoishiPlugin({ config, service, wechatApi, logger = console }) {
-  const reminderInteraction = createReminderInteractionHandler({
-    service,
+export function createVoiceLifeKoishiPlugin({
+  config,
+  service,
+  imApplication,
+  wechatApi,
+  logger = console
+}) {
+  const bindingHandler = createBindingHandler({
+    bindingApplication: imApplication.binding
+  });
+  const reminderAction = createReminderActionHandler({
+    actionApplication: imApplication.action,
     tokenSecret: config.wechat.actionTokenSecret
   });
 
@@ -64,7 +75,7 @@ export function createVoiceLifeKoishiPlugin({ config, service, wechatApi, logger
 
     // Koishi 标准交互入口：平台 Adapter 产生 interaction/button，
     // VoiceLife 插件只解析动作并转发给同一个提醒动作处理器。
-    registerReminderInteractionHandler(ctx, reminderInteraction);
+    registerReminderActionHandler(ctx, reminderAction);
 
     ctx.middleware(async (session, next) => {
       if (session.platform !== "wechat-official") return next();
@@ -74,10 +85,12 @@ export function createVoiceLifeKoishiPlugin({ config, service, wechatApi, logger
             recognition: raw.Recognition,
             mediaId: raw.MediaId
           })
-        : handleWechatText({
+        : handleWechatBindingText({
+            channelAccountId: session.selfId || config.wechat.account || "wechat-official",
             content: session.content,
+            eventId: session.messageId,
             openId: session.userId,
-            service
+            bindingHandler
           });
       koishiLogger.info("wechat message user=%s", session.userId);
       await session.send(reply);
@@ -86,16 +99,23 @@ export function createVoiceLifeKoishiPlugin({ config, service, wechatApi, logger
     ctx.on("friend-added", async (session) => {
       if (session.platform !== "wechat-official") return;
       const reply = handleWechatBindingEvent({
+        channelAccountId: session.selfId || config.wechat.account || "wechat-official",
+        eventId: session.messageId || `${session.timestamp}:friend-added`,
         eventKey: session.wechatOfficial?.EventKey,
         openId: session.userId,
-        service
+        bindingHandler
       });
       await session.send(reply);
     });
 
     ctx.on("friend-deleted", (session) => {
       if (session.platform !== "wechat-official") return;
-      deactivateWechatBinding({ openId: session.userId, service });
+      deactivateWechatBinding({
+        channelAccountId: session.selfId || config.wechat.account || "wechat-official",
+        eventId: session.messageId || `${session.timestamp}:friend-deleted`,
+        openId: session.userId,
+        bindingHandler
+      });
     });
 
     // 官方适配器当前的明文 POST 不校验 signature，安全模式 URL 验证也不完整。
@@ -144,7 +164,8 @@ export function createVoiceLifeKoishiPlugin({ config, service, wechatApi, logger
         url: requestUrl(koa, config.koishi.selfUrl),
         body,
         config: config.wechat,
-        service
+        bindingHandler,
+        receiptService: service
       });
       koa.status = 200;
       koa.type = "application/xml; charset=utf-8";
@@ -170,7 +191,8 @@ export function createVoiceLifeKoishiPlugin({ config, service, wechatApi, logger
         url: requestUrl(koa, config.koishi.selfUrl),
         body,
         config: config.wechat,
-        service
+        bindingHandler,
+        receiptService: service
       });
       koa.status = 200;
       koa.type = "application/xml; charset=utf-8";
@@ -187,7 +209,7 @@ export function createVoiceLifeKoishiPlugin({ config, service, wechatApi, logger
 <li>Koishi 微信回调：<code>/wechat-official</code></li>
 <li>旧回调兼容：<code>/wechat/callback</code></li>
 <li>Satori API：<code>${config.koishi.satoriPath}/v1</code></li>
-<li>提醒操作页：<code>/reminders/action</code></li>
+<li>提醒操作页：<code>${REMINDER_ACTION_ROUTE}/{token}</code></li>
 </ul></html>`);
     });
 
@@ -208,21 +230,21 @@ export function createVoiceLifeKoishiPlugin({ config, service, wechatApi, logger
       });
     });
 
-    ctx.server.get("/reminders/action", (koa) => {
+    ctx.server.get(`${REMINDER_ACTION_ROUTE}/:token`, (koa) => {
       try {
-        const token = koa.query.token;
-        const reminder = reminderInteraction.inspect(token);
+        const token = koa.params.token;
+        const reminder = reminderAction.inspect(token);
         html(koa, 200, actionPage({ reminder, token }));
       } catch (error) {
         html(koa, 400, errorPage(error.message));
       }
     });
 
-    ctx.server.post("/reminders/action", (koa) => {
+    ctx.server.post(`${REMINDER_ACTION_ROUTE}/:token`, (koa) => {
       try {
         const form = formBody(koa.request.body);
-        const result = reminderInteraction.execute({
-          token: form.token,
+        const result = reminderAction.execute({
+          token: koa.params.token,
           action: form.action
         });
         const detail = result.action === "snooze"
@@ -254,7 +276,17 @@ export function createVoiceLifeKoishiPlugin({ config, service, wechatApi, logger
     ctx.server.post("/api/demo/bind", (koa) => {
       if (!config.demoMode) return json(koa, 404, { error: "not_found" });
       const input = koa.request.body || {};
-      json(koa, 200, service.bindOpenId(input.code, input.openId));
+      const result = bindingHandler.handle({
+        type: "binding.requested",
+        channelAccountId: input.channelAccountId || config.wechat.account || "wechat-official",
+        eventId: input.eventId || `demo:${input.code}:${input.openId}`,
+        actor: {
+          platform: input.platform || "wechat-official",
+          userId: input.openId
+        },
+        pairingCode: input.code
+      });
+      json(koa, 200, result.binding);
     });
     ctx.server.post("/api/reminders", (koa) => {
       json(koa, 201, service.createReminder(koa.request.body || {}));

@@ -2,8 +2,13 @@ import { createRequire } from "node:module";
 import { loadConfig } from "./config.js";
 import { loadDotEnv } from "./env.js";
 import { createVoiceLifeKoishiPlugin } from "./koishi-plugin.js";
+import { createImApplication } from "./im-application.js";
 import { VoiceLifeService } from "./service.js";
 import { JsonStore } from "./store.js";
+import {
+  createBindingServicePort,
+  createReminderCommandPort
+} from "./voicelife-ports.js";
 import { WechatApi } from "./wechat-api.js";
 import { XiaozhiMcpBridge } from "./xiaozhi-mcp.js";
 
@@ -21,6 +26,10 @@ const config = loadConfig();
 const store = new JsonStore(config.dataFile);
 const wechatApi = new WechatApi(config.wechat);
 const service = new VoiceLifeService({ store, wechatApi });
+const imApplication = createImApplication({
+  bindingService: createBindingServicePort(service),
+  reminderCommandPort: createReminderCommandPort(service)
+});
 const app = new Context();
 app.plugin(HTTP);
 app.plugin(server, {
@@ -28,7 +37,12 @@ app.plugin(server, {
   port: config.port,
   selfUrl: config.koishi.selfUrl
 });
-app.plugin(createVoiceLifeKoishiPlugin({ config, service, wechatApi }));
+app.plugin(createVoiceLifeKoishiPlugin({
+  config,
+  service,
+  imApplication,
+  wechatApi
+}));
 if (config.wechat.account) {
   app.plugin(WechatOfficialBot, {
     account: config.wechat.account,

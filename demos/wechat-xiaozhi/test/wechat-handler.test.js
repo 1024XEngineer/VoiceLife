@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
+import { createBindingHandler } from "../src/binding-handler.js";
+import { createImApplication } from "../src/im-application.js";
 import { VoiceLifeService } from "../src/service.js";
 import { MemoryStore } from "../src/store.js";
+import {
+  createBindingServicePort,
+  createReminderCommandPort
+} from "../src/voicelife-ports.js";
 import {
   processWechatCallback,
   verifyWechatUrl
@@ -28,7 +34,14 @@ function fixture() {
     wechatApi: { sendTemplate: async () => ({ msgid: "1" }) },
     now: () => Date.parse("2026-07-29T10:00:00+08:00")
   });
-  return { store, service };
+  const application = createImApplication({
+    bindingService: createBindingServicePort(service),
+    reminderCommandPort: createReminderCommandPort(service)
+  });
+  const bindingHandler = createBindingHandler({
+    bindingApplication: application.binding
+  });
+  return { bindingHandler, store, service };
 }
 
 test("公众号 URL 明文校验返回 echostr", async () => {
@@ -44,7 +57,7 @@ test("公众号 URL 明文校验返回 echostr", async () => {
 });
 
 test("明文公众号消息可以完成设备绑定", async () => {
-  const { service } = fixture();
+  const { bindingHandler, service } = fixture();
   const binding = service.createBindingCode("xiaozhi-01");
   const token = "token";
   const timestamp = "1";
@@ -65,14 +78,18 @@ test("明文公众号消息可以完成设备绑定", async () => {
     url,
     body,
     config: { token },
-    service
+    bindingHandler,
+    receiptService: service
   });
   assert.match(xmlField(reply, "Content"), /绑定成功/);
-  assert.equal(service.findDeviceByOpenId("openid-01").deviceId, "xiaozhi-01");
+  assert.equal(service.findDeviceByExternalIdentity({
+    platform: "wechat-official",
+    userId: "openid-01"
+  }).deviceId, "xiaozhi-01");
 });
 
 test("安全模式回调可以解密、处理并加密回复", async () => {
-  const { service } = fixture();
+  const { bindingHandler, service } = fixture();
   const token = "token";
   const appId = "wx-demo";
   const aesKey = Buffer.alloc(32, 9).toString("base64").replace(/=$/, "");
@@ -103,7 +120,8 @@ test("安全模式回调可以解密、处理并加密回复", async () => {
     url,
     body,
     config: { token, appId, aesKey },
-    service
+    bindingHandler,
+    receiptService: service
   });
   const responseEncrypted = xmlField(response, "Encrypt");
   const decrypted = decryptWechatMessage({
@@ -111,5 +129,5 @@ test("安全模式回调可以解密、处理并加密回复", async () => {
     appId,
     encodingAesKey: aesKey
   }).xml;
-  assert.match(parseWechatXml(decrypted).Content, /VoiceLife 微信 Demo/);
+  assert.match(parseWechatXml(decrypted).Content, /VoiceLife 微信绑定入口/);
 });

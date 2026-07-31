@@ -28,19 +28,29 @@ function fixture() {
   };
 }
 
-test("绑定码把小智设备和公众号 OpenID 关联", () => {
+test("绑定码把小智设备和平台 ExternalIdentity 关联", () => {
   const { service } = fixture();
   const token = service.createBindingCode("xiaozhi-01");
-  const binding = service.bindOpenId(token.code, "openid-01");
+  const identity = { platform: "wechat-official", userId: "openid-01" };
+  const binding = service.bindExternalIdentity(token.code, identity);
   assert.equal(binding.deviceId, "xiaozhi-01");
-  assert.equal(binding.openId, "openid-01");
-  assert.throws(() => service.bindOpenId(token.code, "other"), /已经使用/);
+  assert.deepEqual(binding.externalIdentity, identity);
+  assert.throws(
+    () => service.bindExternalIdentity(token.code, {
+      platform: "wechat-official",
+      userId: "other"
+    }),
+    /已经使用/
+  );
 });
 
 test("到期提醒发送模板并记录发送回执", async () => {
   const { service, store, sent, advance } = fixture();
   const token = service.createBindingCode("xiaozhi-01");
-  service.bindOpenId(token.code, "openid-01");
+  service.bindExternalIdentity(token.code, {
+    platform: "wechat-official",
+    userId: "openid-01"
+  });
   const reminder = service.createReminder({
     deviceId: "xiaozhi-01",
     title: "喝水",
@@ -84,7 +94,10 @@ test("小智可以直接关闭和推迟提醒", () => {
 test("统一动作入口可以知道了或推迟，旧动作令牌不能重复推迟", async () => {
   const { service, advance } = fixture();
   const binding = service.createBindingCode("xiaozhi-01");
-  service.bindOpenId(binding.code, "openid-01");
+  service.bindExternalIdentity(binding.code, {
+    platform: "wechat-official",
+    userId: "openid-01"
+  });
   const dismissed = service.createReminder({
     deviceId: "xiaozhi-01",
     title: "吃药",
