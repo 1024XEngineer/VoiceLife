@@ -203,133 +203,418 @@ list_tools——获取全部已注册的工具
 
 ## 5. MCP Tool
 
-### 1. 日程管理相关Tool
+### 日程 Tools
 
-#### 1）创建日程
+#### create_schedule
 
-**工具描述：**创建一条日程。如果时间冲突且未忽略冲突，则仅返回冲突列表且不创建。
+创建一条日程。如果时间冲突且未忽略冲突，则仅返回冲突列表且不创建。
 
-**入参：**
+内部编排：
 
-- **event(String，必填）:** 事件标题
-- **start_time(String， 可选）：**事件开始时间
-- **end_time(datetime，可选）：**事件结束时间
-- **location（datetime，可选）：**事件地点
+1. 创建 `schedule` 主记录。
+2. 若 `start_time` 不为空，则内部调用 `RegisterTimerTask(schedule_id, start_at)` 创建对应 `timer_task`。
+3. 若本次创建同时包含 `recurrence_rule` 或 `reminder_config`，则继续内部调用 `UpdateTimerTask(task_id, schedule_id, start_at, recurrence_rule, reminder_config, change_scope=all)` 补全调度规则。
+4. 若仅创建无时间语义的普通记录，则不编排 `timingtask`。
 
-- **notes（String，可选）：**事件备注
-- **ignore_conflict(Boolean, 可选，默认 False）：**是否忽略与其他日程的时间冲突
+**参数：**
 
-**出参：**
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| event | string | 是 | 事件标题 |
+| start_time | datetime \| null | 否 | 开始时间 |
+| end_time | datetime \| null | 否 | 结束时间/开始时间+持续时间=结束时间 |
+| location | string \| null | 否 | 地点 |
+| notes | string \| null | 否 | 备注 |
+| recurrence_rule | object \| null | 否 | 周期规则；不传表示单次事项 |
+| reminder_config | object \| null | 否 | 提醒配置；不传表示仅记录日程、不触发提醒 |
+| ignore_conflict | boolean | 否 | 是否忽略与其他日程的时间冲突，默认 false |
 
-**message（String）：**对此次创建的一些说明，比如：”created successful“。
+**返回：**
 
-**schedule（Schedule 实体对象）：**创建完成后的 Schedule 实体对象。
+返回结构化 JSON 数据。
 
-**conflicts（Schedule[]）：**创建成功时此字段为空，日程冲突时为冲突日程实体。
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| created | boolean | 是否成功创建日程 |
+| schedule | Schedule \| null | 创建成功后的完整日程；未创建时为 null |
+| task_id | string \| null | 若已同步到 `timingtask`，则返回对应任务 ID |
+| conflicts | Schedule[] | 与新日程冲突的日程；无冲突时为空数组 |
+| error | Error \| null | 调用失败时的错误信息；无错误时为 null |
 
-**error（String）：**无错误时为空。和 message 字段的区别是，error 字段更加突出，message 字段适合常规信息。
+创建成功：
 
-#### 2）查询日程
+```json
+{
+  "created": true,
+  "schedule": {
+    "schedule_id": 12,
+    "event": "项目周会",
+    "start_time": "2026-07-29T10:00:00+08:00",
+    "end_time": "2026-07-29T11:00:00+08:00",
+    "location": "301会议室",
+    "notes": null,
+    "recurrence_rule": null,
+    "reminder_config": {
+      "weak_offsets": [-30],
+      "strong": {
+        "enabled": true,
+        "can_snooze": true,
+        "snooze_interval_minutes": 10
+      }
+    },
+    "status": "active"
+  },
+  "task_id": "task_12",
+  "conflicts": [],
+  "error": null
+}
+```
 
-**工具描述：**根据日程 ID、关键词或时间范围查询日程。多个查询条件之间为 AND 关系，结果按开始时间升序排列。不传任何参数默认查询所有日程。
+存在时间冲突且未忽略冲突时，不创建日程：
 
-**入参：**
+```json
+{
+  "created": false,
+  "schedule": null,
+  "task_id": null,
+  "conflicts": [
+    {
+      "schedule_id": 8,
+      "event": "看牙医",
+      "start_time": "2026-07-29T10:00:00+08:00",
+      "end_time": "2026-07-29T10:30:00+08:00"
+    }
+  ],
+  "error": null
+}
+```
 
-- **schedule_id(Number，可选）：**日程 ID，提供后按 ID 精确查询
-- **keyword(String，可选）：**事件标题关键词，支持模糊匹配
-- **start_from(datetime，可选）：**开始时间范围的下限
-- **start_to(datetime，可选）：**开始时间范围的上限
-- **status(String，可选，默认 active）：**状态筛选；all 表示全部状态，cancelled 表示已取消日程
-- **limit(Number，可选，默认 10，最大 50）：**返回条数
-- **offset(Number，可选，默认 0）：**分页偏移量
+调用失败：
 
-**出参：**
+```json
+{
+  "created": false,
+  "schedule": null,
+  "task_id": null,
+  "conflicts": [],
+  "error": {
+    "code": "INVALID_TIME",
+    "message": "结束时间不能早于开始时间"
+  }
+}
+```
 
-**schedules（Schedule[]）：**符合条件的日程列表。
+#### query_schedule
 
-**total（Number）：**符合条件的日程总数，不受 limit 和 offset 影响。
+根据日程 ID、关键词或时间范围查询日程主记录。多个查询条件之间为 AND 关系，结果按开始时间升序排列。不传任何参数默认查询所有日程。
 
-**error（String）：**调用失败时的错误信息；无错误时为空。
+说明：
 
-#### 3）修改日程
+- 该 Tool 返回 `schedule` 主记录，适合查看“用户保存了哪些事项”。
+- 若用户问“明天有什么安排”“下周五有哪些事情”，应优先调用 `query_calendar_view`，由内部调度层按时间范围展开周期事项与单次例外。
 
-**工具描述：**修改一条已有日程。调用前应先查询并确定目标日程的 schedule_id。如果时间冲突且未忽略冲突，则仅返回冲突列表且不修改任何字段。
+**参数：**
 
-**入参：**
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| schedule_id | number \| null | 否 | 日程 ID；提供后按 ID 精确查询 |
+| keyword | string \| null | 否 | 事件标题关键词，支持模糊匹配 |
+| start_from | datetime \| null | 否 | 开始时间范围的下限 |
+| start_to | datetime \| null | 否 | 开始时间范围的上限 |
+| status | string \| null | 否 | 状态筛选，默认 active；all 表示全部状态；cancelled 已取消日程 |
+| limit | number \| null | 否 | 返回条数，默认 10，最大 50 |
+| offset | number \| null | 否 | 分页偏移量，默认 0 |
 
-- **schedule_id(Number，必填）：**要修改的日程 ID
-- **event(String，可选）：**新的事件标题
-- **start_time(datetime，可选）：**新的开始时间
-- **end_time(datetime，可选）：**新的结束时间
-- **location(String，可选）：**新的地点
-- **notes(String，可选）：**新的备注
-- **reminder_id(Number，可选）：**关联的提醒 ID
-- **ignore_conflict(Boolean，可选，默认 False）：**是否忽略时间冲突
+**返回：**
 
-**出参：**
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| schedules | Schedule[] | 符合条件的日程列表 |
+| total | number | 符合条件的日程总数，不受 limit 和 offset 影响 |
+| error | Error \| null | 调用失败时的错误信息；无错误时为 null |
 
-**message（String）：**对此次修改的一些说明。
+```json
+{
+  "schedules": [
+    {
+      "schedule_id": 12,
+      "event": "项目周会",
+      "start_time": "2026-07-29T10:00:00+08:00",
+      "end_time": "2026-07-29T11:00:00+08:00",
+      "location": "301会议室",
+      "notes": null,
+      "reminder_config": {
+        "weak_offsets": [-10, -30],
+        "strong": {
+          "enabled": true,
+          "can_snooze": true
+        }
+      },
+      "status": "active"
+    }
+  ],
+  "total": 1,
+  "error": null
+}
+```
 
-**schedule（Schedule 实体对象）：**修改后的完整日程；未修改时为空。
+#### update_schedule
 
-**conflicts（Schedule[]）：**修改后发生冲突的日程；无冲突时为空数组。
+修改一条已有日程。调用前应先查询并确定目标日程的 `schedule_id`。如果时间冲突且未忽略冲突，则仅返回冲突列表且不修改任何字段；另外修改时只调整部分字段的话，不需要调整的字段值为原始值（原来是空现在还是空，原来是什么值，现在还是什么值）。
 
-**error（String）：**调用失败时的错误信息；无错误时为空。
+内部编排：
 
-#### 4）删除日程
+1. 更新 `schedule` 主记录。
+2. 若该日程已有对应 `timer_task`，则按本次请求内部调用 `UpdateTimerTask` 同步 `start_time`、`recurrence_rule`、`reminder_config`。
+3. 若该日程此前没有 `timer_task`，但本次更新后具备时间语义，则先调用 `RegisterTimerTask(schedule_id, start_at)`，再调用 `UpdateTimerTask(...)` 补全规则。
+4. 若本次更新移除了时间语义或明确关闭提醒，则可在内部编排 `CancelTimerTask(change_scope=all)` 终止后续触发。
 
-**工具描述：**删除/取消一条日程。调用前应先查询并确定目标日程的 schedule_id。该接口不会自动删除关联提醒。
+**参数：**
 
-**入参：**
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| schedule_id | number | 是 | 要修改的日程 ID |
+| event | string \| null | 否 | 新的事件标题 |
+| start_time | datetime \| null | 否 | 新的开始时间 |
+| end_time | datetime \| null | 否 | 新的结束时间 |
+| location | string \| null | 否 | 新的地点 |
+| notes | string \| null | 否 | 新的备注 |
+| recurrence_rule | object \| null | 否 | 新的周期规则；传 null 可表示改为单次事项 |
+| reminder_config | object \| null | 否 | 新的提醒配置；传 null 可表示移除提醒 |
+| change_scope | string \| null | 否 | 修改范围：`single` / `future` / `all`；默认 `all` |
+| target_occurrence_at | datetime \| null | 否 | 修改“本次”时的目标 occurrence 时间 |
+| effective_from | datetime \| null | 否 | 修改“本次及以后”时的生效时间 |
+| ignore_conflict | boolean | 否 | 是否忽略时间冲突，默认 false |
 
-- **schedule_id(Number，必填）：**要删除的日程 ID
+**返回：**
 
-**出参：**
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| updated | boolean | 是否成功修改日程 |
+| schedule | Schedule \| null | 修改后的完整日程 |
+| task_id | string \| null | 若同步了 `timingtask`，则返回对应任务 ID |
+| conflicts | Schedule[] | 修改后发生冲突的日程；无冲突时为空数组 |
+| error | Error \| null | 调用失败时的错误信息；无错误时为 null |
 
-**schedule_id（Number）：**被删除的日程 ID。
+```json
+{
+  "updated": true,
+  "schedule": {
+    "schedule_id": 12,
+    "event": "项目周会",
+    "start_time": "2026-07-29T15:00:00+08:00",
+    "end_time": "2026-07-29T16:00:00+08:00",
+    "location": "301会议室",
+    "notes": null,
+    "recurrence_rule": {
+      "frequency": "week",
+      "interval": 1,
+      "start_at": "2026-07-29T15:00:00+08:00",
+      "timezone": "+08:00",
+      "by_weekdays": ["wed"],
+      "end_type": "none"
+    },
+    "reminder_config": {
+      "weak_offsets": [-30],
+      "strong": {
+        "enabled": true,
+        "can_snooze": true,
+        "max_snooze_count": 2
+      }
+    },
+    "status": "active"
+  },
+  "task_id": "task_12",
+  "conflicts": [],
+  "error": null
+}
+```
 
-**deleted（Boolean）：**是否成功删除日程。
+#### delete_schedule
 
-**error（String）：**调用失败时的错误信息；无错误时为空。
+删除/取消一条日程。调用前应先查询并确定目标日程的 `schedule_id`。
 
-#### 5）查询最近日程操作
+内部编排：
 
-**工具描述：**查询当前用户最近 10 条日程操作。如需撤销，应先调用该接口找到用户想撤销的操作记录。
+1. 更新或删除 `schedule` 主记录。
+2. 若该日程存在对应 `timer_task`，则内部调用 `CancelTimerTask` 停止后续触发。
+3. `single` / `future` / `all` 等范围语义由 MCP Tool 转换后传给 `timingtask`，避免 Agent 直接操作底层调度对象。
 
-**入参：**
+**参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| schedule_id | number | 是 | 要删除的日程 ID |
+| change_scope | string \| null | 否 | 删除范围：`single` / `future` / `all`；默认 `all` |
+| target_occurrence_at | datetime \| null | 否 | 删除“本次”时的目标 occurrence 时间 |
+| effective_from | datetime \| null | 否 | 删除“本次及以后”时的生效时间 |
+
+**返回：**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| schedule_id | number | 被删除的日程 ID |
+| deleted | boolean | 是否成功删除 |
+| error | Error \| null | 调用失败时的错误信息；无错误时为 null |
+
+```json
+{
+  "schedule_id": 12,
+  "deleted": true,
+  "error": null
+}
+```
+
+#### query_calendar_view
+
+按时间范围查询用户可见安排。该 Tool 面向“明天有什么安排”“下周五有哪些事情”这类用户问题，内部调用 `ListCalendarView` 展开周期事项并叠加单次例外。
+
+**参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| range_start | datetime | 是 | 查询开始时间 |
+| range_end | datetime | 是 | 查询结束时间 |
+| schedule_id | number \| null | 否 | 指定某条日程；为空时查询当前用户范围内全部日程 |
+| status | string \| null | 否 | 状态筛选 |
+| limit | number \| null | 否 | 返回条数，默认 20，最大 100 |
+| offset | number \| null | 否 | 分页偏移量，默认 0 |
+
+**返回：**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| occurrences | Occurrence[] | 查询时间范围内用户可见的安排列表 |
+| total | number | 符合条件的安排总数 |
+| error | Error \| null | 调用失败时的错误信息；无错误时为 null |
+
+```json
+{
+  "occurrences": [
+    {
+      "occurrence_id": "task_12#2026-08-07T20:00:00+08:00",
+      "schedule_id": 12,
+      "task_id": "task_12",
+      "instance_id": null,
+      "event": "项目周会",
+      "planned_start_at": "2026-08-07T20:00:00+08:00",
+      "planned_end_at": "2026-08-07T21:00:00+08:00",
+      "status": "pending",
+      "is_recurring": true,
+      "is_exception": false
+    }
+  ],
+  "total": 1,
+  "error": null
+}
+```
+
+#### query_recent_operations
+
+查询当前用户最近 15 分钟内可撤销的日程操作（限制：仅允许撤销最近 10 条操作，不可调整）。如需撤销应先调用该 Tool，找到用户想撤销的操作记录。
+
+**参数：**
 
 无。
 
-**出参：**
+**返回：**
 
-**operations（Operation[]）：**可撤销的操作记录（包含操作和日程状态），按操作时间倒序排列。
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| operations | Operation[] | 可撤销的操作记录，按操作时间倒序排列 |
+| error | Error \| null | 调用失败时的错误信息；无错误时为 null |
 
-**error（String）：**调用失败时的错误信息；无错误时为空。
+```json
+{
+  "operations": [
+    {
+      "operation_id": 100,
+      "type": "update",
+      "schedule_id": 1,
+      "schedule_event": "项目周会",
+      "operated_at": "2026-07-27T15:05:00+08:00",
+      "previous": {  // 本次操作前的数据
+        "schedule_id": 1,
+        "event": "项目周会",
+        "start_time": "2026-07-28T10:00:00+08:00",
+        "end_time": "2026-07-28T11:00:00+08:00",
+        "location": "301会议室",
+        "notes": null,
+        "reminder_config": {
+          "weak_offsets": [-10],
+          "strong": {
+            "enabled": true,
+            "can_snooze": true
+          }
+        },
+        "status": "active",
+        "created_at": "2026-07-27T14:30:00+08:00",
+        "updated_at": "2026-07-27T14:30:00+08:00"
+      }
+    },
+    {
+      "operation_id": 101,
+      "type": "create",
+      "schedule_id": 12,
+      "schedule_event": "项目周会",
+      "operated_at": "2026-07-29T09:50:00+08:00",
+      "previous": null   // 新建日程前没有该日程的相关数据
+    }
+  ],
+  "error": null
+}
+```
 
-#### 6）撤销日程操作
+#### undo_operation
 
-**工具描述：**撤销当前用户最近 15 分钟内指定的一条日程创建、修改或删除操作。
+撤销当前用户最近 15 分钟内指定的一条日程创建、修改或删除操作。
 
-**入参：**
+**参数：**
 
-- **operation_id(Number，必填）：**要撤销的操作记录 ID，由 query_recent_operations 接口获取
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| operation_id | number | 是 | 要撤销的操作记录 ID，由 `query_recent_operations` Tool获取 |
 
-**出参：**
+**返回：**
 
-**undone（Boolean）：**是否成功撤销。
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| undone | boolean | 是否成功撤销 |
+| operation | Operation \| null | 被撤销的操作信息 |
+| schedule | Schedule \| null | 撤销完成后的日程；撤销创建操作时为 null |
+| error | Error \| null | 操作不存在、已过期或调用失败时的错误信息 |
 
-**operation（Operation 实体对象）：**被撤销的操作信息（撤销前的状态）；无操作时为空。
+```json
+{
+  "undone": true,
+  "operation": {
+    "operation_id": 102,
+    "type": "update",
+    "schedule_id": 12,
+    "schedule_event": "项目周会",
+    "operated_at": "2026-07-29T09:55:00+08:00"
+  },
+  "schedule": {
+    "schedule_id": 12,
+    "event": "项目周会",
+    "start_time": "2026-07-29T10:00:00+08:00",
+    "end_time": "2026-07-29T11:00:00+08:00",
+    "location": "301会议室",
+    "notes": null,
+    "reminder_config": {
+      "weak_offsets": [-10],
+      "strong": {
+        "enabled": true,
+        "can_snooze": true
+      }
+    },
+    "status": "active"
+  },
+  "error": null
+}
+```
 
-**schedule（Schedule 实体对象）：**撤销完成后的日程（撤销后的状态）；撤销创建操作时为空。
-
-**error（String）：**操作不存在、已过期或调用失败时的错误信息；无错误时为空。
-
-
-
-
-
-
-## 提醒 Tools
+### 提醒 Tools
 
 说明：
 
@@ -337,7 +622,7 @@ list_tools——获取全部已注册的工具
 - “修改提醒策略”属于配置态，内部会编排 `UpsertReminderRules` / `DeleteReminderRule`。
 - “推迟 / 关闭强提醒”属于运行态，内部会编排 `ListReminderTriggers`、`SnoozeReminderTrigger`、`DismissReminderTrigger`。
 
-### update_schedule_reminders
+#### update_schedule_reminders
 
 为一条已有日程创建、修改或关闭提醒策略。该 Tool 面向“再提前 30 分钟提醒我一次”“取消 10 分钟前提醒”“把强提醒改成可推迟 2 次”这类需求。
 
@@ -424,7 +709,7 @@ list_tools——获取全部已注册的工具
 }
 ```
 
-### query_active_strong_reminders
+#### query_active_strong_reminders
 
 查询当前可响应的强提醒触发。适用于用户说“把刚才那个提醒推迟十分钟”“关闭这个提醒”之前，让 Agent 先定位当前正在触发或刚触发的强提醒。
 
@@ -472,7 +757,7 @@ list_tools——获取全部已注册的工具
 }
 ```
 
-### snooze_strong_reminder
+#### snooze_strong_reminder
 
 推迟当前正在触发的强提醒。仅适用于 `timingtask` 中 `reminder_type=strong` 且允许 snooze 的触发。
 
@@ -508,7 +793,7 @@ list_tools——获取全部已注册的工具
 }
 ```
 
-### dismiss_strong_reminder
+#### dismiss_strong_reminder
 
 关闭当前正在触发或已 snooze 的强提醒，关闭后不再继续播放。
 
@@ -538,4 +823,3 @@ list_tools——获取全部已注册的工具
   "error": null
 }
 ```
-
