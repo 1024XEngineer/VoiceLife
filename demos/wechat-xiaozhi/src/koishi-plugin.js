@@ -4,7 +4,10 @@ import {
   formatChinaTime,
   resultPage
 } from "./app.js";
-import { verifyReminderActionToken } from "./action-token.js";
+import {
+  createReminderInteractionHandler,
+  registerReminderInteractionHandler
+} from "./reminder-interaction.js";
 import {
   processWechatCallback,
   verifyWechatUrl
@@ -51,8 +54,17 @@ function logWechatAccount(logger, body) {
 }
 
 export function createVoiceLifeKoishiPlugin({ config, service, wechatApi, logger = console }) {
+  const reminderInteraction = createReminderInteractionHandler({
+    service,
+    tokenSecret: config.wechat.actionTokenSecret
+  });
+
   function voiceLifeKoishiPlugin(ctx) {
     const koishiLogger = ctx.logger("voicelife");
+
+    // Koishi 标准交互入口：平台 Adapter 产生 interaction/button，
+    // VoiceLife 插件只解析动作并转发给同一个提醒动作处理器。
+    registerReminderInteractionHandler(ctx, reminderInteraction);
 
     ctx.middleware(async (session, next) => {
       if (session.platform !== "wechat-official") return next();
@@ -199,11 +211,7 @@ export function createVoiceLifeKoishiPlugin({ config, service, wechatApi, logger
     ctx.server.get("/reminders/action", (koa) => {
       try {
         const token = koa.query.token;
-        const payload = verifyReminderActionToken(
-          token,
-          config.wechat.actionTokenSecret
-        );
-        const reminder = service.findWebActionTarget(payload);
+        const reminder = reminderInteraction.inspect(token);
         html(koa, 200, actionPage({ reminder, token }));
       } catch (error) {
         html(koa, 400, errorPage(error.message));
@@ -213,30 +221,14 @@ export function createVoiceLifeKoishiPlugin({ config, service, wechatApi, logger
     ctx.server.post("/reminders/action", (koa) => {
       try {
         const form = formBody(koa.request.body);
-        const payload = verifyReminderActionToken(
-          form.token,
-          config.wechat.actionTokenSecret
-        );
-        if (form.action === "dismiss") {
-          service.dismissFromWeb(payload);
-          return html(
-            koa,
-            200,
-            resultPage({ title: "已知道", detail: "这条提醒已经完成" })
-          );
-        }
-        if (form.action === "snooze") {
-          const reminder = service.snoozeFromWeb(payload, 10);
-          return html(
-            koa,
-            200,
-            resultPage({
-              title: "已推迟 10 分钟",
-              detail: `将在 ${formatChinaTime(reminder.dueAt)} 再次提醒`
-            })
-          );
-        }
-        throw new Error("未知操作");
+        const result = reminderInteraction.execute({
+          token: form.token,
+          action: form.action
+        });
+        const detail = result.action === "snooze"
+          ? `将在 ${formatChinaTime(result.reminder.dueAt)} 再次提醒`
+          : result.detail;
+        html(koa, 200, resultPage({ title: result.title, detail }));
       } catch (error) {
         html(koa, 400, errorPage(error.message));
       }

@@ -132,7 +132,7 @@ export class VoiceLifeService {
     return this.dismissTarget(target);
   }
 
-  findWebActionTarget({ reminderId, dueAt }) {
+  findActionIntentTarget({ reminderId, dueAt }) {
     const target = this.store.state.reminders[reminderId];
     if (!target || target.dueAt !== dueAt) throw new Error("这个提醒链接已经失效");
     if (!["sent", "dismissed"].includes(target.status)) {
@@ -141,16 +141,21 @@ export class VoiceLifeService {
     return target;
   }
 
-  dismissFromWeb(input) {
-    const target = this.findWebActionTarget(input);
-    if (target.status === "dismissed") return structuredClone(target);
-    return this.dismissTarget(target);
-  }
-
-  snoozeFromWeb(input, minutes = 10) {
-    const target = this.findWebActionTarget(input);
-    if (target.status !== "sent") throw new Error("这个提醒已经处理");
-    return this.snoozeTarget(target, minutes);
+  executeReminderAction({ reminderId, dueAt, action, minutes = 10 }) {
+    const target = this.findActionIntentTarget({ reminderId, dueAt });
+    if (action === "dismiss") {
+      if (target.status === "dismissed") return structuredClone(target);
+      return this.dismissTarget(target);
+    }
+    if (action === "snooze") {
+      if (target.status !== "sent") throw new Error("这个提醒已经处理");
+      const amount = Number(minutes);
+      if (!Number.isInteger(amount) || amount < 1 || amount > 1440) {
+        throw new Error("推迟分钟数必须是 1～1440 的整数");
+      }
+      return this.snoozeTarget(target, amount);
+    }
+    throw new Error("未知操作");
   }
 
   snooze({ openId, reminderId, minutes = 10 }) {

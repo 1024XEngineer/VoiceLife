@@ -9,7 +9,7 @@
 
 小智语音 → MCP 工具 → VoiceLife 提醒 → 微信公众号模板消息
                                           ↓
-                 点击消息 → H5“知道了/推迟 10 分钟” → VoiceLife 状态
+                 点击消息 → H5/原生卡片 → 统一动作入口 → VoiceLife 状态
 ```
 
 已实现：
@@ -296,6 +296,11 @@ curl http://localhost:8787/api/state \
 
 公众号没有通用已读回执。用户点击 H5 的“知道了/推迟 10 分钟”或发送对应文字，才是 VoiceLife 可确认的业务回执。
 
+H5 和未来原生卡片不各自实现提醒逻辑。Koishi 插件中的 H5 Route 与
+`interaction/button` Handler 都调用同一个 `ReminderInteractionHandler`；
+该 Handler 校验令牌并把动作交给 `VoiceLifeService.executeReminderAction()`。
+卡片操作完成后优先通过 Koishi 通用 `bot.editMessage()` 更新原消息。
+
 ## 6. HTTP API
 
 | 方法 | 路径 | 作用 |
@@ -354,7 +359,9 @@ curl -X POST http://localhost:8787/satori/v1/login.get \
 ## 8. Koishi 与微信原生能力边界
 
 - 普通文字、图片、语音、关注和取消关注由 Koishi 适配器标准化；
-- 模板消息、模板发送回执、参数二维码和 H5 动作仍是微信专属能力；
+- 模板消息、模板发送回执和参数二维码仍是微信专属能力；
+- H5 Route 与标准 `interaction/button` 位于 VoiceLife Koishi Plugin，
+  只负责接收、校验和转发动作，不直接修改提醒状态；
 - 当前官方适配器未把 `SCAN` 和 `TEMPLATESENDJOBFINISH` 转换成标准 Session，
   Demo 在 Koishi 路由边界补充处理这两个明文事件；
 - 以后接入其他 IM 时，通用消息进入同一个 VoiceLife Koishi 插件，平台卡片、

@@ -1,6 +1,6 @@
 import http from "node:http";
 import { URL } from "node:url";
-import { verifyReminderActionToken } from "./action-token.js";
+import { createReminderInteractionHandler } from "./reminder-interaction.js";
 import { processWechatCallback, verifyWechatUrl } from "./wechat-handler.js";
 
 function json(response, status, body) {
@@ -145,6 +145,10 @@ code{background:#edf2ef;padding:2px 6px;border-radius:5px}li{margin:8px 0}
 }
 
 export function createApp({ config, service, wechatApi, logger = console }) {
+  const reminderInteraction = createReminderInteractionHandler({
+    service,
+    tokenSecret: config.wechat.actionTokenSecret
+  });
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, config.baseUrl);
     try {
@@ -183,11 +187,7 @@ export function createApp({ config, service, wechatApi, logger = console }) {
       if (request.method === "GET" && url.pathname === "/reminders/action") {
         try {
           const token = url.searchParams.get("token");
-          const payload = verifyReminderActionToken(
-            token,
-            config.wechat.actionTokenSecret
-          );
-          const reminder = service.findWebActionTarget(payload);
+          const reminder = reminderInteraction.inspect(token);
           return text(
             response,
             200,
@@ -201,33 +201,19 @@ export function createApp({ config, service, wechatApi, logger = console }) {
       if (request.method === "POST" && url.pathname === "/reminders/action") {
         try {
           const form = new URLSearchParams(await readBody(request, 16 * 1024));
-          const token = form.get("token");
-          const payload = verifyReminderActionToken(
-            token,
-            config.wechat.actionTokenSecret
+          const result = reminderInteraction.execute({
+            token: form.get("token"),
+            action: form.get("action")
+          });
+          const detail = result.action === "snooze"
+            ? `将在 ${formatChinaTime(result.reminder.dueAt)} 再次提醒`
+            : result.detail;
+          return text(
+            response,
+            200,
+            resultPage({ title: result.title, detail }),
+            "text/html; charset=utf-8"
           );
-          if (form.get("action") === "dismiss") {
-            service.dismissFromWeb(payload);
-            return text(
-              response,
-              200,
-              resultPage({ title: "已知道", detail: "这条提醒已经完成" }),
-              "text/html; charset=utf-8"
-            );
-          }
-          if (form.get("action") === "snooze") {
-            const reminder = service.snoozeFromWeb(payload, 10);
-            return text(
-              response,
-              200,
-              resultPage({
-                title: "已推迟 10 分钟",
-                detail: `将在 ${formatChinaTime(reminder.dueAt)} 再次提醒`
-              }),
-              "text/html; charset=utf-8"
-            );
-          }
-          throw new Error("未知操作");
         } catch (error) {
           return text(response, 400, errorPage(error.message), "text/html; charset=utf-8");
         }

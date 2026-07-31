@@ -81,7 +81,7 @@ test("小智可以直接关闭和推迟提醒", () => {
   assert.equal(dismissed.status, "dismissed");
 });
 
-test("网页按钮可以知道了或推迟，旧链接不能重复推迟", async () => {
+test("统一动作入口可以知道了或推迟，旧动作令牌不能重复推迟", async () => {
   const { service, advance } = fixture();
   const binding = service.createBindingCode("xiaozhi-01");
   service.bindOpenId(binding.code, "openid-01");
@@ -93,9 +93,10 @@ test("网页按钮可以知道了或推迟，旧链接不能重复推迟", async
   advance(61_000);
   await service.dispatchReminder(dismissed.id);
   assert.equal(
-    service.dismissFromWeb({
+    service.executeReminderAction({
       reminderId: dismissed.id,
-      dueAt: dismissed.dueAt
+      dueAt: dismissed.dueAt,
+      action: "dismiss"
     }).status,
     "dismissed"
   );
@@ -108,8 +109,19 @@ test("网页按钮可以知道了或推迟，旧链接不能重复推迟", async
   advance(30_000);
   await service.dispatchReminder(snoozed.id);
   const action = { reminderId: snoozed.id, dueAt: snoozed.dueAt };
-  const updated = service.snoozeFromWeb(action, 10);
+  const updated = service.executeReminderAction({
+    ...action,
+    action: "snooze",
+    minutes: 10
+  });
   assert.equal(updated.status, "scheduled");
   assert.equal(updated.snoozeCount, 1);
-  assert.throws(() => service.snoozeFromWeb(action, 10), /已经失效/);
+  assert.throws(
+    () => service.executeReminderAction({
+      ...action,
+      action: "snooze",
+      minutes: 10
+    }),
+    /已经失效/
+  );
 });
