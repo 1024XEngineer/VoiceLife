@@ -73,7 +73,7 @@ VoiceLife MVP 整体架构覆盖：
 | 调度执行 | `taskId`、`instanceId`、`reminderRuleId`、`reminderTriggerId`、`plannedAt` | 周期规则、Occurrence、提醒规则和单次提醒动作 |
 | 业务事件 | `eventId`、`correlationId` | 跨服务去重和链路追踪 |
 | IM 投递 | `notificationIntentId`、`deliveryId`、`attemptId` | 投递与重试审计 |
-| 用户动作 | `actionId`、`operationId` | 防止重复关闭或推迟 |
+| 用户动作 | `actionId`、`commandId`、`operationId` | 关联 SSE 命令、执行结果并防止重复关闭或推迟 |
 
 ---
 
@@ -126,6 +126,9 @@ sequenceDiagram
   T->>DB: 原子更新 reminder_trigger=triggered
   T-->>IM: NotificationIntent(reminderTriggerId)
   IM->>IM: 校验 eventId、解析有效绑定
+  IM-->>T: deliveryId + actionExpiresAt
+  T->>IM: GET reminder-actions/stream（仅强提醒，SSE）
+  IM-->>T: connected（有效窗口内）
   IM->>K: 创建 Delivery 并发送
   K->>WX: 模板/消息
   WX-->>K: accepted / delivered / failed
@@ -147,11 +150,33 @@ sequenceDiagram
   WX->>K: Action UI POST / interaction/button
   K->>IM: ReminderActionHandler → IM Application.Action
   IM->>IM: 验签、版本、身份、Delivery、operationId 幂等校验
-  IM-->>User: 已接收 / 待设备确认
-  IM->>T: ReminderActionCommand(reminderTriggerId)
+  IM-->>K: 动作已接收，等待设备执行
+  K-->>WX: 显示处理中
+  IM-->>T: SSE ReminderActionCommand(commandId)
   T->>T: DismissReminderTrigger / SnoozeReminderTrigger
-  T-->>IM: succeeded / failed
-  IM-->>WX: 更新消息或 H5 结果
+
+  alt 执行成功
+    T->>IM: POST ReminderActionResult(succeeded)
+    IM->>IM: 更新 Action=succeeded
+    IM-->>T: HTTP 200 Result Accepted
+    IM--xT: 关闭当前 SSE
+    IM-->>K: 更新消息或 H5 结果
+    K-->>WX: 显示已知道 / 已推迟
+    opt snooze
+      Note over T,IM: 到 nextTriggerAt 再次触发时重新建立 SSE
+    end
+  else 可重试失败
+    T->>IM: POST ReminderActionResult(retryable_failed)
+    IM->>IM: Action 保持待执行
+    IM-->>T: 保持 SSE，可重放同一 commandId
+  else 已过期或不可重试
+    T->>IM: POST ReminderActionResult(expired / failed)
+    IM->>IM: 更新 Action=expired / failed
+    IM-->>T: HTTP 200 Result Accepted
+    IM--xT: 关闭当前 SSE
+    IM-->>K: 更新失败或过期结果
+    K-->>WX: 显示操作失败 / 已过期
+  end
 ```
 
 ---
@@ -188,6 +213,7 @@ VoiceLife 是一个"语音优先、IM 辅助"的日程提醒系统。MVP 的部�
 3. **MCP Registry 与语音 ToolGateway 是同一逻辑模块**：本地只保留一份工具定义和路由。
 4. **业务回执由领域模块产生**：例如 Schedule 事务提交成功后，由 Schedule 向 IM Application 发送 `ScheduleReceiptIntent`；MCP 只转发工具结果。
 5. **IM 用户动作不直写本地库**：动作经过绑定、Token、目标 ReminderTrigger 和 `operationId` 校验后，以命令回传本地 TimingTask。
+6. **用户动作采用临时 SSE 下行**：只有强提醒进入可操作窗口时，本地才建立 SSE；IM 通过 SSE 下发命令，本地通过 HTTPS 回传结果。连接在 dismiss、snooze 或 `actionExpiresAt` 到期时关闭，不维持第二条永久 WebSocket，也不引入 Local Outbox。
 
 ### 设计原则
 
@@ -906,6 +932,9 @@ triggered → completed / skipped
 | `DeliveryReceipt` | 平台明确返回的 `delivered` / `failed` 证据；用户动作单独记入 Action |
 | `NormalizedImEvent` | 规范化入站事件 |
 | `ChannelCapabilities` | Adapter 原生能力与 Action UI 补充能力的合并结果 |
+| `ReminderActionCommand` | IM 向本地 TimingTask 下发的短时效用户动作命令 |
+| `ReminderActionResult` | 本地执行命令后回传的成功、失败或新触发时间 |
+| `ActionStream` | 强提醒有效窗口内由本地主动建立的临时 SSE 下行通道 |
 
 ### 3. 核心业务流程
 
@@ -930,8 +959,11 @@ triggered → completed / skipped
 2. H5/小程序经 `plugin-server` 进入 VoiceLife Koishi Plugin 的 Action Route，不经过平台 Adapter，也不构造 Koishi Session
 3. 原生卡片由 Adapter/Capability Plugin 转为 `interaction/button`
 4. 两条动作入口统一为 `{token, action, params?}`，交给 `ReminderActionHandler`
-5. Handler 验签、校验版本与幂等后调用 `IM Application.Action`，再通过 Reminder Command Port 回传本地 TimingTask
-6. 微信公众号文字仅用于绑定，不解析“知道了/推迟”
+5. Handler 验签、校验版本与幂等后调用 `IM Application.Action`，将 Action 作为有过期时间的待执行命令保存
+6. 本地在强提醒触发后主动建立临时 SSE；IM 通过该连接下发 `ReminderActionCommand`
+7. 本地 TimingTask 执行 dismiss / snooze，再通过 HTTPS 回传 `ReminderActionResult`
+8. 收到结果或达到 `actionExpiresAt` 后关闭 SSE；snooze 后到下一次强提醒触发时重新建立
+9. 微信公众号文字仅用于绑定，不解析“知道了/推迟”
 
 **流程四：平台回执更新**
 
@@ -952,9 +984,15 @@ H5/小程序 → plugin-server → VoiceLife Koishi Plugin / Action Route ─┐
 
 NotificationIntent → IM Application.Delivery → Renderer / ImChannelPort
   → Koishi Runtime（WeChat / WeCom / Lark / DingTalk Adapter + Capability Plugin）
+
+本地 TimingTask ── HTTPS NotificationIntent ──→ IM Application
+本地 TimingTask ←─ 临时 SSE ReminderActionCommand ─ IM Application.Action
+本地 TimingTask ── HTTPS ReminderActionResult ─→ IM Application.Action
 ```
 
 `BindingHandler` 与 `ReminderActionHandler` 是共享应用入口，不是平台 Adapter。当前 Demo 可单进程组合部署，但 Handler 不得直接依赖具体业务 Service；生产拆分时只替换 Port 的 IPC/RPC 实现。H5/小程序是同一微信公众号渠道的 Action UI，不是第二个 Adapter。
+
+临时 SSE 只承担 `IM → 本地` 的命令下行，不传输执行结果。它由本地主动建立，适应设备位于 NAT 后的部署；没有活动强提醒时不保持连接。
 
 ### 5. 核心数据模型
 
@@ -1016,9 +1054,10 @@ DeliveryReceipt（平台投递证据）
 
 Action（用户动作）
   ├── delivery_id / action_type
+  ├── device_id / reminder_trigger_id
   ├── operation_id   // Unique
   ├── expected_identity_id / actual_identity_id
-  └── status / result / expires_at
+  └── status / dispatched_at / result / expires_at
 ```
 
 ### 6. 模块接口
@@ -1049,13 +1088,21 @@ Action（用户动作）
 | GET | `/voicelife/reminder-actions/{token}` | 展示 H5/小程序动作页 |
 | POST | `/voicelife/reminder-actions/{token}` | 执行统一提醒动作 |
 
+**本地设备动作通道**
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| GET | `/v1/devices/{deviceId}/reminder-actions/stream` | 在强提醒有效窗口内建立临时 SSE |
+| POST | `/v1/devices/{deviceId}/reminder-actions/{commandId}/result` | 回传本地动作执行结果 |
+
 **跨模块事件**
 
 | 方向 | 接口 | 说明 |
 | --- | --- | --- |
-| 本地→IM | `ScheduleReceiptIntent` | 提交操作回执 |
-| 本地→IM | `NotificationIntent` | 提交通知意图 |
-| IM→本地 | `ReminderActionCommand` | 回传用户动作 |
+| 本地→IM（HTTPS） | `ScheduleReceiptIntent` | 提交操作回执 |
+| 本地→IM（HTTPS） | `NotificationIntent` | 提交通知意图并获得动作有效期 |
+| IM→本地（临时 SSE） | `ReminderActionCommand` | 在强提醒窗口内下发用户动作 |
+| 本地→IM（HTTPS） | `ReminderActionResult` | 回传命令执行结果 |
 
 #### 6.2 关键接口参数
 
@@ -1080,7 +1127,70 @@ Idempotency-Key: reminder-occurrence-8899
 }
 ```
 
-响应：`{ "businessEventId": "...", "status": "accepted", "deliveries": [{ "deliveryId": "...", "bindingId": "...", "status": "pending" }] }`
+强提醒响应还需返回动作窗口：
+
+```json
+{
+  "businessEventId": "evt-reminder-8899",
+  "status": "accepted",
+  "deliveries": [
+    {
+      "deliveryId": "delivery-8899",
+      "bindingId": "binding-01",
+      "status": "pending"
+    }
+  ],
+  "actionStream": {
+    "reminderTriggerId": "rtg-9001",
+    "expiresAt": "2026-07-31T15:10:00+08:00"
+  }
+}
+```
+
+弱提醒不支持用户动作，因此不返回 `actionStream`。
+
+**临时 SSE 动作通道**
+
+本地仅在 `reminder_type=strong` 且 Trigger 进入 `triggered` 状态后建立连接：
+
+```http
+GET /v1/devices/xiaozhi-01/reminder-actions/stream?reminderTriggerId=rtg-9001
+Accept: text/event-stream
+Authorization: Bearer <device-token>
+Last-Event-ID: action-1000
+```
+
+服务端响应头至少包括：
+
+```http
+Content-Type: text/event-stream
+Cache-Control: no-cache
+X-Accel-Buffering: no
+```
+
+命令事件：
+
+```text
+id: action-1001
+event: reminder.action
+data: {"commandId":"action-1001","operationId":"op-1001","reminderTriggerId":"rtg-9001","action":"snooze","params":{"minutes":10},"expiresAt":"2026-07-31T15:10:00+08:00"}
+
+```
+
+其中 `commandId` 复用 Action ID，SSE `id` 与之相同。连接中断后，本地在有效期内携带 `Last-Event-ID` 重连。`Last-Event-ID` 只是传输续接提示，不能代替业务 ACK；在收到 `ReminderActionResult` 前，服务端可以重放同一未过期命令，本地必须用 `operationId` 幂等执行。
+
+本地执行后通过 HTTPS 回传：
+
+```json
+{
+  "operationId": "op-1001",
+  "status": "succeeded",
+  "reminderTriggerId": "rtg-9001",
+  "nextTriggerAt": "2026-07-31T15:20:00+08:00"
+}
+```
+
+SSE 是单向下行协议，禁止用它承载 `ReminderActionResult`。
 
 ### 7. 能力降级策略
 
@@ -1096,8 +1206,13 @@ Delivery：pending → sending → accepted → delivered
                     ↘ permanent_failed / dead_letter
 
 Receipt：delivered / failed
-Action：pending → processing → succeeded / failed / expired
+Action：pending → dispatched → processing → succeeded / failed
+          └──────────────────────────────→ expired
+
+ActionStream：closed → connected → closed
 ```
+
+`ActionStream` 不是长期会话：默认窗口建议 10 分钟、最大 30 分钟，以 `actionExpiresAt` 为准。dismiss、snooze、动作成功或到期均立即关闭；snooze 后在下一次强提醒触发时重新建立。
 
 ### 9. 幂等策略
 
@@ -1107,6 +1222,8 @@ Action：pending → processing → succeeded / failed / expired
 | 平台入站事件 | `channel_account_id + external_event_id` |
 | 平台投递回执 | `dedupe_key` |
 | 用户业务动作 | `operation_id` |
+| SSE 命令与结果关联 | `command_id`（复用 Action ID） |
+| SSE 断线续传 | `Last-Event-ID` |
 | 发送 API 请求 | `delivery_id + attempt_no` |
 
 ### 10. 关键约定
@@ -1119,6 +1236,10 @@ Action：pending → processing → succeeded / failed / expired
 - H5 Token 需签名，含 `action_id`、`delivery_id`、`expires_at`，不放身份明文
 - 一个 IM 平台只保留一个 Koishi Adapter；Action UI 不计为 Adapter
 - 业务层只能依据 `ChannelCapabilities` 选能力，不得按平台名称分支
+- 临时 SSE 仅为强提醒下发 `ReminderActionCommand`；弱提醒不得建立动作流
+- SSE 每 15～30 秒发送注释型 heartbeat，代理层必须关闭响应缓冲
+- 设备 Token 必须绑定 `deviceId`，命令还需校验 `reminderTriggerId`、身份和 `expiresAt`
+- 未确认命令仅在 IM 服务端 Action 记录中保存到过期，不新增 Local Outbox
 
 ---
 
@@ -1131,7 +1252,8 @@ Action：pending → processing → succeeded / failed / expired
 | MCP Server ↔ Schedule/TimingTask | MCP Tool + Application Port | `create_schedule` / `query_calendar_view` / `update_schedule_reminders` / `snooze_strong_reminder` 等 |
 | Schedule ↔ TimingTask | 同步 Port | `RegisterTimerTask` / `UpdateTimerTask` / `CancelTimerTask` / `UpsertReminderRules` / `DeleteReminderRule` / `ListCalendarView` |
 | MCP/IM ↔ TimingTask 运行态 | 同步 Port / Command | `ListReminderTriggers` / `SnoozeReminderTrigger` / `DismissReminderTrigger` |
-| 本地 ↔ IM Gateway | Intent / Command | `ScheduleReceiptIntent` / `NotificationIntent` / `ReminderActionCommand` |
+| 本地 → IM Gateway | HTTPS | `ScheduleReceiptIntent` / `NotificationIntent` / `ReminderActionResult` |
+| IM Gateway → 本地 | 临时 SSE | 强提醒有效窗口内下发 `ReminderActionCommand`；dismiss / snooze / 到期后关闭 |
 | IM Application ↔ Koishi | Handler + `ImChannelPort` | 出站：发送意图；入站：`BindingHandler` / `ReminderActionHandler` / `NormalizedImEvent` |
 
 ---
@@ -1343,16 +1465,21 @@ Action：pending → processing → succeeded / failed / expired
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| `id` | uuid | PK | 用户动作 ID |
+| `id` | uuid | PK | 用户动作 ID，同时作为 `commandId` 和 SSE Event ID |
 | `delivery_id` | uuid | FK, Not Null | 所属投递 |
+| `device_id` | varchar(128) | Not Null | 目标本地设备 |
+| `reminder_trigger_id` | varchar(64) | Not Null | 目标强提醒 Trigger |
 | `action_type` | varchar(32) | Not Null | acknowledge / snooze |
 | `action_params` | jsonb | Nullable | 动作参数 |
 | `action_key_hash` | varchar(128) | Unique, Not Null | Token/平台 action key 哈希 |
 | `operation_id` | varchar(128) | Unique, Not Null | 业务动作幂等 ID |
 | `expected_identity_id` / `actual_identity_id` | uuid | FK | 预期/实际执行身份 |
-| `status` | varchar(32) | Not Null | 动作状态 |
+| `status` | varchar(32) | Not Null | pending / dispatched / processing / succeeded / failed / expired |
+| `dispatched_at` | timestamptz | Nullable | 最近一次通过 SSE 下发时间 |
 | `result` | jsonb | Nullable | 业务执行结果 |
 | `expires_at` | timestamptz | Not Null | 过期时间 |
+
+索引：`(device_id, status, expires_at)`。SSE 重连查询同一设备与 ReminderTrigger 下尚未确认、未过期的 Action；`Last-Event-ID` 用于识别续接位置，但只有 `ReminderActionResult` 才能确认命令完成。该表承担短时 Command Inbox，不增加本地 Outbox。
 
 #### 2.9 `im_inbound_events`
 
@@ -1399,6 +1526,6 @@ VoiceLife MVP 以**本地日程 + 定时任务**为业务事实源，以**语音
 - **语音模块**负责交互编排，不执行业务
 - **MCP 模块**负责工具路由，不持有状态
 - **日程 + 定时任务**负责业务事实与调度，是系统核心（`Schedule → TimerTask → TimerInstance`，并由 `ReminderRule + TimerInstance` 派生 `ReminderTrigger`）
-- **IM 模块**负责消息通道，通过 Handler、Application Port、Koishi Adapter 与 Capability Plugin 隔离业务语义和平台差异
+- **IM 模块**负责消息通道，通过 Handler、Application Port、Koishi Adapter 与 Capability Plugin 隔离业务语义和平台差异；强提醒动作使用临时 SSE 下发，HTTPS 回传执行结果
 
-数据流向：`用户语音 → 意图 → 日程 → 定时 → 触发 → 提醒投递 → 用户动作 → 闭环`
+数据流向：`用户语音 → 意图 → 日程 → 定时 → 强提醒触发 → 临时 SSE 等待动作 → 用户确认 → HTTPS 回传结果 → 闭环`
