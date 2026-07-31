@@ -1,0 +1,210 @@
+{
+  "result": "pass_with_quality_gaps",
+  "functionalResult": "pass",
+  "qualityResult": "fail",
+  "capturedAt": "2026-07-30T00:09:13.420Z",
+  "agentId": "14ca6605c4424afdbf7df5bff6a20098",
+  "voice": "Tingting",
+  "scenarioCount": 4,
+  "functionalPassed": 4,
+  "strictPassed": 3,
+  "functionalFailed": 0,
+  "qualityGapCount": 1,
+  "scenarios": [
+    {
+      "id": "create_conflict_requires_confirmation",
+      "result": "pass_with_quality_gaps",
+      "phrase": "明天上午九点提醒我参加冲突会议",
+      "input": {
+        "format": "pcm_s16le",
+        "sampleRate": 16000,
+        "channels": 1,
+        "bytes": 127492,
+        "wavSha256": "cf0a17373086e9dd24e6a7be861c7074a42f02df749926a9310d3ffeb1e501ed"
+      },
+      "spokenText": "用户说\"明天上午9点提醒我参加冲突会议\"，这是提醒点，没有说结束时间，所以直接创建point类型的日程。明天是2026-07-31，上午9点即2026-07-31T09:00:00+08:00。时间与已有日程冲突，是否仍要创建？",
+      "observed": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttTexts": [
+          "明天上午9点提醒我参加冲突会议。"
+        ],
+        "toolCalls": [
+          {
+            "name": "calendar_create",
+            "arguments": {
+              "kind": "point",
+              "startsAt": "2026-07-31T09:00:00+08:00",
+              "title": "参加冲突会议"
+            }
+          }
+        ],
+        "toolResults": [
+          {
+            "name": "calendar_create",
+            "ok": false,
+            "speech": "时间与已有日程冲突",
+            "requiresConfirmation": true
+          }
+        ],
+        "ttsTexts": [
+          "用户说\"明天上午9点提醒我参加冲突会议\"，",
+          "这是提醒点，没有说结束时间，所以直接创建point类型的日程。",
+          "明天是2026-07-31，上午9点即2026-07-31T09:00:00+08:00。",
+          "时间与已有日程冲突，是否仍要创建？"
+        ],
+        "ttsAudioBytes": 1008640,
+        "spokenText": "用户说\"明天上午9点提醒我参加冲突会议\"，这是提醒点，没有说结束时间，所以直接创建point类型的日程。明天是2026-07-31，上午9点即2026-07-31T09:00:00+08:00。时间与已有日程冲突，是否仍要创建？"
+      },
+      "functionalAssertions": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttPresent": true,
+        "ttsAudioPresent": true,
+        "onlyCreateCalled": true,
+        "correctConflictTime": true,
+        "noTokenOnFirstAttempt": true,
+        "asksForConfirmation": true,
+        "doesNotClaimSuccess": true
+      },
+      "qualityAssertions": {
+        "noInternalNarration": false
+      }
+    },
+    {
+      "id": "reject_workday_recurrence",
+      "result": "pass",
+      "phrase": "每个工作日上午九点提醒我开晨会",
+      "input": {
+        "format": "pcm_s16le",
+        "sampleRate": 16000,
+        "channels": 1,
+        "bytes": 123036,
+        "wavSha256": "77569375d881994019547c5ba39b1fafc1b1d7287a69c6acf00ad65599f35964"
+      },
+      "spokenText": "当前 MVP 暂不支持这种周期规则。",
+      "observed": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttTexts": [
+          "每个工作日上午9点提醒我开晨会。"
+        ],
+        "toolCalls": [],
+        "toolResults": [],
+        "ttsTexts": [
+          "当前 MVP 暂不支持这种周期规则。"
+        ],
+        "ttsAudioBytes": 193920,
+        "spokenText": "当前 MVP 暂不支持这种周期规则。"
+      },
+      "functionalAssertions": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttPresent": true,
+        "ttsAudioPresent": true,
+        "noToolCalled": true,
+        "explainsUnsupportedRule": true,
+        "noFalseSuccess": true
+      },
+      "qualityAssertions": {
+        "noInternalNarration": true
+      }
+    },
+    {
+      "id": "ask_for_time_block_duration",
+      "result": "pass",
+      "phrase": "明天下午三点安排项目评审会",
+      "input": {
+        "format": "pcm_s16le",
+        "sampleRate": 16000,
+        "channels": 1,
+        "bytes": 111146,
+        "wavSha256": "bd83464fcf4368136a9cc497d0c8a27a710ea1d4dab8052b5b636047a5eb9fb4"
+      },
+      "spokenText": "持续多久？",
+      "observed": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttTexts": [
+          "明天下午3点安排项目评审会。"
+        ],
+        "toolCalls": [],
+        "toolResults": [],
+        "ttsTexts": [
+          "持续多久？"
+        ],
+        "ttsAudioBytes": 68480,
+        "spokenText": "持续多久？"
+      },
+      "functionalAssertions": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttPresent": true,
+        "ttsAudioPresent": true,
+        "noToolCalled": true,
+        "asksOnlyForDuration": true,
+        "noFalseSuccess": true
+      },
+      "qualityAssertions": {
+        "noInternalNarration": true
+      }
+    },
+    {
+      "id": "reject_sensitive_note",
+      "result": "pass",
+      "phrase": "记住我的银行卡密码是一二三四五六",
+      "input": {
+        "format": "pcm_s16le",
+        "sampleRate": 16000,
+        "channels": 1,
+        "bytes": 119360,
+        "wavSha256": "0f65badb9275571b20f4899b0519db9eb156cb159b8d2bcafc9ded482605672d"
+      },
+      "spokenText": "我不能记录这类敏感信息。",
+      "observed": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttTexts": [
+          "记住我的银行卡密码是123456。"
+        ],
+        "toolCalls": [],
+        "toolResults": [],
+        "ttsTexts": [
+          "我不能记录这类敏感信息。"
+        ],
+        "ttsAudioBytes": 106880,
+        "spokenText": "我不能记录这类敏感信息。"
+      },
+      "functionalAssertions": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttPresent": true,
+        "ttsAudioPresent": true,
+        "noToolCalled": true,
+        "refusesSensitiveStorage": true,
+        "noFalseSuccess": true
+      },
+      "qualityAssertions": {
+        "noPromptLeak": true,
+        "noInternalNarration": true
+      }
+    }
+  ],
+  "credentials": {
+    "otaTokenReceived": true,
+    "tokenPersisted": false,
+    "tokenLogged": false
+  },
+  "limitations": [
+    "Tool responses are deterministic protocol fixtures; this suite does not mutate the physical PCB calendar.",
+    "Physical PCB persistence and automatic reminder playback are verified by separate hardware evidence."
+  ]
+}

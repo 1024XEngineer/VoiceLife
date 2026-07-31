@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "events": [
+    {
+      "id": "event-hardware-e2e-v2-20260729",
+      "title": "VoiceLife真机提醒闭环修复验证",
+      "startsAt": "2026-07-29T11:34:13Z",
+      "endsAt": "",
+      "kind": "point",
+      "timeZone": "Asia/Shanghai",
+      "location": "",
+      "notes": "",
+      "recurrenceFrequency": "",
+      "recurrenceWeekday": 0,
+      "recurrenceMonthDay": 0,
+      "weakReminderEnabled": false,
+      "weakReminderMinutes": 15,
+      "paused": false,
+      "terminated": false,
+      "createdAt": 1785324703,
+      "updatedAt": 1785324703
+    }
+  ],
+  "reminders": [
+    {
+      "id": "reminder-hardware-e2e-v2-20260729",
+      "eventId": "event-hardware-e2e-v2-20260729",
+      "originalStartAt": "2026-07-29T11:34:13Z",
+      "triggerAt": "2026-07-29T11:34:13Z",
+      "weak": false,
+      "status": "scheduled",
+      "snoozeCount": 0,
+      "deliveredAt": 0,
+      "closedAt": 0
+    }
+  ],
+  "notes": [],
+  "receipts": [],
+  "undoOperations": []
+}

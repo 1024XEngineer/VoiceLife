@@ -1,0 +1,32 @@
+{
+  "result": "fail",
+  "port": "/dev/cu.usbmodem5A840116301",
+  "phrase": "明天上午九点提醒我开会",
+  "voice": "Tingting",
+  "capturedAt": "2026-07-29T19:55:50.619105+00:00",
+  "originalOutput": "外置耳机",
+  "originalSystemOutput": "外置耳机",
+  "requiredLogPatterns": [
+    "Application: >> ",
+    "VoiceLife: Delivering",
+    "VoiceLife reminder TTS started",
+    "VoiceLife reminder received TTS audio packet",
+    "VoiceLife reminder TTS stopped"
+  ],
+  "observedLogPatterns": {
+    "stt": false,
+    "delivery": false,
+    "ttsStart": false,
+    "ttsAudio": false,
+    "ttsStop": false
+  },
+  "hardwareObservations": {
+    "booted": true,
+    "wifiConnected": true,
+    "linxWebSocketHandshake": true,
+    "enteredListening": true,
+    "asrTextReceived": false
+  },
+  "failureReason": "Mac 合成语音未被板载麦克风采集；本次未产生 ASR 文本，因此没有进入工具调用或提醒播报阶段。",
+  "error": null
+}

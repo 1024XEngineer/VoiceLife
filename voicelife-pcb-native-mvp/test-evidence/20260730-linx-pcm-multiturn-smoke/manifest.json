@@ -1,0 +1,162 @@
+{
+  "result": "pass",
+  "functionalResult": "pass",
+  "qualityResult": "pass",
+  "capturedAt": "2026-07-30T00:33:27.372Z",
+  "agentId": "14ca6605c4424afdbf7df5bff6a20098",
+  "voice": "Tingting",
+  "scenarioCount": 1,
+  "turnCount": 2,
+  "functionalScenariosPassed": 1,
+  "strictScenariosPassed": 1,
+  "functionalTurnsPassed": 2,
+  "strictTurnsPassed": 2,
+  "scenarios": [
+    {
+      "id": "conflict_confirm_create",
+      "result": "pass",
+      "hello": true,
+      "mcpInitialize": true,
+      "mcpToolsList": true,
+      "turnCount": 2,
+      "functionalTurnsPassed": 2,
+      "strictTurnsPassed": 2,
+      "turns": [
+        {
+          "id": "request_conflicting_reminder",
+          "phrase": "明天上午九点提醒我参加冲突会议",
+          "result": "pass",
+          "input": {
+            "format": "pcm_s16le",
+            "sampleRate": 16000,
+            "channels": 1,
+            "bytes": 127492,
+            "wavSha256": "cf0a17373086e9dd24e6a7be861c7074a42f02df749926a9310d3ffeb1e501ed"
+          },
+          "observed": {
+            "sttTexts": [
+              "明天上午9点提醒我参加冲突会议。"
+            ],
+            "toolCalls": [
+              {
+                "name": "calendar_create",
+                "arguments": {
+                  "kind": "point",
+                  "startsAt": "2026-07-31T09:00:00+08:00",
+                  "title": "参加冲突会议"
+                }
+              }
+            ],
+            "toolResults": [
+              {
+                "name": "calendar_create",
+                "result": {
+                  "ok": false,
+                  "message": "时间与已有日程冲突",
+                  "speech": "时间与已有日程冲突",
+                  "reason": "calendar_conflict",
+                  "requiresConfirmation": true,
+                  "confirmationToken": "create-conflict-token",
+                  "conflictConfirmationToken": "create-conflict-token",
+                  "conflicts": [
+                    {
+                      "eventId": "existing-conflict",
+                      "title": "已有会议",
+                      "startsAt": "2026-07-31T09:00:00+08:00",
+                      "originalStartAt": "2026-07-31T09:00:00+08:00",
+                      "kind": "point",
+                      "location": "",
+                      "notes": "",
+                      "recurrence": null
+                    }
+                  ]
+                }
+              }
+            ],
+            "ttsTexts": [
+              "时间与已有日程冲突，",
+              "是否仍要创建？"
+            ],
+            "ttsAudioBytes": 181120,
+            "spokenText": "时间与已有日程冲突，是否仍要创建？"
+          },
+          "functionalAssertions": {
+            "onlyCreateCalled": true,
+            "createsPointAtNine": true,
+            "noTokenOnFirstAttempt": true,
+            "asksForConflictConfirmation": true,
+            "doesNotClaimSuccess": true
+          },
+          "qualityAssertions": {
+            "noInternalNarration": true
+          }
+        },
+        {
+          "id": "confirm_conflicting_reminder",
+          "phrase": "仍然创建",
+          "result": "pass",
+          "input": {
+            "format": "pcm_s16le",
+            "sampleRate": 16000,
+            "channels": 1,
+            "bytes": 36106,
+            "wavSha256": "d673436c06e5f8550d21539e0d84ad458051b2dac4755a801a518e98981222a8"
+          },
+          "observed": {
+            "sttTexts": [
+              "仍然创建"
+            ],
+            "toolCalls": [
+              {
+                "name": "calendar_create",
+                "arguments": {
+                  "conflictConfirmationToken": "create-conflict-token",
+                  "kind": "point",
+                  "startsAt": "2026-07-31T09:00:00+08:00",
+                  "title": "参加冲突会议"
+                }
+              }
+            ],
+            "toolResults": [
+              {
+                "name": "calendar_create",
+                "result": {
+                  "ok": true,
+                  "speech": "已创建参加冲突会议，时间是2026-07-31T09:00:00+08:00",
+                  "eventId": "created-conflict",
+                  "reminderId": "created-conflict-reminder",
+                  "undoOperationId": "undo-created-conflict"
+                }
+              }
+            ],
+            "ttsTexts": [
+              "已创建参加冲突会议，",
+              "时间是2026-07-31T09:00:00+08:00"
+            ],
+            "ttsAudioBytes": 380800,
+            "spokenText": "已创建参加冲突会议，时间是2026-07-31T09:00:00+08:00"
+          },
+          "functionalAssertions": {
+            "onlyCreateCalled": true,
+            "reusesConflictToken": true,
+            "preservesBusinessPayload": true
+          },
+          "qualityAssertions": {
+            "ttsExactlySpeech": true,
+            "noInternalNarration": true
+          }
+        }
+      ]
+    }
+  ],
+  "credentials": {
+    "otaTokenReceived": true,
+    "tokenPersisted": false,
+    "tokenLogged": false
+  },
+  "limitations": [
+    "Every utterance is synthesized to PCM and sent through the real Linx ASR/Agent/TTS path.",
+    "MCP tool responses are deterministic fixtures; this suite never mutates the physical PCB calendar.",
+    "Physical persistence and automatic playback are verified by the separate hardware smoke suite."
+  ]
+}

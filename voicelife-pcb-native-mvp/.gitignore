@@ -1,0 +1,14 @@
+# Device images contain credentials and identity data. Keep them local.
+backup/*.bin
+backup/**/*.bin
+test-evidence/**/*.bin
+backup/*.elf
+firmware/.git/
+firmware/build/
+firmware/build-idf6/
+firmware/managed_components/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/.cache/
+firmware/.clangd
+backup/linx-agent/

@@ -1,0 +1,25 @@
+{
+  "result": "pass",
+  "port": "/dev/cu.usbmodem5A840116301",
+  "baud": 460800,
+  "partitionOffset": "0xe00000",
+  "partitionSize": "0x200000",
+  "eventId": "event-hardware-smoke-20260729181132",
+  "startsAt": "2026-07-29T18:12:17Z",
+  "fixtureSha256": "5573d3720694ffd3aadea4cca3dd27b40a51700f840ec642f366bd0de33d6861",
+  "beforeSha256": "4cdd94ded22c0502b3bc8e734a72dac8a9b889b13983dd283f2c91f14684b1be",
+  "afterSha256": "2bf9cb8ac0def54ed940c5a9e376a9c0ee47ed8c5bf9e61398ef563404a0186b",
+  "finalReadbackSha256": "4cdd94ded22c0502b3bc8e734a72dac8a9b889b13983dd283f2c91f14684b1be",
+  "restoreVerified": true,
+  "originalBackupSha256": "4e3ea1bd77873dc2b300f7b14adf0c3b5b93ceb15a8febe15d1c19464b76385d",
+  "restoreRequested": true,
+  "restoreError": null,
+  "requiredLogPatterns": [
+    "VoiceLifeStorage: Loaded",
+    "Delivering",
+    "VoiceLife reminder TTS started",
+    "VoiceLife reminder received TTS audio packet",
+    "VoiceLife reminder TTS stopped",
+    "Marked"
+  ]
+}

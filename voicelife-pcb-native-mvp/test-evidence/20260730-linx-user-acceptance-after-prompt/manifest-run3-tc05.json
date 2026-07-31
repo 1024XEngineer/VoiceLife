@@ -1,0 +1,181 @@
+{
+  "result": "fail",
+  "functionalResult": "fail",
+  "qualityResult": "fail",
+  "capturedAt": "2026-07-30T09:31:12.679Z",
+  "agentId": "14ca6605c4424afdbf7df5bff6a20098",
+  "voice": "Tingting",
+  "scenarioCount": 1,
+  "turnCount": 2,
+  "functionalScenariosPassed": 0,
+  "strictScenariosPassed": 0,
+  "functionalTurnsPassed": 1,
+  "strictTurnsPassed": 1,
+  "scenarios": [
+    {
+      "id": "acceptance_tc05_weekly_skip",
+      "result": "fail",
+      "hello": true,
+      "mcpInitialize": true,
+      "mcpToolsList": true,
+      "turnCount": 2,
+      "functionalTurnsPassed": 1,
+      "strictTurnsPassed": 1,
+      "turns": [
+        {
+          "id": "tc05_create_weekly_report",
+          "phrase": "每周五下午五点提醒我提交周报",
+          "result": "fail",
+          "input": {
+            "format": "pcm_s16le",
+            "sampleRate": 16000,
+            "channels": 1,
+            "bytes": 111890,
+            "wavSha256": "5636fc3e8ff762ae7974838f4b87d4e53ec2b1d75721c8995fe2542922868373"
+          },
+          "observed": {
+            "sttTexts": [
+              "每周五下午5点提醒我提交周报。"
+            ],
+            "toolCalls": [
+              {
+                "name": "calendar_create",
+                "arguments": {
+                  "kind": "point",
+                  "recurrence": {
+                    "frequency": "weekly",
+                    "weekday": 5
+                  },
+                  "startsAt": "2026-08-01T17:00:00+08:00",
+                  "title": "提交周报"
+                }
+              }
+            ],
+            "toolResults": [
+              {
+                "name": "calendar_create",
+                "result": {
+                  "ok": true,
+                  "speech": "已创建每周五下午五点提交周报。",
+                  "eventId": "tc05-weekly-report",
+                  "reminderId": "tc05-weekly-report-reminder",
+                  "undoOperationId": "tc05-undo-create"
+                }
+              }
+            ],
+            "ttsTexts": [
+              "已创建每周五下午五点提交周报。"
+            ],
+            "ttsAudioBytes": 94080,
+            "spokenText": "已创建每周五下午五点提交周报。"
+          },
+          "functionalAssertions": {
+            "onlyCreateCalled": true,
+            "weeklyFriday": true,
+            "firstFridayAtFive": false,
+            "pointKind": true
+          },
+          "qualityAssertions": {
+            "ttsExactlySpeech": true,
+            "noInternalNarration": true
+          }
+        },
+        {
+          "id": "tc05_skip_this_week_report",
+          "phrase": "这周周报跳过一次",
+          "result": "pass",
+          "input": {
+            "format": "pcm_s16le",
+            "sampleRate": 16000,
+            "channels": 1,
+            "bytes": 64506,
+            "wavSha256": "b33feada8636aa3d14d36ffbb4443900a92b5dd30a6587d30e7a97834860cc69"
+          },
+          "observed": {
+            "sttTexts": [
+              "这周周报跳过一次。"
+            ],
+            "toolCalls": [
+              {
+                "name": "calendar_find",
+                "arguments": {
+                  "query": "提交周报",
+                  "rangeEnd": "2026-08-03T00:00:00+08:00",
+                  "rangeStart": "2026-07-27T00:00:00+08:00"
+                }
+              },
+              {
+                "name": "calendar_skip_occurrence",
+                "arguments": {
+                  "eventId": "tc05-weekly-report",
+                  "originalStartAt": "2026-07-31T17:00:00+08:00"
+                }
+              }
+            ],
+            "toolResults": [
+              {
+                "name": "calendar_find",
+                "result": {
+                  "ok": true,
+                  "speech": "找到一条日程。",
+                  "total": 1,
+                  "requiresDisambiguation": false,
+                  "candidates": [
+                    {
+                      "eventId": "tc05-weekly-report",
+                      "title": "提交周报",
+                      "startsAt": "2026-07-31T17:00:00+08:00",
+                      "originalStartAt": "2026-07-31T17:00:00+08:00",
+                      "kind": "point",
+                      "location": "",
+                      "notes": "",
+                      "recurrence": {
+                        "frequency": "weekly",
+                        "weekday": 5
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "calendar_skip_occurrence",
+                "result": {
+                  "ok": true,
+                  "speech": "已跳过这周的周报，下一次仍会提醒。",
+                  "undoOperationId": "tc05-undo-skip"
+                }
+              }
+            ],
+            "ttsTexts": [
+              "已跳过这周的周报，",
+              "下一次仍会提醒。"
+            ],
+            "ttsAudioBytes": 118400,
+            "spokenText": "已跳过这周的周报，下一次仍会提醒。"
+          },
+          "functionalAssertions": {
+            "findThenSkip": true,
+            "boundsThisWeekOccurrence": true,
+            "targetsWeeklyReport": true,
+            "targetsThisFriday": true,
+            "noSingleEventConfirmation": true
+          },
+          "qualityAssertions": {
+            "ttsExactlySpeech": true,
+            "noInternalNarration": true
+          }
+        }
+      ]
+    }
+  ],
+  "credentials": {
+    "otaTokenReceived": true,
+    "tokenPersisted": false,
+    "tokenLogged": false
+  },
+  "limitations": [
+    "Every utterance is synthesized to PCM and sent through the real Linx ASR/Agent/TTS path.",
+    "MCP tool responses are deterministic fixtures; this suite never mutates the physical PCB calendar.",
+    "Physical persistence and automatic playback are verified by the separate hardware smoke suite."
+  ]
+}

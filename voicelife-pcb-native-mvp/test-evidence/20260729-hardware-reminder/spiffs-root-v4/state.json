@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "events": [
+    {
+      "id": "event-hardware-e2e-v4-20260729",
+      "title": "VoiceLife真机完整闭环验收",
+      "startsAt": "2026-07-29T12:00:39Z",
+      "endsAt": "",
+      "kind": "point",
+      "timeZone": "Asia/Shanghai",
+      "location": "",
+      "notes": "",
+      "recurrenceFrequency": "",
+      "recurrenceWeekday": 0,
+      "recurrenceMonthDay": 0,
+      "weakReminderEnabled": false,
+      "weakReminderMinutes": 15,
+      "paused": false,
+      "terminated": false,
+      "createdAt": 1785326364,
+      "updatedAt": 1785326364
+    }
+  ],
+  "reminders": [
+    {
+      "id": "reminder-hardware-e2e-v4-20260729",
+      "eventId": "event-hardware-e2e-v4-20260729",
+      "originalStartAt": "2026-07-29T12:00:39Z",
+      "triggerAt": "2026-07-29T12:00:39Z",
+      "weak": false,
+      "status": "scheduled",
+      "snoozeCount": 0,
+      "deliveredAt": 0,
+      "closedAt": 0
+    }
+  ],
+  "notes": [],
+  "receipts": [],
+  "undoOperations": []
+}

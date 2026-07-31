@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "events": [
+    {
+      "id": "event-hardware-e2e-v10-20260729",
+      "title": "VoiceLife最终MVP音频闭环验证",
+      "startsAt": "1970-01-01T00:00:00Z",
+      "endsAt": "",
+      "kind": "point",
+      "timeZone": "Asia/Shanghai",
+      "location": "",
+      "notes": "",
+      "recurrenceFrequency": "",
+      "recurrenceWeekday": 0,
+      "recurrenceMonthDay": 0,
+      "weakReminderEnabled": false,
+      "weakReminderMinutes": 15,
+      "paused": false,
+      "terminated": false,
+      "createdAt": 0,
+      "updatedAt": 0
+    }
+  ],
+  "reminders": [
+    {
+      "id": "reminder-hardware-e2e-v10-20260729",
+      "eventId": "event-hardware-e2e-v10-20260729",
+      "originalStartAt": "1970-01-01T00:00:00Z",
+      "triggerAt": "1970-01-01T00:00:00Z",
+      "weak": false,
+      "status": "scheduled",
+      "snoozeCount": 0,
+      "deliveredAt": 0,
+      "closedAt": 0
+    }
+  ],
+  "notes": [],
+  "receipts": [],
+  "undoOperations": []
+}

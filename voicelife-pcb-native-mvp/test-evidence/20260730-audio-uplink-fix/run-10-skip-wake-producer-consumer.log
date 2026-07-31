@@ -1,0 +1,2149 @@
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x1 (POWERON),boot:0xa (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x544
+load:0x403c8700,len:0xcc8
+load:0x403cb700,len:0x2eb4
+entry 0x403c88f4
+I (33) octal_psram: vendor id    : 0x0d (AP)
+I (33) octal_psram: dev id       : 0x02 (generation 3)
+I (34) octal_psram: density      : 0x03 (64 Mbit)
+I (35) octal_psram: good-die     : 0x01 (Pass)
+I (39) octal_psram: Latency      : 0x01 (Fixed)
+I (44) octal_psram: VCC          : 0x01 (3V)
+I (48) octal_psram: SRF          : 0x01 (Fast Refresh)
+I (53) octal_psram: BurstType    : 0x01 (Hybrid Wrap)
+I (57) octal_psram: BurstLen     : 0x01 (32 Byte)
+I (62) octal_psram: Readlatency  : 0x02 (10 cycles@Fixed)
+I (67) octal_psram: DriveStrength: 0x00 (1/1)
+I (71) MSPI Timing: Enter psram timing tuning
+I (76) esp_psram: Found 8MB PSRAM device
+I (79) esp_psram: Speed: 80MHz
+I (82) cpu_start: Multicore app
+I (96) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
+I (96) cpu_start: Pro cpu start user code
+I (96) cpu_start: cpu freq: 240000000 Hz
+I (98) app_init: Application information:
+I (101) app_init: Project name:     xiaozhi
+I (105) app_init: App version:      2.4.0
+I (109) app_init: Compile time:     Jul 30 2026 05:27:19
+I (114) app_init: ELF file SHA256:  f1d01a2ec...
+I (119) app_init: ESP-IDF:          v6.0.2
+I (122) efuse_init: Min chip rev:     v0.0
+I (126) efuse_init: Max chip rev:     v0.99 
+I (130) efuse_init: Chip rev:         v0.2
+I (134) heap_init: Initializing. RAM available for dynamic allocation:
+I (140) heap_init: At 3FCA8B60 len 00040BB0 (258 KiB): RAM
+I (145) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (151) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (156) heap_init: At 600FE000 len 00001FD8 (7 KiB): RTCRAM
+I (161) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+I (168) spi_flash: detected chip: boya
+I (171) spi_flash: flash io: qio
+I (175) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (180) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (187) main_task: Started on CPU0
+I (207) esp_psram: Reserving pool of 96K of internal memory for DMA/internal allocations
+I (207) main_task: Calling app_main()
+I (237) Board: UUID=1bd9e62c-0816-4a6d-a782-b5f72a59b7ad SKU=voicelife-pcb
+I (237) button: IoT Button Version: 4.2.0
+I (237) CompactWifiBoard: Install SSD1306 driver
+I (237) CompactWifiBoard: SSD1306 driver installed
+I (247) CompactWifiBoard: Turning display on
+I (347) Display: Power management not supported
+I (347) OledDisplay: Initialize LVGL
+I (347) OledDisplay: Adding OLED display
+I (347) LVGL: Starting LVGL task
+I (347) MCP: Add tool: self.lamp.get_state
+I (347) MCP: Add tool: self.lamp.turn_on
+I (357) MCP: Add tool: self.lamp.turn_off
+I (357) StateMachine: State: unknown -> starting
+I (367) NoAudioCodec: Simplex channels created
+I (367) AudioCodec: Audio codec started
+I (367) MCP: Add tool: self.get_device_status
+I (377) MCP: Add tool: self.audio_speaker.set_volume
+I (377) MCP: Add tool: self.screen.set_theme
+I (377) MCP: Add tool: self.get_system_info [user]
+I (387) MCP: Add tool: self.reboot [user]
+I (387) MCP: Add tool: self.upgrade_firmware [user]
+I (397) MCP: Add tool: self.screen.get_info [user]
+I (397) MCP: Add tool: self.screen.snapshot [user]
+I (407) MCP: Add tool: self.screen.preview_image [user]
+I (407) MCP: Add tool: self.assets.set_download_url [user]
+I (497) VoiceLifeStorage: Mounted voicelife: 4016/1920401 bytes
+I (507) VoiceLifeStorage: Loaded 2 events, 2 reminders, 0 notes
+I (507) MCP: Add tool: calendar_create
+I (507) MCP: Add tool: calendar_query
+I (507) MCP: Add tool: calendar_find
+I (507) MCP: Add tool: calendar_modify
+I (507) MCP: Add tool: calendar_skip_occurrence
+I (517) MCP: Add tool: calendar_pause_series
+I (517) MCP: Add tool: calendar_resume_series
+I (527) MCP: Add tool: calendar_terminate_series
+I (527) MCP: Add tool: calendar_delete
+I (527) MCP: Add tool: calendar_undo
+I (537) MCP: Add tool: reminder_list_due
+I (537) MCP: Add tool: reminder_close
+I (537) MCP: Add tool: reminder_snooze
+I (547) MCP: Add tool: reminder_get_details
+I (547) MCP: Add tool: note_record
+I (557) MCP: Add tool: note_query
+I (557) WifiManager: Initializing...
+I (557) pp: pp rom version: e7ae62f
+I (557) net80211: net80211 rom version: e7ae62f
+I (577) wifi:wifi driver task: 3fcde20c, prio:23, stack:6656, core=0
+I (577) wifi:wifi firmware version: 00ad238
+I (577) wifi:wifi certification version: v7.0
+I (577) wifi:config NVS flash: disabled
+I (587) wifi:config nano formatting: disabled
+I (587) wifi:Init data frame dynamic rx buffer num: 6
+I (597) wifi:Init dynamic rx mgmt buffer num: 5
+I (597) wifi:Init management short buffer num: 32
+I (597) wifi:Init dynamic tx buffer num: 32
+I (607) wifi:Init static tx FG buffer num: 2
+I (607) wifi:Init static rx buffer size: 1600
+I (617) wifi:Init static rx buffer num: 3
+I (617) wifi:Init dynamic rx buffer num: 6
+I (617) wifi_init: rx ba win: 3
+I (627) wifi_init: accept mbox: 6
+I (627) wifi_init: tcpip mbox: 16
+I (627) wifi_init: udp mbox: 6
+I (637) wifi_init: tcp mbox: 6
+I (637) wifi_init: tcp tx win: 5760
+I (637) wifi_init: tcp rx win: 5760
+I (637) wifi_init: tcp mss: 1440
+I (647) WifiManager: Initialized
+I (647) WifiBoard: Starting WiFi connection attempt
+I (657) WifiManager: Starting station
+I (657) WifiStation: Station DHCP hostname: Xiaozhi-91DC
+I (657) phy_init: phy_version 712,87e8c20e,Apr 13 2026,18:51:10
+I (697) wifi:mode : sta (98:a3:16:e6:91:dc)
+I (697) wifi:enable tsf
+I (707) WifiBoard: WiFi scanning
+I (3107) WifiStation: Found AP: Qiniu-Guest, BSSID: 2c:94:52:9c:a4:85, RSSI: -66, Channel: 11, Authmode: 3
+I (3107) WifiStation: Found AP: Qiniu-Guest, BSSID: 2c:94:52:9c:ab:75, RSSI: -85, Channel: 11, Authmode: 3
+I (3117) WifiBoard: WiFi connecting to Qiniu-Guest
+W (3127) wifi:Password length matches WPA2 standards, authmode threshold changes from OPEN to WPA2
+I (5587) wifi:new:<11,0>, old:<1,0>, ap:<255,255>, sta:<11,0>, prof:1, snd_ch_cfg:0x0
+I (5587) wifi:state: init -> auth (0xb0)
+I (6587) wifi:state: auth -> init (0x200)
+I (6597) wifi:state: init -> auth (0xb0)
+I (6607) wifi:state: auth -> assoc (0x0)
+I (6617) wifi:state: assoc -> run (0x10)
+I (6637) wifi:connected with Qiniu-Guest, aid = 1, channel 11, BW20, bssid = 2c:94:52:9c:a4:85
+I (6637) wifi:security: WPA2-PSK, phy: bgn, rssi: -66, cipher(pairwise:0x3, group:0x1), pmf:0
+I (6637) wifi:pm start, type: 1
+
+I (6647) wifi:dp: 1, bi: 102400, li: 10, scale listen interval from 1024000 us to 1024000 us
+I (6657) wifi:set rx beacon pti, rx_bcn_pti: 0, bcn_timeout: 25000, mt_pti: 0, mt_time: 10000
+I (6697) wifi:AP's beacon interval = 102400 us, DTIM period = 1
+I (6707) wifi:<ba-add>idx:0 (ifx:0, 2c:94:52:9c:a4:85), tid:6, ssn:4, winSize:64
+I (6737) wifi:<ba-add>idx:1 (ifx:0, 2c:94:52:9c:a4:85), tid:0, ssn:1, winSize:64
+I (7727) esp_netif_handlers: sta ip: 100.100.55.91, mask: 255.255.255.0, gw: 100.100.55.254
+I (7727) WifiStation: Got IP: 100.100.55.91
+I (7727) WifiBoard: Connected to WiFi: Qiniu-Guest
+I (7747) Application: Network connected
+W (7747) Application: VoiceLife IM sync is enabled but Gateway URL/token is empty
+I (7747) StateMachine: State: starting -> activating
+I (7747) Assets: The storage free size is 21952 KB
+I (7747) Application: Main loop: events=0x1000 state=8
+I (7757) Assets: The partition size is 6144 KB
+I (7757) Application: Handling state change: activating
+I (7767) Application: Main loop: state handler returned
+I (7797) Assets: The checksum calculation time is 33 ms
+I (7797) MODEL_LOADER: Successfully load srmodels
+I (7797) Assets: Refreshing display theme...
+I (7797) Ota: Current version: 2.4.0
+I (8797) Ota: No mqtt section found !
+I (8807) Ota: System time synchronized in UTC
+I (8807) Ota: Current is the latest version
+I (8807) Ota: Running partition: ota_0
+I (8807) Application: Activation done
+I (8807) SystemInfo: free sram: 158023 minimal sram: 148395
+I (8817) StateMachine: State: activating -> idle
+I (8827) WifiStation: Setting WiFi power save level: LOW_POWER (MAX_MODEM)
+I (8827) wifi:Set ps type: 2, coexist: 0
+
+I (8827) Application: Main loop: events=0x1001 state=3
+I (8837) Application: Handling state change: idle
+I (8837) AfeAudioEngine: Model 0: wn9_nihaoxiaozhi_tts
+I (8847) WakeWordCache: Allocated 64000 bytes in PSRAM
+I (8847) AFE_CONFIG: Set WakeNet Model: wn9_nihaoxiaozhi_tts
+MC Quantized wakenet9: wakenet9l_tts1h8_你好小智_3_0.631_0.635, tigger:v4, mode:0, p:0, (May 25 2026 15:51:00)
+I (8887) AFE: AFE Version: (1MIC_V251128)
+I (8897) AFE: Input PCM Config: total 1 channels(1 microphone, 0 playback), sample rate:16000
+I (8897) AFE: AFE Pipeline: [input] -> |VAD(WebRTC)| -> |WakeNet(wn9_nihaoxiaozhi_tts,)| -> [output]
+I (8907) AFE: AFE Version: (1MIC_V251128)
+I (8917) AFE: Input PCM Config: total 1 channels(1 microphone, 0 playback), sample rate:16000
+I (8927) AFE: AFE Pipeline: [input] -> |VAD(WebRTC)| -> [output]
+I (8927) AfeAudioEngine: Initialized FD AFE, detector: WakeNet, NS: off, feed: 512, fetch: 512
+I (8937) Application: Main loop: state handler returned
+I (8937) Application: Main loop: running 1 scheduled task(s)
+I (8947) Application: Main loop: scheduled task 0 begin
+I (8947) AudioCodec: Set output enable to true
+I (8957) Application: Main loop: scheduled task 0 end
+I (8957) AudioService: Resampling audio from 16000 to 24000
+I (8957) AudioCodec: Set input enable to true
+I (18367) SystemInfo: free sram: 135571 minimal sram: 129883
+I (25957) AudioCodec: Set output enable to false
+I (27417) Application: Wake word detected: 你好小智 (state: 3)
+I (27417) Application: VoiceLife: skipping cached wake-word audio burst
+I (27417) StateMachine: State: idle -> connecting
+I (27417) Application: Main loop: events=0x1001 state=4
+I (27427) Application: Handling state change: connecting
+I (27447) Application: Main loop: state handler returned
+I (27447) Application: Main loop: running 1 scheduled task(s)
+I (27447) Application: Main loop: scheduled task 0 begin
+I (27447) WifiStation: Setting WiFi power save level: PERFORMANCE (NONE)
+I (27457) wifi:Set ps type: 0, coexist: 0
+
+I (27467) WS: Connecting to websocket server: ws://xrobo-io.qiniuapi.com/v1/ws/ with version: 1
+I (27477) EspTcp: Resolved xrobo-io.qiniuapi.com -> 39.106.38.241
+I (27557) WebSocket: WebSocket handshake done, cost=90 tcp=50 handshake=40
+I (27607) WS: Session ID: 5LkAANugFlvLVwYA
+I (27607) WifiStation: Setting WiFi power save level: PERFORMANCE (NONE)
+I (27607) wifi:Set ps type: 0, coexist: 0
+
+W (27607) Application: Server sample rate 16000 does not match device output sample rate 24000, resampling may cause distortion
+I (27607) Application: MCP reply queued (150 bytes)
+I (27617) Application: Wake word detected: 你好小智
+I (27627) Application: MCP reply queued (867 bytes)
+I (27627) StateMachine: State: connecting -> listening
+I (27637) Application: Main loop: scheduled task 0 end
+I (27647) Application: Main loop: events=0x1001 state=5
+I (27647) Application: Handling state change: listening
+I (27667) Application: Listening state ready: mode=0 processor=off playback=idle
+I (27667) Application: Audio uplink: sending listen.start (mode=0)
+I (27677) Application: Audio uplink: enabling voice processing
+I (27677) AudioService: Voice processing: resetting decoder and input pipeline
+I (27687) Application: >> 嘿，你好呀
+I (27687) AudioService: Voice processing: enabling audio engine
+I (27697) AudioService: Voice processing: input task enabled
+I (27697) Application: Audio uplink: voice processing is running
+I (27707) Application: Audio uplink: configuring listening wake word
+I (27707) Application: Wake word detection already stopped for listening
+I (27717) Application: Audio uplink: listening pipeline ready
+I (27727) Application: Main loop: state handler returned
+I (27727) Application: Main loop: running 3 scheduled task(s)
+I (27737) Application: Main loop: scheduled task 0 begin
+I (27737) Application: MCP reply send begin (150 bytes)
+I (27747) Application: MCP reply send end
+I (27747) Application: Main loop: scheduled task 0 end
+I (27757) Application: Main loop: scheduled task 1 begin
+I (27757) Application: MCP reply send begin (867 bytes)
+I (27767) Application: MCP reply send end
+I (27767) Application: Main loop: scheduled task 1 end
+I (27767) Application: Main loop: scheduled task 2 begin
+I (27777) Application: Main loop: scheduled task 2 end
+I (27777) Application: Main loop: events=0x1 state=5
+I (27787) Application: Main loop: running 0 scheduled task(s)
+I (27807) Application: MCP reply queued (633 bytes)
+I (27807) Application: Main loop: events=0x1 state=5
+I (27807) Application: Main loop: running 1 scheduled task(s)
+I (27807) Application: Main loop: scheduled task 0 begin
+I (27807) Application: MCP reply send begin (633 bytes)
+I (27817) Application: MCP reply send end
+I (27817) Application: Main loop: scheduled task 0 end
+I (27857) Application: MCP reply queued (940 bytes)
+I (27857) Application: Main loop: events=0x1 state=5
+I (27857) Application: Main loop: running 1 scheduled task(s)
+I (27867) Application: Main loop: scheduled task 0 begin
+I (27867) Application: MCP reply send begin (940 bytes)
+I (27877) Application: MCP reply send end
+I (27877) Application: Main loop: scheduled task 0 end
+I (27907) AudioService: Voice input: captured 1 10 ms frames
+I (27907) AfeAudioEngine: Voice AFE: frames=1 vad=1 peak=1310
+I (27907) AfeAudioEngine: Voice VAD: speech (frame=1 peak=1310)
+I (27907) Application: Main loop: events=0x8 state=5
+I (27917) Application: MCP reply queued (630 bytes)
+I (27917) Application: Main loop: events=0x2 state=5
+I (27917) Application: Audio uplink: first send event posted (bits=0x0)
+I (27917) Application: Audio uplink: main task received first send event
+I (27927) AudioService: Voice encoder: produced 1 Opus packets
+I (27937) Application: Audio uplink: sending first Opus packet (143 bytes)
+I (27947) Application: Audio uplink: sent 1 Opus packets
+I (27947) Application: Main loop: events=0x1 state=5
+I (27957) Application: Main loop: running 1 scheduled task(s)
+I (27957) Application: Main loop: scheduled task 0 begin
+I (27967) Application: MCP reply send begin (630 bytes)
+I (27977) Application: MCP reply send end
+I (27977) Application: Main loop: scheduled task 0 end
+I (27977) AfeAudioEngine: Voice VAD: silence (frame=4 peak=1033)
+I (27987) Application: Main loop: events=0x8 state=5
+I (27997) Application: Main loop: events=0x2 state=5
+I (28037) Application: Main loop: events=0x2 state=5
+I (28067) Application: MCP reply queued (956 bytes)
+I (28067) Application: Main loop: events=0x1 state=5
+I (28067) Application: Main loop: running 1 scheduled task(s)
+I (28077) Application: Main loop: scheduled task 0 begin
+I (28077) Application: MCP reply send begin (956 bytes)
+I (28087) Application: MCP reply send end
+I (28087) Application: Main loop: scheduled task 0 end
+I (28097) Application: Main loop: events=0x2 state=5
+I (28157) Application: Main loop: events=0x2 state=5
+I (28187) Application: MCP reply queued (842 bytes)
+I (28187) Application: Main loop: events=0x1 state=5
+I (28187) Application: Main loop: running 1 scheduled task(s)
+I (28197) Application: Main loop: scheduled task 0 begin
+I (28197) Application: MCP reply send begin (842 bytes)
+I (28207) Application: MCP reply send end
+I (28207) Application: Main loop: scheduled task 0 end
+I (28217) AfeAudioEngine: Voice VAD: speech (frame=12 peak=1230)
+I (28217) Application: Main loop: events=0x8 state=5
+I (28227) Application: Main loop: events=0x2 state=5
+I (28287) Application: Main loop: events=0x2 state=5
+I (28317) Application: Main loop: events=0x2 state=5
+I (28317) Application: MCP reply queued (885 bytes)
+I (28317) Application: Main loop: events=0x1 state=5
+I (28327) Application: Main loop: running 1 scheduled task(s)
+I (28327) Application: Main loop: scheduled task 0 begin
+I (28337) Application: MCP reply send begin (885 bytes)
+I (28337) Application: MCP reply send end
+I (28347) Application: Main loop: scheduled task 0 end
+I (28367) Application: Main loop: events=0x40 state=5
+I (28367) Application: Main loop: VoiceLife tick begin
+I (28367) Application: Main loop: VoiceLife tick end
+I (28377) Application: Main loop: events=0x2 state=5
+I (28427) AfeAudioEngine: Voice VAD: silence (frame=19 peak=918)
+I (28427) Application: Main loop: events=0x8 state=5
+I (28437) Application: Main loop: events=0x2 state=5
+I (28447) Application: MCP reply queued (891 bytes)
+I (28447) Application: Main loop: events=0x1 state=5
+I (28447) Application: Main loop: running 1 scheduled task(s)
+I (28447) Application: Main loop: scheduled task 0 begin
+I (28457) Application: MCP reply send begin (891 bytes)
+I (28467) Application: MCP reply send end
+I (28467) Application: Main loop: scheduled task 0 end
+I (28517) Application: Main loop: events=0x2 state=5
+I (28577) Application: Main loop: events=0x2 state=5
+I (28587) Application: Main loop: events=0x1 state=5
+I (28587) Application: Main loop: running 1 scheduled task(s)
+I (28587) Application: Main loop: scheduled task 0 begin
+I (28587) Application: MCP reply queued (217 bytes)
+I (28597) Application: Main loop: scheduled task 0 end
+I (28597) Application: Main loop: events=0x1 state=5
+I (28597) Application: Main loop: running 1 scheduled task(s)
+I (28607) Application: Main loop: scheduled task 0 begin
+I (28617) Application: MCP reply send begin (217 bytes)
+I (28617) Application: MCP reply send end
+I (28617) Application: Main loop: scheduled task 0 end
+I (28627) Application: Main loop: events=0x1 state=5
+I (28627) Application: Main loop: running 1 scheduled task(s)
+I (28637) Application: Main loop: scheduled task 0 begin
+I (28637) Application: MCP reply queued (217 bytes)
+I (28647) Application: Main loop: scheduled task 0 end
+I (28647) Application: Main loop: events=0x1 state=5
+I (28657) Application: Main loop: running 1 scheduled task(s)
+I (28657) Application: Main loop: scheduled task 0 begin
+I (28667) Application: MCP reply send begin (217 bytes)
+I (28667) Application: MCP reply send end
+I (28677) Application: Main loop: scheduled task 0 end
+I (28687) Application: Main loop: events=0x2 state=5
+I (28717) AfeAudioEngine: Voice VAD: speech (frame=27 peak=1254)
+I (28717) Application: Main loop: events=0x8 state=5
+I (28727) Application: Main loop: events=0x2 state=5
+I (28787) Application: Main loop: events=0x2 state=5
+I (28817) Application: Main loop: events=0x2 state=5
+I (28847) AudioService: Voice input: captured 100 10 ms frames
+I (28877) AfeAudioEngine: Voice AFE: frames=32 vad=1 peak=916
+I (28887) Application: Main loop: events=0x2 state=5
+I (28897) Application: Main loop: events=0x1 state=5
+I (28897) Application: Main loop: running 2 scheduled task(s)
+I (28897) Application: Main loop: scheduled task 0 begin
+I (28897) Application: << 嘿～你好呀！
+I (28897) StateMachine: State: listening -> speaking
+I (28907) Application: Main loop: scheduled task 0 end
+I (28917) Application: Main loop: scheduled task 1 begin
+I (28917) Application: Main loop: scheduled task 1 end
+I (28927) Application: Main loop: events=0x1001 state=6
+I (28927) Application: Handling state change: speaking
+I (28927) AudioCodec: Set output enable to true
+I (28937) AfeAudioEngine: Voice VAD: silence (frame=34 peak=926)
+I (28947) Application: Main loop: state handler returned
+I (28947) Application: Main loop: running 1 scheduled task(s)
+I (28957) Application: Main loop: scheduled task 0 begin
+I (28977) Application: Main loop: scheduled task 0 end
+I (31327) Application: Main loop: running 1 scheduled task(s)
+I (31327) Application: Main loop: scheduled task 0 begin
+I (31327) Application: Main loop: scheduled task 0 end
+I (31337) Application: << 今天想干嘛呀？
+I (31337) Application: Main loop: running 1 scheduled task(s)
+I (31347) Application: Main loop: scheduled task 0 begin
+I (31357) Application: Main loop: scheduled task 0 end
+I (34627) Application: Main loop: running 1 scheduled task(s)
+I (34627) Application: Main loop: scheduled task 0 begin
+I (34627) StateMachine: State: speaking -> listening
+I (34627) Application: Main loop: scheduled task 0 end
+I (34637) Application: Main loop: events=0x1000 state=5
+I (34637) Application: Handling state change: listening
+I (34647) Application: Listening state ready: mode=0 processor=off playback=idle
+I (34647) Application: Audio uplink: sending listen.start (mode=0)
+I (34657) Application: Audio uplink: enabling voice processing
+I (34667) AudioService: Voice processing: resetting decoder and input pipeline
+I (34667) AudioService: Voice processing: enabling audio engine
+I (34677) AudioService: Voice processing: input task enabled
+I (34677) Application: Audio uplink: voice processing is running
+I (34687) Application: Audio uplink: configuring listening wake word
+I (34697) Application: Audio uplink: listening pipeline ready
+I (34697) Application: Main loop: state handler returned
+I (34707) AudioService: Voice input: captured 1 10 ms frames
+I (34827) AfeAudioEngine: Voice AFE: frames=1 vad=1 peak=1040
+I (34827) AfeAudioEngine: Voice VAD: speech (frame=1 peak=1040)
+I (34827) Application: Main loop: events=0x8 state=5
+I (34837) Application: Main loop: events=0x2 state=5
+I (34837) AudioService: Voice encoder: produced 1 Opus packets
+I (34837) AfeAudioEngine: Voice VAD: silence (frame=3 peak=1175)
+I (34847) Application: Main loop: events=0x8 state=5
+I (34877) Application: Main loop: events=0x2 state=5
+I (34877) Application: Audio uplink: sent 20 Opus packets
+I (34947) Application: Main loop: events=0x2 state=5
+I (35007) Application: Main loop: events=0x2 state=5
+I (35067) Application: Main loop: events=0x2 state=5
+I (35127) Application: Main loop: events=0x2 state=5
+I (35187) Application: Main loop: events=0x2 state=5
+I (35237) Application: Main loop: events=0x2 state=5
+I (35297) Application: Main loop: events=0x2 state=5
+I (35357) Application: Main loop: events=0x2 state=5
+I (35367) Application: Main loop: events=0x40 state=5
+I (35367) Application: Main loop: VoiceLife tick begin
+I (35367) Application: Main loop: VoiceLife tick end
+I (35427) Application: Main loop: events=0x2 state=5
+I (35487) Application: Main loop: events=0x2 state=5
+I (35547) Application: Main loop: events=0x2 state=5
+I (35607) Application: Main loop: events=0x2 state=5
+I (35667) Application: Main loop: events=0x2 state=5
+I (35717) Application: Main loop: events=0x2 state=5
+I (35747) AudioService: Voice input: captured 100 10 ms frames
+I (35767) AfeAudioEngine: Voice AFE: frames=32 vad=0 peak=1266
+I (35777) Application: Main loop: events=0x2 state=5
+I (35837) Application: Main loop: events=0x2 state=5
+I (35907) Application: Main loop: events=0x2 state=5
+I (35927) AfeAudioEngine: Voice VAD: speech (frame=37 peak=1771)
+I (35927) Application: Main loop: events=0x8 state=5
+I (35967) AudioService: Voice encoder: produced 20 Opus packets
+I (35967) Application: Main loop: events=0x2 state=5
+I (36027) Application: Main loop: events=0x2 state=5
+I (36087) Application: Main loop: events=0x2 state=5
+I (36087) Application: Audio uplink: sent 40 Opus packets
+I (36137) AfeAudioEngine: Voice VAD: silence (frame=44 peak=1524)
+I (36137) Application: Main loop: events=0x8 state=5
+I (36147) Application: Main loop: events=0x2 state=5
+I (36197) Application: Main loop: events=0x2 state=5
+I (36257) Application: Main loop: events=0x2 state=5
+I (36317) Application: Main loop: events=0x2 state=5
+I (36367) Application: Main loop: events=0x40 state=5
+I (36367) Application: Main loop: VoiceLife tick begin
+I (36367) Application: Main loop: VoiceLife tick end
+I (36377) AfeAudioEngine: Voice VAD: speech (frame=51 peak=1155)
+I (36377) Application: Main loop: events=0x8 state=5
+I (36387) Application: Main loop: events=0x2 state=5
+I (36447) Application: Main loop: events=0x2 state=5
+I (36497) AfeAudioEngine: Voice VAD: silence (frame=55 peak=928)
+I (36497) Application: Main loop: events=0x8 state=5
+I (36507) Application: Main loop: events=0x2 state=5
+I (36567) Application: Main loop: events=0x2 state=5
+I (36627) Application: Main loop: events=0x2 state=5
+I (36677) Application: Main loop: events=0x2 state=5
+I (36737) Application: Main loop: events=0x2 state=5
+I (36737) AudioService: Voice input: captured 200 10 ms frames
+I (36787) AfeAudioEngine: Voice AFE: frames=64 vad=0 peak=7145
+I (36797) Application: Main loop: events=0x2 state=5
+I (36857) AfeAudioEngine: Voice VAD: speech (frame=66 peak=7035)
+I (36857) Application: Main loop: events=0x8 state=5
+I (36867) Application: Main loop: events=0x2 state=5
+I (36927) Application: Main loop: events=0x2 state=5
+I (36987) Application: Main loop: events=0x2 state=5
+I (37047) Application: Main loop: events=0x2 state=5
+I (37107) Application: Main loop: events=0x2 state=5
+I (37157) AudioService: Voice encoder: produced 40 Opus packets
+I (37157) Application: Main loop: events=0x2 state=5
+I (37217) Application: Main loop: events=0x2 state=5
+I (37277) Application: Main loop: events=0x2 state=5
+I (37277) Application: Audio uplink: sent 60 Opus packets
+I (37347) Application: Main loop: events=0x2 state=5
+I (37367) Application: Main loop: events=0x40 state=5
+I (37367) Application: Main loop: VoiceLife tick begin
+I (37367) Application: Main loop: VoiceLife tick end
+I (37407) Application: Main loop: events=0x2 state=5
+I (37467) Application: Main loop: events=0x2 state=5
+I (37527) Application: Main loop: events=0x2 state=5
+I (37587) Application: Main loop: events=0x2 state=5
+I (37637) Application: Main loop: events=0x2 state=5
+I (37697) Application: Main loop: events=0x2 state=5
+I (37747) AudioService: Voice input: captured 300 10 ms frames
+I (37757) Application: Main loop: events=0x2 state=5
+I (37817) AfeAudioEngine: Voice AFE: frames=96 vad=1 peak=5835
+I (37827) Application: Main loop: events=0x2 state=5
+I (37887) Application: Main loop: events=0x2 state=5
+I (37947) Application: Main loop: events=0x2 state=5
+I (38007) Application: Main loop: events=0x2 state=5
+I (38067) Application: Main loop: events=0x2 state=5
+I (38117) Application: Main loop: events=0x2 state=5
+I (38177) Application: Main loop: events=0x2 state=5
+I (38237) Application: Main loop: events=0x2 state=5
+I (38307) Application: Main loop: events=0x2 state=5
+I (38367) AudioService: Voice encoder: produced 60 Opus packets
+I (38367) Application: Main loop: events=0x2 state=5
+I (38367) Application: Main loop: events=0x40 state=5
+I (38367) Application: Main loop: VoiceLife tick begin
+I (38377) Application: Main loop: VoiceLife tick end
+I (38427) Application: Main loop: events=0x2 state=5
+I (38487) Application: Main loop: events=0x2 state=5
+I (38487) Application: Audio uplink: sent 80 Opus packets
+I (38547) Application: Main loop: events=0x2 state=5
+I (38597) Application: Main loop: events=0x2 state=5
+I (38657) Application: Main loop: events=0x2 state=5
+I (38717) Application: Main loop: events=0x2 state=5
+I (38747) AudioService: Voice input: captured 400 10 ms frames
+I (38787) Application: Main loop: events=0x2 state=5
+I (38837) AfeAudioEngine: Voice AFE: frames=128 vad=1 peak=908
+I (38847) Application: Main loop: events=0x2 state=5
+I (38907) Application: Main loop: events=0x2 state=5
+I (38967) Application: Main loop: events=0x2 state=5
+I (39027) Application: Main loop: events=0x2 state=5
+I (39077) Application: Main loop: events=0x2 state=5
+I (39137) Application: Main loop: events=0x2 state=5
+I (39197) Application: Main loop: events=0x2 state=5
+I (39257) AfeAudioEngine: Voice VAD: silence (frame=141 peak=1392)
+I (39257) Application: Main loop: events=0x8 state=5
+I (39267) Application: Main loop: events=0x2 state=5
+I (39317) Application: >> 一分钟后提醒我测试。
+I (39317) Application: Main loop: events=0x1 state=5
+I (39317) Application: Main loop: running 1 scheduled task(s)
+I (39317) Application: Main loop: scheduled task 0 begin
+I (39337) Application: Main loop: scheduled task 0 end
+I (39337) Application: Main loop: events=0x2 state=5
+I (39367) Application: Main loop: events=0x40 state=5
+I (39367) Application: Main loop: VoiceLife tick begin
+I (39367) Application: Main loop: VoiceLife tick end
+I (39387) Application: Main loop: events=0x2 state=5
+I (39447) Application: Main loop: events=0x2 state=5
+I (39507) Application: Main loop: events=0x2 state=5
+I (39557) Application: Main loop: events=0x2 state=5
+I (39557) AudioService: Voice encoder: produced 80 Opus packets
+I (39607) AfeAudioEngine: Voice VAD: speech (frame=152 peak=1096)
+I (39607) Application: Main loop: events=0x8 state=5
+I (39617) Application: Main loop: events=0x2 state=5
+I (39677) Application: Main loop: events=0x2 state=5
+I (39677) Application: Audio uplink: sent 100 Opus packets
+I (39737) AudioService: Voice input: captured 500 10 ms frames
+I (39747) Application: Main loop: events=0x2 state=5
+I (39767) AfeAudioEngine: Voice VAD: silence (frame=157 peak=917)
+I (39767) Application: Main loop: events=0x8 state=5
+I (39807) Application: Main loop: events=0x2 state=5
+I (39857) AfeAudioEngine: Voice AFE: frames=160 vad=0 peak=780
+I (39867) Application: Main loop: events=0x2 state=5
+I (39927) Application: Main loop: events=0x2 state=5
+I (39987) Application: Main loop: events=0x2 state=5
+I (40037) Application: Main loop: events=0x2 state=5
+I (40097) Application: Main loop: events=0x2 state=5
+I (40157) Application: Main loop: events=0x2 state=5
+I (40217) AfeAudioEngine: Voice VAD: speech (frame=171 peak=1360)
+I (40217) Application: Main loop: events=0x8 state=5
+I (40227) Application: Main loop: events=0x2 state=5
+I (40287) Application: Main loop: events=0x2 state=5
+I (40347) Application: Main loop: events=0x2 state=5
+I (40367) Application: Main loop: events=0x40 state=5
+I (40367) Application: Main loop: VoiceLife tick begin
+I (40367) Application: Main loop: VoiceLife tick end
+I (40407) Application: Main loop: events=0x2 state=5
+I (40467) Application: Main loop: events=0x2 state=5
+I (40517) Application: Main loop: events=0x2 state=5
+I (40567) AfeAudioEngine: Voice VAD: silence (frame=182 peak=1320)
+I (40567) Application: Main loop: events=0x8 state=5
+I (40577) Application: Main loop: events=0x2 state=5
+I (40637) Application: Main loop: events=0x2 state=5
+I (40697) AfeAudioEngine: Voice VAD: speech (frame=186 peak=1202)
+I (40697) Application: Main loop: events=0x8 state=5
+I (40707) Application: Main loop: events=0x2 state=5
+I (40747) AudioService: Voice input: captured 600 10 ms frames
+I (40767) AudioService: Voice encoder: produced 100 Opus packets
+I (40767) Application: Main loop: events=0x2 state=5
+I (40827) Application: Main loop: events=0x2 state=5
+I (40877) AfeAudioEngine: Voice AFE: frames=192 vad=0 peak=1085
+I (40877) AfeAudioEngine: Voice VAD: silence (frame=192 peak=1085)
+I (40887) Application: Main loop: events=0x8 state=5
+I (40887) Application: Main loop: events=0x2 state=5
+I (40887) Application: Audio uplink: sent 120 Opus packets
+I (40947) Application: Main loop: events=0x2 state=5
+I (40997) Application: Main loop: events=0x2 state=5
+I (41057) Application: Main loop: events=0x2 state=5
+I (41117) Application: Main loop: events=0x2 state=5
+I (41187) Application: Main loop: events=0x2 state=5
+I (41247) Application: Main loop: events=0x2 state=5
+I (41307) Application: Main loop: events=0x2 state=5
+I (41367) Application: Main loop: events=0x2 state=5
+I (41367) Application: Main loop: events=0x40 state=5
+I (41367) Application: Main loop: VoiceLife tick begin
+I (41367) Application: Main loop: VoiceLife tick end
+I (41427) Application: Main loop: events=0x2 state=5
+I (41477) Application: Main loop: events=0x2 state=5
+I (41537) Application: Main loop: events=0x2 state=5
+I (41597) Application: Main loop: events=0x2 state=5
+I (41667) Application: Main loop: events=0x2 state=5
+I (41727) Application: Main loop: events=0x2 state=5
+I (41747) AudioService: Voice input: captured 700 10 ms frames
+I (41787) Application: Main loop: events=0x2 state=5
+I (41847) Application: Main loop: events=0x2 state=5
+I (41897) AfeAudioEngine: Voice AFE: frames=224 vad=0 peak=1201
+I (41907) Application: Main loop: events=0x2 state=5
+I (41957) AudioService: Voice encoder: produced 120 Opus packets
+I (41957) Application: Main loop: events=0x2 state=5
+I (42017) Application: Main loop: events=0x2 state=5
+I (42077) Application: Main loop: events=0x2 state=5
+I (42077) Application: Audio uplink: sent 140 Opus packets
+I (42137) Application: Main loop: events=0x1 state=5
+I (42137) Application: Main loop: running 1 scheduled task(s)
+I (42137) Application: Main loop: scheduled task 0 begin
+I (42267) Application: MCP reply queued (434 bytes)
+I (42267) Application: Main loop: scheduled task 0 end
+I (42267) Application: Main loop: events=0x3 state=5
+I (42267) Application: Main loop: running 1 scheduled task(s)
+I (42277) Application: Main loop: scheduled task 0 begin
+I (42277) Application: MCP reply send begin (434 bytes)
+I (42287) Application: MCP reply send end
+I (42287) Application: Main loop: scheduled task 0 end
+I (42297) Application: Main loop: events=0x2 state=5
+I (42357) Application: Main loop: events=0x2 state=5
+I (42367) Application: Main loop: events=0x40 state=5
+I (42367) Application: Main loop: VoiceLife tick begin
+I (42367) Application: Main loop: VoiceLife tick end
+I (42417) Application: Main loop: events=0x2 state=5
+I (42447) Application: Main loop: events=0x2 state=5
+I (42507) Application: Main loop: events=0x2 state=5
+I (42567) Application: Main loop: events=0x2 state=5
+I (42647) Application: Main loop: events=0x2 state=5
+I (42697) AfeAudioEngine: Voice VAD: speech (frame=248 peak=1238)
+I (42697) Application: Main loop: events=0x8 state=5
+I (42707) Application: Main loop: events=0x2 state=5
+I (42767) AudioService: Voice input: captured 800 10 ms frames
+I (42777) Application: Main loop: events=0x2 state=5
+I (42837) Application: Main loop: events=0x2 state=5
+I (42897) Application: Main loop: events=0x2 state=5
+I (42927) Application: Main loop: events=0x2 state=5
+I (42947) AfeAudioEngine: Voice AFE: frames=256 vad=1 peak=1246
+I (42987) Application: Main loop: events=0x2 state=5
+I (43047) Application: Main loop: events=0x2 state=5
+I (43087) AfeAudioEngine: Voice VAD: silence (frame=260 peak=872)
+I (43087) Application: Main loop: events=0x8 state=5
+I (43127) Application: Main loop: events=0x2 state=5
+I (43187) Application: Main loop: events=0x2 state=5
+I (43187) AudioService: Voice encoder: produced 140 Opus packets
+I (43257) Application: Main loop: events=0x2 state=5
+I (43317) Application: Main loop: events=0x2 state=5
+I (43317) Application: Audio uplink: sent 160 Opus packets
+I (43367) Application: Main loop: events=0x40 state=5
+I (43367) Application: Main loop: VoiceLife tick begin
+I (43367) Application: Main loop: VoiceLife tick end
+I (43377) Application: Main loop: events=0x2 state=5
+I (43407) Application: Main loop: events=0x2 state=5
+I (43467) Application: Main loop: events=0x2 state=5
+I (43527) Application: Main loop: events=0x2 state=5
+I (43607) Application: Main loop: events=0x2 state=5
+I (43627) AfeAudioEngine: Voice VAD: speech (frame=277 peak=1115)
+I (43627) Application: Main loop: events=0x8 state=5
+I (43667) Application: Main loop: events=0x2 state=5
+I (43717) Application: Main loop: events=0x1 state=5
+I (43717) Application: Main loop: running 1 scheduled task(s)
+I (43717) Application: Main loop: scheduled task 0 begin
+I (43727) StateMachine: State: listening -> speaking
+I (43727) Application: << 好的，我来帮你设置提醒已创建测试，
+I (43727) Application: Main loop: scheduled task 0 end
+I (43747) Application: Main loop: events=0x1001 state=6
+I (43747) Application: Handling state change: speaking
+I (43757) AudioService: Voice input: captured 900 10 ms frames
+I (43767) Application: Main loop: state handler returned
+I (43767) Application: Main loop: running 2 scheduled task(s)
+I (43767) Application: Main loop: scheduled task 0 begin
+I (43777) Application: Main loop: scheduled task 0 end
+I (43777) Application: Main loop: scheduled task 1 begin
+I (43787) Application: Main loop: scheduled task 1 end
+I (47797) Application: Main loop: running 1 scheduled task(s)
+I (47797) Application: Main loop: scheduled task 0 begin
+I (47797) Application: << 时间是2026-07-30T11:07:31+08:00
+I (47817) Application: Main loop: scheduled task 0 end
+I (47817) Application: Main loop: running 1 scheduled task(s)
+I (47817) Application: Main loop: scheduled task 0 begin
+I (47817) Application: Main loop: scheduled task 0 end
+I (53377) SystemInfo: free sram: 125439 minimal sram: 108455
+I (56127) Application: Main loop: running 1 scheduled task(s)
+I (56127) Application: Main loop: scheduled task 0 begin
+I (56127) StateMachine: State: speaking -> listening
+I (56127) Application: Main loop: scheduled task 0 end
+I (56137) Application: Main loop: events=0x1000 state=5
+I (56137) Application: Handling state change: listening
+I (56147) Application: Listening state ready: mode=0 processor=off playback=idle
+I (56157) Application: Audio uplink: sending listen.start (mode=0)
+I (56157) Application: Audio uplink: enabling voice processing
+I (56167) AudioService: Voice processing: resetting decoder and input pipeline
+I (56167) AudioService: Voice processing: enabling audio engine
+I (56177) AudioService: Voice processing: input task enabled
+I (56177) Application: Audio uplink: voice processing is running
+I (56187) Application: Audio uplink: configuring listening wake word
+I (56197) Application: Audio uplink: listening pipeline ready
+I (56197) Application: Main loop: state handler returned
+I (56207) AudioService: Voice input: captured 1 10 ms frames
+I (56327) AfeAudioEngine: Voice AFE: frames=1 vad=1 peak=1045
+I (56327) AfeAudioEngine: Voice VAD: speech (frame=1 peak=1045)
+I (56327) Application: Main loop: events=0x8 state=5
+I (56337) AudioService: Voice encoder: produced 1 Opus packets
+I (56337) Application: Main loop: events=0x2 state=5
+I (56367) Application: Main loop: events=0x2 state=5
+I (56367) Application: Main loop: events=0x40 state=5
+I (56367) Application: Main loop: VoiceLife tick begin
+I (56367) Application: Main loop: VoiceLife tick end
+I (56387) AfeAudioEngine: Voice VAD: silence (frame=5 peak=831)
+I (56387) Application: Main loop: events=0x8 state=5
+I (56447) Application: Main loop: events=0x2 state=5
+I (56507) Application: Main loop: events=0x2 state=5
+I (56567) Application: Main loop: events=0x2 state=5
+I (56627) Application: Main loop: events=0x2 state=5
+I (56687) Application: Main loop: events=0x2 state=5
+I (56707) AfeAudioEngine: Voice VAD: speech (frame=15 peak=1296)
+I (56707) Application: Main loop: events=0x8 state=5
+I (56717) Application: Main loop: events=0x2 state=5
+I (56787) Application: Main loop: events=0x2 state=5
+I (56847) Application: Main loop: events=0x2 state=5
+I (56927) Application: Main loop: events=0x2 state=5
+I (56987) Application: Main loop: events=0x2 state=5
+I (57047) Application: Main loop: events=0x2 state=5
+I (57047) Application: Audio uplink: sent 180 Opus packets
+I (57107) Application: Main loop: events=0x2 state=5
+I (57167) Application: Main loop: events=0x2 state=5
+I (57197) Application: Main loop: events=0x2 state=5
+I (57247) AudioService: Voice input: captured 100 10 ms frames
+I (57257) AfeAudioEngine: Voice AFE: frames=32 vad=1 peak=2132
+I (57267) Application: Main loop: events=0x2 state=5
+I (57327) Application: Main loop: events=0x2 state=5
+I (57367) Application: Main loop: events=0x40 state=5
+I (57367) Application: Main loop: VoiceLife tick begin
+I (57367) Application: Main loop: VoiceLife tick end
+I (57407) Application: Main loop: events=0x2 state=5
+I (57467) AudioService: Voice encoder: produced 20 Opus packets
+I (57467) Application: Main loop: events=0x2 state=5
+I (57527) Application: Main loop: events=0x2 state=5
+I (57587) Application: Main loop: events=0x2 state=5
+I (57647) Application: Main loop: events=0x2 state=5
+I (57677) Application: Main loop: events=0x2 state=5
+I (57747) Application: Main loop: events=0x2 state=5
+I (57807) Application: Main loop: events=0x2 state=5
+I (57887) Application: Main loop: events=0x2 state=5
+I (57947) Application: Main loop: events=0x2 state=5
+I (58007) Application: Main loop: events=0x2 state=5
+I (58067) Application: Main loop: events=0x2 state=5
+I (58127) Application: Main loop: events=0x2 state=5
+I (58157) Application: Main loop: events=0x2 state=5
+I (58187) AfeAudioEngine: Voice VAD: silence (frame=61 peak=1124)
+I (58187) Application: Main loop: events=0x8 state=5
+I (58227) Application: Main loop: events=0x2 state=5
+I (58227) Application: Audio uplink: sent 200 Opus packets
+I (58237) AudioService: Voice input: captured 200 10 ms frames
+I (58277) AfeAudioEngine: Voice AFE: frames=64 vad=0 peak=1373
+I (58287) Application: Main loop: events=0x2 state=5
+I (58367) Application: Main loop: events=0x2 state=5
+I (58367) Application: Main loop: events=0x40 state=5
+I (58367) Application: Main loop: VoiceLife tick begin
+I (58367) Application: Main loop: VoiceLife tick end
+I (58427) Application: Main loop: events=0x2 state=5
+I (58487) Application: Main loop: events=0x2 state=5
+I (58547) Application: Main loop: events=0x2 state=5
+I (58607) Application: Main loop: events=0x2 state=5
+I (58637) Application: Main loop: events=0x2 state=5
+I (58637) AudioService: Voice encoder: produced 40 Opus packets
+I (58707) Application: Main loop: events=0x2 state=5
+I (58767) Application: Main loop: events=0x2 state=5
+I (58847) Application: Main loop: events=0x2 state=5
+I (58867) AfeAudioEngine: Voice VAD: speech (frame=82 peak=1195)
+I (58867) Application: Main loop: events=0x8 state=5
+I (58907) Application: Main loop: events=0x2 state=5
+I (58967) Application: Main loop: events=0x2 state=5
+I (58987) AfeAudioEngine: Voice VAD: silence (frame=86 peak=1054)
+I (58987) Application: Main loop: events=0x8 state=5
+I (59027) Application: Main loop: events=0x2 state=5
+I (59087) Application: Main loop: events=0x2 state=5
+I (59117) Application: Main loop: events=0x2 state=5
+I (59187) Application: Main loop: events=0x2 state=5
+I (59237) AudioService: Voice input: captured 300 10 ms frames
+I (59247) Application: Main loop: events=0x2 state=5
+I (59317) AfeAudioEngine: Voice AFE: frames=96 vad=0 peak=1377
+I (59327) Application: Main loop: events=0x2 state=5
+I (59367) Application: Main loop: events=0x40 state=5
+I (59367) Application: Main loop: VoiceLife tick begin
+I (59367) Application: Main loop: VoiceLife tick end
+I (59387) Application: Main loop: events=0x2 state=5
+I (59407) AfeAudioEngine: Voice VAD: speech (frame=99 peak=1556)
+I (59407) Application: Main loop: events=0x8 state=5
+I (59447) Application: Main loop: events=0x2 state=5
+I (59447) Application: Audio uplink: sent 220 Opus packets
+I (59507) Application: Main loop: events=0x2 state=5
+I (59557) AfeAudioEngine: Voice VAD: silence (frame=104 peak=1357)
+I (59557) Application: Main loop: events=0x8 state=5
+I (59567) Application: Main loop: events=0x2 state=5
+I (59597) Application: Main loop: events=0x2 state=5
+I (59667) Application: Main loop: events=0x2 state=5
+I (59727) Application: Main loop: events=0x2 state=5
+I (59807) Application: Main loop: events=0x2 state=5
+I (59867) Application: Main loop: events=0x2 state=5
+I (59867) AudioService: Voice encoder: produced 60 Opus packets
+I (59927) Application: Main loop: events=0x2 state=5
+I (59987) Application: Main loop: events=0x2 state=5
+I (60047) Application: Main loop: events=0x2 state=5
+I (60077) Application: Main loop: events=0x2 state=5
+I (60147) Application: Main loop: events=0x2 state=5
+I (60207) Application: Main loop: events=0x2 state=5
+I (60247) AudioService: Voice input: captured 400 10 ms frames
+I (60287) Application: Main loop: events=0x2 state=5
+I (60337) AfeAudioEngine: Voice AFE: frames=128 vad=0 peak=1251
+I (60347) Application: Main loop: events=0x2 state=5
+I (60367) Application: Main loop: events=0x40 state=5
+I (60367) Application: Main loop: VoiceLife tick begin
+I (60367) Application: Main loop: VoiceLife tick end
+I (60407) Application: Main loop: events=0x2 state=5
+I (60467) Application: Main loop: events=0x2 state=5
+I (60527) Application: Main loop: events=0x2 state=5
+I (60557) Application: Main loop: events=0x2 state=5
+I (60627) Application: Main loop: events=0x2 state=5
+I (60627) Application: Audio uplink: sent 240 Opus packets
+I (60647) AfeAudioEngine: Voice VAD: speech (frame=138 peak=1402)
+I (60647) Application: Main loop: events=0x8 state=5
+I (60687) Application: Main loop: events=0x2 state=5
+I (60767) Application: Main loop: events=0x2 state=5
+I (60827) Application: Main loop: events=0x2 state=5
+I (60887) Application: Main loop: events=0x2 state=5
+I (60947) Application: Main loop: events=0x2 state=5
+I (61007) Application: Main loop: events=0x2 state=5
+I (61037) AudioService: Voice encoder: produced 80 Opus packets
+I (61037) Application: Main loop: events=0x2 state=5
+I (61107) Application: Main loop: events=0x2 state=5
+I (61167) Application: Main loop: events=0x2 state=5
+I (61237) AudioService: Voice input: captured 500 10 ms frames
+I (61247) Application: Main loop: events=0x2 state=5
+I (61307) Application: Main loop: events=0x2 state=5
+I (61357) AfeAudioEngine: Voice AFE: frames=160 vad=1 peak=1835
+I (61367) Application: Main loop: events=0x2 state=5
+I (61367) Application: Main loop: events=0x40 state=5
+I (61367) Application: Main loop: VoiceLife tick begin
+I (61367) Application: Main loop: VoiceLife tick end
+I (61427) Application: Main loop: events=0x2 state=5
+I (61487) Application: Main loop: events=0x2 state=5
+I (61517) Application: Main loop: events=0x2 state=5
+I (61587) Application: Main loop: events=0x2 state=5
+I (61647) Application: Main loop: events=0x2 state=5
+I (61727) Application: Main loop: events=0x2 state=5
+I (61787) Application: Main loop: events=0x2 state=5
+I (61847) Application: Main loop: events=0x2 state=5
+I (61847) Application: Audio uplink: sent 260 Opus packets
+I (61907) Application: Main loop: events=0x2 state=5
+I (61967) Application: Main loop: events=0x2 state=5
+I (61997) Application: Main loop: events=0x2 state=5
+I (62067) Application: Main loop: events=0x2 state=5
+I (62127) Application: Main loop: events=0x2 state=5
+I (62207) Application: Main loop: events=0x2 state=5
+I (62237) AudioService: Voice input: captured 600 10 ms frames
+I (62267) AudioService: Voice encoder: produced 100 Opus packets
+I (62267) Application: Main loop: events=0x2 state=5
+I (62327) Application: Main loop: events=0x2 state=5
+I (62367) Application: Main loop: events=0x40 state=5
+I (62367) Application: Main loop: VoiceLife tick begin
+I (62367) Application: Main loop: VoiceLife tick end
+I (62377) AfeAudioEngine: Voice AFE: frames=192 vad=1 peak=1698
+I (62387) Application: Main loop: events=0x2 state=5
+I (62447) Application: Main loop: events=0x2 state=5
+I (62477) Application: Main loop: events=0x2 state=5
+I (62547) Application: Main loop: events=0x2 state=5
+I (62607) Application: Main loop: events=0x2 state=5
+I (62687) Application: Main loop: events=0x2 state=5
+I (62747) Application: Main loop: events=0x2 state=5
+I (62807) Application: Main loop: events=0x2 state=5
+I (62857) AfeAudioEngine: Voice VAD: silence (frame=207 peak=730)
+I (62857) Application: Main loop: events=0x8 state=5
+I (62867) Application: Main loop: events=0x2 state=5
+I (62927) Application: Main loop: events=0x2 state=5
+I (62957) Application: Main loop: events=0x2 state=5
+I (63027) Application: Main loop: events=0x2 state=5
+I (63027) Application: Audio uplink: sent 280 Opus packets
+I (63087) Application: Main loop: events=0x2 state=5
+I (63167) Application: Main loop: events=0x2 state=5
+I (63227) Application: Main loop: events=0x2 state=5
+I (63247) AudioService: Voice input: captured 700 10 ms frames
+I (63287) Application: Main loop: events=0x2 state=5
+I (63347) Application: Main loop: events=0x2 state=5
+I (63367) Application: Main loop: events=0x40 state=5
+I (63367) Application: Main loop: VoiceLife tick begin
+I (63367) Application: Main loop: VoiceLife tick end
+I (63397) AfeAudioEngine: Voice AFE: frames=224 vad=0 peak=1288
+I (63407) Application: Main loop: events=0x2 state=5
+I (63437) AudioService: Voice encoder: produced 120 Opus packets
+I (63437) Application: Main loop: events=0x2 state=5
+I (63507) Application: Main loop: events=0x2 state=5
+I (63567) Application: Main loop: events=0x2 state=5
+I (63647) Application: Main loop: events=0x2 state=5
+I (63707) Application: Main loop: events=0x2 state=5
+I (63767) Application: Main loop: events=0x2 state=5
+I (63827) Application: Main loop: events=0x2 state=5
+I (63887) Application: Main loop: events=0x2 state=5
+I (63917) Application: Main loop: events=0x2 state=5
+I (63977) AfeAudioEngine: Voice VAD: speech (frame=242 peak=1837)
+I (63977) Application: Main loop: events=0x8 state=5
+I (63987) Application: Main loop: events=0x2 state=5
+I (64047) Application: Main loop: events=0x2 state=5
+I (64127) Application: Main loop: events=0x2 state=5
+I (64187) Application: Main loop: events=0x2 state=5
+I (64237) AudioService: Voice input: captured 800 10 ms frames
+I (64247) Application: Main loop: events=0x2 state=5
+I (64247) Application: Audio uplink: sent 300 Opus packets
+I (64307) Application: Main loop: events=0x2 state=5
+I (64367) Application: Main loop: events=0x2 state=5
+I (64367) Application: Main loop: events=0x40 state=5
+I (64367) Application: Main loop: VoiceLife tick begin
+I (64367) Application: Main loop: VoiceLife tick end
+I (64397) Application: Main loop: events=0x2 state=5
+I (64427) AfeAudioEngine: Voice AFE: frames=256 vad=1 peak=1016
+I (64467) Application: Main loop: events=0x2 state=5
+I (64527) Application: Main loop: events=0x2 state=5
+I (64607) Application: Main loop: events=0x2 state=5
+I (64667) AudioService: Voice encoder: produced 140 Opus packets
+I (64667) Application: Main loop: events=0x2 state=5
+I (64727) Application: Main loop: events=0x2 state=5
+I (64787) Application: Main loop: events=0x2 state=5
+I (64847) Application: Main loop: events=0x2 state=5
+I (64877) Application: Main loop: events=0x2 state=5
+I (64947) Application: Main loop: events=0x2 state=5
+I (65007) Application: Main loop: events=0x2 state=5
+I (65087) Application: Main loop: events=0x2 state=5
+I (65147) Application: Main loop: events=0x2 state=5
+I (65207) Application: Main loop: events=0x2 state=5
+I (65237) AudioService: Voice input: captured 900 10 ms frames
+I (65267) Application: Main loop: events=0x2 state=5
+I (65317) AfeAudioEngine: Voice VAD: silence (frame=284 peak=1174)
+I (65317) Application: Main loop: events=0x8 state=5
+I (65327) Application: Main loop: events=0x2 state=5
+I (65357) Application: Main loop: events=0x2 state=5
+I (65367) Application: Main loop: events=0x40 state=5
+I (65367) Application: Main loop: VoiceLife tick begin
+I (65367) Application: Main loop: VoiceLife tick end
+I (65377) SystemInfo: free sram: 121807 minimal sram: 108455
+I (65427) Application: Main loop: events=0x2 state=5
+I (65427) Application: Audio uplink: sent 320 Opus packets
+I (65447) AfeAudioEngine: Voice AFE: frames=288 vad=0 peak=1162
+I (65487) Application: Main loop: events=0x2 state=5
+I (65567) Application: Main loop: events=0x2 state=5
+I (65627) Application: Main loop: events=0x2 state=5
+I (65687) Application: Main loop: events=0x2 state=5
+I (65747) Application: Main loop: events=0x2 state=5
+I (65807) Application: Main loop: events=0x2 state=5
+I (65837) Application: Main loop: events=0x2 state=5
+I (65837) AudioService: Voice encoder: produced 160 Opus packets
+I (65907) Application: Main loop: events=0x2 state=5
+I (65967) Application: Main loop: events=0x2 state=5
+I (66047) Application: Main loop: events=0x2 state=5
+I (66107) Application: Main loop: events=0x2 state=5
+I (66167) Application: Main loop: events=0x2 state=5
+I (66187) AfeAudioEngine: Voice VAD: speech (frame=311 peak=1765)
+I (66187) Application: Main loop: events=0x8 state=5
+I (66227) Application: Main loop: events=0x2 state=5
+I (66247) AudioService: Voice input: captured 1000 10 ms frames
+I (66287) Application: Main loop: events=0x2 state=5
+I (66317) Application: Main loop: events=0x2 state=5
+I (66367) Application: Main loop: events=0x40 state=5
+I (66367) Application: Main loop: VoiceLife tick begin
+I (66367) Application: Main loop: VoiceLife tick end
+I (66387) Application: Main loop: events=0x2 state=5
+I (66447) Application: Main loop: events=0x2 state=5
+I (66467) AfeAudioEngine: Voice AFE: frames=320 vad=1 peak=1194
+I (66527) Application: Main loop: events=0x2 state=5
+I (66587) Application: Main loop: events=0x2 state=5
+I (66647) Application: Main loop: events=0x2 state=5
+I (66647) Application: Audio uplink: sent 340 Opus packets
+I (66707) Application: Main loop: events=0x2 state=5
+I (66767) Application: Main loop: events=0x2 state=5
+I (66797) Application: Main loop: events=0x2 state=5
+I (66867) Application: Main loop: events=0x2 state=5
+I (66927) Application: Main loop: events=0x2 state=5
+I (67007) Application: Main loop: events=0x2 state=5
+I (67057) AfeAudioEngine: Voice VAD: silence (frame=338 peak=1173)
+I (67057) Application: Main loop: events=0x8 state=5
+I (67067) AudioService: Voice encoder: produced 180 Opus packets
+I (67067) Application: Main loop: events=0x2 state=5
+I (67127) Application: Main loop: events=0x2 state=5
+I (67187) Application: Main loop: events=0x2 state=5
+I (67237) AudioService: Voice input: captured 1100 10 ms frames
+I (67247) Application: Main loop: events=0x2 state=5
+I (67277) Application: Main loop: events=0x2 state=5
+I (67347) Application: Main loop: events=0x2 state=5
+I (67367) Application: Main loop: events=0x40 state=5
+I (67367) Application: Main loop: VoiceLife tick begin
+I (67367) Application: Main loop: VoiceLife tick end
+I (67407) Application: Main loop: events=0x2 state=5
+I (67487) Application: Main loop: events=0x2 state=5
+I (67507) AfeAudioEngine: Voice AFE: frames=352 vad=0 peak=766
+I (67547) Application: Main loop: events=0x2 state=5
+I (67607) Application: Main loop: events=0x2 state=5
+I (67667) Application: Main loop: events=0x2 state=5
+I (67687) AfeAudioEngine: Voice VAD: speech (frame=358 peak=2207)
+I (67687) Application: Main loop: events=0x8 state=5
+I (67727) Application: Main loop: events=0x2 state=5
+I (67757) Application: Main loop: events=0x2 state=5
+I (67827) Application: Main loop: events=0x2 state=5
+I (67827) Application: Audio uplink: sent 360 Opus packets
+I (67887) Application: Main loop: events=0x2 state=5
+I (67967) Application: Main loop: events=0x2 state=5
+I (68027) Application: Main loop: events=0x2 state=5
+I (68087) Application: Main loop: events=0x2 state=5
+I (68147) Application: Main loop: events=0x2 state=5
+I (68207) Application: Main loop: events=0x2 state=5
+I (68237) Application: Main loop: events=0x2 state=5
+I (68237) AudioService: Voice encoder: produced 200 Opus packets
+I (68237) AudioService: Voice input: captured 1200 10 ms frames
+I (68307) Application: Main loop: events=0x2 state=5
+I (68367) Application: Main loop: events=0x2 state=5
+I (68367) Application: Main loop: events=0x40 state=5
+I (68367) Application: Main loop: VoiceLife tick begin
+I (68367) Application: Main loop: VoiceLife tick end
+I (68447) Application: Main loop: events=0x2 state=5
+I (68507) Application: Main loop: events=0x2 state=5
+I (68527) AfeAudioEngine: Voice AFE: frames=384 vad=1 peak=2314
+I (68567) Application: Main loop: events=0x2 state=5
+I (68627) Application: Main loop: events=0x2 state=5
+I (68687) Application: Main loop: events=0x2 state=5
+I (68717) Application: Main loop: events=0x2 state=5
+I (68787) Application: Main loop: events=0x2 state=5
+I (68847) Application: Main loop: events=0x2 state=5
+I (68927) Application: Main loop: events=0x2 state=5
+I (68987) Application: Main loop: events=0x2 state=5
+I (69047) Application: Main loop: events=0x2 state=5
+I (69047) Application: Audio uplink: sent 380 Opus packets
+I (69107) Application: Main loop: events=0x2 state=5
+I (69167) Application: Main loop: events=0x2 state=5
+I (69197) Application: Main loop: events=0x2 state=5
+I (69247) AudioService: Voice input: captured 1300 10 ms frames
+I (69267) Application: Main loop: events=0x2 state=5
+I (69327) Application: Main loop: events=0x2 state=5
+I (69367) Application: Main loop: events=0x40 state=5
+I (69367) Application: Main loop: VoiceLife tick begin
+I (69367) Application: Main loop: VoiceLife tick end
+I (69407) Application: Main loop: events=0x2 state=5
+I (69467) AudioService: Voice encoder: produced 220 Opus packets
+I (69467) Application: Main loop: events=0x2 state=5
+I (69527) Application: Main loop: events=0x2 state=5
+I (69547) AfeAudioEngine: Voice AFE: frames=416 vad=1 peak=2110
+I (69587) Application: Main loop: events=0x2 state=5
+I (69647) Application: Main loop: events=0x2 state=5
+I (69677) Application: Main loop: events=0x2 state=5
+I (69747) Application: Main loop: events=0x2 state=5
+I (69807) Application: Main loop: events=0x2 state=5
+I (69887) Application: Main loop: events=0x2 state=5
+I (69947) Application: Main loop: events=0x2 state=5
+I (70007) Application: Main loop: events=0x2 state=5
+I (70067) Application: Main loop: events=0x2 state=5
+I (70127) Application: Main loop: events=0x2 state=5
+I (70157) Application: Main loop: events=0x2 state=5
+I (70227) Application: Main loop: events=0x2 state=5
+I (70227) Application: Audio uplink: sent 400 Opus packets
+I (70237) AudioService: Voice input: captured 1400 10 ms frames
+I (70287) Application: Main loop: events=0x2 state=5
+I (70367) Application: Main loop: events=0x2 state=5
+I (70367) Application: Main loop: events=0x40 state=5
+I (70367) Application: Main loop: VoiceLife tick begin
+I (70367) Application: Main loop: VoiceLife tick end
+I (70427) Application: Main loop: events=0x2 state=5
+I (70487) Application: Main loop: events=0x2 state=5
+I (70547) Application: Main loop: events=0x2 state=5
+I (70567) AfeAudioEngine: Voice AFE: frames=448 vad=1 peak=1188
+I (70607) Application: Main loop: events=0x2 state=5
+I (70637) Application: Main loop: events=0x2 state=5
+I (70637) AudioService: Voice encoder: produced 240 Opus packets
+I (70697) AfeAudioEngine: Voice VAD: silence (frame=452 peak=1473)
+I (70697) Application: Main loop: events=0x8 state=5
+I (70707) Application: Main loop: events=0x2 state=5
+I (70767) Application: Main loop: events=0x2 state=5
+I (70847) Application: Main loop: events=0x2 state=5
+I (70897) AfeAudioEngine: Voice VAD: speech (frame=458 peak=1542)
+I (70897) Application: Main loop: events=0x8 state=5
+I (70907) Application: Main loop: events=0x2 state=5
+I (70927) AudioCodec: Set output enable to false
+I (70967) Application: Main loop: events=0x2 state=5
+I (71027) Application: Main loop: events=0x2 state=5
+I (71087) Application: Main loop: events=0x2 state=5
+I (71117) Application: Main loop: events=0x2 state=5
+I (71167) Application: >> 对
+I (71167) Application: Main loop: events=0x1 state=5
+I (71167) Application: Main loop: running 1 scheduled task(s)
+I (71167) Application: Main loop: scheduled task 0 begin
+I (71177) Application: Main loop: scheduled task 0 end
+I (71187) Application: Main loop: events=0x2 state=5
+I (71237) AudioService: Voice input: captured 1500 10 ms frames
+I (71247) Application: Main loop: events=0x2 state=5
+I (71327) Application: Main loop: events=0x2 state=5
+I (71367) Application: Main loop: events=0x40 state=5
+I (71367) Application: Main loop: VoiceLife tick begin
+I (71367) Application: Main loop: VoiceLife tick end
+I (71387) Application: Main loop: events=0x2 state=5
+I (71447) Application: Main loop: events=0x2 state=5
+I (71447) Application: Audio uplink: sent 420 Opus packets
+I (71507) Application: Main loop: events=0x2 state=5
+I (71567) Application: Main loop: events=0x2 state=5
+I (71587) AfeAudioEngine: Voice AFE: frames=480 vad=1 peak=4979
+I (71597) Application: Main loop: events=0x2 state=5
+I (71667) Application: Main loop: events=0x2 state=5
+I (71727) Application: Main loop: events=0x2 state=5
+I (71807) Application: Main loop: events=0x2 state=5
+I (71867) Application: Main loop: events=0x2 state=5
+I (71867) AudioService: Voice encoder: produced 260 Opus packets
+I (71927) Application: Main loop: events=0x2 state=5
+I (71987) Application: Main loop: events=0x2 state=5
+I (72047) Application: Main loop: events=0x2 state=5
+I (72077) Application: Main loop: events=0x2 state=5
+I (72147) Application: Main loop: events=0x2 state=5
+I (72207) Application: Main loop: events=0x2 state=5
+I (72247) AudioService: Voice input: captured 1600 10 ms frames
+I (72287) Application: Main loop: events=0x2 state=5
+I (72347) Application: Main loop: events=0x2 state=5
+I (72367) Application: Main loop: events=0x40 state=5
+I (72367) Application: Main loop: VoiceLife tick begin
+I (72367) Application: Main loop: VoiceLife tick end
+I (72407) Application: Main loop: events=0x2 state=5
+I (72467) Application: Main loop: events=0x2 state=5
+I (72527) Application: Main loop: events=0x2 state=5
+I (72557) Application: Main loop: events=0x2 state=5
+I (72617) AfeAudioEngine: Voice AFE: frames=512 vad=1 peak=3669
+I (72627) Application: Main loop: events=0x2 state=5
+I (72627) Application: Audio uplink: sent 440 Opus packets
+I (72687) Application: Main loop: events=0x2 state=5
+I (72767) Application: Main loop: events=0x2 state=5
+I (72827) Application: Main loop: events=0x2 state=5
+I (72887) Application: Main loop: events=0x2 state=5
+I (72947) Application: Main loop: events=0x2 state=5
+I (73007) Application: Main loop: events=0x2 state=5
+I (73037) AudioService: Voice encoder: produced 280 Opus packets
+I (73037) Application: Main loop: events=0x2 state=5
+I (73107) Application: Main loop: events=0x2 state=5
+I (73167) Application: Main loop: events=0x2 state=5
+I (73237) AudioService: Voice input: captured 1700 10 ms frames
+I (73247) Application: Main loop: events=0x2 state=5
+I (73307) Application: Main loop: events=0x2 state=5
+I (73367) Application: Main loop: events=0x2 state=5
+I (73367) Application: Main loop: events=0x40 state=5
+I (73367) Application: Main loop: VoiceLife tick begin
+I (73367) Application: Main loop: VoiceLife tick end
+I (73427) Application: Main loop: events=0x2 state=5
+I (73487) Application: Main loop: events=0x2 state=5
+I (73517) Application: Main loop: events=0x2 state=5
+I (73587) Application: Main loop: events=0x2 state=5
+I (73637) AfeAudioEngine: Voice AFE: frames=544 vad=1 peak=1713
+I (73647) Application: Main loop: events=0x2 state=5
+I (73727) Application: Main loop: events=0x2 state=5
+I (73787) Application: Main loop: events=0x2 state=5
+I (73847) Application: Main loop: events=0x2 state=5
+I (73847) Application: Audio uplink: sent 460 Opus packets
+I (73907) Application: Main loop: events=0x2 state=5
+I (73967) Application: Main loop: events=0x2 state=5
+I (73997) Application: Main loop: events=0x2 state=5
+I (74067) Application: Main loop: events=0x2 state=5
+I (74127) Application: Main loop: events=0x2 state=5
+I (74207) Application: Main loop: events=0x2 state=5
+I (74237) AudioService: Voice input: captured 1800 10 ms frames
+I (74267) Application: Main loop: events=0x2 state=5
+I (74267) AudioService: Voice encoder: produced 300 Opus packets
+I (74327) Application: Main loop: events=0x2 state=5
+I (74367) Application: Main loop: events=0x40 state=5
+I (74367) Application: Main loop: VoiceLife tick begin
+I (74367) Application: Main loop: VoiceLife tick end
+I (74387) Application: Main loop: events=0x2 state=5
+I (74447) Application: Main loop: events=0x2 state=5
+I (74477) Application: Main loop: events=0x2 state=5
+I (74547) Application: Main loop: events=0x2 state=5
+I (74607) Application: Main loop: events=0x2 state=5
+I (74677) AfeAudioEngine: Voice AFE: frames=576 vad=1 peak=1585
+I (74687) Application: Main loop: events=0x2 state=5
+I (74747) Application: Main loop: events=0x2 state=5
+I (74807) Application: Main loop: events=0x2 state=5
+I (74867) Application: Main loop: events=0x2 state=5
+I (74887) AfeAudioEngine: Voice VAD: silence (frame=583 peak=1021)
+I (74887) Application: Main loop: events=0x8 state=5
+I (74927) Application: Main loop: events=0x2 state=5
+I (74957) Application: Main loop: events=0x2 state=5
+I (75027) Application: Main loop: events=0x2 state=5
+I (75027) Application: Audio uplink: sent 480 Opus packets
+I (75087) Application: Main loop: events=0x2 state=5
+I (75167) Application: Main loop: events=0x2 state=5
+I (75217) AfeAudioEngine: Voice VAD: speech (frame=593 peak=1393)
+I (75217) Application: Main loop: events=0x8 state=5
+I (75227) Application: Main loop: events=0x2 state=5
+I (75247) AudioService: Voice input: captured 1900 10 ms frames
+I (75287) Application: Main loop: events=0x2 state=5
+I (75347) Application: Main loop: events=0x2 state=5
+I (75367) Application: Main loop: events=0x40 state=5
+I (75367) Application: Main loop: VoiceLife tick begin
+I (75367) Application: Main loop: VoiceLife tick end
+I (75377) SystemInfo: free sram: 124223 minimal sram: 108455
+I (75407) Application: Main loop: events=0x2 state=5
+I (75437) AudioService: Voice encoder: produced 320 Opus packets
+I (75437) Application: Main loop: events=0x2 state=5
+I (75507) Application: Main loop: events=0x2 state=5
+I (75567) Application: Main loop: events=0x2 state=5
+I (75647) Application: Main loop: events=0x2 state=5
+I (75667) Application: >> 所以说问题就是。
+I (75667) Application: Main loop: events=0x1 state=5
+I (75667) Application: Main loop: running 1 scheduled task(s)
+I (75667) Application: Main loop: scheduled task 0 begin
+I (75677) Application: Main loop: scheduled task 0 end
+I (75697) AfeAudioEngine: Voice AFE: frames=608 vad=1 peak=2069
+I (75707) Application: Main loop: events=0x2 state=5
+I (75767) Application: Main loop: events=0x2 state=5
+I (75827) Application: Main loop: events=0x2 state=5
+I (75887) Application: Main loop: events=0x2 state=5
+I (75907) AfeAudioEngine: Voice VAD: silence (frame=615 peak=1056)
+I (75907) Application: Main loop: events=0x8 state=5
+I (75917) Application: Main loop: events=0x2 state=5
+I (75987) Application: Main loop: events=0x2 state=5
+I (76047) Application: Main loop: events=0x2 state=5
+I (76127) Application: Main loop: events=0x2 state=5
+I (76177) AfeAudioEngine: Voice VAD: speech (frame=623 peak=1810)
+I (76177) Application: Main loop: events=0x8 state=5
+I (76187) Application: Main loop: events=0x2 state=5
+I (76237) AudioService: Voice input: captured 2000 10 ms frames
+I (76247) Application: Main loop: events=0x2 state=5
+I (76247) Application: Audio uplink: sent 500 Opus packets
+I (76307) Application: Main loop: events=0x2 state=5
+I (76367) Application: Main loop: events=0x2 state=5
+I (76367) Application: Main loop: events=0x40 state=5
+I (76367) Application: Main loop: VoiceLife tick begin
+I (76367) Application: Main loop: VoiceLife tick end
+I (76397) Application: Main loop: events=0x2 state=5
+I (76467) Application: Main loop: events=0x2 state=5
+I (76527) Application: Main loop: events=0x2 state=5
+I (76607) Application: Main loop: events=0x2 state=5
+I (76667) AudioService: Voice encoder: produced 340 Opus packets
+I (76667) Application: Main loop: events=0x2 state=5
+I (76717) AfeAudioEngine: Voice AFE: frames=640 vad=1 peak=2877
+I (76727) Application: Main loop: events=0x2 state=5
+I (76767) Application: Main loop: events=0x1 state=5
+I (76767) Application: Main loop: running 2 scheduled task(s)
+I (76767) Application: Main loop: scheduled task 0 begin
+I (76767) Application: << 嗯？什么问题呀？
+I (76777) StateMachine: State: listening -> speaking
+I (76787) Application: Main loop: scheduled task 0 end
+I (76787) Application: Main loop: scheduled task 1 begin
+I (76797) Application: Main loop: scheduled task 1 end
+I (76797) AudioCodec: Set output enable to true
+I (76797) Application: Main loop: events=0x1003 state=6
+I (76807) Application: Handling state change: speaking
+I (76827) Application: Main loop: state handler returned
+I (76827) Application: Main loop: running 1 scheduled task(s)
+I (76827) Application: Main loop: scheduled task 0 begin
+I (76837) Application: Main loop: scheduled task 0 end
+I (79137) Application: Main loop: running 1 scheduled task(s)
+I (79137) Application: Main loop: scheduled task 0 begin
+I (79137) Application: Main loop: scheduled task 0 end
+I (79137) Application: << 你说说看～
+I (79147) Application: Main loop: running 1 scheduled task(s)
+I (79147) Application: Main loop: scheduled task 0 begin
+I (79167) Application: Main loop: scheduled task 0 end
+I (82197) Application: Main loop: running 1 scheduled task(s)
+I (82197) Application: Main loop: scheduled task 0 begin
+I (82197) StateMachine: State: speaking -> listening
+I (82207) Application: Main loop: scheduled task 0 end
+I (82207) Application: Main loop: events=0x1000 state=5
+I (82217) Application: Handling state change: listening
+I (82237) Application: Listening state ready: mode=0 processor=off playback=idle
+I (82237) Application: Audio uplink: sending listen.start (mode=0)
+I (82237) Application: Audio uplink: enabling voice processing
+I (82247) AudioService: Voice processing: resetting decoder and input pipeline
+I (82257) AudioService: Voice processing: enabling audio engine
+I (82257) AudioService: Voice processing: input task enabled
+I (82267) Application: Audio uplink: voice processing is running
+I (82267) Application: Audio uplink: configuring listening wake word
+I (82277) Application: Audio uplink: listening pipeline ready
+I (82277) Application: Main loop: state handler returned
+I (82287) AudioService: Voice input: captured 1 10 ms frames
+I (82297) AfeAudioEngine: Voice AFE: frames=1 vad=0 peak=1063
+I (82367) Application: Main loop: events=0x40 state=5
+I (82367) Application: Main loop: VoiceLife tick begin
+I (82367) Application: Main loop: VoiceLife tick end
+I (82407) AfeAudioEngine: Voice VAD: speech (frame=3 peak=3336)
+I (82407) Application: Main loop: events=0x8 state=5
+I (82407) AudioService: Voice encoder: produced 1 Opus packets
+I (82407) Application: Main loop: events=0x2 state=5
+I (82437) Application: Main loop: events=0x2 state=5
+I (82497) Application: Main loop: events=0x2 state=5
+I (82557) Application: Main loop: events=0x2 state=5
+I (82637) Application: Main loop: events=0x2 state=5
+I (82697) Application: Main loop: events=0x2 state=5
+I (82767) Application: Main loop: events=0x2 state=5
+I (82797) Application: Main loop: events=0x2 state=5
+I (82857) Application: Main loop: events=0x2 state=5
+I (82917) Application: Main loop: events=0x2 state=5
+I (82977) Application: Main loop: events=0x2 state=5
+I (82977) Application: Audio uplink: sent 520 Opus packets
+I (82997) AfeAudioEngine: Voice VAD: silence (frame=22 peak=1220)
+I (82997) Application: Main loop: events=0x8 state=5
+I (83037) Application: Main loop: events=0x2 state=5
+I (83117) Application: Main loop: events=0x2 state=5
+I (83177) Application: Main loop: events=0x2 state=5
+I (83247) Application: Main loop: events=0x2 state=5
+I (83277) Application: Main loop: events=0x2 state=5
+I (83327) AudioService: Voice input: captured 100 10 ms frames
+I (83327) AfeAudioEngine: Voice AFE: frames=32 vad=0 peak=1246
+I (83337) Application: Main loop: events=0x2 state=5
+I (83367) Application: Main loop: events=0x40 state=5
+I (83367) Application: Main loop: VoiceLife tick begin
+I (83367) Application: Main loop: VoiceLife tick end
+I (83397) Application: Main loop: events=0x2 state=5
+I (83457) Application: Main loop: events=0x2 state=5
+I (83477) AfeAudioEngine: Voice VAD: speech (frame=37 peak=8304)
+I (83477) Application: Main loop: events=0x8 state=5
+I (83517) AudioService: Voice encoder: produced 20 Opus packets
+I (83517) Application: Main loop: events=0x2 state=5
+I (83597) Application: Main loop: events=0x2 state=5
+I (83657) Application: Main loop: events=0x2 state=5
+I (83687) Application: >> 还能上来。
+I (83687) Application: Main loop: events=0x1 state=5
+I (83697) Application: Main loop: running 1 scheduled task(s)
+I (83697) Application: Main loop: scheduled task 0 begin
+I (83697) Application: Main loop: scheduled task 0 end
+I (83727) Application: Main loop: events=0x2 state=5
+I (83757) Application: Main loop: events=0x2 state=5
+I (83817) Application: Main loop: events=0x2 state=5
+I (83877) Application: Main loop: events=0x2 state=5
+I (83897) AfeAudioEngine: Voice VAD: silence (frame=50 peak=2780)
+I (83897) Application: Main loop: events=0x8 state=5
+I (83937) Application: Main loop: events=0x2 state=5
+I (83997) Application: Main loop: events=0x2 state=5
+I (84037) AfeAudioEngine: Voice VAD: speech (frame=54 peak=2479)
+I (84037) Application: Main loop: events=0x8 state=5
+I (84077) Application: Main loop: events=0x2 state=5
+I (84137) Application: Main loop: events=0x2 state=5
+I (84207) Application: Main loop: events=0x2 state=5
+I (84207) Application: Audio uplink: sent 540 Opus packets
+I (84237) Application: Main loop: events=0x2 state=5
+I (84297) Application: Main loop: events=0x2 state=5
+I (84317) AudioService: Voice input: captured 200 10 ms frames
+I (84347) AfeAudioEngine: Voice AFE: frames=64 vad=1 peak=3487
+I (84357) Application: Main loop: events=0x2 state=5
+I (84367) Application: Main loop: events=0x40 state=5
+I (84367) Application: Main loop: VoiceLife tick begin
+I (84367) Application: Main loop: VoiceLife tick end
+I (84417) Application: Main loop: events=0x2 state=5
+I (84477) Application: Main loop: events=0x2 state=5
+I (84557) Application: Main loop: events=0x2 state=5
+I (84617) Application: Main loop: events=0x2 state=5
+I (84687) Application: Main loop: events=0x2 state=5
+I (84717) Application: Main loop: events=0x2 state=5
+I (84717) AudioService: Voice encoder: produced 40 Opus packets
+I (84777) Application: Main loop: events=0x2 state=5
+I (84837) Application: Main loop: events=0x2 state=5
+I (84897) Application: Main loop: events=0x2 state=5
+I (84957) Application: Main loop: events=0x2 state=5
+I (85037) Application: Main loop: events=0x2 state=5
+I (85097) Application: Main loop: events=0x2 state=5
+I (85167) Application: Main loop: events=0x2 state=5
+I (85197) Application: Main loop: events=0x2 state=5
+I (85257) Application: Main loop: events=0x2 state=5
+I (85277) AfeAudioEngine: Voice VAD: silence (frame=93 peak=849)
+I (85277) Application: Main loop: events=0x8 state=5
+I (85317) Application: Main loop: events=0x2 state=5
+I (85327) AudioService: Voice input: captured 300 10 ms frames
+I (85367) Application: Main loop: events=0x40 state=5
+I (85367) Application: Main loop: VoiceLife tick begin
+I (85367) Application: Main loop: VoiceLife tick end
+I (85377) AfeAudioEngine: Voice AFE: frames=96 vad=0 peak=1225
+I (85387) Application: Main loop: events=0x2 state=5
+I (85387) Application: Audio uplink: sent 560 Opus packets
+I (85437) Application: Main loop: events=0x2 state=5
+I (85517) Application: Main loop: events=0x2 state=5
+I (85537) AfeAudioEngine: Voice VAD: speech (frame=101 peak=2022)
+I (85537) Application: Main loop: events=0x8 state=5
+I (85577) Application: Main loop: events=0x2 state=5
+I (85647) Application: Main loop: events=0x2 state=5
+I (85677) Application: Main loop: events=0x2 state=5
+I (85737) Application: Main loop: events=0x2 state=5
+I (85797) Application: Main loop: events=0x2 state=5
+I (85857) Application: Main loop: events=0x2 state=5
+I (85917) AudioService: Voice encoder: produced 60 Opus packets
+I (85917) Application: Main loop: events=0x2 state=5
+I (85997) Application: Main loop: events=0x2 state=5
+I (86057) Application: Main loop: events=0x2 state=5
+I (86127) Application: Main loop: events=0x2 state=5
+I (86157) Application: Main loop: events=0x2 state=5
+I (86217) Application: Main loop: events=0x2 state=5
+I (86277) Application: Main loop: events=0x2 state=5
+I (86327) AudioService: Voice input: captured 400 10 ms frames
+I (86337) Application: Main loop: events=0x2 state=5
+I (86367) Application: Main loop: events=0x40 state=5
+I (86367) Application: Main loop: VoiceLife tick begin
+I (86367) Application: Main loop: VoiceLife tick end
+I (86387) AfeAudioEngine: Voice AFE: frames=128 vad=1 peak=1288
+I (86397) Application: Main loop: events=0x2 state=5
+I (86477) Application: Main loop: events=0x2 state=5
+I (86537) Application: Main loop: events=0x2 state=5
+I (86607) Application: Main loop: events=0x2 state=5
+I (86607) Application: Audio uplink: sent 580 Opus packets
+I (86637) Application: Main loop: events=0x2 state=5
+I (86687) AfeAudioEngine: Voice VAD: silence (frame=137 peak=1783)
+I (86687) Application: Main loop: events=0x8 state=5
+I (86697) Application: Main loop: events=0x2 state=5
+I (86757) Application: Main loop: events=0x2 state=5
+I (86807) AfeAudioEngine: Voice VAD: speech (frame=141 peak=4269)
+I (86807) Application: Main loop: events=0x8 state=5
+I (86817) Application: Main loop: events=0x2 state=5
+I (86877) Application: Main loop: events=0x2 state=5
+I (86957) Application: Main loop: events=0x2 state=5
+I (87017) Application: Main loop: events=0x2 state=5
+I (87087) Application: Main loop: events=0x2 state=5
+I (87117) AudioService: Voice encoder: produced 80 Opus packets
+I (87117) Application: Main loop: events=0x2 state=5
+I (87177) Application: Main loop: events=0x2 state=5
+I (87237) Application: Main loop: events=0x2 state=5
+I (87297) Application: Main loop: events=0x2 state=5
+I (87317) AudioService: Voice input: captured 500 10 ms frames
+I (87357) Application: Main loop: events=0x2 state=5
+I (87367) Application: Main loop: events=0x40 state=5
+I (87367) Application: Main loop: VoiceLife tick begin
+I (87367) Application: Main loop: VoiceLife tick end
+I (87427) AfeAudioEngine: Voice AFE: frames=160 vad=1 peak=1891
+I (87437) Application: Main loop: events=0x2 state=5
+I (87497) Application: Main loop: events=0x2 state=5
+I (87567) Application: Main loop: events=0x2 state=5
+I (87597) Application: Main loop: events=0x2 state=5
+I (87657) Application: Main loop: events=0x2 state=5
+I (87717) Application: Main loop: events=0x2 state=5
+I (87777) Application: Main loop: events=0x2 state=5
+I (87777) Application: Audio uplink: sent 600 Opus packets
+I (87837) Application: Main loop: events=0x2 state=5
+I (87917) Application: Main loop: events=0x2 state=5
+I (87977) Application: Main loop: events=0x2 state=5
+I (88047) Application: Main loop: events=0x2 state=5
+I (88077) Application: Main loop: events=0x2 state=5
+I (88137) Application: Main loop: events=0x2 state=5
+I (88197) Application: Main loop: events=0x2 state=5
+I (88257) Application: Main loop: events=0x2 state=5
+I (88317) AudioService: Voice encoder: produced 100 Opus packets
+I (88317) Application: Main loop: events=0x2 state=5
+I (88327) AudioService: Voice input: captured 600 10 ms frames
+I (88367) Application: Main loop: events=0x40 state=5
+I (88367) Application: Main loop: VoiceLife tick begin
+I (88367) Application: Main loop: VoiceLife tick end
+I (88397) Application: Main loop: events=0x2 state=5
+I (88447) AfeAudioEngine: Voice AFE: frames=192 vad=1 peak=3121
+I (88457) Application: Main loop: events=0x2 state=5
+I (88527) Application: Main loop: events=0x2 state=5
+I (88557) Application: Main loop: events=0x2 state=5
+I (88617) Application: Main loop: events=0x2 state=5
+I (88677) Application: Main loop: events=0x2 state=5
+I (88697) AfeAudioEngine: Voice VAD: silence (frame=200 peak=1330)
+I (88697) Application: Main loop: events=0x8 state=5
+I (88737) Application: Main loop: events=0x2 state=5
+I (88797) Application: Main loop: events=0x2 state=5
+I (88877) Application: Main loop: events=0x2 state=5
+I (88897) AfeAudioEngine: Voice VAD: speech (frame=206 peak=2080)
+I (88897) Application: Main loop: events=0x8 state=5
+I (88937) Application: Main loop: events=0x2 state=5
+I (89007) Application: Main loop: events=0x2 state=5
+I (89007) Application: Audio uplink: sent 620 Opus packets
+I (89037) Application: Main loop: events=0x2 state=5
+I (89097) Application: Main loop: events=0x2 state=5
+I (89157) Application: Main loop: events=0x2 state=5
+I (89217) Application: Main loop: events=0x2 state=5
+I (89277) Application: Main loop: events=0x2 state=5
+I (89327) AudioService: Voice input: captured 700 10 ms frames
+I (89357) Application: Main loop: events=0x2 state=5
+I (89367) Application: Main loop: events=0x40 state=5
+I (89367) Application: Main loop: VoiceLife tick begin
+I (89367) Application: Main loop: VoiceLife tick end
+I (89417) Application: Main loop: events=0x2 state=5
+I (89477) AfeAudioEngine: Voice AFE: frames=224 vad=1 peak=2670
+I (89487) Application: Main loop: events=0x2 state=5
+I (89517) AudioService: Voice encoder: produced 120 Opus packets
+I (89517) Application: Main loop: events=0x2 state=5
+I (89577) Application: Main loop: events=0x2 state=5
+I (89637) Application: Main loop: events=0x2 state=5
+I (89697) Application: Main loop: events=0x2 state=5
+I (89757) Application: Main loop: events=0x2 state=5
+I (89837) Application: Main loop: events=0x2 state=5
+I (89897) Application: Main loop: events=0x2 state=5
+I (89967) Application: Main loop: events=0x2 state=5
+I (89997) Application: Main loop: events=0x2 state=5
+I (90057) Application: Main loop: events=0x2 state=5
+I (90117) Application: Main loop: events=0x2 state=5
+I (90177) Application: Main loop: events=0x2 state=5
+I (90177) Application: Audio uplink: sent 640 Opus packets
+I (90237) Application: Main loop: events=0x2 state=5
+I (90317) Application: Main loop: events=0x2 state=5
+I (90317) AudioService: Voice input: captured 800 10 ms frames
+I (90367) Application: Main loop: events=0x40 state=5
+I (90367) Application: Main loop: VoiceLife tick begin
+I (90367) Application: Main loop: VoiceLife tick end
+I (90377) Application: Main loop: events=0x2 state=5
+I (90447) Application: Main loop: events=0x2 state=5
+I (90477) Application: Main loop: events=0x2 state=5
+I (90497) AfeAudioEngine: Voice AFE: frames=256 vad=1 peak=4150
+I (90537) Application: Main loop: events=0x2 state=5
+I (90597) Application: Main loop: events=0x2 state=5
+I (90657) Application: Main loop: events=0x2 state=5
+I (90717) AudioService: Voice encoder: produced 140 Opus packets
+I (90717) Application: Main loop: events=0x2 state=5
+I (90797) Application: Main loop: events=0x2 state=5
+I (90857) Application: Main loop: events=0x2 state=5
+I (90927) Application: Main loop: events=0x2 state=5
+I (90957) Application: Main loop: events=0x2 state=5
+I (91017) Application: Main loop: events=0x2 state=5
+I (91077) Application: Main loop: events=0x2 state=5
+I (91137) Application: Main loop: events=0x2 state=5
+I (91197) Application: Main loop: events=0x2 state=5
+I (91277) Application: Main loop: events=0x2 state=5
+I (91327) AudioService: Voice input: captured 900 10 ms frames
+I (91337) Application: Main loop: events=0x2 state=5
+I (91367) Application: Main loop: events=0x40 state=5
+I (91367) Application: Main loop: VoiceLife tick begin
+I (91367) Application: Main loop: VoiceLife tick end
+I (91377) SystemInfo: free sram: 123823 minimal sram: 108455
+I (91407) Application: Main loop: events=0x2 state=5
+I (91407) Application: Audio uplink: sent 660 Opus packets
+I (91437) Application: Main loop: events=0x2 state=5
+I (91497) Application: Main loop: events=0x2 state=5
+I (91517) AfeAudioEngine: Voice AFE: frames=288 vad=1 peak=7692
+I (91557) Application: Main loop: events=0x2 state=5
+I (91617) Application: Main loop: events=0x2 state=5
+I (91677) Application: Main loop: events=0x2 state=5
+I (91757) Application: Main loop: events=0x2 state=5
+I (91817) Application: Main loop: events=0x2 state=5
+I (91887) Application: Main loop: events=0x2 state=5
+I (91917) AudioService: Voice encoder: produced 160 Opus packets
+I (91917) Application: Main loop: events=0x2 state=5
+I (91977) Application: Main loop: events=0x2 state=5
+I (92037) Application: Main loop: events=0x2 state=5
+I (92097) Application: Main loop: events=0x2 state=5
+I (92157) Application: Main loop: events=0x2 state=5
+I (92237) Application: Main loop: events=0x2 state=5
+I (92297) Application: Main loop: events=0x2 state=5
+I (92327) AudioService: Voice input: captured 1000 10 ms frames
+I (92367) Application: Main loop: events=0x2 state=5
+I (92367) Application: Main loop: events=0x40 state=5
+I (92367) Application: Main loop: VoiceLife tick begin
+I (92377) Application: Main loop: VoiceLife tick end
+I (92397) Application: Main loop: events=0x2 state=5
+I (92457) Application: Main loop: events=0x2 state=5
+I (92517) Application: Main loop: events=0x2 state=5
+I (92537) AfeAudioEngine: Voice AFE: frames=320 vad=1 peak=5652
+I (92577) Application: Main loop: events=0x2 state=5
+I (92577) Application: Audio uplink: sent 680 Opus packets
+I (92637) Application: Main loop: events=0x2 state=5
+I (92717) Application: Main loop: events=0x2 state=5
+I (92777) Application: Main loop: events=0x2 state=5
+I (92847) Application: Main loop: events=0x2 state=5
+I (92877) Application: Main loop: events=0x2 state=5
+I (92937) Application: Main loop: events=0x2 state=5
+I (92997) Application: Main loop: events=0x2 state=5
+I (93057) Application: Main loop: events=0x2 state=5
+I (93117) AudioService: Voice encoder: produced 180 Opus packets
+I (93117) Application: Main loop: events=0x2 state=5
+I (93197) Application: Main loop: events=0x2 state=5
+I (93257) Application: Main loop: events=0x2 state=5
+I (93317) AudioService: Voice input: captured 1100 10 ms frames
+I (93317) AfeAudioEngine: Voice VAD: silence (frame=344 peak=1480)
+I (93317) Application: Main loop: events=0x8 state=5
+I (93327) Application: Main loop: events=0x2 state=5
+I (93357) Application: Main loop: events=0x2 state=5
+I (93367) Application: Main loop: events=0x40 state=5
+I (93367) Application: Main loop: VoiceLife tick begin
+I (93367) Application: Main loop: VoiceLife tick end
+I (93417) Application: Main loop: events=0x2 state=5
+I (93477) Application: Main loop: events=0x2 state=5
+I (93537) Application: Main loop: events=0x2 state=5
+I (93557) AfeAudioEngine: Voice AFE: frames=352 vad=0 peak=1640
+I (93587) AfeAudioEngine: Voice VAD: speech (frame=353 peak=1095)
+I (93587) Application: Main loop: events=0x8 state=5
+I (93597) Application: Main loop: events=0x2 state=5
+I (93677) Application: Main loop: events=0x2 state=5
+I (93697) AfeAudioEngine: Voice VAD: silence (frame=356 peak=1753)
+I (93697) Application: Main loop: events=0x8 state=5
+I (93737) Application: Main loop: events=0x2 state=5
+I (93807) Application: Main loop: events=0x2 state=5
+I (93807) Application: Audio uplink: sent 700 Opus packets
+I (93837) Application: Main loop: events=0x2 state=5
+I (93897) Application: Main loop: events=0x2 state=5
+I (93957) Application: Main loop: events=0x2 state=5
+I (94017) Application: Main loop: events=0x2 state=5
+I (94067) AfeAudioEngine: Voice VAD: speech (frame=368 peak=1515)
+I (94067) Application: Main loop: events=0x8 state=5
+I (94077) Application: Main loop: events=0x2 state=5
+I (94157) Application: Main loop: events=0x2 state=5
+I (94217) Application: Main loop: events=0x2 state=5
+I (94287) Application: Main loop: events=0x2 state=5
+I (94317) AudioService: Voice encoder: produced 200 Opus packets
+I (94317) Application: Main loop: events=0x2 state=5
+I (94327) AudioService: Voice input: captured 1200 10 ms frames
+I (94337) AfeAudioEngine: Voice VAD: silence (frame=376 peak=1034)
+I (94337) Application: Main loop: events=0x8 state=5
+I (94347) Application: >> 什么？板子上的 MCP。这不用灵犀吗？用灵犀啊，灵犀是智能体。灵犀可以接 MCP 啊。为什么要一定要灵犀接 MCP 呢？
+I (94357) Application: Main loop: events=0x1 state=5
+I (94357) Application: Main loop: running 1 scheduled task(s)
+I (94367) Application: Main loop: scheduled task 0 begin
+I (94377) Application: Main loop: scheduled task 0 end
+I (94377) Application: Main loop: events=0x40 state=5
+I (94377) Application: Main loop: VoiceLife tick begin
+I (94387) Application: Main loop: VoiceLife tick end
+I (94397) Application: Main loop: events=0x2 state=5
+I (94437) Application: Main loop: events=0x2 state=5
+I (94497) Application: Main loop: events=0x2 state=5
+I (94557) Application: Main loop: events=0x2 state=5
+I (94597) AfeAudioEngine: Voice AFE: frames=384 vad=0 peak=1416
+I (94627) AfeAudioEngine: Voice VAD: speech (frame=385 peak=1457)
+I (94627) Application: Main loop: events=0x8 state=5
+I (94637) Application: Main loop: events=0x2 state=5
+I (94697) Application: Main loop: events=0x2 state=5
+I (94717) AfeAudioEngine: Voice VAD: silence (frame=388 peak=1453)
+I (94717) Application: Main loop: events=0x8 state=5
+I (94767) Application: Main loop: events=0x2 state=5
+I (94797) Application: Main loop: events=0x2 state=5
+I (94857) Application: Main loop: events=0x2 state=5
+I (94877) AfeAudioEngine: Voice VAD: speech (frame=393 peak=18629)
+I (94877) Application: Main loop: events=0x8 state=5
+I (94917) Application: Main loop: events=0x2 state=5
+I (94977) Application: Main loop: events=0x2 state=5
+I (94977) Application: Audio uplink: sent 720 Opus packets
+I (95037) Application: Main loop: events=0x2 state=5
+I (95117) Application: Main loop: events=0x2 state=5
+I (95177) Application: Main loop: events=0x2 state=5
+I (95247) Application: Main loop: events=0x2 state=5
+I (95277) Application: Main loop: events=0x2 state=5
+I (95327) AudioService: Voice input: captured 1300 10 ms frames
+I (95337) Application: Main loop: events=0x2 state=5
+I (95367) Application: Main loop: events=0x40 state=5
+I (95367) Application: Main loop: VoiceLife tick begin
+I (95367) Application: Main loop: VoiceLife tick end
+I (95397) Application: Main loop: events=0x2 state=5
+I (95457) Application: Main loop: events=0x2 state=5
+I (95517) AudioService: Voice encoder: produced 220 Opus packets
+I (95517) Application: Main loop: events=0x2 state=5
+I (95597) Application: Main loop: events=0x2 state=5
+I (95617) AfeAudioEngine: Voice AFE: frames=416 vad=1 peak=6839
+I (95657) Application: Main loop: events=0x2 state=5
+I (95727) Application: Main loop: events=0x2 state=5
+I (95757) Application: Main loop: events=0x2 state=5
+I (95817) Application: Main loop: events=0x2 state=5
+I (95877) Application: Main loop: events=0x2 state=5
+I (95937) Application: Main loop: events=0x2 state=5
+I (95997) Application: Main loop: events=0x2 state=5
+I (96077) Application: Main loop: events=0x2 state=5
+I (96137) Application: Main loop: events=0x2 state=5
+I (96207) Application: Main loop: events=0x2 state=5
+I (96207) Application: Audio uplink: sent 740 Opus packets
+I (96237) Application: Main loop: events=0x2 state=5
+I (96297) Application: Main loop: events=0x2 state=5
+I (96317) AudioService: Voice input: captured 1400 10 ms frames
+I (96357) Application: Main loop: events=0x2 state=5
+I (96367) Application: Main loop: events=0x40 state=5
+I (96367) Application: Main loop: VoiceLife tick begin
+I (96367) Application: Main loop: VoiceLife tick end
+I (96417) Application: Main loop: events=0x2 state=5
+I (96477) Application: Main loop: events=0x2 state=5
+I (96557) Application: Main loop: events=0x2 state=5
+I (96617) Application: Main loop: events=0x2 state=5
+I (96637) AfeAudioEngine: Voice AFE: frames=448 vad=1 peak=2896
+I (96687) Application: Main loop: events=0x2 state=5
+I (96717) AudioService: Voice encoder: produced 240 Opus packets
+I (96717) Application: Main loop: events=0x2 state=5
+I (96777) Application: Main loop: events=0x2 state=5
+I (96837) Application: Main loop: events=0x2 state=5
+I (96897) Application: Main loop: events=0x2 state=5
+I (96957) Application: Main loop: events=0x2 state=5
+I (97037) Application: Main loop: events=0x2 state=5
+I (97097) Application: Main loop: events=0x2 state=5
+I (97167) Application: Main loop: events=0x2 state=5
+I (97197) Application: Main loop: events=0x2 state=5
+I (97257) Application: Main loop: events=0x2 state=5
+I (97317) Application: Main loop: events=0x2 state=5
+I (97327) AudioService: Voice input: captured 1500 10 ms frames
+I (97367) Application: Main loop: events=0x40 state=5
+I (97367) Application: Main loop: VoiceLife tick begin
+I (97367) Application: Main loop: VoiceLife tick end
+I (97387) Application: Main loop: events=0x2 state=5
+I (97387) Application: Audio uplink: sent 760 Opus packets
+I (97437) Application: Main loop: events=0x2 state=5
+I (97517) Application: Main loop: events=0x2 state=5
+I (97577) Application: Main loop: events=0x2 state=5
+I (97647) Application: Main loop: events=0x2 state=5
+I (97667) AfeAudioEngine: Voice AFE: frames=480 vad=1 peak=1187
+I (97677) Application: Main loop: events=0x2 state=5
+I (97727) AfeAudioEngine: Voice VAD: silence (frame=482 peak=921)
+I (97737) Application: Main loop: events=0x8 state=5
+I (97737) Application: Main loop: events=0x2 state=5
+I (97797) AudioCodec: Set output enable to false
+I (97797) Application: Main loop: events=0x2 state=5
+I (97857) Application: Main loop: events=0x2 state=5
+I (97917) Application: Main loop: events=0x2 state=5
+I (97917) AudioService: Voice encoder: produced 260 Opus packets
+I (97997) Application: Main loop: events=0x2 state=5
+I (98057) Application: Main loop: events=0x2 state=5
+I (98127) Application: Main loop: events=0x2 state=5
+I (98157) Application: Main loop: events=0x2 state=5
+I (98217) Application: Main loop: events=0x2 state=5
+I (98277) Application: Main loop: events=0x2 state=5
+I (98327) AudioService: Voice input: captured 1600 10 ms frames
+I (98337) AfeAudioEngine: Voice VAD: speech (frame=501 peak=1279)
+I (98337) Application: Main loop: events=0x8 state=5
+I (98337) Application: Main loop: events=0x2 state=5
+I (98367) Application: Main loop: events=0x40 state=5
+I (98367) Application: Main loop: VoiceLife tick begin
+I (98367) Application: Main loop: VoiceLife tick end
+I (98397) Application: Main loop: events=0x2 state=5
+I (98427) Application: >> 啥意思啊？你你， SCD 在硬件上面吗？嗯。
+I (98427) Application: Main loop: events=0x1 state=5
+I (98427) Application: Main loop: running 1 scheduled task(s)
+I (98437) Application: Main loop: scheduled task 0 begin
+I (98437) Application: Main loop: scheduled task 0 end
+I (98447) AfeAudioEngine: Voice VAD: silence (frame=504 peak=760)
+I (98447) Application: Main loop: events=0x8 state=5
+I (98477) Application: Main loop: events=0x2 state=5
+I (98537) Application: Main loop: events=0x2 state=5
+I (98607) Application: Main loop: events=0x2 state=5
+I (98607) Application: Audio uplink: sent 780 Opus packets
+I (98637) Application: Main loop: events=0x2 state=5
+I (98687) AfeAudioEngine: Voice AFE: frames=512 vad=0 peak=1486
+I (98697) Application: Main loop: events=0x2 state=5
+I (98747) AfeAudioEngine: Voice VAD: speech (frame=514 peak=1521)
+I (98747) Application: Main loop: events=0x8 state=5
+I (98757) Application: Main loop: events=0x2 state=5
+I (98817) Application: Main loop: events=0x2 state=5
+I (98837) AfeAudioEngine: Voice VAD: silence (frame=517 peak=1057)
+I (98837) Application: Main loop: events=0x8 state=5
+I (98877) Application: Main loop: events=0x2 state=5
+I (98957) Application: Main loop: events=0x2 state=5
+I (99007) AfeAudioEngine: Voice VAD: speech (frame=522 peak=935)
+I (99007) Application: Main loop: events=0x8 state=5
+I (99017) Application: Main loop: events=0x2 state=5
+I (99087) Application: Main loop: events=0x2 state=5
+I (99117) AudioService: Voice encoder: produced 280 Opus packets
+I (99117) Application: Main loop: events=0x2 state=5
+I (99177) Application: Main loop: events=0x2 state=5
+I (99237) Application: Main loop: events=0x2 state=5
+I (99297) Application: Main loop: events=0x2 state=5
+I (99317) AudioService: Voice input: captured 1700 10 ms frames
+I (99357) Application: Main loop: events=0x2 state=5
+I (99367) Application: Main loop: events=0x40 state=5
+I (99367) Application: Main loop: VoiceLife tick begin
+I (99367) Application: Main loop: VoiceLife tick end
+I (99437) Application: Main loop: events=0x2 state=5
+I (99497) Application: Main loop: events=0x2 state=5
+I (99567) Application: Main loop: events=0x2 state=5
+I (99597) Application: Main loop: events=0x2 state=5
+I (99657) Application: Main loop: events=0x2 state=5
+I (99707) AfeAudioEngine: Voice AFE: frames=544 vad=1 peak=2622
+I (99717) Application: Main loop: events=0x2 state=5
+I (99777) Application: Main loop: events=0x2 state=5
+I (99777) Application: Audio uplink: sent 800 Opus packets
+I (99837) Application: Main loop: events=0x2 state=5
+I (99917) Application: Main loop: events=0x2 state=5
+I (99977) Application: Main loop: events=0x2 state=5
+I (100047) Application: Main loop: events=0x2 state=5
+I (100077) Application: Main loop: events=0x2 state=5
+I (100137) Application: Main loop: events=0x2 state=5
+I (100197) Application: Main loop: events=0x2 state=5
+I (100257) Application: Main loop: events=0x2 state=5
+I (100317) AudioService: Voice encoder: produced 300 Opus packets
+I (100317) Application: Main loop: events=0x2 state=5
+I (100327) AudioService: Voice input: captured 1800 10 ms frames
+I (100367) Application: Main loop: events=0x40 state=5
+I (100367) Application: Main loop: VoiceLife tick begin
+I (100367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (100377) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (100377) Application: >> 那他就是这个东西。
+I (100377) Application: Main loop: VoiceLife tick end
+I (100387) Application: Main loop: events=0x1 state=5
+I (100397) Application: Main loop: running 1 scheduled task(s)
+I (100397) Application: Main loop: scheduled task 0 begin
+I (100407) Application: Main loop: scheduled task 0 end
+I (100407) Application: Main loop: events=0x2 state=5
+I (100457) Application: Main loop: events=0x2 state=5
+I (100527) Application: Main loop: events=0x2 state=5
+I (100557) Application: Main loop: events=0x2 state=5
+I (100617) Application: Main loop: events=0x2 state=5
+I (100677) Application: Main loop: events=0x2 state=5
+I (100727) AfeAudioEngine: Voice AFE: frames=576 vad=1 peak=7179
+I (100737) Application: Main loop: events=0x2 state=5
+I (100797) Application: Main loop: events=0x2 state=5
+I (100877) Application: Main loop: events=0x2 state=5
+I (100937) Application: Main loop: events=0x2 state=5
+I (101007) Application: Main loop: events=0x2 state=5
+I (101007) Application: Audio uplink: sent 820 Opus packets
+I (101037) Application: Main loop: events=0x2 state=5
+I (101097) Application: Main loop: events=0x2 state=5
+I (101157) Application: Main loop: events=0x2 state=5
+I (101217) Application: Main loop: events=0x2 state=5
+I (101277) Application: Main loop: events=0x2 state=5
+I (101327) AudioService: Voice input: captured 1900 10 ms frames
+I (101357) Application: Main loop: events=0x2 state=5
+I (101367) Application: Main loop: events=0x40 state=5
+I (101367) Application: Main loop: VoiceLife tick begin
+I (101367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (101377) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (101377) Application: Main loop: VoiceLife tick end
+I (101387) SystemInfo: free sram: 123735 minimal sram: 108455
+I (101417) Application: Main loop: events=0x2 state=5
+I (101487) Application: Main loop: events=0x2 state=5
+I (101517) Application: Main loop: events=0x2 state=5
+I (101517) AudioService: Voice encoder: produced 320 Opus packets
+I (101577) Application: Main loop: events=0x2 state=5
+I (101637) Application: Main loop: events=0x2 state=5
+I (101697) Application: Main loop: events=0x2 state=5
+I (101747) AfeAudioEngine: Voice AFE: frames=608 vad=1 peak=1066
+I (101757) Application: Main loop: events=0x2 state=5
+I (101837) Application: Main loop: events=0x2 state=5
+I (101897) Application: Main loop: events=0x2 state=5
+I (101967) Application: Main loop: events=0x2 state=5
+I (101997) Application: Main loop: events=0x2 state=5
+I (102057) Application: Main loop: events=0x2 state=5
+I (102117) Application: Main loop: events=0x2 state=5
+I (102177) Application: Main loop: events=0x2 state=5
+I (102177) Application: Audio uplink: sent 840 Opus packets
+I (102237) Application: Main loop: events=0x2 state=5
+I (102317) Application: Main loop: events=0x2 state=5
+I (102317) AudioService: Voice input: captured 2000 10 ms frames
+I (102367) Application: Main loop: events=0x40 state=5
+I (102367) Application: Main loop: VoiceLife tick begin
+I (102367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (102377) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (102377) Application: >> 为什么不用灵气啊？
+I (102377) Application: Main loop: VoiceLife tick end
+I (102387) Application: Main loop: events=0x3 state=5
+I (102397) Application: Main loop: running 1 scheduled task(s)
+I (102397) Application: Main loop: scheduled task 0 begin
+I (102417) Application: Main loop: scheduled task 0 end
+I (102447) Application: Main loop: events=0x2 state=5
+I (102477) Application: Main loop: events=0x2 state=5
+I (102497) AfeAudioEngine: Voice VAD: silence (frame=631 peak=1050)
+I (102497) Application: Main loop: events=0x8 state=5
+I (102537) Application: Main loop: events=0x2 state=5
+I (102597) Application: Main loop: events=0x2 state=5
+I (102657) Application: Main loop: events=0x2 state=5
+I (102677) AfeAudioEngine: Voice VAD: speech (frame=637 peak=1304)
+I (102677) Application: Main loop: events=0x8 state=5
+I (102717) Application: Main loop: events=0x2 state=5
+I (102717) AudioService: Voice encoder: produced 340 Opus packets
+I (102787) AfeAudioEngine: Voice AFE: frames=640 vad=1 peak=1160
+I (102797) Application: Main loop: events=0x2 state=5
+I (102847) AfeAudioEngine: Voice VAD: silence (frame=642 peak=1007)
+I (102847) Application: Main loop: events=0x8 state=5
+I (102857) Application: Main loop: events=0x2 state=5
+I (102927) Application: Main loop: events=0x2 state=5
+I (102957) Application: Main loop: events=0x2 state=5
+I (103017) Application: Main loop: events=0x2 state=5
+I (103077) Application: Main loop: events=0x2 state=5
+I (103137) Application: Main loop: events=0x2 state=5
+I (103197) Application: Main loop: events=0x2 state=5
+I (103277) Application: Main loop: events=0x2 state=5
+I (103327) AudioService: Voice input: captured 2100 10 ms frames
+I (103337) Application: Main loop: events=0x2 state=5
+I (103367) Application: Main loop: events=0x40 state=5
+I (103367) Application: Main loop: VoiceLife tick begin
+I (103367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (103377) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (103377) Application: Main loop: VoiceLife tick end
+I (103407) Application: Main loop: events=0x2 state=5
+I (103407) Application: Audio uplink: sent 860 Opus packets
+I (103437) Application: Main loop: events=0x2 state=5
+I (103497) Application: Main loop: events=0x2 state=5
+I (103557) Application: Main loop: events=0x2 state=5
+I (103617) Application: Main loop: events=0x2 state=5
+I (103677) Application: Main loop: events=0x2 state=5
+I (103757) Application: Main loop: events=0x2 state=5
+I (103807) AfeAudioEngine: Voice AFE: frames=672 vad=0 peak=817
+I (103817) Application: Main loop: events=0x2 state=5
+I (103887) Application: Main loop: events=0x2 state=5
+I (103917) Application: Main loop: events=0x2 state=5
+I (103917) AudioService: Voice encoder: produced 360 Opus packets
+I (103927) Application: Main loop: events=0x1 state=5
+I (103927) Application: Main loop: running 1 scheduled task(s)
+I (103927) Application: Main loop: scheduled task 0 begin
+I (103937) StateMachine: State: listening -> speaking
+I (103937) Application: << 呃…你讲得好复杂呀，
+I (103937) Application: Main loop: scheduled task 0 end
+I (103947) AfeAudioEngine: Voice VAD: speech (frame=676 peak=1008)
+I (103947) Application: Main loop: events=0x1001 state=6
+I (103957) Application: Handling state change: speaking
+I (103967) AudioCodec: Set output enable to true
+I (103977) Application: Main loop: state handler returned
+I (103977) Application: Main loop: running 2 scheduled task(s)
+I (103977) Application: Main loop: scheduled task 0 begin
+I (103987) Application: Main loop: scheduled task 0 end
+I (103987) Application: Main loop: scheduled task 1 begin
+I (104007) Application: Main loop: scheduled task 1 end
+I (104367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (104367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (105367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (105367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (106367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (106367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (106547) Application: Main loop: running 1 scheduled task(s)
+I (106547) Application: Main loop: scheduled task 0 begin
+I (106547) Application: << 我有点听不太懂捏～你说的这些技术问题，我这个小助手不太擅长回答啦，要不我们聊点别的？
+I (106567) Application: Main loop: scheduled task 0 end
+I (106567) Application: Main loop: running 1 scheduled task(s)
+I (106567) Application: Main loop: scheduled task 0 begin
+I (106577) Application: Main loop: scheduled task 0 end
+I (107367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (107367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (108367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (108367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (109367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (109367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (110367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (110367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (111367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (111367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (112367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (112367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (113367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (113367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (113377) SystemInfo: free sram: 123283 minimal sram: 108455
+I (114367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (114367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (115367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (115367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (116367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (116367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (117367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (117367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (118367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (118367) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (119327) Application: Main loop: running 1 scheduled task(s)
+I (119327) Application: Main loop: scheduled task 0 begin
+I (119327) StateMachine: State: speaking -> listening
+I (119327) Application: Main loop: scheduled task 0 end
+I (119337) Application: Main loop: events=0x1000 state=5
+I (119337) Application: Handling state change: listening
+I (119347) Application: Listening state ready: mode=0 processor=off playback=idle
+I (119347) Application: Audio uplink: sending listen.start (mode=0)
+I (119357) Application: Audio uplink: enabling voice processing
+I (119357) AudioService: Voice processing: resetting decoder and input pipeline
+I (119367) AudioService: Voice processing: enabling audio engine
+I (119377) AudioService: Voice processing: input task enabled
+I (119377) Application: Audio uplink: voice processing is running
+I (119387) Application: Audio uplink: configuring listening wake word
+I (119387) Application: Audio uplink: listening pipeline ready
+I (119397) Application: Main loop: state handler returned
+I (119407) Application: Main loop: events=0x40 state=5
+I (119407) Application: Main loop: VoiceLife tick begin
+I (119417) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (119417) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (119427) Application: Main loop: VoiceLife tick end
+I (119427) AudioService: Voice input: captured 1 10 ms frames
+I (119437) AfeAudioEngine: Voice AFE: frames=1 vad=1 peak=8439
+I (119437) AfeAudioEngine: Voice VAD: speech (frame=1 peak=8439)
+I (119447) Application: Main loop: events=0x8 state=5
+I (119557) AudioService: Voice encoder: produced 1 Opus packets
+I (119557) Application: Main loop: events=0x2 state=5
+I (119577) Application: Main loop: events=0x2 state=5
+I (119637) Application: Main loop: events=0x2 state=5
+I (119717) Application: Main loop: events=0x2 state=5
+I (119777) Application: Main loop: events=0x2 state=5
+I (119837) Application: Main loop: events=0x2 state=5
+I (119907) Application: Main loop: events=0x2 state=5
+I (119937) Application: Main loop: events=0x2 state=5
+I (119997) Application: Main loop: events=0x2 state=5
+I (120057) Application: Main loop: events=0x2 state=5
+I (120057) Application: Audio uplink: sent 880 Opus packets
+I (120117) Application: Main loop: events=0x2 state=5
+I (120197) Application: Main loop: events=0x2 state=5
+I (120257) Application: Main loop: events=0x2 state=5
+I (120317) Application: Main loop: events=0x2 state=5
+I (120367) Application: Main loop: events=0x40 state=5
+I (120367) Application: Main loop: VoiceLife tick begin
+I (120367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (120377) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (120377) Application: Main loop: VoiceLife tick end
+I (120397) Application: Main loop: events=0x2 state=5
+I (120417) Application: Main loop: events=0x2 state=5
+I (120467) AudioService: Voice input: captured 100 10 ms frames
+I (120467) AfeAudioEngine: Voice AFE: frames=32 vad=1 peak=2612
+I (120477) Application: Main loop: events=0x2 state=5
+I (120537) Application: Main loop: events=0x2 state=5
+I (120597) Application: Main loop: events=0x2 state=5
+I (120677) AudioService: Voice encoder: produced 20 Opus packets
+I (120677) Application: Main loop: events=0x2 state=5
+I (120737) Application: Main loop: events=0x2 state=5
+I (120797) Application: Main loop: events=0x2 state=5
+I (120867) Application: Main loop: events=0x2 state=5
+I (120897) Application: Main loop: events=0x2 state=5
+I (120957) Application: Main loop: events=0x2 state=5
+I (121017) Application: Main loop: events=0x2 state=5
+I (121077) Application: Main loop: events=0x2 state=5
+I (121157) Application: Main loop: events=0x2 state=5
+I (121217) Application: Main loop: events=0x2 state=5
+I (121277) Application: Main loop: events=0x2 state=5
+I (121277) Application: Audio uplink: sent 900 Opus packets
+I (121347) Application: Main loop: events=0x2 state=5
+I (121367) Application: Main loop: events=0x40 state=5
+I (121367) Application: Main loop: VoiceLife tick begin
+I (121367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (121377) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (121377) Application: Main loop: VoiceLife tick end
+I (121397) Application: Main loop: events=0x2 state=5
+I (121437) Application: Main loop: events=0x2 state=5
+I (121457) AudioService: Voice input: captured 200 10 ms frames
+I (121487) AfeAudioEngine: Voice AFE: frames=64 vad=1 peak=3223
+I (121497) Application: Main loop: events=0x2 state=5
+I (121557) Application: Main loop: events=0x2 state=5
+I (121637) Application: Main loop: events=0x2 state=5
+I (121697) Application: Main loop: events=0x2 state=5
+I (121757) Application: Main loop: events=0x2 state=5
+I (121827) Application: Main loop: events=0x2 state=5
+I (121857) Application: Main loop: events=0x2 state=5
+I (121857) AudioService: Voice encoder: produced 40 Opus packets
+I (121917) Application: Main loop: events=0x2 state=5
+I (121977) Application: Main loop: events=0x2 state=5
+I (122037) Application: Main loop: events=0x2 state=5
+I (122117) Application: Main loop: events=0x2 state=5
+I (122177) Application: Main loop: events=0x2 state=5
+I (122237) Application: Main loop: events=0x2 state=5
+I (122307) Application: Main loop: events=0x2 state=5
+I (122337) Application: Main loop: events=0x2 state=5
+I (122367) Application: Main loop: events=0x40 state=5
+I (122367) Application: Main loop: VoiceLife tick begin
+I (122367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (122377) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (122377) Application: Main loop: VoiceLife tick end
+I (122397) Application: Main loop: events=0x2 state=5
+I (122457) Application: Main loop: events=0x2 state=5
+I (122457) Application: Audio uplink: sent 920 Opus packets
+I (122467) AudioService: Voice input: captured 300 10 ms frames
+I (122507) AfeAudioEngine: Voice AFE: frames=96 vad=1 peak=3036
+I (122517) Application: Main loop: events=0x2 state=5
+I (122597) Application: Main loop: events=0x2 state=5
+I (122657) Application: Main loop: events=0x2 state=5
+I (122717) Application: Main loop: events=0x2 state=5
+I (122787) Application: Main loop: events=0x2 state=5
+I (122817) Application: Main loop: events=0x2 state=5
+I (122877) Application: Main loop: events=0x2 state=5
+I (122937) Application: Main loop: events=0x2 state=5
+I (122997) Application: Main loop: events=0x2 state=5
+I (123077) AudioService: Voice encoder: produced 60 Opus packets
+I (123077) Application: Main loop: events=0x2 state=5
+I (123137) Application: Main loop: events=0x2 state=5
+I (123197) Application: Main loop: events=0x2 state=5
+I (123267) Application: Main loop: events=0x2 state=5
+I (123297) Application: Main loop: events=0x2 state=5
+I (123357) Application: Main loop: events=0x2 state=5
+I (123367) Application: Main loop: events=0x40 state=5
+I (123367) Application: Main loop: VoiceLife tick begin
+I (123367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (123377) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (123377) Application: Main loop: VoiceLife tick end
+I (123417) Application: Main loop: events=0x2 state=5
+I (123467) AudioService: Voice input: captured 400 10 ms frames
+I (123477) Application: Main loop: events=0x2 state=5
+I (123547) AfeAudioEngine: Voice AFE: frames=128 vad=1 peak=3230
+I (123557) Application: Main loop: events=0x2 state=5
+I (123617) Application: Main loop: events=0x2 state=5
+I (123677) Application: Main loop: events=0x2 state=5
+I (123677) Application: Audio uplink: sent 940 Opus packets
+I (123747) Application: Main loop: events=0x2 state=5
+I (123777) Application: Main loop: events=0x2 state=5
+I (123837) Application: Main loop: events=0x2 state=5
+I (123897) Application: Main loop: events=0x2 state=5
+I (123957) Application: Main loop: events=0x2 state=5
+I (124037) Application: Main loop: events=0x2 state=5
+I (124097) Application: Main loop: events=0x2 state=5
+I (124157) Application: Main loop: events=0x2 state=5
+I (124187) Application: >> 那方便直接用小智不就完完事了。
+I (124187) Application: Main loop: events=0x1 state=5
+I (124187) Application: Main loop: running 1 scheduled task(s)
+I (124197) Application: Main loop: scheduled task 0 begin
+I (124217) Application: Main loop: scheduled task 0 end
+I (124227) Application: Main loop: events=0x2 state=5
+I (124257) Application: Main loop: events=0x2 state=5
+I (124257) AudioService: Voice encoder: produced 80 Opus packets
+I (124317) Application: Main loop: events=0x2 state=5
+I (124367) Application: Main loop: events=0x40 state=5
+I (124367) Application: Main loop: VoiceLife tick begin
+I (124367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (124377) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (124377) Application: Main loop: VoiceLife tick end
+I (124397) Application: Main loop: events=0x2 state=5
+I (124437) Application: Main loop: events=0x2 state=5
+I (124457) AudioService: Voice input: captured 500 10 ms frames
+I (124517) Application: Main loop: events=0x2 state=5
+I (124567) AfeAudioEngine: Voice AFE: frames=160 vad=1 peak=7757
+I (124577) Application: Main loop: events=0x2 state=5
+I (124637) Application: Main loop: events=0x2 state=5
+I (124707) Application: Main loop: events=0x2 state=5
+I (124737) Application: Main loop: events=0x2 state=5
+I (124797) Application: Main loop: events=0x2 state=5
+I (124857) Application: Main loop: events=0x2 state=5
+I (124857) Application: Audio uplink: sent 960 Opus packets
+I (124917) Application: Main loop: events=0x2 state=5
+I (124997) Application: Main loop: events=0x2 state=5
+I (125057) Application: Main loop: events=0x2 state=5
+I (125117) Application: Main loop: events=0x2 state=5
+I (125187) Application: Main loop: events=0x2 state=5
+I (125217) Application: Main loop: events=0x2 state=5
+I (125277) Application: Main loop: events=0x2 state=5
+I (125337) Application: Main loop: events=0x2 state=5
+I (125367) Application: Main loop: events=0x40 state=5
+I (125367) Application: Main loop: VoiceLife tick begin
+I (125367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (125377) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (125377) Application: Main loop: VoiceLife tick end
+I (125397) Application: Main loop: events=0x2 state=5
+I (125467) AudioService: Voice input: captured 600 10 ms frames
+I (125477) AudioService: Voice encoder: produced 100 Opus packets
+I (125477) Application: Main loop: events=0x2 state=5
+I (125537) Application: Main loop: events=0x2 state=5
+I (125587) AfeAudioEngine: Voice AFE: frames=192 vad=1 peak=4442
+I (125597) Application: Main loop: events=0x2 state=5
+I (125667) Application: Main loop: events=0x2 state=5
+I (125697) Application: Main loop: events=0x2 state=5
+I (125757) Application: Main loop: events=0x2 state=5
+I (125817) Application: Main loop: events=0x2 state=5
+I (125877) Application: Main loop: events=0x2 state=5
+I (125957) Application: Main loop: events=0x2 state=5
+I (126017) Application: Main loop: events=0x2 state=5
+I (126077) Application: Main loop: events=0x2 state=5
+I (126077) Application: Audio uplink: sent 980 Opus packets
+I (126147) Application: Main loop: events=0x2 state=5
+I (126177) Application: Main loop: events=0x2 state=5
+I (126237) Application: Main loop: events=0x2 state=5
+I (126297) Application: Main loop: events=0x2 state=5
+I (126357) Application: Main loop: events=0x2 state=5
+I (126367) Application: Main loop: events=0x40 state=5
+I (126367) Application: Main loop: VoiceLife tick begin
+I (126367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (126377) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (126377) Application: Main loop: VoiceLife tick end
+I (126437) Application: Main loop: events=0x2 state=5
+I (126467) AudioService: Voice input: captured 700 10 ms frames
+I (126497) Application: Main loop: events=0x2 state=5
+I (126557) Application: Main loop: events=0x2 state=5
+I (126617) AfeAudioEngine: Voice AFE: frames=224 vad=1 peak=4053
+I (126627) Application: Main loop: events=0x2 state=5
+I (126657) Application: Main loop: events=0x2 state=5
+I (126657) AudioService: Voice encoder: produced 120 Opus packets
+I (126717) Application: Main loop: events=0x2 state=5
+I (126777) Application: Main loop: events=0x2 state=5
+I (126837) Application: Main loop: events=0x2 state=5
+I (126917) Application: Main loop: events=0x2 state=5
+I (126977) Application: Main loop: events=0x2 state=5
+I (127037) Application: Main loop: events=0x2 state=5
+I (127107) Application: Main loop: events=0x2 state=5
+I (127137) Application: Main loop: events=0x2 state=5
+I (127197) Application: Main loop: events=0x2 state=5
+I (127257) Application: Main loop: events=0x2 state=5
+I (127257) Application: Audio uplink: sent 1000 Opus packets
+I (127317) Application: Main loop: events=0x2 state=5
+I (127367) Application: Main loop: events=0x40 state=5
+I (127367) Application: Main loop: VoiceLife tick begin
+I (127367) VoiceLife: Delivering 1 due reminder(s) through Linx
+W (127377) VoiceLife: Reminder is queued but Linx audio channel is not ready
+I (127377) Application: Main loop: VoiceLife tick end
+I (127397) Application: Main loop: events=0x2 state=5
+I (127457) Application: Main loop: events=0x2 state=5
+I (127457) AudioService: Voice input: captured 800 10 ms frames
+I (127517) Application: Main loop: events=0x2 state=5
+I (127587) Application: Main loop: events=0x2 state=5
+I (127617) Application: Main loop: events=0x2 state=5
+I (127637) AfeAudioEngine: Voice AFE: frames=256 vad=1 peak=1299
+I (127677) Application: Main loop: events=0x2 state=5

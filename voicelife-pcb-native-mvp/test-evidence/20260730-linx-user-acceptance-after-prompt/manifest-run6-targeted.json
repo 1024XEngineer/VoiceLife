@@ -1,0 +1,515 @@
+{
+  "result": "pass",
+  "functionalResult": "pass",
+  "qualityResult": "pass",
+  "capturedAt": "2026-07-30T09:42:47.054Z",
+  "agentId": "14ca6605c4424afdbf7df5bff6a20098",
+  "voice": "Tingting",
+  "scenarioCount": 3,
+  "turnCount": 7,
+  "functionalScenariosPassed": 3,
+  "strictScenariosPassed": 3,
+  "functionalTurnsPassed": 7,
+  "strictTurnsPassed": 7,
+  "scenarios": [
+    {
+      "id": "acceptance_tc06_single_skip",
+      "result": "pass",
+      "hello": true,
+      "mcpInitialize": true,
+      "mcpToolsList": true,
+      "turnCount": 2,
+      "functionalTurnsPassed": 2,
+      "strictTurnsPassed": 2,
+      "turns": [
+        {
+          "id": "tc06_create_pc_meeting",
+          "phrase": "明天下午三点和 PC 开会",
+          "result": "pass",
+          "input": {
+            "format": "pcm_s16le",
+            "sampleRate": 16000,
+            "channels": 1,
+            "bytes": 127120,
+            "wavSha256": "255998e0210d9f0a2339c5ef256ea2beb55556a033c035f0af9c241d7702bc11"
+          },
+          "observed": {
+            "sttTexts": [
+              "明天下午3点和 PC 开会。"
+            ],
+            "toolCalls": [
+              {
+                "name": "calendar_create",
+                "arguments": {
+                  "kind": "point",
+                  "startsAt": "2026-07-31T15:00:00+08:00",
+                  "title": "和 PC 开会"
+                }
+              }
+            ],
+            "toolResults": [
+              {
+                "name": "calendar_create",
+                "result": {
+                  "ok": true,
+                  "speech": "已创建和 PC 开会，明天下午三点。",
+                  "eventId": "tc06-pc-meeting",
+                  "reminderId": "tc06-pc-meeting-reminder",
+                  "undoOperationId": "tc06-undo-create"
+                }
+              }
+            ],
+            "ttsTexts": [
+              "已创建和 PC 开会，",
+              "明天下午三点。"
+            ],
+            "ttsAudioBytes": 110080,
+            "spokenText": "已创建和 PC 开会，明天下午三点。"
+          },
+          "functionalAssertions": {
+            "onlyCreateCalled": true,
+            "tomorrowAtThree": true,
+            "noDurationPoint": true,
+            "titleIncludesPc": true
+          },
+          "qualityAssertions": {
+            "ttsExactlySpeech": true,
+            "noInternalNarration": true
+          }
+        },
+        {
+          "id": "tc06_request_skip_pc_meeting",
+          "phrase": "跳过明天下午三点和 PC 的会",
+          "result": "pass",
+          "input": {
+            "format": "pcm_s16le",
+            "sampleRate": 16000,
+            "channels": 1,
+            "bytes": 141238,
+            "wavSha256": "69a74913f0b47d3a382d9c4aa66a08d9ef2a9f2b33bf96951fa7036e256180f8"
+          },
+          "observed": {
+            "sttTexts": [
+              "跳过明天下午3点和 PC 的会。"
+            ],
+            "toolCalls": [
+              {
+                "name": "calendar_find",
+                "arguments": {
+                  "query": "和 PC 开会",
+                  "rangeEnd": "2026-07-31T15:01:00+08:00",
+                  "rangeStart": "2026-07-31T15:00:00+08:00"
+                }
+              },
+              {
+                "name": "calendar_skip_occurrence",
+                "arguments": {
+                  "eventId": "tc06-pc-meeting",
+                  "originalStartAt": "2026-07-31T15:00:00+08:00"
+                }
+              }
+            ],
+            "toolResults": [
+              {
+                "name": "calendar_find",
+                "result": {
+                  "ok": true,
+                  "speech": "找到一条日程。",
+                  "total": 1,
+                  "requiresDisambiguation": false,
+                  "candidates": [
+                    {
+                      "eventId": "tc06-pc-meeting",
+                      "title": "和 PC 开会",
+                      "startsAt": "2026-07-31T15:00:00+08:00",
+                      "originalStartAt": "2026-07-31T15:00:00+08:00",
+                      "kind": "point",
+                      "location": "",
+                      "notes": "",
+                      "recurrence": null
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "calendar_skip_occurrence",
+                "result": {
+                  "ok": true,
+                  "speech": "已取消和 PC 开会。",
+                  "undoOperationId": "tc06-undo-skip"
+                }
+              }
+            ],
+            "ttsTexts": [
+              "已取消和 PC 开会。"
+            ],
+            "ttsAudioBytes": 90240,
+            "spokenText": "已取消和 PC 开会。"
+          },
+          "functionalAssertions": {
+            "findThenSkip": true,
+            "findsTomorrowThreeMinute": true,
+            "targetsPcMeeting": true,
+            "targetsTomorrowThree": true,
+            "cancelsWithoutConfirmation": true
+          },
+          "qualityAssertions": {
+            "ttsExactlySpeech": true,
+            "noInternalNarration": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "acceptance_tc07_conflict_and_move",
+      "result": "pass",
+      "hello": true,
+      "mcpInitialize": true,
+      "mcpToolsList": true,
+      "turnCount": 4,
+      "functionalTurnsPassed": 4,
+      "strictTurnsPassed": 4,
+      "turns": [
+        {
+          "id": "tc07_create_pz_meeting",
+          "phrase": "今天下午六点和pz开会",
+          "result": "pass",
+          "input": {
+            "format": "pcm_s16le",
+            "sampleRate": 16000,
+            "channels": 1,
+            "bytes": 124190,
+            "wavSha256": "85f06e5408e5c54d92c956a0a2ec67f04a2930a7804f33dc0f81fde2cbda3f82"
+          },
+          "observed": {
+            "sttTexts": [
+              "今天下午6点和 P Z 开会。"
+            ],
+            "toolCalls": [
+              {
+                "name": "calendar_create",
+                "arguments": {
+                  "kind": "point",
+                  "startsAt": "2026-07-30T18:00:00+08:00",
+                  "title": "和 P Z 开会"
+                }
+              }
+            ],
+            "toolResults": [
+              {
+                "name": "calendar_create",
+                "result": {
+                  "ok": true,
+                  "speech": "已创建和 pz 开会，今天下午六点。",
+                  "eventId": "tc07-pz-meeting",
+                  "reminderId": "tc07-pz-reminder",
+                  "undoOperationId": "tc07-undo-create-pz"
+                }
+              }
+            ],
+            "ttsTexts": [
+              "已创建和 pz 开会，",
+              "今天下午六点。"
+            ],
+            "ttsAudioBytes": 108160,
+            "spokenText": "已创建和 pz 开会，今天下午六点。"
+          },
+          "functionalAssertions": {
+            "onlyCreateCalled": true,
+            "createsPzAtSix": true,
+            "pointKind": true
+          },
+          "qualityAssertions": {
+            "ttsExactlySpeech": true,
+            "noInternalNarration": true
+          }
+        },
+        {
+          "id": "tc07_request_conflicting_review",
+          "phrase": "今天下午六点项目评审",
+          "result": "pass",
+          "input": {
+            "format": "pcm_s16le",
+            "sampleRate": 16000,
+            "channels": 1,
+            "bytes": 86294,
+            "wavSha256": "b27744fbd69de8dffa9afaa2abb9b0152b58c7efb272924ed19bbb4f520cd0e4"
+          },
+          "observed": {
+            "sttTexts": [
+              "今天下午6点项目评审。"
+            ],
+            "toolCalls": [
+              {
+                "name": "calendar_create",
+                "arguments": {
+                  "kind": "point",
+                  "startsAt": "2026-07-30T18:00:00+08:00",
+                  "title": "项目评审"
+                }
+              }
+            ],
+            "toolResults": [
+              {
+                "name": "calendar_create",
+                "result": {
+                  "ok": false,
+                  "message": "时间与已有日程冲突，是否仍要创建？",
+                  "speech": "时间与已有日程冲突，是否仍要创建？",
+                  "reason": "calendar_conflict",
+                  "requiresConfirmation": true,
+                  "confirmationToken": "tc07-create-conflict",
+                  "conflictConfirmationToken": "tc07-create-conflict",
+                  "conflicts": [
+                    {
+                      "eventId": "tc07-pz-meeting",
+                      "title": "和 pz 开会",
+                      "startsAt": "2026-07-30T18:00:00+08:00",
+                      "originalStartAt": "2026-07-30T18:00:00+08:00",
+                      "kind": "point",
+                      "location": "",
+                      "notes": "",
+                      "recurrence": null
+                    }
+                  ]
+                }
+              }
+            ],
+            "ttsTexts": [
+              "时间与已有日程冲突，",
+              "是否仍要创建？"
+            ],
+            "ttsAudioBytes": 121600,
+            "spokenText": "时间与已有日程冲突，是否仍要创建？"
+          },
+          "functionalAssertions": {
+            "onlyCreateCalled": true,
+            "createsReviewAtSix": true,
+            "noTokenOnFirstAttempt": true,
+            "asksForConflictConfirmation": true
+          },
+          "qualityAssertions": {
+            "noInternalNarration": true
+          }
+        },
+        {
+          "id": "tc07_confirm_conflicting_review",
+          "phrase": "还是创建",
+          "result": "pass",
+          "input": {
+            "format": "pcm_s16le",
+            "sampleRate": 16000,
+            "channels": 1,
+            "bytes": 34690,
+            "wavSha256": "298f35e677370b6c2391b88b0f40fe6471050b327f4ca8b6e42ad9280fc89cf1"
+          },
+          "observed": {
+            "sttTexts": [
+              "还是创建"
+            ],
+            "toolCalls": [
+              {
+                "name": "calendar_create",
+                "arguments": {
+                  "conflictConfirmationToken": "tc07-create-conflict",
+                  "kind": "point",
+                  "startsAt": "2026-07-30T18:00:00+08:00",
+                  "title": "项目评审"
+                }
+              }
+            ],
+            "toolResults": [
+              {
+                "name": "calendar_create",
+                "result": {
+                  "ok": true,
+                  "speech": "已创建项目评审，今天下午六点。",
+                  "eventId": "tc07-project-review",
+                  "reminderId": "tc07-review-reminder",
+                  "undoOperationId": "tc07-undo-create-review"
+                }
+              }
+            ],
+            "ttsTexts": [
+              "已创建项目评审，",
+              "今天下午六点。"
+            ],
+            "ttsAudioBytes": 110080,
+            "spokenText": "已创建项目评审，今天下午六点。"
+          },
+          "functionalAssertions": {
+            "onlyCreateCalled": true,
+            "reusesConflictToken": true,
+            "preservesConflictingReview": true
+          },
+          "qualityAssertions": {
+            "ttsExactlySpeech": true,
+            "noInternalNarration": true
+          }
+        },
+        {
+          "id": "tc07_move_pz_meeting_to_eight",
+          "phrase": "把今天和pz的会改到下午八点",
+          "result": "pass",
+          "input": {
+            "format": "pcm_s16le",
+            "sampleRate": 16000,
+            "channels": 1,
+            "bytes": 143280,
+            "wavSha256": "dbcc24a8a24513b769d5241b40dcd176596bb4211c1a05f7e0dfcfaad1a377c3"
+          },
+          "observed": {
+            "sttTexts": [
+              "把今天和 PC 的会改到下午8点。"
+            ],
+            "toolCalls": [
+              {
+                "name": "calendar_find",
+                "arguments": {
+                  "query": "和 PC 开会",
+                  "rangeEnd": "2026-07-30T18:01:00+08:00",
+                  "rangeStart": "2026-07-30T18:00:00+08:00"
+                }
+              },
+              {
+                "name": "calendar_modify",
+                "arguments": {
+                  "eventId": "tc07-pz-meeting",
+                  "newStartAt": "2026-07-30T20:00:00+08:00",
+                  "scope": "this_occurrence"
+                }
+              }
+            ],
+            "toolResults": [
+              {
+                "name": "calendar_find",
+                "result": {
+                  "ok": true,
+                  "speech": "找到一条日程。",
+                  "total": 1,
+                  "requiresDisambiguation": false,
+                  "candidates": [
+                    {
+                      "eventId": "tc07-pz-meeting",
+                      "title": "和 pz 开会",
+                      "startsAt": "2026-07-30T18:00:00+08:00",
+                      "originalStartAt": "2026-07-30T18:00:00+08:00",
+                      "kind": "point",
+                      "location": "",
+                      "notes": "",
+                      "recurrence": null
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "calendar_modify",
+                "result": {
+                  "ok": true,
+                  "speech": "已修改和 pz 开会，今天晚上八点。",
+                  "undoOperationId": "tc07-undo-modify"
+                }
+              }
+            ],
+            "ttsTexts": [
+              "已修改和 pz 开会，",
+              "今天晚上八点。"
+            ],
+            "ttsAudioBytes": 112000,
+            "spokenText": "已修改和 pz 开会，今天晚上八点。"
+          },
+          "functionalAssertions": {
+            "findThenModify": true,
+            "findsSixPmMinute": true,
+            "targetsPzMeeting": true,
+            "movesToEightPm": true
+          },
+          "qualityAssertions": {
+            "ttsExactlySpeech": true,
+            "noInternalNarration": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "acceptance_one_minute_reminder",
+      "result": "pass",
+      "hello": true,
+      "mcpInitialize": true,
+      "mcpToolsList": true,
+      "turnCount": 1,
+      "functionalTurnsPassed": 1,
+      "strictTurnsPassed": 1,
+      "turns": [
+        {
+          "id": "create_one_minute_headphones_reminder",
+          "phrase": "一分钟后提醒我戴耳机",
+          "result": "pass",
+          "input": {
+            "format": "pcm_s16le",
+            "sampleRate": 16000,
+            "channels": 1,
+            "bytes": 81742,
+            "wavSha256": "634c71881fc7ea706e1d92ad8a57546557d7b5216a7ddbaa5cd0db18b73f9c2a"
+          },
+          "observed": {
+            "sttTexts": [
+              "一分钟后提醒我戴耳机。"
+            ],
+            "toolCalls": [
+              {
+                "name": "calendar_create",
+                "arguments": {
+                  "delayMinutes": 1,
+                  "kind": "point",
+                  "title": "戴耳机"
+                }
+              }
+            ],
+            "toolResults": [
+              {
+                "name": "calendar_create",
+                "result": {
+                  "ok": true,
+                  "speech": "已创建戴耳机提醒，一分钟后提醒。",
+                  "eventId": "acceptance-headphones",
+                  "reminderId": "acceptance-headphones-reminder",
+                  "undoOperationId": "acceptance-headphones-undo",
+                  "startsAt": "2026-07-30T09:43:42.657Z"
+                }
+              }
+            ],
+            "ttsTexts": [
+              "已创建戴耳机提醒，",
+              "一分钟后提醒。"
+            ],
+            "ttsAudioBytes": 110080,
+            "spokenText": "已创建戴耳机提醒，一分钟后提醒。"
+          },
+          "functionalAssertions": {
+            "onlyCreateCalled": true,
+            "titleIncludesHeadphones": true,
+            "pointKind": true,
+            "usesRelativeDelay": true,
+            "dueAboutOneMinuteLater": true,
+            "noSeparateLateReminder": true
+          },
+          "qualityAssertions": {
+            "ttsExactlySpeech": true,
+            "noInternalNarration": true
+          }
+        }
+      ]
+    }
+  ],
+  "credentials": {
+    "otaTokenReceived": true,
+    "tokenPersisted": false,
+    "tokenLogged": false
+  },
+  "limitations": [
+    "Every utterance is synthesized to PCM and sent through the real Linx ASR/Agent/TTS path.",
+    "MCP tool responses are deterministic fixtures; this suite never mutates the physical PCB calendar.",
+    "Physical persistence and automatic playback are verified by the separate hardware smoke suite."
+  ]
+}

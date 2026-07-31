@@ -1,0 +1,65 @@
+{
+  "result": "pass",
+  "capturedAt": "2026-07-29T23:09:37.499Z",
+  "agentId": "14ca6605c4424afdbf7df5bff6a20098",
+  "agentName": "VoiceLife PCB MVP",
+  "promptSha256": "b85fd941fd6a0dc6f0657b79193dac4241390927612ee8e52689c2ddf4031583",
+  "localAndRemotePromptExact": true,
+  "protectedAgentFieldsUnchanged": true,
+  "promptBackupPath": "backup/linx-agent/20260730070908-before-date-neutral-example.json",
+  "phrase": "明天上午九点提醒我开会",
+  "voice": "Tingting",
+  "input": {
+    "format": "pcm_s16le",
+    "sampleRate": 16000,
+    "channels": 1,
+    "bytes": 94800,
+    "wavSha256": "8f8feb05015fed6dcd68d84387f7ea7785e65a3174e8ac621c6d102606109941"
+  },
+  "expectedStart": "2026-07-31T09:00:00+08:00",
+  "expectedSpeech": "已创建开会，时间是2026-07-31T09:00:00+08:00",
+  "spokenText": "已创建开会，时间是2026-07-31T09:00:00+08:00",
+  "observed": {
+    "hello": true,
+    "mcpInitialize": true,
+    "mcpToolsList": true,
+    "sttTexts": [
+      "明天上午9点提醒我开会。"
+    ],
+    "toolCalls": [
+      {
+        "name": "calendar_create",
+        "arguments": {
+          "kind": "point",
+          "startsAt": "2026-07-31T09:00:00+08:00",
+          "title": "开会"
+        }
+      }
+    ],
+    "ttsTexts": [
+      "已创建开会，",
+      "时间是2026-07-31T09:00:00+08:00"
+    ],
+    "ttsAudioBytes": 311680
+  },
+  "assertions": {
+    "hello": true,
+    "mcpInitialize": true,
+    "mcpToolsList": true,
+    "sttContainsMeeting": true,
+    "calendarCreateCalled": true,
+    "pointKind": true,
+    "exactTomorrowAtNine": true,
+    "ttsExactlySpeech": true,
+    "ttsAudioPresent": true
+  },
+  "credentials": {
+    "otaTokenReceived": true,
+    "tokenPersisted": false,
+    "tokenLogged": false
+  },
+  "limitations": [
+    "MCP tool responses are deterministic protocol-test responses; this run does not write the physical PCB calendar.",
+    "Physical PCB storage and reminder delivery are verified separately by C++ host tests and hardware auto-broadcast evidence."
+  ]
+}

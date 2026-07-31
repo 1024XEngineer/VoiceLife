@@ -1,0 +1,34 @@
+{
+  "result": "pass",
+  "capturedAt": "2026-07-30",
+  "agentId": "14ca6605c4424afdbf7df5bff6a20098",
+  "agentName": "VoiceLife PCB MVP",
+  "promptSha256": "de98359e8dabd4db0e05eae376afa100785a09f370cf9cf6656fc0db5c7ee0fd",
+  "localAndRemotePromptExact": true,
+  "registeredToolCount": 16,
+  "promptToolCount": 16,
+  "legacyVoicelifePrefixCount": 0,
+  "protectedAgentFieldsUnchanged": true,
+  "protectedFields": {
+    "llmModelId": "f3626c105383d71654a57f2bb8a973f3",
+    "ttsVoiceId": "96f3888db5d2402c85e9c8a07e264aa7",
+    "deviceCount": 1,
+    "functions": [
+      "SYSTEM_PLUGIN_MUSIC",
+      "SYSTEM_PLUGIN_NEWS_NEWSNOW",
+      "SYSTEM_PLUGIN_WEATHER"
+    ]
+  },
+  "verification": [
+    "remote GET returned code=0",
+    "PUT systemPrompt returned code=0",
+    "remote reread matches local prompt byte-for-byte",
+    "Linx MCP Proxy initialize and tools/list handshake passed with 16 advertised tools",
+    "C++ VoiceLife host tests passed",
+    "ESP-IDF firmware Python tests passed"
+  ],
+  "limitations": [
+    "This manifest verifies the prompt and tool contract; it does not claim a new physical microphone ASR run.",
+    "The existing protocol smoke uses deterministic MCP responses; hardware TTS evidence is recorded separately."
+  ]
+}

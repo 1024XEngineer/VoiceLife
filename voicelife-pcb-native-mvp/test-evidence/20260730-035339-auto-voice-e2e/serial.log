@@ -1,0 +1,191 @@
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x1 (POWERON),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x544
+load:0x403c8700,len:0xcc8
+load:0x403cb700,len:0x2eb4
+entry 0x403c88f4
+I (33) octal_psram: vendor id    : 0x0d (AP)
+I (33) octal_psram: dev id       : 0x02 (generation 3)
+I (34) octal_psram: density      : 0x03 (64 Mbit)
+I (35) octal_psram: good-die     : 0x01 (Pass)
+I (39) octal_psram: Latency      : 0x01 (Fixed)
+I (44) octal_psram: VCC          : 0x01 (3V)
+I (48) octal_psram: SRF          : 0x01 (Fast Refresh)
+I (53) octal_psram: BurstType    : 0x01 (Hybrid Wrap)
+I (57) octal_psram: BurstLen     : 0x01 (32 Byte)
+I (62) octal_psram: Readlatency  : 0x02 (10 cycles@Fixed)
+I (67) octal_psram: DriveStrength: 0x00 (1/1)
+I (71) MSPI Timing: Enter psram timing tuning
+I (76) esp_psram: Found 8MB PSRAM device
+I (79) esp_psram: Speed: 80MHz
+I (82) cpu_start: Multicore app
+I (96) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
+I (96) cpu_start: Pro cpu start user code
+I (96) cpu_start: cpu freq: 240000000 Hz
+I (98) app_init: Application information:
+I (102) app_init: Project name:     xiaozhi
+I (105) app_init: App version:      2.4.0
+I (109) app_init: Compile time:     Jul 29 2026 23:24:47
+I (114) app_init: ELF file SHA256:  61c8dfda0...
+I (119) app_init: ESP-IDF:          v6.0.2
+I (122) efuse_init: Min chip rev:     v0.0
+I (126) efuse_init: Max chip rev:     v0.99 
+I (130) efuse_init: Chip rev:         v0.2
+I (134) heap_init: Initializing. RAM available for dynamic allocation:
+I (140) heap_init: At 3FCA8B40 len 00040BD0 (258 KiB): RAM
+I (145) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (151) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (156) heap_init: At 600FE000 len 00001FD8 (7 KiB): RTCRAM
+I (161) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+I (168) spi_flash: detected chip: boya
+I (171) spi_flash: flash io: qio
+I (175) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (180) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (187) main_task: Started on CPU0
+I (207) esp_psram: Reserving pool of 96K of internal memory for DMA/internal allocations
+I (207) main_task: Calling app_main()
+I (237) Board: UUID=1bd9e62c-0816-4a6d-a782-b5f72a59b7ad SKU=voicelife-pcb
+I (237) button: IoT Button Version: 4.2.0
+I (237) CompactWifiBoard: Install SSD1306 driver
+I (237) CompactWifiBoard: SSD1306 driver installed
+I (247) CompactWifiBoard: Turning display on
+I (347) Display: Power management not supported
+I (347) OledDisplay: Initialize LVGL
+I (347) OledDisplay: Adding OLED display
+I (347) LVGL: Starting LVGL task
+I (347) MCP: Add tool: self.lamp.get_state
+I (347) MCP: Add tool: self.lamp.turn_on
+I (357) MCP: Add tool: self.lamp.turn_off
+I (357) StateMachine: State: unknown -> starting
+I (367) NoAudioCodec: Simplex channels created
+I (367) AudioCodec: Audio codec started
+I (367) MCP: Add tool: self.get_device_status
+I (377) MCP: Add tool: self.audio_speaker.set_volume
+I (377) MCP: Add tool: self.screen.set_theme
+I (377) MCP: Add tool: self.get_system_info [user]
+I (387) MCP: Add tool: self.reboot [user]
+I (387) MCP: Add tool: self.upgrade_firmware [user]
+I (397) MCP: Add tool: self.screen.get_info [user]
+I (397) MCP: Add tool: self.screen.snapshot [user]
+I (407) MCP: Add tool: self.screen.preview_image [user]
+I (407) MCP: Add tool: self.assets.set_download_url [user]
+I (497) VoiceLifeStorage: Mounted voicelife: 1506/1920401 bytes
+I (497) VoiceLifeStorage: Loaded 1 events, 1 reminders, 0 notes
+I (497) MCP: Add tool: calendar_create
+I (497) MCP: Add tool: calendar_query
+I (507) MCP: Add tool: calendar_find
+I (507) MCP: Add tool: calendar_modify
+I (507) MCP: Add tool: calendar_skip_occurrence
+I (517) MCP: Add tool: calendar_pause_series
+I (517) MCP: Add tool: calendar_resume_series
+I (527) MCP: Add tool: calendar_terminate_series
+I (527) MCP: Add tool: calendar_delete
+I (527) MCP: Add tool: calendar_undo
+I (537) MCP: Add tool: reminder_list_due
+I (537) MCP: Add tool: reminder_close
+I (537) MCP: Add tool: reminder_snooze
+I (547) MCP: Add tool: reminder_get_details
+I (547) MCP: Add tool: note_record
+I (557) MCP: Add tool: note_query
+I (557) WifiManager: Initializing...
+I (557) pp: pp rom version: e7ae62f
+I (557) net80211: net80211 rom version: e7ae62f
+I (577) wifi:wifi driver task: 3fcdd748, prio:23, stack:6656, core=0
+I (577) wifi:wifi firmware version: 00ad238
+I (577) wifi:wifi certification version: v7.0
+I (577) wifi:config NVS flash: disabled
+I (587) wifi:config nano formatting: disabled
+I (587) wifi:Init data frame dynamic rx buffer num: 6
+I (597) wifi:Init dynamic rx mgmt buffer num: 5
+I (597) wifi:Init management short buffer num: 32
+I (597) wifi:Init dynamic tx buffer num: 32
+I (607) wifi:Init static tx FG buffer num: 2
+I (607) wifi:Init static rx buffer size: 1600
+I (617) wifi:Init static rx buffer num: 3
+I (617) wifi:Init dynamic rx buffer num: 6
+I (617) wifi_init: rx ba win: 3
+I (627) wifi_init: accept mbox: 6
+I (627) wifi_init: tcpip mbox: 16
+I (627) wifi_init: udp mbox: 6
+I (637) wifi_init: tcp mbox: 6
+I (637) wifi_init: tcp tx win: 5760
+I (637) wifi_init: tcp rx win: 5760
+I (637) wifi_init: tcp mss: 1440
+I (647) WifiManager: Initialized
+I (647) WifiBoard: Starting WiFi connection attempt
+I (657) WifiManager: Starting station
+I (657) WifiStation: Station DHCP hostname: Xiaozhi-91DC
+I (657) phy_init: phy_version 712,87e8c20e,Apr 13 2026,18:51:10
+I (697) wifi:mode : sta (98:a3:16:e6:91:dc)
+I (697) wifi:enable tsf
+I (697) WifiBoard: WiFi scanning
+I (3107) WifiStation: Found AP: Qiniu-Guest, BSSID: 2c:94:52:9c:a4:85, RSSI: -63, Channel: 11, Authmode: 3
+I (3107) WifiStation: Found AP: Qiniu-Guest, BSSID: 2c:94:52:9c:81:75, RSSI: -77, Channel: 6, Authmode: 3
+I (3117) WifiStation: Found AP: Qiniu-Guest, BSSID: 2c:94:52:9c:ab:75, RSSI: -89, Channel: 11, Authmode: 3
+I (3127) WifiBoard: WiFi connecting to Qiniu-Guest
+W (3147) wifi:Password length matches WPA2 standards, authmode threshold changes from OPEN to WPA2
+I (5607) wifi:new:<11,0>, old:<1,0>, ap:<255,255>, sta:<11,0>, prof:1, snd_ch_cfg:0x0
+I (5607) wifi:state: init -> auth (0xb0)
+I (5617) wifi:state: auth -> assoc (0x0)
+I (5627) wifi:state: assoc -> run (0x10)
+I (5657) wifi:connected with Qiniu-Guest, aid = 1, channel 11, BW20, bssid = 2c:94:52:9c:a4:85
+I (5667) wifi:security: WPA2-PSK, phy: bgn, rssi: -61, cipher(pairwise:0x3, group:0x1), pmf:0
+I (5667) wifi:pm start, type: 1
+
+I (5667) wifi:dp: 1, bi: 102400, li: 10, scale listen interval from 1024000 us to 1024000 us
+I (5677) wifi:set rx beacon pti, rx_bcn_pti: 0, bcn_timeout: 25000, mt_pti: 0, mt_time: 10000
+I (5727) wifi:AP's beacon interval = 102400 us, DTIM period = 1
+I (5737) wifi:<ba-add>idx:0 (ifx:0, 2c:94:52:9c:a4:85), tid:6, ssn:4, winSize:64
+I (5767) wifi:<ba-add>idx:1 (ifx:0, 2c:94:52:9c:a4:85), tid:0, ssn:1, winSize:64
+I (6757) esp_netif_handlers: sta ip: 100.100.55.91, mask: 255.255.255.0, gw: 100.100.55.254
+I (6757) WifiStation: Got IP: 100.100.55.91
+I (6757) WifiBoard: Connected to WiFi: Qiniu-Guest
+I (6777) Application: Network connected
+I (6777) StateMachine: State: starting -> activating
+I (6777) Assets: The storage free size is 21952 KB
+I (6777) Assets: The partition size is 6144 KB
+I (6817) Assets: The checksum calculation time is 32 ms
+I (6817) MODEL_LOADER: Successfully load srmodels
+I (6817) Assets: Refreshing display theme...
+I (6817) Ota: Current version: 2.4.0
+I (7597) Ota: No mqtt section found !
+I (7617) Ota: System time synchronized in UTC
+I (7617) Ota: Current is the latest version
+I (7617) Ota: Running partition: ota_0
+I (7617) Application: Activation done
+I (7617) SystemInfo: free sram: 160719 minimal sram: 149835
+I (7627) StateMachine: State: activating -> idle
+I (7637) WifiStation: Setting WiFi power save level: LOW_POWER (MAX_MODEM)
+I (7637) wifi:Set ps type: 2, coexist: 0
+
+I (7637) AfeAudioEngine: Model 0: wn9_nihaoxiaozhi_tts
+I (7647) WakeWordCache: Allocated 64000 bytes in PSRAM
+I (7647) AFE_CONFIG: Set WakeNet Model: wn9_nihaoxiaozhi_tts
+MC Quantized wakenet9: wakenet9l_tts1h8_你好小智_3_0.631_0.635, tigger:v4, mode:0, p:0, (May 25 2026 15:51:00)
+I (7697) AFE: AFE Version: (1MIC_V251128)
+I (7697) AFE: Input PCM Config: total 1 channels(1 microphone, 0 playback), sample rate:16000
+I (7707) AFE: AFE Pipeline: [input] -> |VAD(WebRTC)| -> |WakeNet(wn9_nihaoxiaozhi_tts,)| -> [output]
+I (7717) AFE: AFE Version: (1MIC_V251128)
+I (7717) AFE: Input PCM Config: total 1 channels(1 microphone, 0 playback), sample rate:16000
+I (7727) AFE: AFE Pipeline: [input] -> |VAD(WebRTC)| -> [output]
+I (7727) AfeAudioEngine: Initialized FD AFE, detector: WakeNet, NS: off, feed: 512, fetch: 512
+I (7737) AudioCodec: Set output enable to true
+I (7747) AudioCodec: Set input enable to true
+I (7747) AudioService: Resampling audio from 16000 to 24000
+I (8197) StateMachine: State: idle -> connecting
+I (8197) WifiStation: Setting WiFi power save level: PERFORMANCE (NONE)
+I (8197) wifi:Set ps type: 0, coexist: 0
+
+I (8207) WS: Connecting to websocket server: ws://xrobo-io.qiniuapi.com/v1/ws/ with version: 1
+I (8207) EspTcp: Resolved xrobo-io.qiniuapi.com -> 112.126.104.213
+I (8307) WebSocket: WebSocket handshake done, cost=100 tcp=40 handshake=60
+I (8357) WS: Session ID: 844CAHIMeVDFVwYA
+I (8357) WifiStation: Setting WiFi power save level: PERFORMANCE (NONE)
+I (8357) wifi:Set ps type: 0, coexist: 0
+
+W (8357) Application: Server sample rate 16000 does not match device output sample rate 24000, resampling may cause distortion
+I (8367) StateMachine: State: connecting -> listening
+I (24747) AudioCodec: Set output enable to false

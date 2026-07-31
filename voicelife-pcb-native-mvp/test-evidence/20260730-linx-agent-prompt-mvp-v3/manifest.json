@@ -1,0 +1,441 @@
+{
+  "result": "fail",
+  "functionalResult": "fail",
+  "qualityResult": "fail",
+  "capturedAt": "2026-07-30T00:06:15.506Z",
+  "agentId": "14ca6605c4424afdbf7df5bff6a20098",
+  "voice": "Tingting",
+  "scenarioCount": 8,
+  "functionalPassed": 7,
+  "strictPassed": 4,
+  "functionalFailed": 1,
+  "qualityGapCount": 4,
+  "scenarios": [
+    {
+      "id": "query_tomorrow",
+      "result": "pass",
+      "phrase": "查询我明天的日程",
+      "input": {
+        "format": "pcm_s16le",
+        "sampleRate": 16000,
+        "channels": 1,
+        "bytes": 65972,
+        "wavSha256": "f6f479cbcfa116d5ff2e035aab78d1aee3fe0bf8d869cea0d18951571de2cb48"
+      },
+      "spokenText": "共有2条安排。明天早上9点开会，傍晚6点健身。",
+      "observed": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttTexts": [
+          "查询我明天的日程"
+        ],
+        "toolCalls": [
+          {
+            "name": "calendar_query",
+            "arguments": {
+              "rangeEnd": "2026-08-01T00:00:00+08:00",
+              "rangeStart": "2026-07-31T00:00:00+08:00"
+            }
+          }
+        ],
+        "toolResults": [
+          {
+            "name": "calendar_query",
+            "ok": true,
+            "speech": "共有2条安排。2026-07-31T09:00:00+08:00的开会",
+            "requiresConfirmation": false
+          }
+        ],
+        "ttsTexts": [
+          "共有2条安排。",
+          "明天早上9点开会，傍晚6点健身。"
+        ],
+        "ttsAudioBytes": 298240,
+        "spokenText": "共有2条安排。明天早上9点开会，傍晚6点健身。"
+      },
+      "functionalAssertions": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttPresent": true,
+        "ttsAudioPresent": true,
+        "onlyExpectedTool": true,
+        "exactNaturalDayRange": true,
+        "reportsCount": true,
+        "reportsFirstItem": true
+      },
+      "qualityAssertions": {
+        "noInternalNarration": true
+      }
+    },
+    {
+      "id": "modify_unique_event",
+      "result": "pass_with_quality_gaps",
+      "phrase": "把明天上午九点的开会改到上午十点",
+      "input": {
+        "format": "pcm_s16le",
+        "sampleRate": 16000,
+        "channels": 1,
+        "bytes": 128048,
+        "wavSha256": "820d77a175b21978c25bab8221c1195937d25a9b45150819ccd4e93fcca5a79c"
+      },
+      "spokenText": "我先查一下那个会议。已修改开会，时间是2026-07-31T10:00:00+08:00",
+      "observed": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttTexts": [
+          "把明天上午9点的开会改到上午10点。"
+        ],
+        "toolCalls": [
+          {
+            "name": "calendar_find",
+            "arguments": {
+              "query": "开会",
+              "rangeEnd": "2026-08-01T00:00:00+08:00",
+              "rangeStart": "2026-07-31T00:00:00+08:00"
+            }
+          },
+          {
+            "name": "calendar_modify",
+            "arguments": {
+              "eventId": "event-meeting",
+              "startsAt": "2026-07-31T10:00:00+08:00"
+            }
+          }
+        ],
+        "toolResults": [
+          {
+            "name": "calendar_find",
+            "ok": true,
+            "speech": "找到一条日程。",
+            "requiresConfirmation": false
+          },
+          {
+            "name": "calendar_modify",
+            "ok": true,
+            "speech": "已修改开会，时间是2026-07-31T10:00:00+08:00",
+            "requiresConfirmation": false
+          }
+        ],
+        "ttsTexts": [
+          "我先查一下那个会议。",
+          "已修改开会，时间是2026-07-31T10:00:00+08:00"
+        ],
+        "ttsAudioBytes": 429440,
+        "spokenText": "我先查一下那个会议。已修改开会，时间是2026-07-31T10:00:00+08:00"
+      },
+      "functionalAssertions": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttPresent": true,
+        "ttsAudioPresent": true,
+        "exactToolSequence": true,
+        "findUsesTitle": true,
+        "findUsesTomorrowRange": true,
+        "modifiesReturnedEvent": true,
+        "movesToTen": true
+      },
+      "qualityAssertions": {
+        "ttsExactlySpeech": false,
+        "noInternalNarration": false
+      }
+    },
+    {
+      "id": "create_conflict_requires_confirmation",
+      "result": "fail",
+      "phrase": "明天上午九点提醒我参加冲突会议",
+      "input": {
+        "format": "pcm_s16le",
+        "sampleRate": 16000,
+        "channels": 1,
+        "bytes": 127492,
+        "wavSha256": "cf0a17373086e9dd24e6a7be861c7074a42f02df749926a9310d3ffeb1e501ed"
+      },
+      "spokenText": "時間跟「已有會議」撞到囉，請問還是要照常設這個提醒嗎？",
+      "observed": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttTexts": [
+          "明天上午9点提醒我参加冲突会议。"
+        ],
+        "toolCalls": [
+          {
+            "name": "calendar_create",
+            "arguments": {
+              "kind": "point",
+              "startsAt": "2026-07-31T09:00:00+08:00",
+              "title": "参加冲突会议"
+            }
+          }
+        ],
+        "toolResults": [
+          {
+            "name": "calendar_create",
+            "ok": false,
+            "speech": "时间与已有日程冲突",
+            "requiresConfirmation": true
+          }
+        ],
+        "ttsTexts": [
+          "時間跟「已有會議」撞到囉，",
+          "請問還是要照常設這個提醒嗎？"
+        ],
+        "ttsAudioBytes": 280960,
+        "spokenText": "時間跟「已有會議」撞到囉，請問還是要照常設這個提醒嗎？"
+      },
+      "functionalAssertions": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttPresent": true,
+        "ttsAudioPresent": true,
+        "onlyCreateCalled": true,
+        "correctConflictTime": true,
+        "noTokenOnFirstAttempt": true,
+        "asksForConfirmation": false,
+        "doesNotClaimSuccess": true
+      },
+      "qualityAssertions": {
+        "noInternalNarration": true
+      }
+    },
+    {
+      "id": "record_nonsensitive_note",
+      "result": "pass_with_quality_gaps",
+      "phrase": "记一下我把门禁卡放在书桌抽屉里",
+      "input": {
+        "format": "pcm_s16le",
+        "sampleRate": 16000,
+        "channels": 1,
+        "bytes": 119732,
+        "wavSha256": "32ef6a7315bfd84b7d9bfebbf575bf765522134cddaebc34065d1fe9b5a5dcb9"
+      },
+      "spokenText": "好的，我帮你记下来～\n\n记住了：门禁卡放在书桌抽屉里。这条临时记录保留二十四小时。",
+      "observed": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttTexts": [
+          "记一下我把门禁卡放在书桌抽屉里"
+        ],
+        "toolCalls": [
+          {
+            "name": "note_record",
+            "arguments": {
+              "category": "其他",
+              "content": "门禁卡放在书桌抽屉里"
+            }
+          }
+        ],
+        "toolResults": [
+          {
+            "name": "note_record",
+            "ok": true,
+            "speech": "记住了：门禁卡放在书桌抽屉里。这条临时记录保留二十四小时。",
+            "requiresConfirmation": false
+          }
+        ],
+        "ttsTexts": [
+          "好的，我帮你记下来～\n\n记住了：门禁卡放在书桌抽屉里。",
+          "这条临时记录保留二十四小时。"
+        ],
+        "ttsAudioBytes": 385920,
+        "spokenText": "好的，我帮你记下来～\n\n记住了：门禁卡放在书桌抽屉里。这条临时记录保留二十四小时。"
+      },
+      "functionalAssertions": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttPresent": true,
+        "ttsAudioPresent": true,
+        "onlyNoteRecordCalled": true,
+        "capturesCardLocation": true
+      },
+      "qualityAssertions": {
+        "ttsExactlySpeech": false,
+        "noInternalNarration": true
+      }
+    },
+    {
+      "id": "reject_workday_recurrence",
+      "result": "pass",
+      "phrase": "每个工作日上午九点提醒我开晨会",
+      "input": {
+        "format": "pcm_s16le",
+        "sampleRate": 16000,
+        "channels": 1,
+        "bytes": 123036,
+        "wavSha256": "77569375d881994019547c5ba39b1fafc1b1d7287a69c6acf00ad65599f35964"
+      },
+      "spokenText": "当前 MVP 暂不支持这种周期规则。",
+      "observed": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttTexts": [
+          "每个工作日上午9点提醒我开晨会。"
+        ],
+        "toolCalls": [],
+        "toolResults": [],
+        "ttsTexts": [
+          "当前 MVP 暂不支持这种周期规则。"
+        ],
+        "ttsAudioBytes": 193920,
+        "spokenText": "当前 MVP 暂不支持这种周期规则。"
+      },
+      "functionalAssertions": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttPresent": true,
+        "ttsAudioPresent": true,
+        "noToolCalled": true,
+        "explainsUnsupportedRule": true,
+        "noFalseSuccess": true
+      },
+      "qualityAssertions": {
+        "noInternalNarration": true
+      }
+    },
+    {
+      "id": "ask_for_time_block_duration",
+      "result": "pass",
+      "phrase": "明天下午三点安排项目评审会",
+      "input": {
+        "format": "pcm_s16le",
+        "sampleRate": 16000,
+        "channels": 1,
+        "bytes": 111146,
+        "wavSha256": "bd83464fcf4368136a9cc497d0c8a27a710ea1d4dab8052b5b636047a5eb9fb4"
+      },
+      "spokenText": "持续多久？",
+      "observed": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttTexts": [
+          "明天下午3点安排项目评审会。"
+        ],
+        "toolCalls": [],
+        "toolResults": [],
+        "ttsTexts": [
+          "持续多久？"
+        ],
+        "ttsAudioBytes": 68480,
+        "spokenText": "持续多久？"
+      },
+      "functionalAssertions": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttPresent": true,
+        "ttsAudioPresent": true,
+        "noToolCalled": true,
+        "asksOnlyForDuration": true,
+        "noFalseSuccess": true
+      },
+      "qualityAssertions": {
+        "noInternalNarration": true
+      }
+    },
+    {
+      "id": "ask_date_for_past_clock_time",
+      "result": "pass_with_quality_gaps",
+      "phrase": "凌晨一点提醒我吃药",
+      "input": {
+        "format": "pcm_s16le",
+        "sampleRate": 16000,
+        "channels": 1,
+        "bytes": 75482,
+        "wavSha256": "7c0a6cfe0391c6c9669ed62b72f8d18febbf0fedc13e9d34f009d6b3dbf4282b"
+      },
+      "spokenText": "当前时间是 2026-07-30 08:05，凌晨1点已经过去了，所以需要询问。你指今天还是明天？",
+      "observed": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttTexts": [
+          "凌晨1点提醒我吃药。"
+        ],
+        "toolCalls": [],
+        "toolResults": [],
+        "ttsTexts": [
+          "当前时间是 2026-07-30 08:05，",
+          "凌晨1点已经过去了，所以需要询问。",
+          "你指今天还是明天？"
+        ],
+        "ttsAudioBytes": 469760,
+        "spokenText": "当前时间是 2026-07-30 08:05，凌晨1点已经过去了，所以需要询问。你指今天还是明天？"
+      },
+      "functionalAssertions": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttPresent": true,
+        "ttsAudioPresent": true,
+        "testClockIsPast": true,
+        "noToolCalled": true,
+        "asksTodayOrTomorrow": true,
+        "noFalseSuccess": true
+      },
+      "qualityAssertions": {
+        "noInternalNarration": false
+      }
+    },
+    {
+      "id": "reject_sensitive_note",
+      "result": "pass",
+      "phrase": "记住我的银行卡密码是一二三四五六",
+      "input": {
+        "format": "pcm_s16le",
+        "sampleRate": 16000,
+        "channels": 1,
+        "bytes": 119360,
+        "wavSha256": "0f65badb9275571b20f4899b0519db9eb156cb159b8d2bcafc9ded482605672d"
+      },
+      "spokenText": "我不能记录这类敏感信息。",
+      "observed": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttTexts": [
+          "记住我的银行卡密码是123456。"
+        ],
+        "toolCalls": [],
+        "toolResults": [],
+        "ttsTexts": [
+          "我不能记录这类敏感信息。"
+        ],
+        "ttsAudioBytes": 106880,
+        "spokenText": "我不能记录这类敏感信息。"
+      },
+      "functionalAssertions": {
+        "hello": true,
+        "mcpInitialize": true,
+        "mcpToolsList": true,
+        "sttPresent": true,
+        "ttsAudioPresent": true,
+        "noToolCalled": true,
+        "refusesSensitiveStorage": true,
+        "noFalseSuccess": true
+      },
+      "qualityAssertions": {
+        "noPromptLeak": true,
+        "noInternalNarration": true
+      }
+    }
+  ],
+  "credentials": {
+    "otaTokenReceived": true,
+    "tokenPersisted": false,
+    "tokenLogged": false
+  },
+  "limitations": [
+    "Tool responses are deterministic protocol fixtures; this suite does not mutate the physical PCB calendar.",
+    "Physical PCB persistence and automatic reminder playback are verified by separate hardware evidence."
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "result": "pass",
+  "capturedAt": "2026-07-30",
+  "transport": "websocket",
+  "agentPromptSha256": "671a5d10b6fb2af1c37fbdfb274eb67486ff18705d5faf16cbfe4fe1b5678d2b",
+  "simulatedInput": "明天上午九点提醒我开会，VoiceLife提示词协议测试",
+  "remoteAgent": {
+    "hello": true,
+    "mcpInitialize": true,
+    "mcpToolsList": true,
+    "stt": true,
+    "tts": true,
+    "toolCalls": [
+      "calendar_create"
+    ],
+    "legacyToolCalls": []
+  },
+  "localToolSetCheck": {
+    "registeredToolCount": 16,
+    "promptToolCount": 16,
+    "setsEqual": true,
+    "legacyVoicelifePrefixCount": 0
+  },
+  "limitations": [
+    "MCP tool responses in this protocol smoke were deterministic test responses; the physical PCB service was not replaced or modified.",
+    "This validates the Linx Agent prompt and protocol routing, not the physical microphone ASR path."
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "result": "pass",
+  "capturedAt": "2026-07-30",
+  "agentId": "14ca6605c4424afdbf7df5bff6a20098",
+  "agentName": "VoiceLife PCB MVP",
+  "change": "Clarify the second call for non-recurring calendar_skip_occurrence with confirmed=true.",
+  "promptSha256": "67b742a9c30e2288e46e1254b87b4d8823c7daebedf56f29af8f68e10fadd0b0",
+  "localAndRemotePromptExact": true,
+  "registeredToolCount": 16,
+  "promptToolCount": 16,
+  "legacyVoicelifePrefixCount": 0,
+  "skipConfirmationRulePresent": true,
+  "protectedAgentFieldsUnchanged": true,
+  "remoteUpdatedAt": "2026-07-30 05:34:00",
+  "firmwareArtifacts": {
+    "mergedBinary": {
+      "path": "firmware/build/merged-binary.bin",
+      "sha256": "73c556abea38df99ea5784710a8443cb4116a0ed9dab3695e16437d8ac55405f"
+    },
+    "applicationBinary": {
+      "path": "firmware/build/xiaozhi.bin",
+      "sha256": "1c70342ba02bd25d98479e5b4e8d3c975e79c9b37de81a6fb937bd51c3e8c5d3"
+    }
+  },
+  "verification": [
+    "Remote GET returned code=0 before and after the update.",
+    "PUT systemPrompt returned code=0.",
+    "Remote reread matches the local prompt byte-for-byte.",
+    "All 16 registered PCB tool names are present; no voicelife.* names remain.",
+    "VoiceLife C++ host tests passed.",
+    "ESP-IDF firmware Python tests passed: 48 tests.",
+    "ESP-IDF 6.0.2 voicelife-pcb build passed and produced merged-binary.bin.",
+    "Gateway tests passed: 9 files, 48 tests."
+  ],
+  "limitations": [
+    "This verifies the Prompt/API contract and build artifacts; it does not claim a new physical microphone ASR run.",
+    "The firmware image was not flashed to the board in this step."
+  ]
+}

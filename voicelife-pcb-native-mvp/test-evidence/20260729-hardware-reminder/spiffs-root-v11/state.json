@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "events": [
+    {
+      "id": "event-hardware-e2e-v11-20260729",
+      "title": "VoiceLife 真机音频闭环 v11",
+      "startsAt": "2026-07-29T14:31:00Z",
+      "endsAt": "",
+      "kind": "point",
+      "timeZone": "Asia/Shanghai",
+      "location": "",
+      "notes": "",
+      "recurrenceFrequency": "",
+      "recurrenceWeekday": 0,
+      "recurrenceMonthDay": 0,
+      "weakReminderEnabled": false,
+      "weakReminderMinutes": 15,
+      "paused": false,
+      "terminated": false,
+      "createdAt": 1785335450,
+      "updatedAt": 1785335450
+    }
+  ],
+  "reminders": [
+    {
+      "id": "reminder-hardware-e2e-v11-20260729",
+      "eventId": "event-hardware-e2e-v11-20260729",
+      "originalStartAt": "2026-07-29T14:31:00Z",
+      "triggerAt": "2026-07-29T14:31:00Z",
+      "weak": false,
+      "status": "scheduled",
+      "snoozeCount": 0,
+      "deliveredAt": 0,
+      "closedAt": 0
+    }
+  ],
+  "notes": [],
+  "receipts": [],
+  "undoOperations": []
+}

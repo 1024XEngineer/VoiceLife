@@ -1,0 +1,16 @@
+{
+  "result": "pass",
+  "capturedAt": "2026-07-30",
+  "transport": "MCP Proxy WebSocket",
+  "proxyHttpStatus": 200,
+  "initializeRequestHandled": true,
+  "toolsListRequestHandled": true,
+  "advertisedToolCount": 16,
+  "toolCallSeen": false,
+  "unexpectedClientRequest": false,
+  "businessStateChanged": false,
+  "limitations": [
+    "This is a handshake and tools/list check only; it intentionally does not call a calendar tool.",
+    "It does not replace the physical microphone ASR test."
+  ]
+}

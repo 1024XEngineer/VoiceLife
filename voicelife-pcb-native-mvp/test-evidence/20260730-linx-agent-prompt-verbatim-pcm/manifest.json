@@ -1,0 +1,26 @@
+{
+  "result": "pass",
+  "capturedAt": "2026-07-29T22:58:22.086Z",
+  "agentId": "14ca6605c4424afdbf7df5bff6a20098",
+  "agentName": "VoiceLife PCB MVP",
+  "change": "Make successful write responses byte-for-byte equal to the MCP speech string after PCM smoke exposed added chatter.",
+  "promptSha256": "904c77443debd407fda78f0e4c1911216b83bde1c9ba37a3fd970c7bf7b94fa5",
+  "localAndRemotePromptExact": true,
+  "registeredToolCount": 16,
+  "promptToolCount": 16,
+  "legacyVoicelifePrefixCount": 0,
+  "verbatimRulePresent": true,
+  "protectedAgentFieldsUnchanged": true,
+  "remoteUpdatedAt": "2026-07-30 06:58:22",
+  "backupPath": "backup/linx-agent/20260730065821-before-verbatim-pcm-fix.json",
+  "protectedFields": {
+    "llmModelId": "f3626c105383d71654a57f2bb8a973f3",
+    "ttsVoiceId": "96f3888db5d2402c85e9c8a07e264aa7",
+    "deviceCount": 1,
+    "functionIds": [
+      "SYSTEM_PLUGIN_MUSIC",
+      "SYSTEM_PLUGIN_NEWS_NEWSNOW",
+      "SYSTEM_PLUGIN_WEATHER"
+    ]
+  }
+}

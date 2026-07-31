@@ -1,0 +1,24 @@
+{
+  "result": "fail",
+  "port": "/dev/cu.usbmodem5A840116301",
+  "phrase": "一分钟后提醒我喝水",
+  "voice": "Tingting",
+  "capturedAt": "2026-07-29T16:36:17.820895+00:00",
+  "originalOutput": "外置耳机",
+  "originalSystemOutput": "外置耳机",
+  "requiredLogPatterns": [
+    "Application: >> ",
+    "VoiceLife: Delivering",
+    "VoiceLife reminder TTS started",
+    "VoiceLife reminder received TTS audio packet",
+    "VoiceLife reminder TTS stopped"
+  ],
+  "observedLogPatterns": {
+    "stt": false,
+    "delivery": false,
+    "ttsStart": false,
+    "ttsAudio": false,
+    "ttsStop": false
+  },
+  "error": null
+}

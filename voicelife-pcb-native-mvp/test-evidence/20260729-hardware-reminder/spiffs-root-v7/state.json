@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "events": [
+    {
+      "id": "event-hardware-e2e-v7-20260729",
+      "title": "VoiceLife最终MVP真机验证",
+      "startsAt": "2026-07-29T13:52:45Z",
+      "endsAt": "",
+      "kind": "point",
+      "timeZone": "Asia/Shanghai",
+      "location": "",
+      "notes": "",
+      "recurrenceFrequency": "",
+      "recurrenceWeekday": 0,
+      "recurrenceMonthDay": 0,
+      "weakReminderEnabled": false,
+      "weakReminderMinutes": 15,
+      "paused": false,
+      "terminated": false,
+      "createdAt": 1785333045,
+      "updatedAt": 1785333045
+    }
+  ],
+  "reminders": [
+    {
+      "id": "reminder-hardware-e2e-v7-20260729",
+      "eventId": "event-hardware-e2e-v7-20260729",
+      "originalStartAt": "2026-07-29T13:52:45Z",
+      "triggerAt": "2026-07-29T13:52:45Z",
+      "weak": false,
+      "status": "scheduled",
+      "snoozeCount": 0,
+      "deliveredAt": 0,
+      "closedAt": 0
+    }
+  ],
+  "notes": [],
+  "receipts": [],
+  "undoOperations": []
+}

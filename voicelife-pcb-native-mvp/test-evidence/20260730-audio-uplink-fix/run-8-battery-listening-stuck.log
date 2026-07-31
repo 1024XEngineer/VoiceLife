@@ -1,0 +1,441 @@
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x1 (POWERON),boot:0xa (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x544
+load:0x403c8700,len:0xcc8
+load:0x403cb700,len:0x2eb4
+entry 0x403c88f4
+I (33) octal_psram: vendor id    : 0x0d (AP)
+I (33) octal_psram: dev id       : 0x02 (generation 3)
+I (33) octal_psram: density      : 0x03 (64 Mbit)
+I (35) octal_psram: good-die     : 0x01 (Pass)
+I (39) octal_psram: Latency      : 0x01 (Fixed)
+I (44) octal_psram: VCC          : 0x01 (3V)
+I (48) octal_psram: SRF          : 0x01 (Fast Refresh)
+I (53) octal_psram: BurstType    : 0x01 (Hybrid Wrap)
+I (57) octal_psram: BurstLen     : 0x01 (32 Byte)
+I (62) octal_psram: Readlatency  : 0x02 (10 cycles@Fixed)
+I (67) octal_psram: DriveStrength: 0x00 (1/1)
+I (71) MSPI Timing: Enter psram timing tuning
+I (76) esp_psram: Found 8MB PSRAM device
+I (79) esp_psram: Speed: 80MHz
+I (82) cpu_start: Multicore app
+I (96) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
+I (96) cpu_start: Pro cpu start user code
+I (96) cpu_start: cpu freq: 240000000 Hz
+I (98) app_init: Application information:
+I (101) app_init: Project name:     xiaozhi
+I (105) app_init: App version:      2.4.0
+I (109) app_init: Compile time:     Jul 30 2026 08:14:50
+I (114) app_init: ELF file SHA256:  d38a17074...
+I (118) app_init: ESP-IDF:          v6.0.2
+I (122) efuse_init: Min chip rev:     v0.0
+I (126) efuse_init: Max chip rev:     v0.99 
+I (130) efuse_init: Chip rev:         v0.2
+I (134) heap_init: Initializing. RAM available for dynamic allocation:
+I (140) heap_init: At 3FCA8B60 len 00040BB0 (258 KiB): RAM
+I (145) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (151) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (156) heap_init: At 600FE000 len 00001FD8 (7 KiB): RTCRAM
+I (161) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+I (168) spi_flash: detected chip: boya
+I (171) spi_flash: flash io: qio
+I (175) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (180) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (187) main_task: Started on CPU0
+I (207) esp_psram: Reserving pool of 96K of internal memory for DMA/internal allocations
+I (207) main_task: Calling app_main()
+I (237) Board: UUID=1bd9e62c-0816-4a6d-a782-b5f72a59b7ad SKU=voicelife-pcb
+I (237) button: IoT Button Version: 4.2.0
+I (237) CompactWifiBoard: Install SSD1306 driver
+I (237) CompactWifiBoard: SSD1306 driver installed
+I (247) CompactWifiBoard: Turning display on
+I (347) Display: Power management not supported
+I (347) OledDisplay: Initialize LVGL
+I (347) OledDisplay: Adding OLED display
+I (347) LVGL: Starting LVGL task
+I (347) MCP: Add tool: self.lamp.get_state
+I (347) MCP: Add tool: self.lamp.turn_on
+I (357) MCP: Add tool: self.lamp.turn_off
+I (357) StateMachine: State: unknown -> starting
+I (367) NoAudioCodec: Simplex channels created
+I (367) AudioCodec: Audio codec started
+I (367) MCP: Add tool: self.get_device_status
+I (377) MCP: Add tool: self.audio_speaker.set_volume
+I (377) MCP: Add tool: self.screen.set_theme
+I (377) MCP: Add tool: self.get_system_info [user]
+I (387) MCP: Add tool: self.reboot [user]
+I (387) MCP: Add tool: self.upgrade_firmware [user]
+I (397) MCP: Add tool: self.screen.get_info [user]
+I (397) MCP: Add tool: self.screen.snapshot [user]
+I (407) MCP: Add tool: self.screen.preview_image [user]
+I (407) MCP: Add tool: self.assets.set_download_url [user]
+I (497) VoiceLifeStorage: Mounted voicelife: 4016/1920401 bytes
+I (507) VoiceLifeStorage: Loaded 2 events, 2 reminders, 0 notes
+I (507) MCP: Add tool: calendar_create
+I (507) MCP: Add tool: calendar_query
+I (507) MCP: Add tool: calendar_find
+I (507) MCP: Add tool: calendar_modify
+I (507) MCP: Add tool: calendar_skip_occurrence
+I (517) MCP: Add tool: calendar_pause_series
+I (517) MCP: Add tool: calendar_resume_series
+I (527) MCP: Add tool: calendar_terminate_series
+I (527) MCP: Add tool: calendar_delete
+I (527) MCP: Add tool: calendar_undo
+I (537) MCP: Add tool: reminder_list_due
+I (537) MCP: Add tool: reminder_close
+I (537) MCP: Add tool: reminder_snooze
+I (547) MCP: Add tool: reminder_get_details
+I (547) MCP: Add tool: note_record
+I (557) MCP: Add tool: note_query
+I (557) WifiManager: Initializing...
+I (557) pp: pp rom version: e7ae62f
+I (557) net80211: net80211 rom version: e7ae62f
+I (577) wifi:wifi driver task: 3fcde20c, prio:23, stack:6656, core=0
+I (577) wifi:wifi firmware version: 00ad238
+I (577) wifi:wifi certification version: v7.0
+I (577) wifi:config NVS flash: disabled
+I (587) wifi:config nano formatting: disabled
+I (587) wifi:Init data frame dynamic rx buffer num: 6
+I (597) wifi:Init dynamic rx mgmt buffer num: 5
+I (597) wifi:Init management short buffer num: 32
+I (597) wifi:Init dynamic tx buffer num: 32
+I (607) wifi:Init static tx FG buffer num: 2
+I (607) wifi:Init static rx buffer size: 1600
+I (617) wifi:Init static rx buffer num: 3
+I (617) wifi:Init dynamic rx buffer num: 6
+I (617) wifi_init: rx ba win: 3
+I (627) wifi_init: accept mbox: 6
+I (627) wifi_init: tcpip mbox: 16
+I (627) wifi_init: udp mbox: 6
+I (637) wifi_init: tcp mbox: 6
+I (637) wifi_init: tcp tx win: 5760
+I (637) wifi_init: tcp rx win: 5760
+I (637) wifi_init: tcp mss: 1440
+I (647) WifiManager: Initialized
+I (647) WifiBoard: Starting WiFi connection attempt
+I (657) WifiManager: Starting station
+I (657) WifiStation: Station DHCP hostname: Xiaozhi-91DC
+I (657) phy_init: phy_version 712,87e8c20e,Apr 13 2026,18:51:10
+I (717) wifi:mode : sta (98:a3:16:e6:91:dc)
+I (717) wifi:enable tsf
+I (717) WifiBoard: WiFi scanning
+I (3127) WifiStation: Found AP: Qiniu-Guest, BSSID: 2c:94:52:9c:a4:85, RSSI: -70, Channel: 11, Authmode: 3
+I (3127) WifiBoard: WiFi connecting to Qiniu-Guest
+W (3127) wifi:Password length matches WPA2 standards, authmode threshold changes from OPEN to WPA2
+I (5597) wifi:new:<11,0>, old:<1,0>, ap:<255,255>, sta:<11,0>, prof:1, snd_ch_cfg:0x0
+I (5597) wifi:state: init -> auth (0xb0)
+I (5607) wifi:state: auth -> assoc (0x0)
+I (5627) wifi:state: assoc -> run (0x10)
+I (5687) wifi:connected with Qiniu-Guest, aid = 1, channel 11, BW20, bssid = 2c:94:52:9c:a4:85
+I (5687) wifi:security: WPA2-PSK, phy: bgn, rssi: -69, cipher(pairwise:0x3, group:0x1), pmf:0
+I (5687) wifi:pm start, type: 1
+
+I (5697) wifi:dp: 1, bi: 102400, li: 10, scale listen interval from 1024000 us to 1024000 us
+I (5707) wifi:set rx beacon pti, rx_bcn_pti: 0, bcn_timeout: 25000, mt_pti: 0, mt_time: 10000
+I (5747) wifi:<ba-add>idx:0 (ifx:0, 2c:94:52:9c:a4:85), tid:6, ssn:4, winSize:64
+I (5807) wifi:<ba-add>idx:1 (ifx:0, 2c:94:52:9c:a4:85), tid:0, ssn:0, winSize:64
+I (5897) wifi:AP's beacon interval = 102400 us, DTIM period = 1
+I (6787) esp_netif_handlers: sta ip: 100.100.55.91, mask: 255.255.255.0, gw: 100.100.55.254
+I (6787) WifiStation: Got IP: 100.100.55.91
+I (6787) WifiBoard: Connected to WiFi: Qiniu-Guest
+I (6797) Application: Network connected
+W (6797) Application: VoiceLife IM sync is enabled but Gateway URL/token is empty
+I (6797) StateMachine: State: starting -> activating
+I (6807) Assets: The storage free size is 21952 KB
+I (6807) Application: Main loop: events=0x1000 state=8
+I (6807) Assets: The partition size is 6144 KB
+I (6817) Application: Handling state change: activating
+I (6827) Application: Main loop: state handler returned
+I (6847) Assets: The checksum calculation time is 32 ms
+I (6847) MODEL_LOADER: Successfully load srmodels
+I (6867) Assets: Refreshing display theme...
+I (6867) Ota: Current version: 2.4.0
+I (8087) Ota: No mqtt section found !
+I (8107) Ota: System time synchronized in UTC
+I (8107) Ota: Current is the latest version
+I (8107) Ota: Running partition: ota_0
+I (8107) Application: Activation done
+I (8107) SystemInfo: free sram: 158183 minimal sram: 147087
+I (8117) StateMachine: State: activating -> idle
+I (8127) WifiStation: Setting WiFi power save level: LOW_POWER (MAX_MODEM)
+I (8127) wifi:Set ps type: 2, coexist: 0
+
+I (8127) Application: Main loop: events=0x1001 state=3
+I (8137) Application: Handling state change: idle
+I (8137) AfeAudioEngine: Model 0: wn9_nihaoxiaozhi_tts
+I (8147) WakeWordCache: Allocated 64000 bytes in PSRAM
+I (8147) AFE_CONFIG: Set WakeNet Model: wn9_nihaoxiaozhi_tts
+MC Quantized wakenet9: wakenet9l_tts1h8_你好小智_3_0.631_0.635, tigger:v4, mode:0, p:0, (May 25 2026 15:51:00)
+I (8187) AFE: AFE Version: (1MIC_V251128)
+I (8197) AFE: Input PCM Config: total 1 channels(1 microphone, 0 playback), sample rate:16000
+I (8197) AFE: AFE Pipeline: [input] -> |VAD(WebRTC)| -> |WakeNet(wn9_nihaoxiaozhi_tts,)| -> [output]
+I (8207) AFE: AFE Version: (1MIC_V251128)
+I (8217) AFE: Input PCM Config: total 1 channels(1 microphone, 0 playback), sample rate:16000
+I (8227) AFE: AFE Pipeline: [input] -> |VAD(WebRTC)| -> [output]
+I (8227) AfeAudioEngine: Initialized FD AFE, detector: WakeNet, NS: off, feed: 512, fetch: 512
+I (8237) Application: Main loop: state handler returned
+I (8237) Application: Main loop: running 1 scheduled task(s)
+I (8247) Application: Main loop: scheduled task 0 begin
+I (8257) AudioCodec: Set output enable to true
+I (8257) Application: Main loop: scheduled task 0 end
+I (8257) AudioService: Resampling audio from 16000 to 24000
+I (8257) AudioCodec: Set input enable to true
+I (17367) SystemInfo: free sram: 135679 minimal sram: 130027
+I (25257) AudioCodec: Set output enable to false
+I (27367) SystemInfo: free sram: 135679 minimal sram: 130027
+I (37367) SystemInfo: free sram: 135679 minimal sram: 130027
+I (47367) SystemInfo: free sram: 135679 minimal sram: 130027
+I (57367) SystemInfo: free sram: 135679 minimal sram: 130027
+I (67367) SystemInfo: free sram: 135679 minimal sram: 130027
+I (77367) SystemInfo: free sram: 135679 minimal sram: 130027
+I (77967) Application: Wake word detected: 你好小智 (state: 3)
+I (77967) StateMachine: State: idle -> connecting
+I (77967) Application: Main loop: events=0x1001 state=4
+I (77977) Application: Handling state change: connecting
+I (77977) Application: Main loop: state handler returned
+I (77987) Application: Main loop: running 1 scheduled task(s)
+I (77987) Application: Main loop: scheduled task 0 begin
+I (77997) WifiStation: Setting WiFi power save level: PERFORMANCE (NONE)
+I (77997) wifi:Set ps type: 0, coexist: 0
+
+I (78007) WS: Connecting to websocket server: ws://xrobo-io.qiniuapi.com/v1/ws/ with version: 1
+I (78017) EspTcp: Resolved xrobo-io.qiniuapi.com -> 39.106.38.241
+I (78097) WebSocket: WebSocket handshake done, cost=80 tcp=40 handshake=40
+I (78137) WS: Session ID: 5LkAAHwwUSbLVwYA
+I (78147) WifiStation: Setting WiFi power save level: PERFORMANCE (NONE)
+I (78147) wifi:Set ps type: 0, coexist: 0
+
+W (78147) Application: Server sample rate 16000 does not match device output sample rate 24000, resampling may cause distortion
+I (78157) Application: Wake word detected: 你好小智
+I (78177) Application: MCP reply queued (150 bytes)
+I (78177) Application: MCP reply queued (867 bytes)
+I (78207) AfeAudioEngine: Encoded wake word into 33 packets in 241 ms
+I (78207) StateMachine: State: connecting -> listening
+I (78207) Application: Main loop: scheduled task 0 end
+I (78217) Application: Main loop: events=0x1001 state=5
+I (78217) Application: Handling state change: listening
+I (78227) Application: Listening state ready: mode=0 processor=off playback=idle
+I (78237) Application: Audio uplink: sending listen.start (mode=0)
+I (78237) Application: Audio uplink: enabling voice processing
+I (78247) AudioService: Voice processing: resetting decoder and input pipeline
+I (78247) AudioService: Voice processing: enabling audio engine
+I (78257) AudioService: Voice processing: input task enabled
+I (78257) Application: Audio uplink: voice processing is running
+I (78267) Application: Audio uplink: configuring listening wake word
+I (78277) Application: Wake word detection already stopped for listening
+I (78277) Application: Audio uplink: listening pipeline ready
+I (78287) Application: Main loop: state handler returned
+I (78287) Application: Main loop: running 2 scheduled task(s)
+I (78297) Application: Main loop: scheduled task 0 begin
+I (78297) Application: MCP reply send begin (150 bytes)
+I (78307) Application: MCP reply send end
+I (78307) Application: Main loop: scheduled task 0 end
+I (78317) Application: Main loop: scheduled task 1 begin
+I (78317) Application: MCP reply send begin (867 bytes)
+I (78447) AudioService: Voice input: captured 1 10 ms frames
+I (78447) AfeAudioEngine: Voice AFE: frames=1 vad=0 peak=930
+I (78447) Application: Audio uplink: first send event posted (bits=0x42)
+I (78447) AudioService: Voice encoder: produced 1 Opus packets
+I (79137) AfeAudioEngine: Voice VAD: speech (frame=24 peak=7437)
+I (79357) AudioService: Voice input: captured 100 10 ms frames
+I (79387) AfeAudioEngine: Voice AFE: frames=32 vad=1 peak=2636
+I (79597) AudioService: Voice encoder: produced 20 Opus packets
+I (80367) AudioService: Voice input: captured 200 10 ms frames
+I (80407) AfeAudioEngine: Voice AFE: frames=64 vad=1 peak=7065
+I (80777) AudioService: Voice encoder: produced 40 Opus packets
+I (81187) AfeAudioEngine: Voice VAD: silence (frame=88 peak=1384)
+I (81367) AudioService: Voice input: captured 300 10 ms frames
+I (81447) AfeAudioEngine: Voice AFE: frames=96 vad=0 peak=904
+I (81997) AudioService: Voice encoder: produced 60 Opus packets
+I (82357) AudioService: Voice input: captured 400 10 ms frames
+I (82467) AfeAudioEngine: Voice AFE: frames=128 vad=0 peak=1028
+I (82977) AfeAudioEngine: Voice VAD: speech (frame=144 peak=1114)
+I (83177) AudioService: Voice encoder: produced 80 Opus packets
+I (83367) AudioService: Voice input: captured 500 10 ms frames
+I (83487) AfeAudioEngine: Voice AFE: frames=160 vad=1 peak=3012
+I (84367) AudioService: Voice input: captured 600 10 ms frames
+I (84397) AudioService: Voice encoder: produced 100 Opus packets
+I (84517) AfeAudioEngine: Voice AFE: frames=192 vad=1 peak=2869
+I (84897) AfeAudioEngine: Voice VAD: silence (frame=204 peak=942)
+I (85087) AfeAudioEngine: Voice VAD: speech (frame=210 peak=1755)
+I (85177) AfeAudioEngine: Voice VAD: silence (frame=213 peak=1106)
+I (85357) AudioService: Voice input: captured 700 10 ms frames
+I (85447) AfeAudioEngine: Voice VAD: speech (frame=221 peak=1059)
+I (85537) AfeAudioEngine: Voice AFE: frames=224 vad=1 peak=1171
+I (85577) AudioService: Voice encoder: produced 120 Opus packets
+I (86367) AudioService: Voice input: captured 800 10 ms frames
+I (86557) AfeAudioEngine: Voice AFE: frames=256 vad=1 peak=4461
+I (86797) AudioService: Voice encoder: produced 140 Opus packets
+I (87367) AudioService: Voice input: captured 900 10 ms frames
+I (87577) AfeAudioEngine: Voice AFE: frames=288 vad=1 peak=1830
+I (87847) AfeAudioEngine: Voice VAD: silence (frame=296 peak=1502)
+I (87967) AfeAudioEngine: Voice VAD: speech (frame=300 peak=8298)
+I (87977) AudioService: Voice encoder: produced 160 Opus packets
+I (88357) AudioService: Voice input: captured 1000 10 ms frames
+I (88597) AfeAudioEngine: Voice AFE: frames=320 vad=1 peak=1911
+I (89127) AfeAudioEngine: Voice VAD: silence (frame=336 peak=783)
+I (89197) AudioService: Voice encoder: produced 180 Opus packets
+I (89367) AudioService: Voice input: captured 1100 10 ms frames
+I (89557) AfeAudioEngine: Voice VAD: speech (frame=350 peak=1986)
+I (89637) AfeAudioEngine: Voice AFE: frames=352 vad=1 peak=1098
+I (90037) AfeAudioEngine: Voice VAD: silence (frame=365 peak=1334)
+I (90277) AfeAudioEngine: Voice VAD: speech (frame=372 peak=2616)
+I (90367) AudioService: Voice input: captured 1200 10 ms frames
+I (90377) AudioService: Voice encoder: produced 200 Opus packets
+I (90657) AfeAudioEngine: Voice AFE: frames=384 vad=1 peak=1509
+I (91047) AfeAudioEngine: Voice VAD: silence (frame=396 peak=1211)
+I (91357) AudioService: Voice input: captured 1300 10 ms frames
+I (91367) AfeAudioEngine: Voice VAD: speech (frame=406 peak=1766)
+I (91557) AfeAudioEngine: Voice VAD: silence (frame=412 peak=1040)
+I (91597) AudioService: Voice encoder: produced 220 Opus packets
+I (91687) AfeAudioEngine: Voice AFE: frames=416 vad=0 peak=1230
+I (92127) AfeAudioEngine: Voice VAD: speech (frame=430 peak=1192)
+I (92227) AfeAudioEngine: Voice VAD: silence (frame=433 peak=1453)
+I (92367) AudioService: Voice input: captured 1400 10 ms frames
+I (92517) AfeAudioEngine: Voice VAD: speech (frame=442 peak=1045)
+I (92647) AfeAudioEngine: Voice VAD: silence (frame=446 peak=891)
+I (92707) AfeAudioEngine: Voice AFE: frames=448 vad=0 peak=710
+I (92767) AfeAudioEngine: Voice VAD: speech (frame=450 peak=1259)
+I (92777) AudioService: Voice encoder: produced 240 Opus packets
+I (93247) AfeAudioEngine: Voice VAD: silence (frame=465 peak=1614)
+I (93367) AudioService: Voice input: captured 1500 10 ms frames
+I (93367) AfeAudioEngine: Voice VAD: speech (frame=469 peak=1149)
+I (93537) AfeAudioEngine: Voice VAD: silence (frame=474 peak=1615)
+I (93697) AfeAudioEngine: Voice VAD: speech (frame=479 peak=1131)
+I (93727) AfeAudioEngine: Voice AFE: frames=480 vad=1 peak=1174
+I (93997) AudioService: Voice encoder: produced 260 Opus packets
+I (94357) AudioService: Voice input: captured 1600 10 ms frames
+I (94747) AfeAudioEngine: Voice AFE: frames=512 vad=1 peak=2320
+I (95177) AudioService: Voice encoder: produced 280 Opus packets
+I (95367) AudioService: Voice input: captured 1700 10 ms frames
+I (95427) AfeAudioEngine: Voice VAD: silence (frame=533 peak=1220)
+I (95557) AfeAudioEngine: Voice VAD: speech (frame=537 peak=1668)
+I (95767) AfeAudioEngine: Voice AFE: frames=544 vad=1 peak=1057
+I (95877) AfeAudioEngine: Voice VAD: silence (frame=547 peak=1042)
+I (96007) AfeAudioEngine: Voice VAD: speech (frame=551 peak=1241)
+I (96217) AfeAudioEngine: Voice VAD: silence (frame=558 peak=1187)
+I (96367) AudioService: Voice input: captured 1800 10 ms frames
+I (96397) AudioService: Voice encoder: produced 300 Opus packets
+I (96637) AfeAudioEngine: Voice VAD: speech (frame=571 peak=1765)
+I (96807) AfeAudioEngine: Voice AFE: frames=576 vad=1 peak=1488
+I (97147) AfeAudioEngine: Voice VAD: silence (frame=587 peak=1794)
+I (97357) AudioService: Voice input: captured 1900 10 ms frames
+I (97537) AfeAudioEngine: Voice VAD: speech (frame=599 peak=842)
+I (97577) AudioService: Voice encoder: produced 320 Opus packets
+I (97627) AfeAudioEngine: Voice VAD: silence (frame=602 peak=1467)
+I (97827) AfeAudioEngine: Voice AFE: frames=608 vad=1 peak=1456
+I (97827) AfeAudioEngine: Voice VAD: speech (frame=608 peak=1456)
+I (98367) AudioService: Voice input: captured 2000 10 ms frames
+I (98797) AudioService: Voice encoder: produced 340 Opus packets
+I (98847) AfeAudioEngine: Voice AFE: frames=640 vad=1 peak=1428
+I (99207) AfeAudioEngine: Voice VAD: silence (frame=651 peak=1370)
+I (99367) AudioService: Voice input: captured 2100 10 ms frames
+I (99367) AfeAudioEngine: Voice VAD: speech (frame=656 peak=1340)
+I (99517) AfeAudioEngine: Voice VAD: silence (frame=661 peak=1258)
+I (99877) AfeAudioEngine: Voice AFE: frames=672 vad=0 peak=1400
+I (99977) AudioService: Voice encoder: produced 360 Opus packets
+I (100197) AfeAudioEngine: Voice VAD: speech (frame=682 peak=1093)
+I (100357) AudioService: Voice input: captured 2200 10 ms frames
+I (100897) AfeAudioEngine: Voice AFE: frames=704 vad=1 peak=2557
+I (101197) AudioService: Voice encoder: produced 380 Opus packets
+I (101367) AudioService: Voice input: captured 2300 10 ms frames
+I (101407) AfeAudioEngine: Voice VAD: silence (frame=720 peak=1023)
+I (101917) AfeAudioEngine: Voice AFE: frames=736 vad=0 peak=653
+I (102367) AudioService: Voice input: captured 2400 10 ms frames
+I (102377) AudioService: Voice encoder: produced 400 Opus packets
+I (102487) AfeAudioEngine: Voice VAD: speech (frame=754 peak=1392)
+I (102597) AfeAudioEngine: Voice VAD: silence (frame=757 peak=933)
+I (102757) AfeAudioEngine: Voice VAD: speech (frame=762 peak=905)
+I (102937) AfeAudioEngine: Voice AFE: frames=768 vad=1 peak=1206
+I (103297) AfeAudioEngine: Voice VAD: silence (frame=779 peak=1242)
+I (103357) AudioService: Voice input: captured 2500 10 ms frames
+I (103447) AfeAudioEngine: Voice VAD: speech (frame=784 peak=2023)
+I (103597) AudioService: Voice encoder: produced 420 Opus packets
+I (103957) AfeAudioEngine: Voice AFE: frames=800 vad=1 peak=1360
+I (104367) AudioService: Voice input: captured 2600 10 ms frames
+I (104777) AudioService: Voice encoder: produced 440 Opus packets
+I (104857) AfeAudioEngine: Voice VAD: silence (frame=828 peak=1522)
+I (104997) AfeAudioEngine: Voice AFE: frames=832 vad=0 peak=1403
+I (105367) AudioService: Voice input: captured 2700 10 ms frames
+I (105397) AfeAudioEngine: Voice VAD: speech (frame=845 peak=3882)
+I (105927) AfeAudioEngine: Voice VAD: silence (frame=861 peak=999)
+I (105997) AudioService: Voice encoder: produced 460 Opus packets
+I (106017) AfeAudioEngine: Voice AFE: frames=864 vad=0 peak=1118
+I (106047) AfeAudioEngine: Voice VAD: speech (frame=865 peak=933)
+I (106147) AfeAudioEngine: Voice VAD: silence (frame=868 peak=1251)
+I (106357) AudioService: Voice input: captured 2800 10 ms frames
+I (106947) AfeAudioEngine: Voice VAD: speech (frame=893 peak=1303)
+I (107047) AfeAudioEngine: Voice AFE: frames=896 vad=1 peak=1815
+I (107177) AudioService: Voice encoder: produced 480 Opus packets
+I (107227) AfeAudioEngine: Voice VAD: silence (frame=902 peak=1371)
+I (107367) AudioService: Voice input: captured 2900 10 ms frames
+I (107457) AfeAudioEngine: Voice VAD: speech (frame=909 peak=1467)
+I (107617) AfeAudioEngine: Voice VAD: silence (frame=914 peak=722)
+I (107937) AfeAudioEngine: Voice VAD: speech (frame=924 peak=1608)
+I (108067) AfeAudioEngine: Voice AFE: frames=928 vad=1 peak=1251
+I (108187) AfeAudioEngine: Voice VAD: silence (frame=932 peak=1101)
+I (108367) AudioService: Voice input: captured 3000 10 ms frames
+I (108397) AudioService: Voice encoder: produced 500 Opus packets
+I (108997) AfeAudioEngine: Voice VAD: speech (frame=957 peak=1232)
+I (109087) AfeAudioEngine: Voice AFE: frames=960 vad=1 peak=1201
+I (109207) AfeAudioEngine: Voice VAD: silence (frame=964 peak=1092)
+I (109357) AudioService: Voice input: captured 3100 10 ms frames
+I (109537) AfeAudioEngine: Voice VAD: speech (frame=974 peak=1398)
+I (109577) AudioService: Voice encoder: produced 520 Opus packets
+I (109627) AfeAudioEngine: Voice VAD: silence (frame=977 peak=926)
+I (110107) AfeAudioEngine: Voice AFE: frames=992 vad=0 peak=1340
+I (110247) AfeAudioEngine: Voice VAD: speech (frame=996 peak=915)
+I (110337) AfeAudioEngine: Voice VAD: silence (frame=999 peak=926)
+I (110367) AudioService: Voice input: captured 3200 10 ms frames
+I (110797) AudioService: Voice encoder: produced 540 Opus packets
+I (111127) AfeAudioEngine: Voice AFE: frames=1024 vad=1 peak=1264
+I (111127) AfeAudioEngine: Voice VAD: speech (frame=1024 peak=1264)
+I (111367) AudioService: Voice input: captured 3300 10 ms frames
+I (111907) AfeAudioEngine: Voice VAD: silence (frame=1048 peak=1620)
+I (111977) AudioService: Voice encoder: produced 560 Opus packets
+I (112087) AfeAudioEngine: Voice VAD: speech (frame=1054 peak=1203)
+I (112167) AfeAudioEngine: Voice AFE: frames=1056 vad=1 peak=1548
+I (112357) AudioService: Voice input: captured 3400 10 ms frames
+I (112537) AfeAudioEngine: Voice VAD: silence (frame=1068 peak=1618)
+I (112987) AfeAudioEngine: Voice VAD: speech (frame=1082 peak=1322)
+I (113077) AfeAudioEngine: Voice VAD: silence (frame=1085 peak=1658)
+I (113187) AfeAudioEngine: Voice AFE: frames=1088 vad=0 peak=734
+I (113197) AudioService: Voice encoder: produced 580 Opus packets
+I (113367) AudioService: Voice input: captured 3500 10 ms frames
+I (114207) AfeAudioEngine: Voice AFE: frames=1120 vad=0 peak=1145
+I (114367) AudioService: Voice input: captured 3600 10 ms frames
+I (114377) AudioService: Voice encoder: produced 600 Opus packets
+I (115237) AfeAudioEngine: Voice AFE: frames=1152 vad=0 peak=1114
+I (115267) AfeAudioEngine: Voice VAD: speech (frame=1153 peak=974)
+I (115357) AudioService: Voice input: captured 3700 10 ms frames
+I (115357) AfeAudioEngine: Voice VAD: silence (frame=1156 peak=1304)
+I (115587) AfeAudioEngine: Voice VAD: speech (frame=1163 peak=1706)
+I (115597) AudioService: Voice encoder: produced 620 Opus packets
+I (115687) AfeAudioEngine: Voice VAD: silence (frame=1166 peak=1474)
+I (116197) AfeAudioEngine: Voice VAD: speech (frame=1182 peak=1589)
+I (116257) AfeAudioEngine: Voice AFE: frames=1184 vad=1 peak=816
+I (116347) AfeAudioEngine: Voice VAD: silence (frame=1187 peak=1275)
+I (116367) AudioService: Voice input: captured 3800 10 ms frames
+I (116777) AudioService: Voice encoder: produced 640 Opus packets
+I (117277) AfeAudioEngine: Voice AFE: frames=1216 vad=0 peak=1021
+I (117367) AudioService: Voice input: captured 3900 10 ms frames
+I (117997) AudioService: Voice encoder: produced 660 Opus packets
+I (118297) AfeAudioEngine: Voice AFE: frames=1248 vad=0 peak=1167
+I (118357) AudioService: Voice input: captured 4000 10 ms frames
+I (119177) AudioService: Voice encoder: produced 680 Opus packets
+I (119197) AfeAudioEngine: Voice VAD: speech (frame=1276 peak=1714)
+I (119317) AfeAudioEngine: Voice AFE: frames=1280 vad=1 peak=1532
+I (119367) AudioService: Voice input: captured 4100 10 ms frames
+I (119397) AfeAudioEngine: Voice VAD: silence (frame=1282 peak=1079)
+I (120357) AfeAudioEngine: Voice AFE: frames=1312 vad=0 peak=1706
+I (120367) AudioService: Voice input: captured 4200 10 ms frames
+I (120397) AudioService: Voice encoder: produced 700 Opus packets
+I (120417) AfeAudioEngine: Voice VAD: speech (frame=1314 peak=831)
+I (120547) AfeAudioEngine: Voice VAD: silence (frame=1318 peak=1347)
+I (120967) AfeAudioEngine: Voice VAD: speech (frame=1331 peak=1719)
+I (121087) AfeAudioEngine: Voice VAD: silence (frame=1335 peak=1054)
+I (121357) AudioService: Voice input: captured 4300 10 ms frames
+I (121377) AfeAudioEngine: Voice AFE: frames=1344 vad=0 peak=1219

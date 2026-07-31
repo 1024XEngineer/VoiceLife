@@ -1,0 +1,33 @@
+{
+    "type": "bread-compact-wifi",
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "bread-compact-wifi",
+            "sdkconfig_append": [
+                "CONFIG_OLED_SSD1306_128X32=y"
+            ]
+        },
+        {
+            "name": "bread-compact-wifi-128x64",
+            "sdkconfig_append": [
+                "CONFIG_OLED_SSD1306_128X64=y"
+            ]
+        },
+        {
+            "name": "voicelife-pcb",
+            "sdkconfig_append": [
+                "CONFIG_OLED_SSD1306_128X32=y",
+                "CONFIG_VOICELIFE_ENABLED=y",
+                "CONFIG_VOICELIFE_IM_ENABLED=y",
+                "CONFIG_OTA_URL=\"https://xrobo.qiniuapi.com/v1/ota/\"",
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/16m-voicelife.csv\"",
+                "CONFIG_USE_CUSTOM_WAKE_WORD=y",
+                "CONFIG_CUSTOM_WAKE_WORD=\"ni hao niu niu\"",
+                "CONFIG_CUSTOM_WAKE_WORD_DISPLAY=\"你好牛牛\"",
+                "CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=n",
+                "CONFIG_SR_MN_CN_MULTINET7_QUANT=y"
+            ]
+        }
+    ]
+}

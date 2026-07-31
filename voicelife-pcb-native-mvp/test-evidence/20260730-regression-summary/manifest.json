@@ -1,0 +1,67 @@
+{
+  "result": "pass_with_known_linx_quality_gaps",
+  "capturedAt": "2026-07-29T23:35:20.628Z",
+  "pcbCppHost": {
+    "command": "firmware/scripts/run_voicelife_host_tests.sh",
+    "passed": 31,
+    "failed": 0,
+    "areas": [
+      "calendar CRUD and query boundaries",
+      "conflict tokens and validation",
+      "daily, weekly and monthly recurrence",
+      "reminder close, snooze, retry and batching",
+      "undo, persistence and invalid journal recovery",
+      "temporary notes and sensitive-content rejection",
+      "IM retry, ACK loss, replay and idempotency"
+    ]
+  },
+  "pr62MacPrototype": {
+    "worktree": "XE6-15-pr62-fresh",
+    "modified": false,
+    "testFilesPassed": 9,
+    "testsPassed": 48,
+    "testsFailed": 0,
+    "typecheck": "pass"
+  },
+  "pr85Gateway": {
+    "worktree": "XE6-15-pr85-review/demos/wechat-xiaozhi",
+    "testsPassed": 42,
+    "testsFailed": 0,
+    "liveWechatDelivery": "not_run_missing_live_credentials"
+  },
+  "linxAgent": {
+    "agentId": "14ca6605c4424afdbf7df5bff6a20098",
+    "model": "deepseek-v4-flash",
+    "promptSha256": "5c1e75fe0e6fbe91d2858e52df7e9e26a4bfc6e6ebf5d2cbb5323dd8f393c53b",
+    "temperatureRestored": 0.7,
+    "thinking": {
+      "type": "disabled"
+    },
+    "reasoningEffort": "low",
+    "modelVoiceDeviceAndPluginsOtherwiseUnchanged": true
+  },
+  "pcmProtocol": {
+    "strictCreateSmoke": "pass",
+    "comprehensiveFunctionalPassed": 7,
+    "comprehensiveScenarioCount": 8,
+    "strictPassed": 4,
+    "functionalFailure": "time_block_without_user_duration_was_assumed_as_60_minutes",
+    "qualityGaps": [
+      "pre-tool or reasoning text can be sent to TTS",
+      "successful note speech is not always emitted verbatim",
+      "the system prompt can be partially repeated aloud"
+    ]
+  },
+  "hardware": {
+    "automaticReminderPlayback": "pass",
+    "persistenceAfterReboot": "pass",
+    "voicelifePartitionRestoredAfterSmoke": true,
+    "fullFlashEraseUsed": false,
+    "physicalMicrophoneWakeWordRun": "not_run"
+  },
+  "credentials": {
+    "apiKeyPersistedInEvidence": false,
+    "otaTokenPersisted": false,
+    "otaTokenLogged": false
+  }
+}
