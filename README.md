@@ -107,7 +107,7 @@ flowchart LR
 | `voicelife_schedule` | 日程实体、命令、结果和服务接口骨架 | contracts |
 | `voicelife_timing` | 定时任务、实例和提醒规则 | contracts |
 | `voicelife_mcp` | Tool Schema、注册中心与调用路由 | contracts |
-| `voicelife_voice` | 会话、音频和工具调用编排 | contracts |
+| `voicelife_voice` | 会话、音频/传输 Port 与 Provider Registry | contracts |
 | `voicelife_runtime` | 唯一组装入口，不承载业务规则 | contracts、mcp、voice |
 
 ### 文件树
@@ -123,7 +123,7 @@ XE6-15/
 │   ├── voicelife_schedule/      # 日程领域结构与服务接口骨架
 │   ├── voicelife_timing/        # 定时任务与触发规则
 │   ├── voicelife_mcp/           # MCP 工具注册中心
-│   ├── voicelife_voice/         # 语音会话协调器与 Port
+│   ├── voicelife_voice/         # 语音会话、音频/传输 Port 与 Provider Registry
 │   └── voicelife_runtime/       # Composition Root
 ├── config/
 │   ├── adapter-profile.schema.json
@@ -180,11 +180,12 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
 | 组件边界与依赖检查 | 已完成 | 主机与 CI 可验证 |
-| 分组件 TDD 主机测试 | 已完成 | 6 个单元测试与 1 个串联测试，可按名称筛选 |
+| 分组件 TDD 主机测试 | 已完成 | 7 个测试，可按名称和标签筛选 |
 | MCP → 日程 → 定时任务串联 | 已完成 | 使用内存适配器，仅证明架构 |
 | ESP32-S3 固件构建 | 已完成 | ESP-IDF 6.0.2 已验证 |
 | Profile 驱动 Runtime 装配 | 待开发 | 当前只完成 Schema、构建选择和设计契约 |
-| 小智音频与 XRobot Adapter | 待开发 | 从上游能力逐段迁移 |
+| 语音 Port、会话状态与 Provider Registry | 已完成 | 主机契约通过；真实 Linx/xiaozhi、Codec、AFE 仍待接入 |
+| 小智音频与 XRobot Adapter | 待开发 | 从上游能力逐段迁移，ESP32-S3 优先 |
 | 持久化 Adapter | 待开发 | 必须满足原子写入和重启恢复 |
 | 微信 / 飞书 IM Adapter | 待开发 | 先稳定平台无关语义契约 |
 | 真机闭环与用户试用 | 待开发 | 属于 MS3 功能 Issue |
@@ -195,6 +196,7 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 - [ADR 0001：采用组件化模块单体与 Ports/Adapters](./docs/adr/0001-component-modular-hexagonal.md)
 - [ADR 0002：采用能力驱动的适配器 Profile](./docs/adr/0002-capability-driven-adapters.md)
 - [小智能力迁移方案](./docs/architecture/xiaozhi-migration.md)
+- [语音模块子架构](./docs/architecture/voice-subarchitecture.md)
 - [提交描述规范](./docs/engineering/commit-convention.md)
 - [协同开发规范](./docs/engineering/collaboration.md)
 - [参与开发](./CONTRIBUTING.md)

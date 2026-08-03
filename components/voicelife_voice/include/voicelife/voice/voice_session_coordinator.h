@@ -1,6 +1,7 @@
 #pragma once
 
 #include "voicelife/contracts/tool.h"
+#include "voicelife/voice/voice_ports.h"
 
 namespace voicelife::voice {
 
@@ -11,13 +12,6 @@ class AudioDevicePort {
     virtual ~AudioDevicePort() = default;
     virtual Status Open() = 0;
     virtual void Close() = 0;
-};
-
-class SpeechProviderPort {
-   public:
-    virtual ~SpeechProviderPort() = default;
-    virtual Status Connect() = 0;
-    virtual void Disconnect() = 0;
 };
 
 class ToolGatewayPort {

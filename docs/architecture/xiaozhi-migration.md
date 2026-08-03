@@ -6,9 +6,9 @@ VoiceLife 迁移小智已经验证且难以重写正确的设备能力，但不�
 
 | 小智能力 | 决定 | VoiceLife 落点 | 原因 |
 | --- | --- | --- | --- |
-| Audio Codec / Audio Service | 迁移 | `AudioDevicePort` Adapter | I2S、Codec、Opus 和队列已有大量硬件细节 |
+| Audio Codec / Audio Service | 迁移 | `AudioInputPort` / `AudioOutputPort` / `CodecStrategy` | I2S、Codec、Opus 和队列已有大量硬件细节 |
 | ESP-SR AFE / Wake Word | 迁移 | Audio Adapter 子能力 | 唤醒、AEC 和模型配置适合复用 |
-| WebSocket Protocol | 迁移并包裹 | `SpeechProviderPort` Adapter | 保留 XRobot 协议兼容，不让协议消息进入 Voice 核心 |
+| WebSocket Protocol | 迁移并包裹 | `VoiceTransportPort` + `SpeechProviderAdapter` | 保留 XRobot 协议兼容，不让协议消息进入 Voice 核心 |
 | MCP `tools/list` / `tools/call` | 参考协议，重写边界 | `voicelife_mcp` | 注册和路由可复用思想，业务 Tool 与状态重新实现 |
 | Settings / OTA 基础能力 | 后续迁移 | Platform Adapter | 先审计凭据、升级签名和回滚契约 |
 | Board 注册与 `config.json` | 收敛迁移 | Adapter Profile | 保留配置构建，移除 138 块板历史矩阵 |
@@ -45,3 +45,5 @@ VoiceLife 迁移小智已经验证且难以重写正确的设备能力，但不�
 - 资源预算记录固件大小、IRAM/DRAM/PSRAM、任务栈和实时丢帧。
 
 不满足这些检查时，迁移只算“代码搬过来”，不算能力迁移完成。
+
+Port、状态、Linx 协议映射和 ESP32-S3 真机验收顺序见 [语音模块子架构](./voice-subarchitecture.md)。
