@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1",
+  "businessEventId": "event-fixture",
+  "correlationId": "correlation-fixture",
+  "kind": "reminder_due",
+  "recipient": {
+    "userId": "user-fixture",
+    "deviceId": "device-fixture"
+  },
+  "scheduleId": "schedule-fixture",
+  "taskId": "task-fixture",
+  "instanceId": "instance-fixture",
+  "reminderTriggerId": "trigger-fixture",
+  "reminderType": "strong",
+  "content": {
+    "title": "Fixture reminder"
+  },
+  "plannedAt": "2026-08-03T00:00:00.000Z",
+  "triggerAt": "2026-08-03T00:00:00.000Z",
+  "actions": [
+    {
+      "kind": "command",
+      "type": "acknowledge",
+      "label": "知道了"
+    },
+    {
+      "kind": "command",
+      "type": "snooze",
+      "label": "推迟 10 分钟",
+      "params": {
+        "minutes": 10
+      }
+    }
+  ],
+  "occurredAt": "2026-08-03T00:00:00.000Z"
+}
