@@ -29,7 +29,7 @@ add_voicelife_library(application voicelife_application
 target_link_libraries(application PUBLIC contracts schedule timing)
 add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_tool_gateway.cc")
-target_link_libraries(mcp PUBLIC contracts)
+target_link_libraries(mcp PUBLIC contracts application)
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
 target_link_libraries(voice PUBLIC contracts)

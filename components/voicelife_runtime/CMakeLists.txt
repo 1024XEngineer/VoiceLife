@@ -3,6 +3,9 @@ idf_component_register(
     INCLUDE_DIRS "include"
     REQUIRES voicelife_contracts
     PRIV_REQUIRES
+        voicelife_application
         voicelife_mcp
         voicelife_voice
+        voicelife_im
+        voicelife_platform
 )
