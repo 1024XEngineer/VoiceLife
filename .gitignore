@@ -1,1 +1,24 @@
 local/
+
+# ESP-IDF generated files
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# Host build and editor files
+build-host/
+dist/
+.cache/
+.clangd/
+.vscode/
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local secrets and generated binaries
+.env
+*.bin
+audio-debug*.wav
