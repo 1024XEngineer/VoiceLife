@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS
+        "src/audio_frame_queue.cc"
         "src/voice_provider_registry.cc"
         "src/voice_session.cc"
         "src/voice_session_coordinator.cc"

@@ -79,6 +79,7 @@ PR 只能声明已经拿到证据的层级。#107 已完成第 1 层、ESP-IDF �
 | `AudioOutputPort` | 接收解码帧、刷新缓冲、关闭 | ESP-IDF I2S/DAC Adapter | 各板 Codec/扬声器驱动 |
 | `VoiceTransportPort` | 连接、文本帧、二进制音频帧、关闭 | TLS WebSocket Adapter | MQTT/UDP 仅在契约满足时接入 |
 | `CodecStrategy` | PCM/Opus 编解码 | 小智 Opus 参数迁移 | PCM 直通或其他硬件 Codec |
+| `BoundedAudioFrameQueue` | 固定容量、generation 隔离、满载策略和水位统计 | FreeRTOS queue/deque Adapter | Zephyr/NuttX/主机实现，必须复用同一契约 |
 | `SpeechProviderAdapter` | Provider 生命周期、采集、播报、打断、能力 | `voicelife_linx` 的 `LinxSpeechProviderAdapter` | `xiaozhi-websocket`、主机 fake |
 | `ASRAdapter` / `TTSAdapter` / `RealtimeAdapter` | 外部事件映射与模式差异 | 由 Provider 组合 | 不强迫所有 Provider 继承万能基类 |
 | `EvidenceSink` | 记录可关联事件 | 串口/JSON 证据 | CI artifact、真机日志和 JUnit 摘要 |
@@ -103,6 +104,23 @@ STOPPED -> STARTING -> READY -> CAPTURING -> READY
 7. `Stop` 幂等，关闭顺序固定为 Provider → Output → Input，并使旧 generation 全部失效。
 
 Transport worker 的回调可以与控制任务并发到达：`VoiceSession` 用生命周期锁串行化资源操作，用状态锁把 generation 检查和 `Flush` 绑定起来；证据回调在锁外执行，避免日志或上层观察者反向阻塞实时路径。
+
+### 3.4 有界音频队列契约
+
+`BoundedAudioFrameQueue` 是主机测试与板级 Adapter 共用的最小实现，不把 FreeRTOS queue 类型暴露到核心。构造时必须声明容量和满载策略：
+
+- 上行采集使用 `kDropOldest`。队列满时丢弃最早帧，保留最新语音，累计 `dropped_oldest` 和 `high_watermark`；不能让网络消费者反向阻塞 AFE。
+- 下行播放使用 `kRejectNewest`。队列满时拒绝新帧并累计 `rejected_newest`，由 Adapter 转换为 `PLAYBACK_OVERFLOW` 或欠载/降级证据；不能静默覆盖已经排队的 TTS。
+- `SetGeneration` 是硬边界：切换 generation 必须清空旧帧；旧 generation 的帧返回 `kConflict` 并计数。
+- 队列只接受格式有效且负载非空的 `AudioFrame`。容量、水位、丢帧和拒绝计数必须进入 `VoiceEvidence` 或脱敏测试摘要。
+
+这套契约来自旧 MVP 的 `AudioService` 队列和 `ResetDecoder` 行为，代码位于 [`audio_frame_queue.h`](../../components/voicelife_voice/include/voicelife/voice/audio_frame_queue.h)，主机契约测试位于 [`audio_frame_queue_contract_test.cc`](../../tests/host/audio_frame_queue_contract_test.cc)。
+
+### 3.5 SQLite 与实时音频的边界
+
+SQLite 不作为 `AudioInputPort` 或 `AudioOutputPort` 的同步依赖。MCP/Calendar Application 通过控制面 `StorageTransactionPort` 提交业务命令，Storage Adapter 独占连接并返回 `transaction_id`、提交状态、影响行数、完整性摘要和错误；音频任务只发布异步事件。
+
+Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质、`journal_mode`、`synchronous` 和掉电类型。`commit` 成功只代表该 Profile 的 VFS/同步语义已返回成功，不能替代真实板断电与恢复证据。详见 [语音模块与 SQLite 边界决策](../../research/voice-module-portability-20260804/2026-08-04_decision.md)。
 
 ## 4. Linx XRobot WebSocket 防腐层
 
@@ -199,6 +217,7 @@ Transport worker 的回调可以与控制任务并发到达：`VoiceSession` 用
 ## 8. TDD 验收
 
 - Red：先让非法 generation、跳号帧、Provider 缺能力、连接失败回滚和打断状态测试失败；
+- Red：队列容量为零、旧 generation、上行丢最旧和下行拒绝新帧必须先有失败测试；
 - Green：只实现使契约通过的最小状态机和 Registry；
 - Refactor：保持公共 Port 不变，再替换内部队列、Codec 或 WebSocket 实现；
 - Integration：Linx/xiaozhi Adapter 解析测试不依赖网络；

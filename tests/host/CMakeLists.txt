@@ -63,6 +63,7 @@ add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_tool_gateway.cc")
 target_link_libraries(mcp PUBLIC contracts)
 add_voicelife_library(voice voicelife_voice
+    "${ROOT_DIR}/components/voicelife_voice/src/audio_frame_queue.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_provider_registry.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
@@ -136,6 +137,10 @@ target_link_libraries(voice_session_coordinator_test PRIVATE voice)
 
 add_voicelife_test(voice_session_contract_test "unit;voice;contract" voice_session_contract_test.cc)
 target_link_libraries(voice_session_contract_test PRIVATE voice)
+
+add_voicelife_test(audio_frame_queue_contract_test "unit;voice;audio;contract"
+    audio_frame_queue_contract_test.cc)
+target_link_libraries(audio_frame_queue_contract_test PRIVATE voice)
 
 add_voicelife_test(linx_provider_contract_test "unit;voice;linx;contract" linx_provider_contract_test.cc)
 target_link_libraries(linx_provider_contract_test PRIVATE linx)
