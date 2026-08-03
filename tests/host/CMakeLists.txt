@@ -22,8 +22,15 @@ add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_module.cc")
 target_link_libraries(schedule PUBLIC contracts)
 add_voicelife_library(timing voicelife_timing
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc")
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/recurrence_policy.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_runner.cc")
 target_link_libraries(timing PUBLIC contracts)
+add_voicelife_library(timing_sqlite voicelife_timing_sqlite
+    "${ROOT_DIR}/components/voicelife_timing_sqlite/src/sqlite_timing_task_store.cc"
+    "${ROOT_DIR}/components/voicelife_timing_sqlite/src/sqlite_timing_task_store_driver.cc")
+target_link_libraries(timing_sqlite PUBLIC timing sqlite3)
 add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_tool_gateway.cc")
 target_link_libraries(mcp PUBLIC contracts)
@@ -46,6 +53,26 @@ target_link_libraries(schedule_contract_test PRIVATE schedule)
 add_voicelife_test(timing_policy_test "unit;timing" timing_policy_test.cc)
 target_link_libraries(timing_policy_test PRIVATE timing)
 
+add_voicelife_test(recurrence_policy_test "unit;timing" recurrence_policy_test.cc)
+target_link_libraries(recurrence_policy_test PRIVATE timing)
+
+add_voicelife_test(timing_task_service_test "unit;timing" timing_task_service_test.cc)
+target_link_libraries(timing_task_service_test PRIVATE timing)
+
+add_voicelife_test(timing_task_runner_test "unit;timing" timing_task_runner_test.cc)
+target_link_libraries(timing_task_runner_test PRIVATE timing)
+
+add_voicelife_test(timing_task_workflow_test "integration;timing" timing_task_workflow_test.cc)
+target_link_libraries(timing_task_workflow_test PRIVATE timing)
+
+add_voicelife_test(timing_task_future_test "integration;timing" timing_task_future_test.cc)
+target_link_libraries(timing_task_future_test PRIVATE timing)
+
+add_voicelife_test(timing_store_contract_test "contract;timing" timing_store_contract_test.cc)
+target_link_libraries(timing_store_contract_test PRIVATE timing)
+
+add_voicelife_test(sqlite_timing_task_store_test "integration;timing;sqlite" sqlite_timing_task_store_test.cc)
+target_link_libraries(sqlite_timing_task_store_test PRIVATE timing_sqlite)
 add_voicelife_test(mcp_tool_gateway_test "unit;mcp" mcp_tool_gateway_test.cc)
 target_link_libraries(mcp_tool_gateway_test PRIVATE mcp)
 

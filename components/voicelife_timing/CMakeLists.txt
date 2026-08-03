@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "src/timing_policy.cc"
+    SRCS "src/timing_policy.cc" "src/recurrence_policy.cc" "src/timing_task_service.cc" "src/timing_task_runner.cc"
     INCLUDE_DIRS "include"
     REQUIRES voicelife_contracts
 )
