@@ -191,6 +191,9 @@ int main() {
     Check(session.Interrupt().ok(), "播报应支持打断");
     Check(session.generation() != generation && provider.generation_ == session.generation() && output.flushes == 1,
           "打断应刷新播放并让 Provider 切换到新 generation");
+    Check(provider.EmitAudio(Frame(generation, 1)).code == ErrorCode::kInvalidArgument &&
+              output.pushes == 1,
+          "打断后迟到的旧 generation 音频不得重新进入播放队列");
     provider.Emit(voicelife::voice::VoiceEvent{});
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
           "缺少 generation 的迟到 Provider 事件不能改变新会话状态");

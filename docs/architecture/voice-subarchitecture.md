@@ -31,6 +31,35 @@ VoiceSession -> Application / MCP（只交稳定语义）
 
 新实现将这些事实分别落到 `AudioInputPort`、`AudioOutputPort`、`CodecStrategy`、有界队列适配器和 `generation` 契约中；不会把旧 MVP 的 FreeRTOS 全局事件位、板卡宏或 `Application` 状态机带入核心。SQLite 提交必须进入业务队列，不能从音频任务直接持有数据库连接。当前实板提交中位数约 1.16 秒，已经超过实时音频路径预算。
 
+### 2.1 旧 PCB MVP 给出的迁移基线
+
+旧版 `voicelife-pcb-native-mvp` 不是待复制的第二套主干，而是一组已经踩过坑的实验样本。以下参数来自实际源码，迁移时先作为 ESP32-S3 Profile 的起点，再由新板测试决定是否保留：
+
+| 旧版事实 | 新架构中的决定 |
+| --- | --- |
+| 输入任务每次读取 10 ms、16 kHz PCM，Opus 以 60 ms 组帧 | 采集粒度和网络帧长分开配置；60 ms 是首个 Opus Profile 默认值，不写死为 Voice Domain 规则 |
+| 编码、播放队列各容纳 2 个任务，压缩包收发队列各覆盖约 2.4 秒 | 每条队列显式声明容量、满载策略和水位指标；不能只暴露一个没有时间预算的 `queue_size` |
+| 麦克风编码队列和网络发送队列满时丢最旧帧，避免网络拥塞反压 AFE | 上行采用 `drop-oldest`；下行播放默认拒绝新帧并上报 underrun/overflow，不允许静默无限等待 |
+| `ResetDecoder` 递增播放代次，再清空解码、播放和时间戳队列 | `AudioOutputPort::Flush` 与 `VoiceSession::generation` 必须形成同一个原子语义，迟到解码结果不得重新入队 |
+| WakeNet、MultiNet、VAD、AEC 共用一个 AFE 实例；开关和 buffer reset 由 fetch 所在任务串行执行 | AFE Adapter 只有一个所有者任务，控制命令通过 mailbox 进入；禁止控制线程与 `fetch` 并发调用 AFE 句柄 |
+| 唤醒前 2 秒 PCM 使用 64 KiB PSRAM 环形缓冲，启动语音处理前预热 120 ms，空闲 15 秒后关闭 ADC/DAC | 环形缓冲、预热和省电阈值属于板卡 Profile；PSRAM 不可用时明确关闭唤醒音频回传，而不是退回堆上无界分配 |
+| 输入与输出采样率不一致时分别重采样 | 重采样属于 Codec/Audio Adapter，协商后的实际格式必须随 `AudioFrame` 传播，不能由播放端猜测 |
+
+旧 MVP 自带的 `audio/README.md` 写的是低成本 AEC 配置，但同一份源码实际创建的是 `AFE_MODE_HIGH_PERF` 和 `AEC_MODE_VOIP_HIGH_PERF`。这类说明与代码不一致的参数不进入新 Profile；迁移 PR 必须记录上游 commit、实际宏值、最低空闲堆和丢帧结果，以实测选择配置。
+
+### 2.2 证据不能跨层复用
+
+旧版确定性 PCM 协议测试已经跑通过 `hello -> STT -> ToolCall -> TTS`，也验证过独立的提醒播报和重启恢复；这说明协议、工具和存储链路可以工作。它不等于物理麦克风闭环已经稳定：历史自动化记录中存在“Mac 合成语音未被板载麦克风采集，未产生 ASR”的失败，另一些通过记录也明确注明未执行新的物理麦克风测试。
+
+因此新架构把证据分成四层，前一层不能替代后一层：
+
+1. 主机 fixture：状态、generation、协议解析和错误注入；
+2. 云端 PCM：固定音频直连 Provider，验证协议、ASR、Tool 与 TTS；
+3. 板上录放：真实 I2S、AFE、Codec、扬声器、队列水位和资源预算；
+4. 物理闭环：人在设备前完成唤醒、讲话、工具调用、播报、打断和断网恢复。
+
+PR 只能声明已经拿到证据的层级。#107 当前仍停在第 1 层和“ESP-IDF 可构建”，不能继承旧 MVP 的第 2/3 层结果来宣称新 Transport 已上板可用。
+
 ## 3. 代码契约
 
 ### 3.1 稳定值对象
@@ -69,6 +98,8 @@ STOPPED -> STARTING -> READY -> CAPTURING -> READY
 3. `SubmitAudio` 只接受当前 generation 且严格连续的 sequence；旧 generation 直接丢弃并记录证据。
 4. `Interrupt` 发送 Provider abort、刷新输出队列，然后递增 generation；本地不依赖云端迟到的 `tts.stop` 才恢复可用。
 5. `Stop` 幂等，关闭顺序固定为 Provider → Output → Input，并使旧 generation 全部失效。
+
+Transport worker 的回调可以与控制任务并发到达：`VoiceSession` 用生命周期锁串行化资源操作，用状态锁把 generation 检查和 `Flush` 绑定起来；证据回调在锁外执行，避免日志或上层观察者反向阻塞实时路径。
 
 ## 4. Linx XRobot WebSocket 防腐层
 

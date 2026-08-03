@@ -16,9 +16,9 @@ voice::VoiceEvent Event(voice::VoiceEventKind kind, std::string_view text = {}, 
 
 }  // namespace
 
-LinxSpeechProviderAdapter::LinxSpeechProviderAdapter(LinxTransportPort& transport, LinxProtocolCodecPort& codec,
-                                                     LinxConnectionConfig connection,
-                                                     voice::CapabilityProfile capabilities)
+LinxSpeechProviderAdapter::LinxSpeechProviderAdapter(
+    LinxTransportPort& transport, LinxProtocolCodecPort& codec, LinxConnectionConfig connection,
+    voice::CapabilityProfile capabilities)
     : transport_(transport),
       codec_(codec),
       connection_(std::move(connection)),
@@ -29,32 +29,39 @@ voice::CapabilityProfile LinxSpeechProviderAdapter::DefaultCapabilities() {
             .capabilities = {"streaming-asr", "tts", "cancel-generation", "pcm", "opus"}};
 }
 
-void LinxSpeechProviderAdapter::SetAudioSink(voice::AudioFrameSink sink) { audio_sink_ = std::move(sink); }
+void LinxSpeechProviderAdapter::SetAudioSink(voice::AudioFrameSink sink) {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    audio_sink_ = std::move(sink);
+}
 
 void LinxSpeechProviderAdapter::SetGeneration(uint64_t generation) {
-    if (connected_ && generation != 0) {
-        generation_ = generation;
-        output_sequence_ = 0;
+    if (connected_.load() && generation != 0) {
+        generation_.store(generation);
+        output_sequence_.store(0);
         transport_.SetGeneration(generation);
     }
 }
 
-Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& config, voice::VoiceEventSink sink) {
+Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& config,
+                                          voice::VoiceEventSink sink) {
     if (!connection_.valid() || config.provider_id != capabilities_.provider_id || config.generation == 0) {
         return Status::Error(ErrorCode::kInvalidArgument, "Linx Provider 连接配置无效");
     }
-    if (connected_) {
+    if (connected_.load()) {
         return Status::Error(ErrorCode::kConflict, "Linx Provider 已连接");
     }
     config_ = config;
-    generation_ = config.generation;
-    output_sequence_ = 0;
+    generation_.store(config.generation);
+    output_sequence_.store(0);
     {
         std::lock_guard<std::mutex> lock(hello_mutex_);
         hello_received_ = false;
         hello_status_ = Status::Ok();
     }
-    event_sink_ = std::move(sink);
+    {
+        std::lock_guard<std::mutex> lock(callback_mutex_);
+        event_sink_ = std::move(sink);
+    }
     LinxTransportSink transport_sink;
     transport_sink.on_text = [this](std::string_view message) { OnText(message); };
     transport_sink.on_binary = [this](const std::vector<uint8_t>& payload) { OnBinary(payload); };
@@ -71,12 +78,14 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
     };
     Status status = transport_.Connect(connection_, std::move(transport_sink));
     if (!status.ok()) {
+        std::lock_guard<std::mutex> lock(callback_mutex_);
         event_sink_ = {};
         return status;
     }
     status = Send(codec_.EncodeHello(config_, connection_));
     if (!status.ok()) {
         transport_.Close();
+        std::lock_guard<std::mutex> lock(callback_mutex_);
         event_sink_ = {};
         return status;
     }
@@ -88,6 +97,7 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
     if (!received) {
         hello_lock.unlock();
         transport_.Close();
+        std::lock_guard<std::mutex> lock(callback_mutex_);
         event_sink_ = {};
         return Status::Error(ErrorCode::kUnavailable, "Linx hello 等待超时");
     }
@@ -95,46 +105,47 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
     hello_lock.unlock();
     if (!status.ok()) {
         transport_.Close();
+        std::lock_guard<std::mutex> lock(callback_mutex_);
         event_sink_ = {};
         return status;
     }
-    connected_ = true;
+    connected_.store(true);
     return Status::Ok();
 }
 
 Status LinxSpeechProviderAdapter::StartCapture(voice::VoiceMode) {
-    if (!connected_) {
+    if (!connected_.load()) {
         return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
     }
     return Send(codec_.EncodeListenStart(config_));
 }
 
 Status LinxSpeechProviderAdapter::StopCapture() {
-    if (!connected_) {
+    if (!connected_.load()) {
         return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
     }
     return Send(codec_.EncodeListenStop(config_));
 }
 
 Status LinxSpeechProviderAdapter::SendAudio(const voice::AudioFrame& frame) {
-    if (!connected_) {
+    if (!connected_.load()) {
         return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
     }
-    if (frame.generation != generation_) {
+    if (frame.generation != generation_.load()) {
         return Status::Error(ErrorCode::kConflict, "Linx 音频帧属于旧连接代次");
     }
     return transport_.SendAudio(frame);
 }
 
 Status LinxSpeechProviderAdapter::Abort(std::string_view reason) {
-    if (!connected_) {
+    if (!connected_.load()) {
         return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
     }
     return Send(codec_.EncodeAbort(config_, reason));
 }
 
 Status LinxSpeechProviderAdapter::Speak(std::string_view text) {
-    if (!connected_) {
+    if (!connected_.load()) {
         return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
     }
     return Send(codec_.EncodeListenDetect(config_, text));
@@ -143,11 +154,14 @@ Status LinxSpeechProviderAdapter::Speak(std::string_view text) {
 Status LinxSpeechProviderAdapter::Disconnect() {
     const Status status = transport_.Close();
     hello_cv_.notify_all();
-    connected_ = false;
-    generation_ = 0;
-    output_sequence_ = 0;
-    event_sink_ = {};
-    audio_sink_ = {};
+    connected_.store(false);
+    generation_.store(0);
+    output_sequence_.store(0);
+    {
+        std::lock_guard<std::mutex> lock(callback_mutex_);
+        event_sink_ = {};
+        audio_sink_ = {};
+    }
     return status;
 }
 
@@ -159,9 +173,14 @@ Status LinxSpeechProviderAdapter::Send(Result<std::string> encoded) {
 }
 
 void LinxSpeechProviderAdapter::Emit(voice::VoiceEvent event) {
-    event.generation = generation_;
-    if (event_sink_) {
-        event_sink_(event);
+    event.generation = generation_.load();
+    voice::VoiceEventSink sink;
+    {
+        std::lock_guard<std::mutex> lock(callback_mutex_);
+        sink = event_sink_;
+    }
+    if (sink) {
+        sink(event);
     }
 }
 
@@ -230,12 +249,17 @@ void LinxSpeechProviderAdapter::OnBinary(const std::vector<uint8_t>& payload) {
         return;
     }
     voice::AudioFrame frame;
-    frame.generation = generation_;
-    frame.sequence = output_sequence_++;
+    frame.generation = generation_.load();
+    frame.sequence = output_sequence_.fetch_add(1);
     frame.format = config_.audio;
     frame.payload = payload;
-    if (audio_sink_) {
-        const Status status = audio_sink_(std::move(frame));
+    voice::AudioFrameSink sink;
+    {
+        std::lock_guard<std::mutex> lock(callback_mutex_);
+        sink = audio_sink_;
+    }
+    if (sink) {
+        const Status status = sink(std::move(frame));
         if (!status.ok()) {
             Emit(Event(voice::VoiceEventKind::kError, status.message));
         }

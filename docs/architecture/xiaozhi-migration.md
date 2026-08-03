@@ -20,6 +20,8 @@ VoiceLife 迁移小智已经验证且难以重写正确的设备能力，但不�
 
 调研基线为 `78/xiaozhi-esp32@dd99da00dc4c89ed4ab07fcec038c03f13f4de50`。
 
+迁移时同时对照历史实验包 `voicelife-pcb-native-mvp`。上游小智回答“通用能力原本怎么实现”，PCB MVP 回答“这块板上改过什么、哪些测试真的跑过”。两者冲突时不凭文档猜：先读实际源码和测试 manifest，再在当前 ESP32-S3 Profile 上复测。历史包不是构建依赖，也不允许通过相对路径参与正式固件编译。
+
 - `scripts/firmware.py`：从小智 Profile 构建思路收敛而来，支持校验、构建、合并和带 manifest 打包。
 - `scripts/audio_debug_server.py`：从 UDP PCM 抓取工具改写而来，显式配置采样率、声道、位宽和输出。
 
@@ -35,6 +37,8 @@ VoiceLife 迁移小智已经验证且难以重写正确的设备能力，但不�
 6. **删旧入口**：对照测试通过后删除被替代的小智 Application 路径，不长期维护双实现。
 
 每一步单独 Issue、单独 PR，可以构建、回退和在真机上验收。迁移 PR 必须列出上游 commit、文件清单、改写点、许可和未迁移依赖。
+
+旧 PCB MVP 的优先参考入口为 `firmware/main/audio/audio_service.*`、`firmware/main/audio/engines/afe_audio_engine.*`、`firmware/main/protocols/websocket_protocol.*` 和 `test-evidence/*/manifest.json`。只迁移被当前板卡 Profile 使用的代码；`Application`、显示资源、多板条件编译和历史凭据读取路径不进入新主干。
 
 ## 对照测试
 

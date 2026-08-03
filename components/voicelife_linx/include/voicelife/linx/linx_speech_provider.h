@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -99,9 +100,10 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     voice::VoiceSessionConfig config_;
     voice::VoiceEventSink event_sink_;
     voice::AudioFrameSink audio_sink_;
-    uint64_t generation_ = 0;
-    uint64_t output_sequence_ = 0;
-    bool connected_ = false;
+    std::atomic<uint64_t> generation_{0};
+    std::atomic<uint64_t> output_sequence_{0};
+    std::atomic<bool> connected_{false};
+    mutable std::mutex callback_mutex_;
     mutable std::mutex hello_mutex_;
     std::condition_variable hello_cv_;
     bool hello_received_ = false;

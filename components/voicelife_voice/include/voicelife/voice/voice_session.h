@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
 
 #include "voicelife/voice/voice_ports.h"
 
@@ -64,30 +65,24 @@ class VoiceSession {
      */
     Status Stop();
 
-    /**
-     * @brief 返回当前会话状态。
-     * @return 会话状态。
-     */
-    [[nodiscard]] VoiceSessionState state() const { return state_; }
-    /**
-     * @brief 返回当前会话代次。
-     * @return 会话代次。
-     */
-    [[nodiscard]] uint64_t generation() const { return generation_; }
-    /**
-     * @brief 返回当前会话配置。
-     * @return 会话配置引用。
-     */
-    [[nodiscard]] const VoiceSessionConfig& config() const { return config_; }
+    [[nodiscard]] VoiceSessionState state() const;
+    [[nodiscard]] uint64_t generation() const;
+    [[nodiscard]] VoiceSessionConfig config() const;
 
    private:
     void Emit(std::string_view event, std::string_view detail);
-    bool AcceptFrame(const AudioFrame& frame) const;
+    void HandleEvent(const VoiceEvent& event);
+    bool AcceptFrameLocked(const AudioFrame& frame) const;
 
     AudioInputPort& input_;
     AudioOutputPort& output_;
     SpeechProviderAdapter& provider_;
     EvidenceSink evidence_;
+    // Serializes resource lifecycle operations. Provider callbacks only take
+    // mutex_, so an event arriving from the transport worker cannot deadlock
+    // Start/Interrupt/Stop.
+    mutable std::mutex lifecycle_mutex_;
+    mutable std::mutex mutex_;
     VoiceSessionConfig config_;
     VoiceSessionState state_ = VoiceSessionState::kStopped;
     uint64_t generation_ = 0;
