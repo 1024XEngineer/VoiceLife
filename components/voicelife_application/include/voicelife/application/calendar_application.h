@@ -43,6 +43,11 @@ class IdGeneratorPort {
    public:
     virtual ~IdGeneratorPort() = default;
     virtual std::string Next(const char* prefix) = 0;
+};
+
+class ClockPort {
+   public:
+    virtual ~ClockPort() = default;
     virtual int64_t Now() const = 0;
 };
 
@@ -53,17 +58,25 @@ struct CreateScheduleOutcome {
     bool notification_accepted = false;
 };
 
-class CalendarApplication {
+class CreateScheduleUseCase {
    public:
-    CalendarApplication(CalendarStorePort& store, NotificationPort& notifications, IdGeneratorPort& ids)
-        : store_(store), notifications_(notifications), ids_(ids) {}
+    virtual ~CreateScheduleUseCase() = default;
+    virtual Result<CreateScheduleOutcome> CreateSchedule(const schedule::CreateScheduleCommand& command) = 0;
+};
 
-    Result<CreateScheduleOutcome> CreateSchedule(const schedule::CreateScheduleCommand& command);
+class CalendarApplication final : public CreateScheduleUseCase {
+   public:
+    CalendarApplication(CalendarStorePort& store, NotificationPort& notifications, IdGeneratorPort& ids,
+                        ClockPort& clock)
+        : store_(store), notifications_(notifications), ids_(ids), clock_(clock) {}
+
+    Result<CreateScheduleOutcome> CreateSchedule(const schedule::CreateScheduleCommand& command) override;
 
    private:
     CalendarStorePort& store_;
     NotificationPort& notifications_;
     IdGeneratorPort& ids_;
+    ClockPort& clock_;
     schedule::SchedulePolicy schedule_policy_;
     timing::TimingPolicy timing_policy_;
 };

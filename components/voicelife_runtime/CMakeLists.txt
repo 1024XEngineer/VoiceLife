@@ -1,8 +1,8 @@
 idf_component_register(
     SRCS "src/runtime.cc"
     INCLUDE_DIRS "include"
-    REQUIRES
-        voicelife_contracts
+    REQUIRES voicelife_contracts
+    PRIV_REQUIRES
         voicelife_application
         voicelife_mcp
         voicelife_voice

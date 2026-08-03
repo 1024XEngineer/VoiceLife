@@ -8,8 +8,7 @@ constexpr char kTag[] = "VoiceLife";
 }  // namespace
 
 extern "C" void app_main() {
-    static voicelife::runtime::Runtime runtime;
-    const voicelife::Status status = runtime.Start();
+    const voicelife::Status status = voicelife::runtime::Start();
     if (!status.ok()) {
         ESP_LOGE(kTag, "启动失败：%s", status.message.c_str());
         return;

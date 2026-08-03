@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    add_compile_options(-Wall -Wextra -Werror -Wpedantic)
+    add_compile_options(-Wall -Wextra -Werror -Wpedantic -Wmissing-field-initializers)
 endif()
 
 set(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../..")
@@ -38,10 +38,36 @@ add_voicelife_library(im voicelife_im
 target_link_libraries(im PUBLIC contracts application)
 add_voicelife_library(platform voicelife_platform
     "${ROOT_DIR}/components/voicelife_platform/src/in_memory_calendar_store.cc"
-    "${ROOT_DIR}/components/voicelife_platform/src/sequential_id_generator.cc")
+    "${ROOT_DIR}/components/voicelife_platform/src/sequential_id_generator.cc"
+    "${ROOT_DIR}/components/voicelife_platform/src/system_clock.cc")
 target_link_libraries(platform PUBLIC contracts application)
 
 enable_testing()
-add_executable(runtime_smoke_test runtime_smoke_test.cc)
+
+function(add_voicelife_test target labels)
+    add_executable(${target} ${ARGN})
+    target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
+    add_test(NAME ${target} COMMAND ${target})
+    set_tests_properties(${target} PROPERTIES LABELS "${labels}")
+endfunction()
+
+add_voicelife_test(schedule_policy_test "unit;schedule" schedule_policy_test.cc)
+target_link_libraries(schedule_policy_test PRIVATE schedule)
+
+add_voicelife_test(timing_policy_test "unit;timing" timing_policy_test.cc)
+target_link_libraries(timing_policy_test PRIVATE timing)
+
+add_voicelife_test(calendar_application_test "unit;application" calendar_application_test.cc)
+target_link_libraries(calendar_application_test PRIVATE application)
+
+add_voicelife_test(mcp_tool_gateway_test "unit;mcp" mcp_tool_gateway_test.cc)
+target_link_libraries(mcp_tool_gateway_test PRIVATE mcp)
+
+add_voicelife_test(voice_session_coordinator_test "unit;voice" voice_session_coordinator_test.cc)
+target_link_libraries(voice_session_coordinator_test PRIVATE voice)
+
+add_voicelife_test(im_gateway_adapter_test "unit;im" im_gateway_adapter_test.cc)
+target_link_libraries(im_gateway_adapter_test PRIVATE im)
+
+add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice im platform)
-add_test(NAME runtime_smoke_test COMMAND runtime_smoke_test)

@@ -25,7 +25,7 @@ Result<CreateScheduleOutcome> CalendarApplication::CreateSchedule(const schedule
         return DuplicateOutcome(existing.value->value());
     }
 
-    const int64_t now = ids_.Now();
+    const int64_t now = clock_.Now();
     auto schedule = schedule_policy_.Create(command, ids_.Next("schedule"), now);
     if (!schedule.ok()) {
         return Result<CreateScheduleOutcome>::Failure(schedule.status.code, schedule.status.message);

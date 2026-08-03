@@ -16,13 +16,13 @@ struct ToolDefinition {
 
 class McpToolGateway {
    public:
-    explicit McpToolGateway(application::CalendarApplication& calendar) : calendar_(calendar) {}
+    explicit McpToolGateway(application::CreateScheduleUseCase& calendar) : calendar_(calendar) {}
 
     std::vector<ToolDefinition> ListTools() const;
     ToolResult Call(const ToolCall& call);
 
    private:
-    application::CalendarApplication& calendar_;
+    application::CreateScheduleUseCase& calendar_;
 };
 
 }  // namespace voicelife::mcp
