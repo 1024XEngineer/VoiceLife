@@ -44,6 +44,7 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
     config_ = config;
     state_ = VoiceSessionState::kStarting;
     generation_++;
+    config_.generation = generation_;
     next_sequence_ = 0;
     Status status = input_.Open(config_.audio);
     if (!status.ok()) {
@@ -58,6 +59,7 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
         Emit("output_open_failed", status.message);
         return status;
     }
+    provider_.SetAudioSink([this](AudioFrame frame) { return HandleAudio(std::move(frame)); });
     status = provider_.Connect(config_, [this](const VoiceEvent& event) {
         // Every provider event belongs to one connection/session epoch. A zero
         // generation is not a wildcard: accepting it would let a late event
@@ -134,7 +136,11 @@ Status VoiceSession::HandleAudio(AudioFrame frame) {
     if (state_ != VoiceSessionState::kReady && state_ != VoiceSessionState::kSpeaking) {
         return Status::Error(ErrorCode::kUnavailable, "语音会话当前不能播放音频");
     }
-    if (frame.generation != generation_ || frame.format.codec != config_.audio.codec || frame.payload.empty()) {
+    if (frame.generation != generation_ || frame.format.codec != config_.audio.codec ||
+        frame.format.sample_rate_hz != config_.audio.sample_rate_hz ||
+        frame.format.channels != config_.audio.channels ||
+        frame.format.bits_per_sample != config_.audio.bits_per_sample ||
+        frame.format.frame_duration_ms != config_.audio.frame_duration_ms || frame.payload.empty()) {
         return Status::Error(ErrorCode::kInvalidArgument, "播放帧不属于当前会话");
     }
     return output_.Push(frame);
@@ -164,6 +170,7 @@ Status VoiceSession::Interrupt() {
     Status flush_status = output_.Flush();
     ++generation_;
     next_sequence_ = 0;
+    provider_.SetGeneration(generation_);
     state_ = VoiceSessionState::kReady;
     Emit("interrupted", "old audio generation invalidated");
     if (!input_status.ok()) {

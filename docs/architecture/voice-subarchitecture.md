@@ -49,7 +49,7 @@ VoiceSession -> Application / MCP（只交稳定语义）
 | `AudioOutputPort` | 接收解码帧、刷新缓冲、关闭 | ESP-IDF I2S/DAC Adapter | 各板 Codec/扬声器驱动 |
 | `VoiceTransportPort` | 连接、文本帧、二进制音频帧、关闭 | TLS WebSocket Adapter | MQTT/UDP 仅在契约满足时接入 |
 | `CodecStrategy` | PCM/Opus 编解码 | 小智 Opus 参数迁移 | PCM 直通或其他硬件 Codec |
-| `SpeechProviderAdapter` | Provider 生命周期、采集、播报、打断、能力 | `xrobot-websocket` | `xiaozhi-websocket`、主机 fake |
+| `SpeechProviderAdapter` | Provider 生命周期、采集、播报、打断、能力 | `voicelife_linx` 的 `LinxSpeechProviderAdapter` | `xiaozhi-websocket`、主机 fake |
 | `ASRAdapter` / `TTSAdapter` / `RealtimeAdapter` | 外部事件映射与模式差异 | 由 Provider 组合 | 不强迫所有 Provider 继承万能基类 |
 | `EvidenceSink` | 记录可关联事件 | 串口/JSON 证据 | CI artifact、真机日志和 JUnit 摘要 |
 
@@ -72,16 +72,28 @@ STOPPED -> STARTING -> READY -> CAPTURING -> READY
 
 ## 4. Linx XRobot WebSocket 防腐层
 
-官方协议（2026-08-04 读取）给出的接入边界如下：
+官方协议（2026-08-04 读取）给出的接入边界如下。当前已把协议编解码和 Provider 行为落到 `components/voicelife_linx`；ESP-IDF 的 socket 句柄、TLS、token 解析仍留在下一层 Transport Adapter，不把它们伪装成已完成的真机能力。
 
 - 推荐 `wss://xrobo-io.qiniuapi.com/v1/ws/`，内网可用 `ws://xrobo-io.qiniuapi.com/v1/ws/`；地址也可由 OTA 动态下发。
 - 握手头包含 `Authorization: Bearer <token>`、`Protocol-Version: 1`、`Device-Id` 和 `Client-Id`。token 只能来自 `secret://`/NVS/安全配置引用。
 - 连接后设备发送 `hello`，声明 `transport=websocket`、MCP 能力和 `audio_params`；服务端返回 hello 后才进入会话。
-- 音频二进制帧支持 OPUS 与 PCM。首选 ESP32-S3 配置为单声道 16 kHz；OPUS 默认 60 ms 帧，PCM 示例为 20 ms、16 bit、小端序。实际播放参数以服务端 hello 为准。
+- 音频二进制帧支持 OPUS 与 PCM。首选 ESP32-S3 配置为单声道 16 kHz；OPUS 默认 60 ms 帧，PCM 示例为 20 ms、16 bit、小端序。首个 Adapter 会校验服务端 hello 的参数，转码和重协商留给后续 Codec Strategy。
 - `listen(start|stop|detect)`、`stt`、`tts(start|sentence_start|stop)`、`abort` 和 MCP 工具消息均先在 Adapter 映射为 `VoiceEvent` 或 `ToolCall`。
-- hello 超时默认 10 秒；异常断线关闭音频发送通道，按 Profile 的退避重连。重连成功前不复用旧 connection/generation。
+- hello 超时默认 10 秒；异常断线关闭音频发送通道，按 Profile 的退避重连。当前首个 Adapter 要求服务端 hello 的音频参数与请求完全一致；真正的转码/重协商必须另建 Codec Strategy 和契约测试。重连成功前不复用旧 connection/generation。
 
 协议字段不进入 `VoiceSession`。Provider 负责版本、字段类型、最大消息长度、session 绑定和错误码映射；核心只看到 `Status`、`AudioFrame` 和 `VoiceEvent`。
+
+### 4.1 已锁定的离线契约
+
+`LinxJsonCodec` 只负责文档化的控制面消息：
+
+- `hello`：编码版本、WebSocket transport 和音频参数；token 只以 `secret://` 等引用传给 Transport；
+- `listen/start|stop|detect`：手动/自动/实时模式和可选 `session_id`；
+- `abort`：必须带非空原因，供打断与服务端回放取消关联；
+- `hello`、`stt`、`tts/start|sentence_start|stop`、`error`：解析为稳定事件；未知类型、未知 TTS 状态、类型错误和非法音频参数直接失败；
+- 二进制帧：由 `LinxSpeechProviderAdapter` 绑定当前连接 generation、单调 sequence 和协商后的 `AudioFormat`，再交给会话的 `AudioFrameSink`。
+
+这些行为由主机 fake Transport 测试，不依赖外网。真正的 ESP32-S3 Transport 必须复用同一套编解码契约，并额外提供 header、hello 超时、断线和资源预算证据。
 
 来源：
 

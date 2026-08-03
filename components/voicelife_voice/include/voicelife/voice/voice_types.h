@@ -13,7 +13,15 @@ enum class VoiceMode { kManual, kAuto, kRealtime };
 
 enum class VoiceSessionState { kStopped, kStarting, kReady, kCapturing, kSpeaking, kFailed };
 
-enum class VoiceEventKind { kConnected, kAsrText, kTtsStarted, kTtsStopped, kToolCall, kError };
+enum class VoiceEventKind {
+    kConnected,
+    kAsrText,
+    kTtsStarted,
+    kTtsSentenceStarted,
+    kTtsStopped,
+    kToolCall,
+    kError,
+};
 
 struct AudioFormat {
     AudioCodec codec = AudioCodec::kPcmS16Le;
@@ -42,6 +50,9 @@ struct VoiceSessionConfig {
     uint32_t hello_timeout_ms = 10000;
     uint32_t reconnect_backoff_ms = 250;
     bool enable_mcp = true;
+    // Assigned by VoiceSession for every connection epoch. Providers must
+    // copy it onto asynchronous events and downlink audio frames.
+    uint64_t generation = 0;
 };
 
 struct CapabilityProfile {

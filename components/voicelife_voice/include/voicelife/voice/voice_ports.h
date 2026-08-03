@@ -15,6 +15,7 @@ namespace voicelife::voice {
 
 using VoiceEventSink = std::function<void(const VoiceEvent&)>;
 using EvidenceSink = std::function<void(const VoiceEvidence&)>;
+using AudioFrameSink = std::function<Status(AudioFrame)>;
 
 class AudioInputPort {
    public:
@@ -83,6 +84,13 @@ class RealtimeAdapter {
 class SpeechProviderAdapter {
    public:
     virtual ~SpeechProviderAdapter() = default;
+    // Optional during migration. Providers with downlink audio should call
+    // this sink for each decoded frame; the session owns generation checks.
+    virtual void SetAudioSink(AudioFrameSink) {}
+    // A single transport connection may survive an interrupt. The session
+    // advances its epoch locally and gives the Provider the new epoch before
+    // accepting the next stream.
+    virtual void SetGeneration(uint64_t) {}
     virtual Status Connect(const VoiceSessionConfig& config, VoiceEventSink sink) = 0;
     virtual Status StartCapture(VoiceMode mode) = 0;
     virtual Status StopCapture() = 0;

@@ -11,6 +11,7 @@ set(known_components
     voicelife_schedule
     voicelife_timing
     voicelife_voice
+    voicelife_linx
 )
 
 function(idf_component_register)
@@ -84,7 +85,9 @@ assert_dependencies(voicelife_mcp PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_mcp PRIVATE)
 assert_dependencies(voicelife_voice PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_voice PRIVATE)
+assert_dependencies(voicelife_linx PUBLIC voicelife_contracts voicelife_voice)
+assert_dependencies(voicelife_linx PRIVATE)
 assert_dependencies(voicelife_runtime PUBLIC voicelife_contracts)
-assert_dependencies(voicelife_runtime PRIVATE voicelife_mcp voicelife_voice)
+assert_dependencies(voicelife_runtime PRIVATE voicelife_linx voicelife_mcp voicelife_voice)
 
 message(STATUS "PASS component names, include paths, and dependency graph")
