@@ -38,11 +38,14 @@
 
 ## 快速开始
 
-需要 CMake、Ninja，以及构建设备固件时所需的 ESP-IDF 6.0.2。
+需要 CMake，以及构建设备固件时所需的 ESP-IDF 6.0.2。Ninja 可选；未安装时主机测试会使用 CMake 默认生成器。
 
 ```bash
-# 本地测试与架构检查，不需要 ESP-IDF
-./scripts/run_host_tests.sh
+# 完整快速门禁，不需要 ESP-IDF
+./scripts/run_checks.sh
+
+# TDD 内循环：只运行当前模块测试
+./scripts/run_host_tests.sh -R schedule_policy_test
 
 # 查看并校验可用适配器 Profile
 python3 scripts/firmware.py list
@@ -140,7 +143,7 @@ XE6-15/
 ├── main/                        # ESP-IDF app_main，仅启动 Runtime
 ├── scripts/                     # 构建、打包、音频诊断和边界检查
 ├── tests/
-│   ├── host/                    # 无硬件可运行的纯 C++ 串联测试
+│   ├── host/                    # 按组件拆分的纯 C++ 单元与串联测试
 │   └── python/                  # 构建工具与错误输入测试
 ├── third_party/licenses/        # 迁移代码与工具的第三方许可原文
 ├── CMakeLists.txt               # ESP-IDF 工程入口
@@ -164,6 +167,8 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 }
 ```
 
+当前已经实现 Profile Schema 校验、`sdkconfig` 选择和按 Profile 构建；Runtime 仍使用 `scaffold`、内存存储和禁用 IM 的固定装配。编译期工厂注册、能力核对和凭据引用解析尚未实现，真实 Adapter 接入前必须补齐，不能把 Profile 文件存在等同于运行时已经支持热切换。
+
 例如接入飞书时，日程和提醒代码不需要修改。新增适配器实现、声明能力、补契约测试，再在部署配置中把 `driver` 从 `koishi-wechat` 换成 `koishi-feishu`。凭据只使用 `secret://`、`nvs://` 或 `env://` 引用，不进入 Profile 和 Git。
 
 完整规则见 [架构与适配器设计规范](./docs/architecture/design-guidelines.md)。
@@ -182,8 +187,10 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
 | 组件边界与依赖检查 | 已完成 | 主机与 CI 可验证 |
+| 分组件 TDD 主机测试 | 已完成 | 6 个单元测试与 1 个串联测试，可按名称筛选 |
 | MCP → 日程 → 定时任务串联 | 已完成 | 使用内存适配器，仅证明架构 |
 | ESP32-S3 固件构建 | 已完成 | ESP-IDF 6.0.2 已验证 |
+| Profile 驱动 Runtime 装配 | 待开发 | 当前只完成 Schema、构建选择和设计契约 |
 | 小智音频与 XRobot Adapter | 待开发 | 从上游能力逐段迁移 |
 | 持久化 Adapter | 待开发 | 必须满足原子写入和重启恢复 |
 | 微信 / 飞书 IM Adapter | 待开发 | 先稳定平台无关语义契约 |

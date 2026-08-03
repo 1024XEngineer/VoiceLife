@@ -6,10 +6,41 @@
 
 1. 在 MS3 下创建或领取 Issue，写清场景、范围和验收标准。
 2. 涉及边界、接口、数据模型或依赖方向时，先提交 Design Issue；重大取舍补 ADR。
-3. 从 `main` 创建个人分支，命名为 `<github-id>/<issue>-<short-name>`。
-4. 小步提交。一个提交只表达一个可回退的意图。
-5. 本地运行 `./scripts/run_host_tests.sh`；设备相关改动还要运行对应 Profile 构建和真机检查。
-6. PR 使用中文写结论、变更、验证和风险，关联 Issue，等待 Review 后合并。
+3. 从最新 `main` 创建短分支，命名为 `dev/<issue>-<short-name>`，例如 `dev/91-tdd-architecture`。仓库不维护长期共享的裸 `dev` 分支。
+4. 先写失败测试并记录 RED 原因，再补最小实现使其 GREEN；重构期间保持测试通过。
+5. 小步提交。每个提交只表达一个可回退的意图，并保持可编译。
+6. 本地运行 `./scripts/run_checks.sh`；设备相关改动还要运行对应 Profile 构建和真机检查。
+7. PR 使用中文写结论、TDD 记录、验证和风险，关联 Issue，等待 CI 与 Review 通过后合并。
+
+`main` 始终保持可构建、可回退。只有多个任务确实需要联合验证时，才临时建立 `integration/<milestone>-<topic>`；联调结束后通过一个 PR 合回 `main` 并删除该分支，不能把它变成第二条长期主线。
+
+```bash
+# 从上游最新 main 开始一个任务
+git fetch origin
+git switch -c dev/123-short-name origin/main
+
+# 首次推送到个人 fork
+git push -u fork HEAD
+```
+
+阶段性交付在 PR 中写 `Refs #123`；只有一个 PR 已完成 Issue 的全部验收时才写 `Closes #123`。普通单一交付默认使用 Squash Merge，保持 `main` 简洁；初始化架构等包含多笔可独立审查提交的 PR 可以使用 Merge commit。合并后删除个人 fork 上的任务分支。
+
+## TDD 快速循环
+
+新增行为时，先把 Issue 的验收条件写成一个能失败的测试。用测试名缩小反馈范围：
+
+```bash
+# RED：先确认测试因缺少目标行为而失败
+./scripts/run_host_tests.sh -R schedule_policy_test
+
+# GREEN / REFACTOR：反复运行同一个测试
+./scripts/run_host_tests.sh -R schedule_policy_test
+
+# 提交前跑完整门禁
+./scripts/run_checks.sh
+```
+
+领域规则、Application 和协议映射优先在主机测试完成。真实 Codec、网络重连、掉电恢复等硬件行为使用 ESP-IDF Unity 测试与真机证据，不能用主机 mock 冒充设备通过。
 
 ## 架构底线
 
@@ -25,8 +56,7 @@
 ## 常用检查
 
 ```bash
-./scripts/run_host_tests.sh
-python3 scripts/firmware.py validate
+./scripts/run_checks.sh
 python3 scripts/firmware.py build esp32s3-dev
 ```
 

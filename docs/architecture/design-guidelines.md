@@ -127,7 +127,7 @@ voicelife_runtime                  只组装
 
 Audio、Speech、Storage 和 IM 的生命周期、实时性与错误语义不同。项目只统一 Profile 包络和能力命名，不强迫所有 Adapter 继承一个 `Plugin` 基类。每类 Port 有自己的工厂和契约测试。
 
-### 6.3 注册与选择
+### 6.3 注册与选择（目标状态，尚未实现）
 
 每个 Adapter 提供：
 
@@ -137,7 +137,9 @@ Audio、Speech、Storage 和 IM 的生命周期、实时性与错误语义不同
 4. 配置校验函数；
 5. 契约测试套件。
 
-Runtime 在启动阶段完成：读取 Profile → 找到编译期注册的工厂 → 校验配置引用 → 核对能力 → 创建 Adapter → 注入 Use Case。任何一步失败都应停止相关能力并给出可定位错误，不能静默换实现。
+目标 Runtime 在启动阶段完成：读取 Profile → 找到编译期注册的工厂 → 校验配置引用 → 核对能力 → 创建 Adapter → 注入 Use Case。任何一步失败都应停止相关能力并给出可定位错误，不能静默换实现。
+
+当前代码只完成 Schema 校验、构建参数选择和固定 scaffold 装配。加入第一个真实 Adapter 前，必须先实现工厂注册、能力核对和凭据引用解析，并为每个 Port 建立共享契约测试。
 
 ## 7. IM 快速适配规则
 
@@ -211,6 +213,8 @@ Gateway 内部按能力选择微信、飞书或其他 Adapter：
 
 测试替身优先使用内存 Adapter，不使用大量只验证调用次数的 mock。Mock 适合故障注入，不替代真实契约。
 
+新增行为遵循 Red → Green → Refactor。主机测试按组件拆分并通过 CTest 名称/标签筛选；RED 必须证明缺少的是目标行为，GREEN 只补最小实现，重构期间保持相关测试通过。硬件相关代码按 ESP-IDF 约定补 Unity 测试，连续真机执行再使用 pytest-embedded；主机测试不能替代 Codec、网络和掉电恢复证据。
+
 ## 12. 变更与评审清单
 
 引入或更换 Adapter 前，Design/PR 必须回答：
@@ -233,6 +237,8 @@ Gateway 内部按能力选择微信、飞书或其他 Adapter：
 - Microsoft Azure Architecture Center, [Anti-Corruption Layer](https://learn.microsoft.com/en-us/azure/architecture/patterns/anti-corruption-layer)
 - Microsoft Azure Architecture Center, [Strangler Fig](https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig)
 - Espressif, [ESP-IDF 6.0.2 Build System](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-guides/build-system.html)
+- Espressif, [ESP-IDF 6.0.2 Unit Testing](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-guides/unit-tests.html)
+- CMake, [CTest command-line reference](https://cmake.org/cmake/help/latest/manual/ctest.1.html)
 - Google, [C++ Style Guide：File Names](https://google.github.io/styleguide/cppguide.html#File_Names)
 - GitHub Docs, [Creating a default community health file](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions/creating-a-default-community-health-file)
 - MADR, [Markdown Architectural Decision Records](https://adr.github.io/madr/)

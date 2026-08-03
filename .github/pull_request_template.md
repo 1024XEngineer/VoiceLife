@@ -2,7 +2,8 @@
 
 <!-- 这次完成了什么？希望 Reviewer 重点判断什么？ -->
 
-Closes #
+<!-- 阶段性交付使用 Refs #；只有本 PR 完成 Issue 全部验收时才改为 Closes #。 -->
+Refs #
 
 ## 变更
 
@@ -18,12 +19,19 @@ Closes #
 
 ## 验证
 
-- [ ] `./scripts/run_host_tests.sh`
-- [ ] `python3 scripts/firmware.py validate`
+- [ ] `./scripts/run_checks.sh`
 - [ ] ESP-IDF 对应 Profile 构建
 - [ ] 真机或外部服务验证（如适用）
 
 证据：
+
+### TDD 记录
+
+<!-- 行为没有变化时写“不涉及”。不要只写“补了测试”，要给出测试名和失败原因。 -->
+
+- RED：
+- GREEN：
+- REFACTOR：
 
 ## 风险与回退
 

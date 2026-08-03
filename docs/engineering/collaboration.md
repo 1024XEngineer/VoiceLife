@@ -1,6 +1,6 @@
 # VoiceLife 协同开发规范
 
-VoiceLife 使用 Milestone → Proposal/Design Issue → Coding PR → Review → Merge → Release 的可追踪流程。任何进入 `main` 的功能都要有业务场景、边界判断、自动验证和 Review 证据；紧急修复可以缩短文档，但不能绕过 Issue、测试和复盘。
+VoiceLife 采用稳定 `main` 和短任务分支，不维护长期共享的裸 `dev`。日常路径固定为 Milestone → Proposal/Design Issue → `dev/<issue>-<topic>` → Coding PR → Review → Merge → Release；任何进入 `main` 的行为变化都要留下测试和 Review 证据。
 
 ## 1. 工作对象和真相来源
 
@@ -28,21 +28,42 @@ Issue/PR 是协作和决策记录，代码、测试、Profile Schema 和接口�
 
 仓库提供四个 Issue Form。表单字段是最低信息，不限制作者补充更具体的证据。
 
-## 3. 分支和提交
+## 3. 分支、TDD 和提交
 
 分支从最新 `main` 创建：
 
 ```text
-<github-id>/<issue>-<short-name>
+dev/<issue>-<short-name>
 ```
 
-例如 `zhaoxingpeng/123-xrobot-adapter`。分支应短期存在；同一分支不要混入第二个 Issue。提交遵循 [Gitmoji 中文提交规范](./commit-convention.md)，并保证每个提交可以编译、测试和回退。
+例如 `dev/123-xrobot-adapter`。这里的 `dev/` 是任务分支命名空间，不是共享分支。分支应短期存在，同一分支不要混入第二个 Issue；合并后删除，不从旧任务分支继续开发下一项功能。
+
+任务分支必须以主仓库最新 `main` 为基线，并推送到个人 fork：
+
+```bash
+git fetch origin
+git switch -c dev/123-xrobot-adapter origin/main
+git push -u fork HEAD
+```
+
+这里的 `origin` 和 `fork` 是本仓库当前远端角色，判断依据始终是 URL，不是远端名字。禁止直接推送主仓库 `main`，也不要从个人 fork 中滞后的 `main` 开始任务。
+
+默认不建立 `develop` 或裸 `dev` 长期分支。它们会让未完成工作积压在一起，也会把一次发布变成大批量合并。只有两个以上任务确实需要联合验证时，才建立 `integration/<milestone>-<topic>`：各任务仍通过 PR 进入集成分支，联调完成后再由一个 PR 合回 `main`，随后删除集成分支。
+
+行为开发使用 Red → Green → Refactor：
+
+1. **RED**：从 Issue 验收条件写出失败测试，确认它是因为目标行为尚未实现而失败，不是环境或语法错误。
+2. **GREEN**：只写让当前测试通过的最小实现，同时运行相关回归测试。
+3. **REFACTOR**：整理命名、重复和边界，测试必须一直为绿。
+4. **FULL CHECK**：提交前运行 `./scripts/run_checks.sh`；硬件行为另附 Unity、pytest-embedded 或真机证据。
+
+为了让提交可检出和回退，仓库不要求保存一个编译失败的 RED commit。作者要在 PR 的 TDD 记录里写清测试名、RED 失败原因、GREEN 结果和重构范围。提交遵循 [Gitmoji 中文提交规范](./commit-convention.md)，每个提交仍应可编译、测试和回退。
 
 ## 4. PR 规则
 
 PR 开头先写结论和请求 Reviewer 判断的事项，再写背景。最低内容：
 
-- `Closes/Refs #Issue`；
+- 阶段性交付写 `Refs #Issue`；只有完成 Issue 全部验收时写 `Closes #Issue`；
 - 改了什么，以及明确没有改什么；
 - 是否改变 Port、Profile、数据模型、协议或依赖方向；
 - 自动测试、ESP-IDF 构建和真机证据；
@@ -52,6 +73,8 @@ PR 开头先写结论和请求 Reviewer 判断的事项，再写背景。最低�
 控制 PR 大小。结构移动、机械格式化、依赖升级和行为变化尽量拆开。大 PR 无法拆时，在正文给 Reviewer 一条明确阅读顺序。
 
 草稿 PR 可以用于提前对齐，但不能长期代替 Design Issue。没有验收标准、CI 失败或含真实凭据的 PR 不进入 Review。
+
+普通单一交付默认使用 Squash Merge，PR 标题必须符合仓库的中文 Gitmoji 提交规范。初始化架构、迁移工具等确有多笔独立审查价值时使用 Merge commit，保留每笔已通过检查的提交。日常不使用 Rebase Merge，避免提交重写后削弱 PR 边界；合并完成后删除个人 fork 上的任务分支。
 
 ## 5. Review 标准
 
@@ -85,6 +108,8 @@ Reviewer 先判断行为和边界，再看代码风格：
 - 纯 C++ 主机测试；
 - 组件依赖方向检查；
 - ESP-IDF 6.0.2 / ESP32-S3 构建。
+
+本地完整入口是 `./scripts/run_checks.sh`。开发中的单测可以用 `./scripts/run_host_tests.sh -R <test-name>` 缩小范围；不能因为局部测试通过就跳过提交前的完整门禁。
 
 涉及硬件的 PR 还要在正文记录板卡、固件 hash、操作步骤和结果。涉及外部服务的 PR 要区分 mock、沙箱和真实环境，不能把 mock 通过写成端到端通过。
 
@@ -121,9 +146,14 @@ CI 不使用未说明用途的 secret，历史遗留的 AI 变量也不得在新
 本规范在 2026-08-03 核对以下来源，并按训练营与嵌入式项目规模做了收敛：
 
 - GitHub Docs：[Setting guidelines for repository contributors](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions/setting-guidelines-for-repository-contributors)
+- GitHub Docs：[GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow)
 - GitHub Docs：[Syntax for issue forms](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms)
 - GitHub Docs：[Adding a security policy](https://docs.github.com/en/code-security/getting-started/adding-a-security-policy-to-your-repository)
+- GitHub Docs：[Using self-hosted runners in a workflow](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/use-in-a-workflow)
+- 七牛：[GitHub Actions 沙箱 Runner 迁移接入](http://las-wiki.qiniu.io/%E6%8C%87%E5%8D%97/GitHub-Actions-%E6%B2%99%E7%AE%B1-Runner-%E8%BF%81%E7%A7%BB%E6%8E%A5%E5%85%A5.md)
 - Google Engineering Practices：[The Standard of Code Review](https://google.github.io/eng-practices/review/reviewer/standard.html) 与 [Small CLs](https://google.github.io/eng-practices/review/developer/small-cls.html)
+- CMake：[CTest 命令行手册](https://cmake.org/cmake/help/latest/manual/ctest.1.html)
+- Espressif：[ESP-IDF 6.0.2 Unit Testing](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-guides/unit-tests.html)
 - [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
 - [Semantic Versioning 2.0.0](https://semver.org/)
 - [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
