@@ -1293,36 +1293,37 @@ Action（用户动作）
 
 #### 6.1 接口总览
 
-**业务 API**
+按部署边界分三类：**设备侧**（本地设备程序，NAT 后）与 **Action UI**（H5/小程序浏览器）的调用方在服务端进程之外，接口按已确定的 HTTP/SSE 契约交互；**服务端应用接口**（Koishi Plugin、Handler、Application、运维/bootstrap）在 Demo 单进程组合部署下直接调用应用方法或 Port、不经 HTTP。若未来跨出部署单元，再根据调用方与运行环境选择 HTTPS、RPC 或消息通道等 Port 适配器，不默认一律映射为 HTTP。
+
+**设备侧接口（跨进程，固定 HTTP/SSE）**
 
 | Method | Path | 说明 |
 | --- | --- | --- |
-| POST | `/v1/im/channel-accounts` | 创建通道账号 |
-| GET | `/v1/im/channel-accounts/{accountId}/health` | 查询 Koishi Bot/Adapter 健康状态 |
 | POST | `/v1/im/pairing-sessions` | 创建配对会话 |
 | GET | `/v1/im/pairing-sessions/{pairingSessionId}` | 查询配对状态 |
-| GET | `/v1/im/bindings` | 查询绑定 |
-| DELETE | `/v1/im/bindings/{bindingId}` | 解绑 |
+| POST | `/v1/im/schedule-receipts` | 提交日程操作回执（`ScheduleReceiptIntent`；URL 为项目补充约定） |
 | POST | `/v1/im/notifications` | 提交通知意图 |
-| GET | `/v1/im/deliveries/{deliveryId}` | 查询投递与回执 |
-| POST | `/v1/im/deliveries/{deliveryId}/retry` | 人工重试死信 |
-| POST | `/internal/v1/im/events` | 接收 NormalizedImEvent |
+| GET | `/v1/devices/{deviceId}/reminder-actions/stream` | 在强提醒有效窗口内建立临时 SSE |
+| POST | `/v1/devices/{deviceId}/reminder-actions/{commandId}/result` | 回传本地动作执行结果 |
 
-同进程部署时，VoiceLife Koishi Plugin 直接调用同一应用服务接口，不经过 HTTP。
-
-**Action UI**
+**Action UI（H5/小程序跨进程，HTTP）**
 
 | Method | Path | 说明 |
 | --- | --- | --- |
 | GET | `/voicelife/reminder-actions/{token}` | 展示 H5/小程序动作页 |
 | POST | `/voicelife/reminder-actions/{token}` | 执行统一提醒动作 |
 
-**本地设备动作通道**
+**服务端应用接口（Demo 单进程内直接调用）**
 
-| Method | Path | 说明 |
-| --- | --- | --- |
-| GET | `/v1/devices/{deviceId}/reminder-actions/stream` | 在强提醒有效窗口内建立临时 SSE |
-| POST | `/v1/devices/{deviceId}/reminder-actions/{commandId}/result` | 回传本地动作执行结果 |
+| 应用方法 | 说明 |
+| --- | --- |
+| `channels.register(command)` | 创建通道账号 |
+| `channels.health(accountId)` | 查询 Koishi Bot/Adapter 健康状态 |
+| `bindings.list(userId)` | 查询绑定 |
+| `bindings.unbind(bindingId)` | 解绑 |
+| `deliveries.find(deliveryId)` | 查询投递与回执 |
+| `deliveries.retryDeadLetter(deliveryId)` | 人工重试死信 |
+| `postEvent(event)` | 接收 `NormalizedImEvent` |
 
 **跨模块事件**
 
@@ -1335,69 +1336,96 @@ Action（用户动作）
 
 #### 6.2 关键接口参数
 
-**提交通知意图**
+`ScheduleReceiptIntent` 和 `NotificationIntent` 共用以下 HTTPS 传输约定：
 
-```http
-POST /v1/im/notifications
-Idempotency-Key: reminder-occurrence-8899
-```
+- 请求体使用 `application/json`，字段使用 camelCase，时间使用带时区的 ISO 8601 字符串
+- `Authorization: Bearer <device-token>` 必须存在，Token 中的 `deviceId` 必须与请求体中的设备一致
+- `Idempotency-Key` 必须存在；日程回执取 `eventId`，通知意图取 `businessEventId`
+- 首次受理或幂等重放均返回 `202 Accepted`；相同幂等键与不同请求体冲突时返回 `409 Conflict`
+- 缺少必填字段或格式错误返回 `400 Bad Request`，认证失败返回 `401 Unauthorized`，Token 与设备不匹配返回 `403 Forbidden`
 
-```json
-{
-  "businessEventId": "evt-reminder-8899",
-  "correlationId": "corr-reminder-8899",
-  "kind": "reminder_due",
-  "recipient": { "userId": "user-01", "deviceId": "xiaozhi-demo-01" },
-  "content": { "title": "喝水", "body": "该喝水了" },
-  "actions": [
-    { "kind": "command", "type": "acknowledge", "label": "知道了" },
-    { "kind": "command", "type": "snooze", "label": "推迟 10 分钟", "params": { "minutes": 10 } }
-  ]
-}
-```
+以上共用约定仅适用于 `ScheduleReceiptIntent`（#### 3）和 `NotificationIntent`（#### 4）。配对接口（#### 1-2）、SSE 动作通道（#### 5）和 `ReminderActionResult`（#### 6）分别按各自条目定义认证、续传与幂等规则。Action UI（#### 7-8）使用 H5 Token。服务端应用接口（#### 9-15）在 Demo 单进程下由同进程组件直接调用、不经 HTTP。
 
-强提醒响应还需返回动作窗口：
+#### 1) 创建配对会话
 
-```json
-{
-  "businessEventId": "evt-reminder-8899",
-  "status": "accepted",
-  "deliveries": [
-    {
-      "deliveryId": "delivery-8899",
-      "bindingId": "binding-01",
-      "status": "pending"
-    }
-  ],
-  "actionStream": {
-    "reminderTriggerId": "rtg-9001",
-    "expiresAt": "2026-07-31T15:10:00+08:00"
-  }
-}
-```
+- **方法与路径**: `POST /v1/im/pairing-sessions`
+- **说明**: 创建配对会话，返回展示码 `displayCode`，供用户在 IM 侧发起绑定。
+- **认证**: `Authorization: Bearer <device-token>`，Token 绑定 `deviceId` 与入参 `deviceId` 一致。
+- **入参 (Body)**: `CreatePairingSessionCommand`
+  - `userId` (string, 可选): 内部用户 ID；可空，确认时再解析
+  - `deviceId` (string, 必填): 目标设备 ID
+  - `allowedPlatforms` (array, 可选): 允许绑定的平台枚举
+  - `expiresInMinutes` (number, 可选): 过期分钟数，默认 10
+- **出参 (Body)**: `{ session, displayCode }`
+  - `session` (object): `PairingSession`，含 `id`、`deviceId`、`status`（`pending`）、`expiresAt`、`createdAt`；`displayCodeHash`、`userId?`、`allowedPlatforms?` 依入参
+  - `displayCode` (string): 展示码明文，仅本次返回
 
-弱提醒不支持用户动作，因此不返回 `actionStream`。
+#### 2) 查询配对状态
 
-**临时 SSE 动作通道**
+- **方法与路径**: `GET /v1/im/pairing-sessions/{pairingSessionId}`
+- **说明**: 查询配对会话状态（`pending | confirmed | expired | cancelled`）。
+- **认证**: `Authorization: Bearer <device-token>`，仅可查询归属本设备的配对会话。
+- **入参 (Path)**:
+  - `pairingSessionId` (string, 必填)
+- **出参 (Body)**: `PairingSession`（不存在时返回 404）
 
-本地仅在 `reminder_type=strong` 且 Trigger 进入 `triggered` 状态后建立连接：
+#### 3) 提交日程操作回执
 
-```http
-GET /v1/devices/xiaozhi-01/reminder-actions/stream?reminderTriggerId=rtg-9001
-Accept: text/event-stream
-Authorization: Bearer <device-token>
-Last-Event-ID: action-1000
-```
+- **方法与路径**: `POST /v1/im/schedule-receipts`
+- **说明**: 本地 Schedule 事务提交成功后提交日程操作回执。Issue #65 仅确定“本地→IM HTTPS”，未指定 URL；本架构补充映射为 `POST /v1/im/schedule-receipts`，不改变 Issue 中的事件语义。
+- **入参 (Body)**: 完整 `ScheduleReceiptIntent`
+  - `schemaVersion` (string, 必填): 契约版本，当前为 `"1"`
+  - `eventId` (string, 必填): 日程操作事件唯一标识，同时作为幂等键
+  - `correlationId` (string, 必填): 关联追踪 ID
+  - `userId` (string, 可选): 内部用户 ID；未携带时，IM 根据已认证的 `deviceId` 查找有效绑定
+  - `deviceId` (string, 必填): 本地设备 ID
+  - `operationType` (string, 必填): `created | updated | cancelled | undone`
+  - `scheduleId` (number, 必填): 日程 ID
+  - `result` (string, 必填): `succeeded | failed`
+  - `summary` (string, 必填): 操作结果摘要
+  - `occurredAt` (string, 必填): 事件发生时间（ISO 8601）
+- **出参 (Body)**: `NotificationSubmission`
+  - `businessEventId` (string): 等于入参 `eventId`
+  - `status` (string): `accepted`
+  - `deliveries` (array, 必填): 每项 `{ deliveryId, bindingId, status: "pending" }`
 
-服务端响应头至少包括：
+#### 4) 提交通知意图
 
-```http
-Content-Type: text/event-stream
-Cache-Control: no-cache
-X-Accel-Buffering: no
-```
+- **方法与路径**: `POST /v1/im/notifications`
+- **说明**: 业务向 IM 提交语义化通知并获得动作有效期。端点在 Issue #65 中已定义，此处仅补充完整入参/出参，不重复定义接口。
+- **入参 (Body)**: 完整 `NotificationIntent`
+  - `schemaVersion` (string, 必填): 契约版本，当前为 `"1"`
+  - `businessEventId` (string, 必填): 提醒发生事件唯一标识，同时作为幂等键
+  - `correlationId` (string, 必填): 关联追踪 ID
+  - `kind` (string, 必填): `reminder_due`
+  - `recipient` (object, 必填): `{ userId, deviceId }`；设备侧通知无论 weak/strong 均必须携带 `deviceId`，并与设备 Token 绑定的设备一致
+  - `scheduleId` (number, 必填): 来源日程 ID
+  - `taskId` (string, 必填): 定时任务 ID
+  - `instanceId` (string, 必填): 定时任务实例 ID
+  - `reminderTriggerId` (string, 必填): 提醒触发 ID，关联 SSE 与 Result
+  - `reminderType` (string, 必填): `weak | strong`
+  - `content` (object, 必填): `{ title, body? }`
+  - `actions` (array, 必填): `{ kind: "command", type: acknowledge|snooze, label, params? }`；strong 非空，weak 为空数组
+  - `plannedAt` (string, 必填): 计划提醒时间（ISO 8601）
+  - `triggerAt` (string, 必填): 实际触发时间（ISO 8601）
+  - `occurredAt` (string, 必填): 事件发生时间（ISO 8601）
+- **出参 (Body)**: `NotificationSubmission`
+  - `businessEventId` (string)
+  - `status` (string): `accepted`
+  - `deliveries` (array, 必填): 每项 `{ deliveryId, bindingId, status: "pending" }`
+  - `actionStream` (object, 仅 strong 返回): `{ reminderTriggerId, expiresAt }`
+  - 弱提醒不支持用户动作，因此不返回 `actionStream`。
 
-命令事件：
+#### 5) 临时 SSE 动作通道
+
+- **方法与路径**: `GET /v1/devices/{deviceId}/reminder-actions/stream?reminderTriggerId={reminderTriggerId}`
+- **说明**: 在强提醒有效窗口内下发 `ReminderActionCommand`；弱提醒不得建立动作流。本地仅在 `reminder_type=strong` 且 Trigger 进入 `triggered` 状态后建立连接。
+- **入参 (Query/Headers)**:
+  - query: `reminderTriggerId` (string, 必填): 提醒触发 ID
+  - `Accept: text/event-stream`
+  - `Authorization: Bearer <device-token>` (必填)
+  - `Last-Event-ID` (可选): 断线续传游标；只是传输续接提示，不能代替业务 ACK
+- **出参 (Body)**: SSE 事件流；响应头至少 `Content-Type: text/event-stream`、`Cache-Control: no-cache`、`X-Accel-Buffering: no`。命令事件：
 
 ```text
 id: action-1001
@@ -1406,20 +1434,125 @@ data: {"commandId":"action-1001","operationId":"op-1001","reminderTriggerId":"rt
 
 ```
 
-其中 `commandId` 复用 Action ID，SSE `id` 与之相同。连接中断后，本地在有效期内携带 `Last-Event-ID` 重连。`Last-Event-ID` 只是传输续接提示，不能代替业务 ACK；在收到 `ReminderActionResult` 前，服务端可以重放同一未过期命令，本地必须用 `operationId` 幂等执行。
+`commandId` 复用 Action ID，SSE `id` 与之相同。连接中断后，本地在有效期内携带 `Last-Event-ID` 重连；在收到 `ReminderActionResult` 前，服务端可以重放同一未过期命令，本地必须用 `operationId` 幂等执行。SSE 是单向下行协议，禁止用它承载 `ReminderActionResult`。
 
-本地执行后通过 HTTPS 回传：
+#### 6) 回传动作执行结果
 
-```json
-{
-  "operationId": "op-1001",
-  "status": "succeeded",
-  "reminderTriggerId": "rtg-9001",
-  "nextTriggerAt": "2026-07-31T15:20:00+08:00"
-}
-```
+- **方法与路径**: `POST /v1/devices/{deviceId}/reminder-actions/{commandId}/result`
+- **说明**: 本地执行后回传 `ReminderActionResult`，服务端据此推进 Action 状态并关闭动作流。`deviceId`、`commandId` 来自路径，Body 不再重复。
+- **认证**: `Authorization: Bearer <device-token>`，Token 绑定 `deviceId` 与路径 `deviceId` 一致。
+- **入参 (Path/Body)**:
+  - path: `deviceId` (string)、`commandId` (string, 即 Action ID)
+  - Body 完整 `ReminderActionResult`:
+    - `schemaVersion` (string, 必填): 契约版本，当前为 `"1"`
+    - `operationId` (string, 必填): 关联命令的幂等 ID
+    - `status` (string, 必填): `succeeded | retryable_failed | failed | expired`
+    - `reminderTriggerId` (string, 必填)
+    - `nextTriggerAt` (string, 可选): snooze 成功时返回下次触发时间
+    - `errorCode` (string, 可选)
+    - `details` (object, 可选)
+    - `occurredAt` (string, 必填): 执行完成时间（ISO 8601）
+- **出参 (Body)**: 更新后的 Action 对象，含 `status` 与 `result`。
 
-SSE 是单向下行协议，禁止用它承载 `ReminderActionResult`。
+#### 7) 展示 H5 动作页
+
+- **方法与路径**: `GET /voicelife/reminder-actions/{token}`
+- **说明**: 展示 H5/小程序动作页，返回可用动作与有效期。
+- **入参 (Path)**:
+  - `token` (string, 必填): H5 Token
+- **出参 (Body)**: `ActionUiView`
+  - `actionId` (string)
+  - `actions` (array): 可用动作 `acknowledge | snooze`
+  - `expiresAt` (string): ISO 8601
+
+#### 8) 执行统一提醒动作
+
+- **方法与路径**: `POST /voicelife/reminder-actions/{token}`
+- **说明**: 从 H5 执行一个提醒动作，服务端验签后返回待下发的命令。
+- **入参 (Path/Body)**:
+  - path: `token` (string, 必填): H5 Token
+  - Body:
+    - `action` (string, 必填): `acknowledge | snooze`
+    - `params` (object, 可选): `{ minutes }`；`snooze` 必填
+- **出参 (Body)**: `ReminderActionCommand`
+
+#### 9) 创建通道账号
+
+- **接口形式**: 应用方法 `channels.register(command)`，Demo 单进程内由运维/bootstrap 直接调用（非 HTTP）。
+- **说明**: 注册一个 IM 通道账号（Koishi Bot/Adapter 的通道配置），供后续投递、配对与健康检查使用。
+- **入参 (参数)**: `RegisterChannelAccountCommand`
+  - `platform` (string, 必填): `wechat_official | wecom_aibot | feishu | dingtalk`
+  - `tenantExternalId` (string, 必填): 租户外部 ID
+  - `koishiBotId` (string, 必填): Koishi Bot 标识
+  - `credentialRef` (string, 必填): 凭据引用，不存明文 Secret
+  - `connectionMode` (string, 必填): `webhook | websocket | both`
+  - `capabilityConfig` (object, 可选): 通道能力配置
+- **出参**: `ChannelAccount`
+  - `id` (string): 通道账号 ID
+  - `platform` / `tenantExternalId` / `koishiBotId` / `credentialRef` / `connectionMode`: 同入参
+  - `capabilityConfig` (object, 可选)
+  - `status` (string): `active | disabled | error`
+  - `createdAt` / `updatedAt` (string): ISO 8601
+
+#### 10) 查询通道健康状态
+
+- **接口形式**: 应用方法 `channels.health(accountId)`，Demo 单进程内直接调用（非 HTTP）。
+- **说明**: 查询 Koishi Bot/Adapter 的实时健康状态。
+- **入参 (参数)**:
+  - `accountId` (string, 必填): 通道账号 ID
+- **出参**: `ChannelHealth`
+  - `accountId` (string)
+  - `status` (string): `healthy | degraded | unavailable`
+  - `checkedAt` (string): ISO 8601
+  - `detail` (string, 可选)
+
+#### 11) 查询绑定
+
+- **接口形式**: 应用方法 `bindings.list(userId)`，Demo 单进程内直接调用（非 HTTP）。
+- **说明**: 查询某用户的有效绑定列表。
+- **入参 (参数)**:
+  - `userId` (string, 必填): 内部用户 ID
+- **出参**: `ImBinding[]`
+  - 每项含 `id`、`userId`、`deviceId?`、`externalIdentityId`、`priority`、`status`（`active | unbound | revoked`）、`boundAt`、`unboundAt?`、`revokedAt?`
+
+#### 12) 解绑
+
+- **接口形式**: 应用方法 `bindings.unbind(bindingId)`，Demo 单进程内直接调用（非 HTTP）。
+- **说明**: 解绑指定绑定（`status → unbound`）。
+- **入参 (参数)**:
+  - `bindingId` (string, 必填)
+- **出参**: 无
+
+#### 13) 查询投递与回执
+
+- **接口形式**: 应用方法 `deliveries.find(deliveryId)`，Demo 单进程内直接调用（非 HTTP）。
+- **说明**: 查询一次投递的详情、attempts 与 receipts。
+- **入参 (参数)**:
+  - `deliveryId` (string, 必填)
+- **出参**: `DeliveryDetails`
+  - `delivery` (object): `Delivery`，含 `id`、`businessEventId`、`correlationId`、`bindingId`、`channelAccountId`、`kind`（`reminder_due | schedule_receipt`）、`semanticPayload`、`presentationType`、`status`、`externalMessageId?`、`expiresAt?`、`lastErrorCode?`、`createdAt`、`updatedAt`
+  - `attempts` (array): `DeliveryAttempt[]`，含 `id`、`deliveryId`、`attemptNo`、`requestId`、`renderedPayload`、`status`、`platformMessageId?`、`errorCode?`、`startedAt`、`completedAt?`
+  - `receipts` (array): `DeliveryReceipt[]`，含 `id`、`deliveryId`、`attemptId?`、`stage`（`delivered | failed`）、`dedupeKey`、`externalEventId?`、`detail?`、`occurredAt`、`receivedAt`
+
+#### 14) 人工重试死信
+
+- **接口形式**: 应用方法 `deliveries.retryDeadLetter(deliveryId)`，Demo 单进程内直接调用（非 HTTP）。
+- **说明**: 对 `dead_letter` / `permanent_failed` 投递手动重试，恢复为 `pending`。
+- **入参 (参数)**:
+  - `deliveryId` (string, 必填)
+- **出参**: `Delivery`（`status` 为 `pending`）
+
+#### 15) 内部标准事件入口
+
+- **接口形式**: 应用服务方法 `postEvent(event: NormalizedImEvent)`，Demo 单进程组合部署时由 VoiceLife Koishi Plugin 直接调用（非 HTTP）。
+- **说明**: 接收平台/适配器标准化后的入站事件 `NormalizedImEvent`，按 `type` 分发处理；重复事件幂等返回。
+- **入参 (参数)**: `NormalizedImEvent`（按 `type` 判别联合）
+  - 公共字段：`id`、`externalEventId`、`platform`、`channelAccountId`、`externalIdentityId?`、`occurredAt`
+  - `type: "message.received"` — `payload` (object): 平台消息体
+  - `type: "binding.requested"` — `payload`: `{ displayCode, externalUserId, userId?, displayName? }`
+  - `type: "delivery.updated"` — `payload`: `NormalizedDeliveryReceipt`，含 `externalEventId`、`channelAccountId`、`externalMessageId`、`attemptId?`、`dedupeKey`、`stage`（`delivered | failed`）、`occurredAt`、`platformCode?`、`detail?`
+  - `type: "action.triggered"` — `payload`: `{ token, action, params? }`
+- **出参**: `void`；`action.triggered` 时返回 `ReminderActionCommand`
 
 ### 7. 能力降级策略
 
