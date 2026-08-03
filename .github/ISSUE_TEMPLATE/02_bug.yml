@@ -1,0 +1,48 @@
+name: 缺陷报告
+description: 报告可复现的构建、运行、数据或协议问题
+title: "[Bug] "
+body:
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影响与结论
+      description: 谁受影响，严重到什么程度，是否需要立即停止发布？
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境
+      placeholder: |
+        commit / version:
+        Profile:
+        board:
+        ESP-IDF:
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 最小复现
+      description: 从干净状态开始，列出最少步骤和输入。
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: 期望与实际
+      placeholder: |
+        期望：
+        实际：
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 脱敏证据
+      description: 日志、截图或测试；请先移除凭据、用户日程和设备身份。
+  - type: textarea
+    id: regression
+    attributes:
+      label: 回归范围
+      description: 已知最后正常版本，以及修复后必须覆盖的场景。

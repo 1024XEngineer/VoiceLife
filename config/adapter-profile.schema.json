@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/1024XEngineer/XE6-15/config/adapter-profile.schema.json",
+  "title": "VoiceLife Adapter Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "target", "adapters", "sdkconfig"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*$" },
+    "target": { "enum": ["esp32s3"] },
+    "adapters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["audio", "speech", "storage", "im"],
+      "properties": {
+        "audio": { "$ref": "#/$defs/adapter" },
+        "speech": { "$ref": "#/$defs/adapter" },
+        "storage": { "$ref": "#/$defs/adapter" },
+        "im": { "$ref": "#/$defs/adapter" }
+      }
+    },
+    "sdkconfig": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^CONFIG_[A-Z0-9_]+=.+$" },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["driver", "capabilities"],
+      "properties": {
+        "driver": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*$" },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+          "uniqueItems": true
+        },
+        "configRef": { "type": "string", "pattern": "^(nvs|env|secret)://.+$" }
+      }
+    }
+  }
+}

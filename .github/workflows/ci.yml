@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-tests:
+    name: 主机测试与架构边界
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: 记录 Runner 环境
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner=${RUNNER_NAME} os=${RUNNER_OS} arch=${RUNNER_ARCH}"
+          cmake --version | head -n 1
+          python3 --version
+      - name: 检查提交描述
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/check_commit_message.py --range "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+      - name: 运行快速质量门禁
+        run: ./scripts/run_checks.sh
+
+  esp-idf-build:
+    name: ESP-IDF 6.0 / ESP32-S3
+    needs: host-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: 构建固件骨架
+        uses: espressif/esp-idf-ci-action@v1.2.0
+        with:
+          esp_idf_version: v6.0.2
+          target: esp32s3
+          path: .

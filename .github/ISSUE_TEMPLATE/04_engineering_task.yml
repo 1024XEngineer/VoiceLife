@@ -1,0 +1,28 @@
+name: 工程任务
+description: 工具、CI、依赖、文档或不改变产品范围的工程工作
+title: "[Engineering] "
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 目标结果
+      description: 完成后仓库具体多了什么能力或少了什么风险？
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 范围与非目标
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收与证据
+      description: 命令、CI、文档链接或其他可重复检查。
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: 风险和回退

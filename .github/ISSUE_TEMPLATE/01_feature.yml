@@ -1,0 +1,42 @@
+name: 功能与产品切片
+description: 提出一个有真实场景、范围和验收标准的功能
+title: "[Feature] "
+body:
+  - type: textarea
+    id: conclusion
+    attributes:
+      label: 结论与请求
+      description: 一两句话说明要解决什么问题，以及希望团队决定或交付什么。
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 用户与场景
+      description: 谁在什么时刻遇到什么问题？当前为什么不够？
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 本期范围
+      description: 分别写清做什么、不做什么。
+      placeholder: |
+        做：
+        -
+        不做：
+        -
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 使用 Given/When/Then 或同样可执行的方式描述。
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 依赖与风险
+      description: 关联 Proposal/Design、外部服务、硬件和未确认事项。
