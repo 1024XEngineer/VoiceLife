@@ -36,12 +36,26 @@ ToolDefinition EchoDefinition(std::string name = "voicelife.test.echo") {
 ToolDefinition DefaultEchoDefinition() {
     auto definition = EchoDefinition("voicelife.test.default-echo");
     definition.input.front().required = false;
-    definition.input.front().default_value = "default";
+    definition.input.front().default_value = std::string("default");
     return definition;
 }
 
+ToolDefinition IntegerDefinition() {
+    return {
+        .name = "voicelife.test.integer",
+        .description = "读取整数",
+        .input = {ToolInputField{
+            .name = "value",
+            .type = ToolInputType::kInteger,
+            .required = true,
+            .default_value = std::nullopt,
+            .description = "整数值",
+        }},
+    };
+}
+
 ToolResult OkResult(const ToolCall& call) {
-    return {.status = Status::Ok(), .output = {{"echo", call.arguments.at("text")}}};
+    return {.status = Status::Ok(), .output = {{"echo", std::get<std::string>(call.arguments.at("text"))}}};
 }
 
 }  // namespace
@@ -101,6 +115,18 @@ int main() {
         .arguments = {},
     });
     Check(default_result.status.ok() && default_result.output.at("echo") == "default", "Gateway 应补齐默认参数");
+
+    Check(gateway.register_tool(IntegerDefinition(), [](const ToolCall& call) {
+              return ToolResult{.status = Status::Ok(),
+                                .output = {{"value", std::to_string(std::get<int64_t>(call.arguments.at("value")))}}};
+          }).ok(),
+          "应能注册整数参数工具");
+    Check(gateway.call({.request_id = "request-5", .name = "voicelife.test.integer", .arguments = {{"value", int64_t{7}}}})
+              .status.ok(),
+          "整数参数应通过类型校验");
+    Check(gateway.call({.request_id = "request-6", .name = "voicelife.test.integer", .arguments = {{"value", std::string("7")}}})
+              .status.code == ErrorCode::kInvalidArgument,
+          "字符串不能伪装成整数参数");
 
     Check(gateway.call({.request_id = "", .name = "voicelife.test.echo", .arguments = {}}).status.code ==
               ErrorCode::kInvalidArgument,

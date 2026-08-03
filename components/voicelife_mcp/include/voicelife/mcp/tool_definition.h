@@ -9,9 +9,11 @@
 
 namespace voicelife::mcp {
 
-// 当前字符串参数契约支持的数据类型，用于生成发送给模型的输入 Schema。
+// 当前工具参数契约支持的数据类型，用于生成发送给模型的输入 Schema。
 enum class ToolInputType {
     kString,
+    kInteger,
+    kBoolean,
 };
 
 // 单个工具入参的声明信息。
@@ -19,7 +21,7 @@ struct ToolInputField {
     std::string name;
     ToolInputType type = ToolInputType::kString;
     bool required = false;
-    std::optional<std::string> default_value;
+    std::optional<ToolValue> default_value;
     std::string description;
 };
 
