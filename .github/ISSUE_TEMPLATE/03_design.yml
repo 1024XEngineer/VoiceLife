@@ -1,0 +1,45 @@
+name: 架构与详细设计
+description: 在编码前决定边界、接口、数据、迁移或技术风险
+title: "[Design] "
+body:
+  - type: textarea
+    id: decision
+    attributes:
+      label: 建议结论
+      description: 先写选择和需要 Reviewer 决定的事项。
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 场景与约束
+      description: 真实质量场景、现状证据、硬件或时间约束。
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: 方案与取舍
+      description: 至少说明所选方案和一个合理备选，为什么不选。
+    validations:
+      required: true
+  - type: textarea
+    id: contracts
+    attributes:
+      label: 边界、接口与数据
+      description: Port、所有权、幂等、原子性、错误、版本和依赖方向。
+    validations:
+      required: true
+  - type: textarea
+    id: migration
+    attributes:
+      label: 验证、迁移与回退
+      description: 测试层级、资源预算、兼容窗口和失败时怎么回退。
+    validations:
+      required: true
+  - type: checkboxes
+    id: adr
+    attributes:
+      label: ADR 判断
+      options:
+        - label: 如果这是长期且跨模块的决定，合并时会补 ADR
