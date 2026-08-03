@@ -10,6 +10,7 @@ enum class ErrorCode {
     kNone = 0,
     kInvalidArgument,
     kNotFound,
+    kAlreadyExists,
     kConflict,
     kUnavailable,
     kInternal,
