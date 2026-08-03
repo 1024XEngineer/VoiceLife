@@ -47,16 +47,20 @@ VoiceSession -> Application / MCP（只交稳定语义）
 
 旧 MVP 自带的 `audio/README.md` 写的是低成本 AEC 配置，但同一份源码实际创建的是 `AFE_MODE_HIGH_PERF` 和 `AEC_MODE_VOIP_HIGH_PERF`。这类说明与代码不一致的参数不进入新 Profile；迁移 PR 必须记录上游 commit、实际宏值、最低空闲堆和丢帧结果，以实测选择配置。
 
-### 2.2 当前立创板的迁移输入
+### 2.2 立创 Codec 板与当前验证板必须分开
 
-旧 MVP 的 `firmware/main/boards/lckfb/szpi-esp32s3/config.h` 和 `lichuang_dev_board.cc` 给出了当前实板的可核对输入：I2S `MCLK=38`、`WS=13`、`BCLK=14`、`DIN=12`、`DOUT=45`；Codec I2C `SDA=1`、`SCL=2`；ES8311 使用默认地址，ES7210 地址为 `0x82`，音频电源/功放由 PCA9557 `0x19` 控制。旧板级源码还把原生输入/输出采样率设为 24 kHz，并启用了物理 MIC1 增益和 MIC3 播放 reference。
+旧 MVP 的 `firmware/main/boards/lckfb/szpi-esp32s3/config.h` 和 `lichuang_dev_board.cc` 给出了 **目标 Lichuang Codec 板** 的迁移输入：I2S `MCLK=38`、`WS=13`、`BCLK=14`、`DIN=12`、`DOUT=45`；Codec I2C `SDA=1`、`SCL=2`；ES8311 使用默认地址，ES7210 地址为 `0x82`，音频电源/功放由 PCA9557 `0x19` 控制。旧板级源码还把原生输入/输出采样率设为 24 kHz，并启用了物理 MIC1 增益和 MIC3 播放 reference。
 
-这些值现在只作为 `esp32s3-lichuang` Adapter/Profile 的输入，不进入 `VoiceSession`，也不等于新工程已经能录放：新工程尚未迁移 `BoxAudioCodec`、PCA9557 控制和 I2C 初始化，当前 `esp32s3-dev` 仍是 scaffold。实现顺序固定为：
+本次连接的实板并不是上述 Lichuang Codec 板，而是原固件报告 `SKU=voicelife-pcb`、`NoAudioCodec` 的纯 I2S 板，其 GPIO/拓扑与小智 `bread-compact-wifi` Profile 一致：麦克风 `SCK=5/WS=4/DIN=6`，扬声器 `BCLK=15/LRCK=16/DOUT=7`，显示屏另占 I2C `SDA=41/SCL=42`。在这块板上运行 Lichuang Profile 的真实日志为 `I2C=1 ES8311=0 ES7210=0 PCA9557=0 I2S_READY=1 I2S_STARTED=1 write=480 read=480`。这不是 Codec 连线失败的证据，而是板型与 Profile 不匹配的证据；不能为取得绿色结果而放宽地址或强行打开功放。
+
+这些值现在只作为 `esp32s3-lichuang` Adapter/Profile 的输入，不进入 `VoiceSession`，也不等于新工程已经能录放：新工程尚未迁移 `BoxAudioCodec`、PCA9557 控制和 I2C 初始化，当前 `esp32s3-dev` 仍是 scaffold。`bread-compact-wifi` 必须另建纯 I2S Profile，不能复用 Codec 地址字段。实现顺序固定为：
 
 1. 先用无 AFE 的 PCM I2S 读写验证 pin/slot/DMA/最低堆；
 2. 再迁移 ES8311/ES7210/PCA9557 的最小控制面并做 codec 寄存器回读；
 3. 录放通过后才验证 24 kHz 原生链路到 16 kHz Linx 上行的重采样；
 4. 最后根据真实 playback reference 决定是否打开 AEC/Wake，不能从旧 MVP 的 `CONFIG_USE_DEVICE_AEC` 直接继承能力。
+
+本轮 #109 先落下 `voicelife_audio_esp` 的第一阶段：`AudioBoardProfile` 只保存板级 GPIO、I2C 地址、设备侧 PCM 格式和 DMA 预算；`Esp32s3AudioProbe` 在专用 `esp32s3-lichuang-audio-probe` Profile 下验证 I2C ACK、I2S channel 生命周期和有限的读写 smoke。探针不会初始化 ES8311/ES7210 寄存器，也不会打开 PCA9557 的功放位，因此通过探针只能说明连线和 DMA 入口可用，不能替代 Codec 录放验收。主机测试明确拒绝把主机当成真机探针。
 
 来源与当前状态见 [旧 MVP 迁移入口](./xiaozhi-migration.md)、[Linx 接入矩阵](../../research/voice-module-portability-20260804/sources/12_linx_current_access_matrix.md)、[ESP-IDF 6.0.2 I2S 边界](../../research/voice-module-portability-20260804/sources/13_esp_idf_i2s_6_0_2.md) 和 [跨板能力矩阵](../../research/voice-module-portability-20260804/sources/14_cross_board_audio_capabilities.md)。
 
@@ -88,8 +92,8 @@ PR 只能声明已经拿到证据的层级。#107 已完成第 1 层、ESP-IDF �
 
 | Port | 责任 | ESP32-S3 首个实现 | 其他实现策略 |
 | --- | --- | --- | --- |
-| `AudioInputPort` | 绑定采集 sink、打开输入、开始/停止采集、关闭 | ESP-IDF I2S + AFE/Wake Adapter | Zephyr I2S、厂商 HAL，先做能力探针 |
-| `AudioOutputPort` | 接收解码帧、刷新缓冲、关闭 | ESP-IDF I2S/DAC Adapter | 各板 Codec/扬声器驱动 |
+| `AudioInputPort` | 绑定采集 sink、打开输入、开始/停止采集、关闭 | ESP32-S3 PCM/I2S Adapter（先探针，后 Codec） | Zephyr I2S、厂商 HAL，先做能力探针 |
+| `AudioOutputPort` | 接收解码帧、刷新缓冲、关闭 | ESP32-S3 PCM/I2S Adapter（先探针，后 Codec） | 各板 Codec/扬声器驱动 |
 | `VoiceTransportPort` | 连接、文本帧、二进制音频帧、关闭 | TLS WebSocket Adapter | MQTT/UDP 仅在契约满足时接入 |
 | `CodecStrategy` | PCM/Opus 编解码 | 小智 Opus 参数迁移 | PCM 直通或其他硬件 Codec |
 | `BoundedAudioFrameQueue` | 固定容量、generation 隔离、满载策略和水位统计 | FreeRTOS queue/deque Adapter | Zephyr/NuttX/主机实现，必须复用同一契约 |
@@ -185,7 +189,7 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 - `WebSocketFragmentAssembler` 在主机和 ESP32-S3 共用，处理 text/binary/continuation、非法 offset、消息大小上限、连接关闭清理和 generation 隔离；完整消息才交给 `LinxTransportSink`。
 - Transport 显式上报 connected/disconnected；Provider 在每次 connected 后发送一次 hello。超时、未配置的编码变化或 Transport error 都以 `Status`/`VoiceEvent` 返回，不把半连接状态交给 `VoiceSession`。
 
-这层现在是“可构建、可单测、已完成受控启动、未完成云端闭环”的状态。物理板身份、16 MB Flash、8 MB PSRAM、双 OTA 与数据分区已经在 115200 下读取并备份；新语音固件只写入过 `ota_1@0x410000`，启动成功后已恢复 `otadata` 并确认原固件从 `ota_0` 启动。真实 Linx 凭据、WSS、ASR、TTS 和 I2S/AFE/Opus 仍是下一步。详细守则见 [ESP32-S3 实板变更与恢复](../engineering/esp32-hardware-validation.md)。
+这层现在是“可构建、可单测、已完成受控启动、音频只完成探针骨架、未完成云端闭环”的状态。物理板身份、16 MB Flash、8 MB PSRAM、双 OTA 与数据分区已经在 115200 下读取并备份；新语音固件只写入过 `ota_1@0x410000`，启动成功后已恢复 `otadata` 并确认原固件从 `ota_0` 启动。真实 Linx 凭据、WSS、ASR、TTS、Codec 录放、AFE 和 Opus 仍是下一步。详细守则见 [ESP32-S3 实板变更与恢复](../engineering/esp32-hardware-validation.md)。
 
 ## 5. 小智迁移边界
 

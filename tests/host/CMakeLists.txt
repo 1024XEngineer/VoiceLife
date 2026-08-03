@@ -82,6 +82,10 @@ target_link_libraries(linx_esp PUBLIC contracts linx)
 add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/storage_protocol.cc")
 target_link_libraries(storage_sqlite PUBLIC contracts)
+add_voicelife_library(audio_esp voicelife_audio_esp
+    "${ROOT_DIR}/components/voicelife_audio_esp/src/audio_board_profile.cc"
+    "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_audio_probe.cc")
+target_link_libraries(audio_esp PUBLIC contracts voice)
 
 enable_testing()
 
@@ -152,6 +156,10 @@ target_link_libraries(linx_provider_contract_test PRIVATE linx)
 add_voicelife_test(linx_esp_transport_contract_test "unit;voice;linx;esp;contract"
     linx_esp_transport_contract_test.cc)
 target_link_libraries(linx_esp_transport_contract_test PRIVATE linx_esp)
+
+add_voicelife_test(audio_board_profile_contract_test "unit;voice;audio;esp;contract"
+    audio_board_profile_contract_test.cc)
+target_link_libraries(audio_board_profile_contract_test PRIVATE audio_esp)
 
 add_voicelife_test(im_gateway_contract_test "unit;im" im_gateway_contract_test.cc)
 target_compile_definitions(im_gateway_contract_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")

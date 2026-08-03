@@ -47,22 +47,24 @@
 
 ## 5. 已完成的 ESP32-S3 受控启动验证
 
-2026-08-04 在 `/dev/cu.usbmodem5A840116301` 以 115200 完成一次可回退验证：
+2026-08-04 在 `/dev/cu.usbmodem5A840116301` 以 115200 完成一次可回退验证。原固件日志报告 `SKU=voicelife-pcb`、`NoAudioCodec`，其 GPIO/拓扑与小智 `bread-compact-wifi` Profile 一致；这不是 Lichuang ES8311/ES7210 Codec 板：
 
 - 设备为 ESP32-S3 QFN56 revision v0.2，16 MB Flash、8 MB Embedded PSRAM；真实分区表与既有快照一致。
-- 构建产物 `voicelife.bin` 为 172480 bytes（`0x2a1c0`，SHA-256 `6ecbd3c32ab3ba13817ebf68acbc790141d4fa65616d85d283331fac68892c69`），只写入 `ota_1@0x410000`，未覆盖 bootloader、分区表、`nvs`、`assets` 或 `voicelife`。
-- 新固件从 `ota_1` 真实启动，串口确认 `Project name: voicelife`、`App version: 0.1.0` 和 Runtime 启动日志。
+- 构建产物 `voicelife.bin` 为 222320 bytes（`0x36470`，SHA-256 `79ec0f3d81a622a24a4484943efe823665bd4ce5739ad8ec0b27671b7eb7f1c4`），只写入 `ota_1@0x410000`，未覆盖 bootloader、分区表、`nvs`、`assets` 或 `voicelife`。
+- OTA 镜像回读 222320 B，与构建产物逐字节一致；`otadata` 写入前哈希为 `8ba3b110139f45443d4f268d1a3373ef99a1718b71d51664531b83ee2d4b91a3`，恢复后逐字节一致。
+- 新固件从 `ota_1` 真实启动，串口确认 `VoiceLifeRuntime: 音频探针`、`VoiceLife 架构主干已启动`、`I2S_READY=1`、`I2S_STARTED=1`、`write=480`、`read=480`。
+- 同一串口日志确认 `ES8311=0`、`ES7210=0`、`PCA9557=0`；这符合当前 `bread-compact-wifi` 的 `NoAudioCodec` 板型，不构成 Lichuang Codec 通过证据。
 - 测试结束恢复原 `otadata`，再次启动确认原固件 `xiaozhi 2.4.0` 从 `ota_0` 运行；SQLite 数据仍可加载 7 个事件、8 个提醒、0 条笔记。
-- 本次只证明分区兼容、写入校验、启动和恢复；没有把启动日志当成 WSS、ASR、TTS 或 I2S 音频闭环证据。
+- 本次证明了分区兼容、写入校验、启动恢复和纯 I2S DMA smoke；没有把启动日志当成 WSS、ASR、TTS、Codec 录放或物理音频闭环证据。
 - 本次启动 smoke 未采集最低空闲堆统计；该项随真实 Transport/音频链路接入补测。
 
-ESP-IDF 6.0.2 自带的 `otatool.py write_ota_partition` 在本次写入阶段触发参数错误：`_write_ota_partition() got an unexpected keyword argument 'input'`。在确认目标地址、镜像大小和备份完整后，使用 esptool 115200、显式地址 `0x410000` 写入并回读校验作为回退路径：
+ESP-IDF 6.0.2 自带的 `otatool.py` 会调用旧式连字符子命令（如 `read-flash`），与本机 esptool 4.12 的下划线命令不兼容。确认目标地址、镜像大小和备份完整后，本次使用 esptool 115200、显式地址 `0x410000` 写入并回读校验作为回退路径：
 
 ```bash
 python -m esptool --chip esp32s3 -p /dev/cu.usbmodemXXXX -b 115200 \
-  write-flash 0x410000 build/esp32s3-dev/voicelife.bin
+  write_flash 0x410000 build/esp32s3-lichuang-audio-probe/voicelife.bin
 python -m esptool --chip esp32s3 -p /dev/cu.usbmodemXXXX -b 115200 \
-  read-flash 0x410000 0x2a1c0 /tmp/voicelife-ota1-readback.bin
+  read_flash 0x410000 0x36470 /tmp/voicelife-ota1-readback.bin
 shasum -a 256 /tmp/voicelife-ota1-readback.bin
 ```
 

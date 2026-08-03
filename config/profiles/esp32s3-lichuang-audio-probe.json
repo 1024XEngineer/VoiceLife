@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "esp32s3-lichuang-audio-probe",
+  "target": "esp32s3",
+  "adapters": {
+    "audio": {
+      "driver": "esp32s3-pcm-probe",
+      "capabilities": ["pcm-probe"],
+      "configRef": "env://VOICELIFE_AUDIO_PROFILE"
+    },
+    "speech": {
+      "driver": "scaffold",
+      "capabilities": []
+    },
+    "storage": {
+      "driver": "memory",
+      "capabilities": ["atomic-calendar-write"]
+    },
+    "im": {
+      "driver": "disabled",
+      "capabilities": []
+    }
+  },
+  "sdkconfig": [
+    "CONFIG_LOG_DEFAULT_LEVEL_INFO=y",
+    "CONFIG_VOICELIFE_AUDIO_PROBE=y"
+  ]
+}

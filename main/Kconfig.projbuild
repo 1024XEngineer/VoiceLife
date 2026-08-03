@@ -1,0 +1,11 @@
+menu "VoiceLife"
+
+config VOICELIFE_AUDIO_PROBE
+    bool "Enable ESP32-S3 audio wiring probe"
+    default n
+    help
+        Run the bounded I2C address and I2S DMA probe for the dedicated
+        esp32s3-lichuang-audio-probe profile. This does not initialize codec
+        registers or enable the speaker power amplifier.
+
+endmenu
