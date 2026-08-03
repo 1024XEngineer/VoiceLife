@@ -1,7 +1,7 @@
 # 语音模块子架构
 
 一句话结论：VoiceLife 的语音模块采用“实时音频数据面 + 会话控制面 + Provider 防腐层”的三段式结构，ESP32-S3 是本期唯一主验证平台，Linx XRobot WebSocket 是首个真实 Provider，小智协议作为可回退迁移来源。
-下一步动作：先合并 Port、状态和契约测试骨架，再实现 ESP32-S3 的 I2S/AFE、Opus/PCM、Linx WebSocket 和真机重连；其他 MCU 只进入 Profile 与能力调研，不提前宣称可用。
+下一步动作：按 TDD 实现 ESP32-S3 的 PCM I2S 数据面，再接入已核对的 Codec/PCA9557 板级控制，最后才打开 AFE、Opus 和真实 Linx 云端闭环；其他 MCU 只进入 Profile 与能力调研，不提前宣称可用。
 
 ## 1. 为什么单独拆语音
 
@@ -47,7 +47,20 @@ VoiceSession -> Application / MCP（只交稳定语义）
 
 旧 MVP 自带的 `audio/README.md` 写的是低成本 AEC 配置，但同一份源码实际创建的是 `AFE_MODE_HIGH_PERF` 和 `AEC_MODE_VOIP_HIGH_PERF`。这类说明与代码不一致的参数不进入新 Profile；迁移 PR 必须记录上游 commit、实际宏值、最低空闲堆和丢帧结果，以实测选择配置。
 
-### 2.2 证据不能跨层复用
+### 2.2 当前立创板的迁移输入
+
+旧 MVP 的 `firmware/main/boards/lckfb/szpi-esp32s3/config.h` 和 `lichuang_dev_board.cc` 给出了当前实板的可核对输入：I2S `MCLK=38`、`WS=13`、`BCLK=14`、`DIN=12`、`DOUT=45`；Codec I2C `SDA=1`、`SCL=2`；ES8311 使用默认地址，ES7210 地址为 `0x82`，音频电源/功放由 PCA9557 `0x19` 控制。旧板级源码还把原生输入/输出采样率设为 24 kHz，并启用了物理 MIC1 增益和 MIC3 播放 reference。
+
+这些值现在只作为 `esp32s3-lichuang` Adapter/Profile 的输入，不进入 `VoiceSession`，也不等于新工程已经能录放：新工程尚未迁移 `BoxAudioCodec`、PCA9557 控制和 I2C 初始化，当前 `esp32s3-dev` 仍是 scaffold。实现顺序固定为：
+
+1. 先用无 AFE 的 PCM I2S 读写验证 pin/slot/DMA/最低堆；
+2. 再迁移 ES8311/ES7210/PCA9557 的最小控制面并做 codec 寄存器回读；
+3. 录放通过后才验证 24 kHz 原生链路到 16 kHz Linx 上行的重采样；
+4. 最后根据真实 playback reference 决定是否打开 AEC/Wake，不能从旧 MVP 的 `CONFIG_USE_DEVICE_AEC` 直接继承能力。
+
+来源与当前状态见 [旧 MVP 迁移入口](./xiaozhi-migration.md)、[Linx 接入矩阵](../../research/voice-module-portability-20260804/sources/12_linx_current_access_matrix.md)、[ESP-IDF 6.0.2 I2S 边界](../../research/voice-module-portability-20260804/sources/13_esp_idf_i2s_6_0_2.md) 和 [跨板能力矩阵](../../research/voice-module-portability-20260804/sources/14_cross_board_audio_capabilities.md)。
+
+### 2.3 证据不能跨层复用
 
 旧版确定性 PCM 协议测试已经跑通过 `hello -> STT -> ToolCall -> TTS`，也验证过独立的提醒播报和重启恢复；这说明协议、工具和存储链路可以工作。它不等于物理麦克风闭环已经稳定：历史自动化记录中存在“Mac 合成语音未被板载麦克风采集，未产生 ASR”的失败，另一些通过记录也明确注明未执行新的物理麦克风测试。
 
@@ -137,7 +150,7 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 - 音频二进制帧支持 OPUS 与 PCM。设备 hello 声明上行偏好；服务端 hello 返回下行播放参数，可能是 16/24 kHz 和 20/40/60 ms。Provider 保留上行格式，把下行结果写入 `VoiceAudioFormats.playback`，`VoiceSession` 在 hello 后才打开音频端口。
 - `listen(start|stop|detect)`、`stt`、`tts(start|sentence_start|stop)`、`abort` 和 MCP 工具消息均先在 Adapter 映射为 `VoiceEvent` 或 `ToolCall`。
 - hello 超时默认 10 秒；异常断线关闭音频发送通道并失效旧 generation。底层 WebSocket 自动重连只恢复传输，Provider 还要对每次新的物理连接补发且只补发一次 hello；hello 完成前不得发送音频。当前只接受服务端保持相同编码，PCM ↔ Opus 变化仍须显式 Codec Strategy，不能静默转码。重连时若下行采样率、声道、位深或帧长变化，Provider 上报错误并让会话保持 `STARTING`，要求上层 `Stop` 后重新 `Start`，当前不做静默 `AudioOutput` 重配置。
-- Linx 的 MQTT 页面在 2026-08-04 仍标记“待补充”。架构保留 Transport Port，不实现也不宣称 MQTT 可用。
+- Linx 官方文档仓库的 `MQTT.md` 在 2026-08-04 仍标记“待补充”，当前平台目录也没有独立的 HTTP/UDP 设备接入正文。架构保留 Transport Port，不实现也不宣称 MQTT/HTTP/UDP 可用；旧 MVP 的 MQTT + UDP 只能作为小智迁移参考。
 
 协议字段不进入 `VoiceSession`。Provider 负责版本、字段类型、最大消息长度、session 绑定和错误码映射；核心只看到 `Status`、`AudioFrame` 和 `VoiceEvent`。
 
@@ -159,6 +172,8 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 - [Linx WebSocket 协议](https://linx.qiniu.com/docs/xrobot/platform/websocket)
 - [Linx 开源文档仓库](https://github.com/qiniu/Xrobot-docs/blob/main/docs/xrobot/platform/websocket.md)
 - [Linx 小智固件接入指南](https://linx.qiniu.com/docs/xrobot/guide/xiaozhi-firmware)
+- [Linx 当前平台目录与 MQTT 反证](../../research/voice-module-portability-20260804/sources/12_linx_current_access_matrix.md)
+- [ESP-IDF 6.0.2 I2S 当前边界](../../research/voice-module-portability-20260804/sources/13_esp_idf_i2s_6_0_2.md)
 
 ### 4.2 ESP-IDF Transport 当前实现
 
@@ -211,13 +226,15 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 
 | 板卡 | 当前判断 | 需要补证据 |
 | --- | --- | --- |
-| ESP32-C3/C6 | 可作为低资源 Wi-Fi 对照，不替代 S3 主路径 | I2S/PSRAM/AEC/Wake 能力和 Opus 资源预算 |
+| ESP32-C3/C6 | 可作为低资源 Wi-Fi 对照，不替代 S3 主路径 | I2S/PDM 差异、PSRAM/AEC/Wake 能力和 Opus 资源预算 |
 | ESP32-P4 | 适合高资源音频和视觉扩展 | 音频驱动、功耗和 SDK 版本矩阵 |
 | RP2350 Pico 2 | 可验证无 Wi-Fi MCU 的音频/存储边界 | 外部网络协处理器、共享 XIP 写擦与 RTOS |
 | STM32H747/GIGA R1 | 适合 Zephyr/HAL 适配器实验 | I2S、网络模块、板级断电和 Codec |
 | nRF5340 DK | 适合低功耗/低资源边界 | Opus 体积、RAM 峰值、外部网络与音频输入 |
 
 这些候选均不是当前语音支持声明。ESP32-S3 的易用性、可刷写、可回退和真实音频证据优先于扩展板卡数量。
+
+能力矩阵和五步准入顺序见 [跨板音频能力矩阵](../../research/voice-module-portability-20260804/sources/14_cross_board_audio_capabilities.md)。芯片文档证明外设能力，不能替代某块板的 Codec、功放、引脚和声学布局实测。
 
 ## 8. TDD 验收
 

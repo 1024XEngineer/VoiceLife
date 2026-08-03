@@ -10,3 +10,6 @@ id,title,url,retrieved,type,credibility,used_for
 09,旧 MVP AudioService,local:/Users/mac/Desktop/project/voicelife-pcb-native-mvp/firmware/main/audio/audio_service.cc,2026-08-04,local implementation evidence,high,实测迁移约束和反例
 10,旧 MVP AFE engine,local:/Users/mac/Desktop/project/voicelife-pcb-native-mvp/firmware/main/audio/engines/afe_audio_engine.cc,2026-08-04,local implementation evidence,high,AFE共享和迟到fetch处理
 11,旧 MVP wake cache,local:/Users/mac/Desktop/project/voicelife-pcb-native-mvp/firmware/main/audio/wake_words/wake_word_audio_cache.cc,2026-08-04,local implementation evidence,high,固定容量PSRAM环形缓冲
+12,Linx 当前设备接入目录,https://api.github.com/repos/qiniu/Xrobot-docs/git/trees/main?recursive=1,2026-08-04,primary vendor repository index,high,MQTT/HTTP/UDP公开资料核对与反证
+13,ESP-IDF 6.0.2 I2S 官方文档,https://raw.githubusercontent.com/espressif/esp-idf/v6.0.2/docs/en/api-reference/peripherals/i2s.rst,2026-08-04,primary vendor documentation,high,S3的PDM/DMA/PM/通道生命周期边界
+14,ESP32跨板音频能力矩阵,https://raw.githubusercontent.com/espressif/esp-idf/v6.0.2/docs/en/api-reference/peripherals/i2s.rst,2026-08-04,primary vendor documentation,medium,C3/C6/S3/P4准入矩阵
