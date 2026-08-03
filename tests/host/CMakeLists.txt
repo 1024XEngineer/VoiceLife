@@ -30,6 +30,9 @@ target_link_libraries(mcp PUBLIC contracts)
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
 target_link_libraries(voice PUBLIC contracts)
+add_voicelife_library(storage_sqlite voicelife_storage_sqlite
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/storage_protocol.cc")
+target_link_libraries(storage_sqlite PUBLIC contracts)
 
 enable_testing()
 
@@ -57,3 +60,7 @@ target_compile_definitions(im_gateway_contract_test PRIVATE VOICELIFE_SOURCE_DIR
 
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
+
+add_voicelife_test(storage_protocol_contract_test "unit;storage;contract"
+    storage_protocol_contract_test.cc)
+target_link_libraries(storage_protocol_contract_test PRIVATE storage_sqlite)

@@ -119,6 +119,7 @@ flowchart LR
 | `voicelife_timing` | 定时任务、实例和提醒规则 | contracts |
 | `voicelife_mcp` | Tool Schema、注册中心与调用路由 | contracts |
 | `voicelife_voice` | 会话、音频和工具调用编排 | contracts |
+| `voicelife_storage_sqlite` | SQLite 生命周期、命名语句、事务回执与健康指标底座 | contracts |
 | `voicelife_runtime` | 唯一组装入口，不承载业务规则 | contracts、mcp、voice |
 
 ### 文件树
@@ -135,6 +136,7 @@ XE6-15/
 │   ├── voicelife_timing/        # 定时任务与触发规则
 │   ├── voicelife_mcp/           # MCP 工具注册中心
 │   ├── voicelife_voice/         # 语音会话协调器与 Port
+│   ├── voicelife_storage_sqlite/ # SQLite 单连接、事务协议与健康指标底座
 │   └── voicelife_runtime/       # Composition Root
 ├── config/
 │   ├── adapter-profile.schema.json
