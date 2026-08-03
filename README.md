@@ -36,6 +36,17 @@
 
 这次重建保留已经验证的业务判断，不搬运 MVP 实现。代码先把边界立住，再逐个迁移能力。
 
+## SQLite 不是“能跑就算过”
+
+我们在目标 ESP32-S3 上验证了 SQLite 与实际文件系统的事务行为，而不是只跑一条增删改查。结果很明确：`SQLite 3.53.4 + FATFS/Wear Levelling` 在四轮外部 EN 复位实验中通过；`LittleFS + SQLite` 的三组配置都在显式回滚后留下表记录、丢失索引记录，因此被否决。
+
+当前合格基线固定为 4 KiB FATFS/WL 扇区、`journal_mode=DELETE`、`synchronous=EXTRA`、`psow=0`、单连接和单写者。四轮平均提交耗时的中位数是 `1,162,373 us`，最慢一次 `1,518,898 us`，所以数据库提交不会进入音频实时路径。
+
+> [!NOTE]
+> 当前故障注入是串口控制线触发的外部 EN 复位，设备报告 `rst:0x1 (POWERON)`。它证明了重启恢复，不等于真实电源轨断电；断电、棕断、满容量和长期磨损仍在正式 Adapter 的验收清单中。
+
+这里真正可复用的能力不是“ESP32 能运行 SQLite”，而是一套面向目标板的存储资格测试：显式回滚、跨表原子提交、表/索引一致性、关闭重开、故障点复位、资源水位，以及可恢复的 Flash 备份与回读校验。完整步骤见 [SQLite 实板验证与 Flash 恢复手册](./docs/engineering/board-storage-validation.md)，去掉 VoiceLife 业务表后的通用版本维护在 [`esp32-sqlite-durability-lab`](https://github.com/ZhaoXingPeng/esp32-sqlite-durability-lab)。
+
 ## 快速开始
 
 需要 CMake，以及构建设备固件时所需的 ESP-IDF 6.0.2。Ninja 可选；未安装时主机测试会使用 CMake 默认生成器。
@@ -134,8 +145,9 @@ XE6-15/
 │   ├── engineering/             # 协作、Review 和提交规范
 │   └── assets/                  # README 素材
 ├── main/                        # ESP-IDF app_main，仅启动 Runtime
-├── scripts/                     # 构建、打包、音频诊断和边界检查
+├── scripts/                     # 构建、诊断、边界检查与实板恢复工具
 ├── tests/
+│   ├── board/                   # SQLite 等必须上板验证的故障探针
 │   ├── host/                    # 按组件拆分的纯 C++ 单元与串联测试
 │   └── python/                  # 构建工具与错误输入测试
 ├── third_party/licenses/        # 迁移代码与工具的第三方许可原文
@@ -172,6 +184,7 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 
 - `scripts/firmware.py`：Profile 校验、ESP-IDF 构建、合并镜像和可追溯打包。
 - `scripts/audio_debug_server.py`：抓取设备通过 UDP 发出的原始 PCM，保存为 WAV，供音频链路诊断。
+- `scripts/sqlite_board_probe.py`：按分区表备份、写入非活动槽、注入 EN 复位、逐段回读校验并恢复原始数据。
 
 上游来源和改造范围记录在 [THIRD_PARTY.md](./THIRD_PARTY.md)，后续源码迁移策略见 [小智能力迁移方案](./docs/architecture/xiaozhi-migration.md)。
 
@@ -183,9 +196,10 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 | 分组件 TDD 主机测试 | 已完成 | 6 个单元测试与 1 个串联测试，可按名称筛选 |
 | MCP → 日程 → 定时任务串联 | 已完成 | 使用内存适配器，仅证明架构 |
 | ESP32-S3 固件构建 | 已完成 | ESP-IDF 6.0.2 已验证 |
+| SQLite 存储资格测试 | 已完成基线验证 | FATFS/WL 四轮通过；LittleFS 路线已否决；真实断电与寿命测试待补 |
 | Profile 驱动 Runtime 装配 | 待开发 | 当前只完成 Schema、构建选择和设计契约 |
 | 小智音频与 XRobot Adapter | 待开发 | 从上游能力逐段迁移 |
-| 持久化 Adapter | 待开发 | 必须满足原子写入和重启恢复 |
+| 持久化 Adapter | 待开发 | 只允许基于已验证底座实现，并复用单连接、迁移和事务生命周期 |
 | 微信 / 飞书 IM Adapter | 待开发 | 先稳定平台无关语义契约 |
 | 真机闭环与用户试用 | 待开发 | 属于 MS3 功能 Issue |
 
@@ -197,6 +211,7 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 - [小智能力迁移方案](./docs/architecture/xiaozhi-migration.md)
 - [提交描述规范](./docs/engineering/commit-convention.md)
 - [协同开发规范](./docs/engineering/collaboration.md)
+- [SQLite 实板验证与 Flash 恢复手册](./docs/engineering/board-storage-validation.md)
 - [参与开发](./CONTRIBUTING.md)
 
 ## 致谢

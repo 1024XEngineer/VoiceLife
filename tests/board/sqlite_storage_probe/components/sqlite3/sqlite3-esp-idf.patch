@@ -1,0 +1,38 @@
+--- sqlite3.c
++++ sqlite3.c
+@@ -178,6 +178,15 @@
+ #define HAVE_LSTAT 1
+ #endif /* defined(_WRS_KERNEL) */
+
++/* ESP-IDF exposes a deliberately smaller POSIX surface. unix-none does not
++** need ownership changes or symlink traversal, so keep those calls out of
++** the amalgamation instead of supplying behaviorless compatibility stubs. */
++#if defined(ESP_PLATFORM)
++# undef HAVE_FCHOWN
++# undef HAVE_READLINK
++# undef HAVE_LSTAT
++#endif
++
+ /************** End of vxworks.h *********************************************/
+ /************** Continuing where we left off in sqliteInt.h ******************/
+
+@@ -40408,7 +40417,7 @@
+ #   define F_SETLKW 7
+ #  endif
+ # endif
+-#else /* !SQLITE_WASI */
++#elif !defined(ESP_PLATFORM) /* !SQLITE_WASI && !ESP_PLATFORM */
+ # ifndef HAVE_FCHMOD
+ #  define HAVE_FCHMOD 1
+ # endif
+@@ -42698,7 +42707,9 @@
+   if( pFile->eFileLock > NO_LOCK ){
+     pFile->eFileLock = eFileLock;
+     /* Always update the timestamp on the old file */
+-#ifdef HAVE_UTIME
++#if defined(ESP_PLATFORM)
++    /* unix-dotfile is not used by the single-owner ESP-IDF adapter. */
++#elif defined(HAVE_UTIME)
+     utime(zLockFile, NULL);
+ #else
+     utimes(zLockFile, NULL);
