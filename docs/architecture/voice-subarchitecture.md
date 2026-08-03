@@ -58,13 +58,14 @@ VoiceSession -> Application / MCP（只交稳定语义）
 3. 板上录放：真实 I2S、AFE、Codec、扬声器、队列水位和资源预算；
 4. 物理闭环：人在设备前完成唤醒、讲话、工具调用、播报、打断和断网恢复。
 
-PR 只能声明已经拿到证据的层级。#107 当前仍停在第 1 层和“ESP-IDF 可构建”，不能继承旧 MVP 的第 2/3 层结果来宣称新 Transport 已上板可用。
+PR 只能声明已经拿到证据的层级。#107 已完成第 1 层、ESP-IDF 构建和受控 `ota_1` 启动/恢复验证，但不能继承旧 MVP 的第 2/3 层结果来宣称新 Linx Transport 已完成云端或物理音频闭环。
 
 ## 3. 代码契约
 
 ### 3.1 稳定值对象
 
-- `AudioFormat`：编码、采样率、声道、位深和帧时长；当前 ESP32-S3 首选单声道 16 kHz、16 bit，Provider 可在握手后协商实际格式。
+- `AudioFormat`：编码、采样率、声道、位深和帧时长。当前 ESP32-S3 上行首选单声道 16 kHz、16 bit。
+- `VoiceAudioFormats`：把 `capture` 与 `playback` 分开。Linx 设备可以用 16 kHz 上行，同时接收服务端协商的 24 kHz TTS；把两者压成一个字段会导致麦克风被错误重开为下行采样率。
 - `AudioFrame`：`generation + sequence + format + payload`。generation 用于隔离重连/打断前的迟到帧，sequence 用于发现丢帧和乱序。
 - `VoiceSessionConfig`：Provider ID、会话模式、音频偏好、握手超时、重连退避和 MCP 能力开关；不保存 token。
 - `CapabilityProfile`：Provider 对外承诺的能力，例如 `streaming-asr`、`tts`、`cancel-generation`、`mcp`、`aec`。
@@ -93,24 +94,27 @@ STOPPED -> STARTING -> READY -> CAPTURING -> READY
 
 状态规则：
 
-1. `Start` 先校验配置，再依次打开输入、输出和 Provider；后一步失败必须回滚前一步资源。
+1. `Start` 先校验配置并完成 Provider hello，再读取 `VoiceAudioFormats` 打开输入和输出；任何一步失败都按 Output → Input → Provider 回滚，不能让音频硬件先于协议协商定型。
 2. `BeginCapture` 同时通知 Provider 和本地输入；输入失败时发送停止，不能留下半开的远端 listen epoch。
 3. `SubmitAudio` 只接受当前 generation 且严格连续的 sequence；旧 generation 直接丢弃并记录证据。
 4. `Interrupt` 发送 Provider abort、刷新输出队列，然后递增 generation；本地不依赖云端迟到的 `tts.stop` 才恢复可用。
-5. `Stop` 幂等，关闭顺序固定为 Provider → Output → Input，并使旧 generation 全部失效。
+5. Transport 断线后立即阻断上行并递增 generation；自动重连只有重新完成 hello 才能从 `STARTING` 回到 `READY`，不会自动恢复上一次采集。
+6. 收到 `tts.stop(is_aborted=true)` 时立即 `Flush` 并递增 generation，防止服务端已取消的迟到音频重新进入播放队列。
+7. `Stop` 幂等，关闭顺序固定为 Provider → Output → Input，并使旧 generation 全部失效。
 
 Transport worker 的回调可以与控制任务并发到达：`VoiceSession` 用生命周期锁串行化资源操作，用状态锁把 generation 检查和 `Flush` 绑定起来；证据回调在锁外执行，避免日志或上层观察者反向阻塞实时路径。
 
 ## 4. Linx XRobot WebSocket 防腐层
 
-官方协议（2026-08-04 读取）给出的接入边界如下。协议编解码和 Provider 行为落在 `components/voicelife_linx`，ESP-IDF 的 socket 句柄、TLS、token 解析落在 `components/voicelife_linx_esp`；两层之间只通过 `LinxTransportPort` 协作。Transport 已能进入 ESP-IDF 6.0.2 / ESP32-S3 固件构建，但还没有被 Runtime 创建，也没有被真实板刷写验证。
+官方协议（2026-08-04 读取）给出的接入边界如下。协议编解码和 Provider 行为落在 `components/voicelife_linx`，ESP-IDF 的 socket 句柄、TLS、token 解析落在 `components/voicelife_linx_esp`；两层之间只通过 `LinxTransportPort` 协作。Transport 已进入 ESP-IDF 6.0.2 / ESP32-S3 固件构建，并在真实板的非活动 `ota_1` 槽启动过；Runtime 仍未创建生产 Transport，也没有真实 Linx 凭据闭环。
 
-- 推荐 `wss://xrobo-io.qiniuapi.com/v1/ws/`，内网可用 `ws://xrobo-io.qiniuapi.com/v1/ws/`；地址也可由 OTA 动态下发。
+- 默认只接受 `wss://xrobo-io.qiniuapi.com/v1/ws/`；`ws://` 只有在受控内网测试 Profile 显式设置 `allow_insecure_ws` 时才放行，不能作为生产回退。地址也可由 OTA 动态下发。
 - 握手头包含 `Authorization: Bearer <token>`、`Protocol-Version: 1`、`Device-Id` 和 `Client-Id`。token 只能来自 `secret://`/NVS/安全配置引用。
 - 连接后设备发送 `hello`，声明 `transport=websocket`、MCP 能力和 `audio_params`；服务端返回 hello 后才进入会话。
-- 音频二进制帧支持 OPUS 与 PCM。首选 ESP32-S3 配置为单声道 16 kHz；OPUS 默认 60 ms 帧，PCM 示例为 20 ms、16 bit、小端序。首个 Adapter 会校验服务端 hello 的参数，转码和重协商留给后续 Codec Strategy。
+- 音频二进制帧支持 OPUS 与 PCM。设备 hello 声明上行偏好；服务端 hello 返回下行播放参数，可能是 16/24 kHz 和 20/40/60 ms。Provider 保留上行格式，把下行结果写入 `VoiceAudioFormats.playback`，`VoiceSession` 在 hello 后才打开音频端口。
 - `listen(start|stop|detect)`、`stt`、`tts(start|sentence_start|stop)`、`abort` 和 MCP 工具消息均先在 Adapter 映射为 `VoiceEvent` 或 `ToolCall`。
-- hello 超时默认 10 秒；异常断线关闭音频发送通道，按 Profile 的退避重连。当前首个 Adapter 要求服务端 hello 的音频参数与请求完全一致；真正的转码/重协商必须另建 Codec Strategy 和契约测试。重连成功前不复用旧 connection/generation。
+- hello 超时默认 10 秒；异常断线关闭音频发送通道并失效旧 generation。底层 WebSocket 自动重连只恢复传输，Provider 还要对每次新的物理连接补发且只补发一次 hello；hello 完成前不得发送音频。当前只接受服务端保持相同编码，PCM ↔ Opus 变化仍须显式 Codec Strategy，不能静默转码。重连时若下行采样率、声道、位深或帧长变化，Provider 上报错误并让会话保持 `STARTING`，要求上层 `Stop` 后重新 `Start`，当前不做静默 `AudioOutput` 重配置。
+- Linx 的 MQTT 页面在 2026-08-04 仍标记“待补充”。架构保留 Transport Port，不实现也不宣称 MQTT 可用。
 
 协议字段不进入 `VoiceSession`。Provider 负责版本、字段类型、最大消息长度、session 绑定和错误码映射；核心只看到 `Status`、`AudioFrame` 和 `VoiceEvent`。
 
@@ -122,7 +126,8 @@ Transport worker 的回调可以与控制任务并发到达：`VoiceSession` 用
 - `listen/start|stop|detect`：手动/自动/实时模式和可选 `session_id`；
 - `abort`：必须带非空原因，供打断与服务端回放取消关联；
 - `hello`、`stt`、`tts/start|sentence_start|stop`、`error`：解析为稳定事件；未知类型、未知 TTS 状态、类型错误和非法音频参数直接失败；
-- 二进制帧：由 `LinxSpeechProviderAdapter` 绑定当前连接 generation、单调 sequence 和协商后的 `AudioFormat`，再交给会话的 `AudioFrameSink`。
+- 二进制帧：由 `LinxSpeechProviderAdapter` 绑定当前连接 generation、单调 sequence 和协商后的下行 `AudioFormat`，再交给会话的 `AudioFrameSink`。
+- 生命周期：重复 `connected` 不重复 hello；`disconnected` 立即阻断上行；重连 hello 使用新 generation，旧帧继续拒绝。
 
 这些行为由主机 fake Transport 测试，不依赖外网。真正的 ESP32-S3 Transport 必须复用同一套编解码契约，并额外提供 header、hello 超时、断线和资源预算证据。
 
@@ -140,9 +145,9 @@ Transport worker 的回调可以与控制任务并发到达：`VoiceSession` 用
 - `SecretResolverPort` 只接收 `secret://` 等引用并返回受控 token；Transport 组装 `Authorization`、`Protocol-Version`、`Device-Id`、`Client-Id`，日志不打印 header 内容。
 - ESP WebSocket callback 只复制 `data_ptr/data_len/payload_len/payload_offset/fin/op_code` 到固定大小的 FreeRTOS 队列。队列满时丢弃事件并把 Transport 标成失败，不在 callback 内调用 stop/destroy。
 - `WebSocketFragmentAssembler` 在主机和 ESP32-S3 共用，处理 text/binary/continuation、非法 offset、消息大小上限、连接关闭清理和 generation 隔离；完整消息才交给 `LinxTransportSink`。
-- Provider 在发送 hello 后等待服务端 hello；超时、音频参数不一致或 Transport error 都以 `Status`/`VoiceEvent` 返回，不把半连接状态交给 `VoiceSession`。
+- Transport 显式上报 connected/disconnected；Provider 在每次 connected 后发送一次 hello。超时、未配置的编码变化或 Transport error 都以 `Status`/`VoiceEvent` 返回，不把半连接状态交给 `VoiceSession`。
 
-这层现在是“可构建、可单测、未上板”的状态。Issue #107 的真机顺序是：固定 115200 备份与设备确认 → 受控 WSS/echo → Linx hello → 断线/重连 → 之后才迁移 I2S/AFE/Opus。不要用当前 scaffold 固件的启动日志替代真实 Provider 验收。
+这层现在是“可构建、可单测、已完成受控启动、未完成云端闭环”的状态。物理板身份、16 MB Flash、8 MB PSRAM、双 OTA 与数据分区已经在 115200 下读取并备份；新语音固件只写入过 `ota_1@0x410000`，启动成功后已恢复 `otadata` 并确认原固件从 `ota_0` 启动。真实 Linx 凭据、WSS、ASR、TTS 和 I2S/AFE/Opus 仍是下一步。详细守则见 [ESP32-S3 实板变更与恢复](../engineering/esp32-hardware-validation.md)。
 
 ## 5. 小智迁移边界
 
@@ -173,7 +178,7 @@ Transport worker 的回调可以与控制任务并发到达：`VoiceSession` 用
 在接入破坏性测试前，按以下顺序完成真实板验证：
 
 1. 设备身份、I2S 麦克风和扬声器输出 smoke；
-2. 录制 16 kHz PCM，验证帧大小、sequence、generation 和队列水位；
+2. 录制 16 kHz PCM，验证帧大小、sequence、generation 和队列水位；同时确认 24 kHz 下行不会改变上行采集格式；
 3. WSS hello、listen、ASR（stt）、TTS（tts）和正常 stop；
 4. TTS 播放中唤醒/按键打断，确认旧帧不再播放；
 5. 拔网、服务端关闭、token 失效和重连，确认本地状态可恢复；
@@ -199,4 +204,4 @@ Transport worker 的回调可以与控制任务并发到达：`VoiceSession` 用
 - Integration：Linx/xiaozhi Adapter 解析测试不依赖网络；
 - Hardware：ESP32-S3 真机验证采集、上行、ASR、TTS、打断、重连和资源预算，主机绿灯不能代替这些证据。
 
-当前 #106 完成 Port、状态、Provider Registry 和 Linx 协议防腐层；#107 已补上可主机测试、可 ESP-IDF 构建的 WSS Transport 外壳。真实 Linx 云端、Opus、AEC、Wake 和板上闭环仍是明确待办，不能把构建通过写成语音功能已完成。
+当前 #106 完成 Port、状态、Provider Registry 和 Linx 协议防腐层；#107 已补上可主机测试、可 ESP-IDF 构建、可在非活动 OTA 槽启动并可恢复的 WSS Transport 外壳。真实 Linx 云端、Opus、AEC、Wake 和板上音频闭环仍是明确待办，不能把构建或启动通过写成语音功能已完成。

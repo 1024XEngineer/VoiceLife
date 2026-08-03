@@ -84,7 +84,9 @@ class VoiceSession {
     mutable std::mutex lifecycle_mutex_;
     mutable std::mutex mutex_;
     VoiceSessionConfig config_;
+    VoiceAudioFormats audio_formats_;
     VoiceSessionState state_ = VoiceSessionState::kStopped;
+    bool audio_ready_ = false;
     uint64_t generation_ = 0;
     uint64_t next_sequence_ = 0;
 };

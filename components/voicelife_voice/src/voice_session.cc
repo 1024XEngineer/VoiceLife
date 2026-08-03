@@ -39,7 +39,7 @@ VoiceSessionConfig VoiceSession::config() const {
 }
 
 bool VoiceSession::AcceptFrameLocked(const AudioFrame& frame) const {
-    const AudioFormat& expected = config_.audio;
+    const AudioFormat& expected = audio_formats_.capture;
     const AudioFormat& actual = frame.format;
     return state_ == VoiceSessionState::kCapturing && frame.generation == generation_ && actual.valid() &&
            actual.codec == expected.codec && actual.sample_rate_hz == expected.sample_rate_hz &&
@@ -63,29 +63,12 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
             return Status::Error(ErrorCode::kConflict, "语音会话已经启动");
         }
         config_ = config;
+        audio_formats_ = {.capture = config.audio, .playback = config.audio};
+        audio_ready_ = false;
         state_ = VoiceSessionState::kStarting;
         generation_++;
         config_.generation = generation_;
         next_sequence_ = 0;
-    }
-    Status status = input_.Open(config_.audio);
-    if (!status.ok()) {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            state_ = VoiceSessionState::kFailed;
-        }
-        Emit("input_open_failed", status.message);
-        return status;
-    }
-    status = output_.Open(config_.audio);
-    if (!status.ok()) {
-        input_.Close();
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            state_ = VoiceSessionState::kFailed;
-        }
-        Emit("output_open_failed", status.message);
-        return status;
     }
     provider_.SetAudioSink([this](AudioFrame frame) { return HandleAudio(std::move(frame)); });
     VoiceSessionConfig provider_config;
@@ -93,11 +76,9 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
         std::lock_guard<std::mutex> lock(mutex_);
         provider_config = config_;
     }
-    status = provider_.Connect(provider_config,
-                               [this](const VoiceEvent& event) { HandleEvent(event); });
+    Status status = provider_.Connect(provider_config,
+                                      [this](const VoiceEvent& event) { HandleEvent(event); });
     if (!status.ok()) {
-        output_.Close();
-        input_.Close();
         {
             std::lock_guard<std::mutex> lock(mutex_);
             state_ = VoiceSessionState::kFailed;
@@ -105,8 +86,48 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
         Emit("provider_connect_failed", status.message);
         return status;
     }
+    auto negotiated = provider_.audio_formats();
+    if (!negotiated.ok() || !negotiated.value.has_value() || !negotiated.value->valid()) {
+        provider_.Disconnect();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            state_ = VoiceSessionState::kFailed;
+        }
+        const Status failure = negotiated.ok()
+                                   ? Status::Error(ErrorCode::kInvalidArgument,
+                                                   "Provider 返回的双向音频格式无效")
+                                   : negotiated.status;
+        Emit("audio_negotiation_failed", failure.message);
+        return failure;
+    }
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        audio_formats_ = *negotiated.value;
+    }
+    status = input_.Open(negotiated.value->capture);
+    if (!status.ok()) {
+        provider_.Disconnect();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            state_ = VoiceSessionState::kFailed;
+        }
+        Emit("input_open_failed", status.message);
+        return status;
+    }
+    status = output_.Open(negotiated.value->playback);
+    if (!status.ok()) {
+        input_.Close();
+        provider_.Disconnect();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            state_ = VoiceSessionState::kFailed;
+        }
+        Emit("output_open_failed", status.message);
+        return status;
+    }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        audio_ready_ = true;
         state_ = VoiceSessionState::kReady;
     }
     Emit("ready", provider_.capabilities().provider_id);
@@ -115,21 +136,61 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
 
 void VoiceSession::HandleEvent(const VoiceEvent& event) {
     bool stale = false;
+    bool generation_changed = false;
+    bool disconnected = false;
+    bool playback_aborted = false;
+    Status flush_status = Status::Ok();
+    uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         // A zero generation is not a wildcard: late events must not mutate a
         // session after interrupt or stop invalidated the old epoch.
         if (event.generation != generation_) {
             stale = true;
+        } else if (event.kind == VoiceEventKind::kDisconnected && audio_ready_ &&
+                   state_ != VoiceSessionState::kStopped && state_ != VoiceSessionState::kFailed) {
+            ++generation_;
+            config_.generation = generation_;
+            next_sequence_ = 0;
+            state_ = VoiceSessionState::kStarting;
+            generation = generation_;
+            generation_changed = true;
+            disconnected = true;
+        } else if (event.kind == VoiceEventKind::kConnected && audio_ready_ &&
+                   state_ == VoiceSessionState::kStarting) {
+            state_ = VoiceSessionState::kReady;
         } else if (event.kind == VoiceEventKind::kTtsStarted) {
             state_ = VoiceSessionState::kSpeaking;
-        } else if (event.kind == VoiceEventKind::kTtsStopped &&
-                   state_ == VoiceSessionState::kSpeaking) {
-            state_ = VoiceSessionState::kReady;
+        } else if (event.kind == VoiceEventKind::kTtsStopped) {
+            if (event.aborted && audio_ready_) {
+                ++generation_;
+                config_.generation = generation_;
+                next_sequence_ = 0;
+                state_ = VoiceSessionState::kReady;
+                generation = generation_;
+                playback_aborted = true;
+            } else if (state_ == VoiceSessionState::kSpeaking) {
+                state_ = VoiceSessionState::kReady;
+            }
         }
     }
     if (stale) {
         Emit("stale_event_dropped", "provider event generation mismatch");
+    } else if (generation_changed) {
+        provider_.SetGeneration(generation);
+        Emit("transport_disconnected", "audio sending disabled until a new hello completes");
+    } else if (playback_aborted) {
+        provider_.SetGeneration(generation);
+        flush_status = output_.Flush();
+        Emit("tts_aborted", "server abort invalidated buffered playback");
+        if (!flush_status.ok()) {
+            Emit("playback_flush_failed", flush_status.message);
+        }
+    } else if (event.kind == VoiceEventKind::kConnected) {
+        Emit("transport_connected", "provider hello completed");
+    }
+    if (disconnected) {
+        return;
     }
 }
 
@@ -205,11 +266,12 @@ Status VoiceSession::HandleAudio(AudioFrame frame) {
     if (state_ != VoiceSessionState::kReady && state_ != VoiceSessionState::kSpeaking) {
         return Status::Error(ErrorCode::kUnavailable, "语音会话当前不能播放音频");
     }
-    if (frame.generation != generation_ || frame.format.codec != config_.audio.codec ||
-        frame.format.sample_rate_hz != config_.audio.sample_rate_hz ||
-        frame.format.channels != config_.audio.channels ||
-        frame.format.bits_per_sample != config_.audio.bits_per_sample ||
-        frame.format.frame_duration_ms != config_.audio.frame_duration_ms || frame.payload.empty()) {
+    const AudioFormat& expected = audio_formats_.playback;
+    if (frame.generation != generation_ || frame.format.codec != expected.codec ||
+        frame.format.sample_rate_hz != expected.sample_rate_hz ||
+        frame.format.channels != expected.channels ||
+        frame.format.bits_per_sample != expected.bits_per_sample ||
+        frame.format.frame_duration_ms != expected.frame_duration_ms || frame.payload.empty()) {
         return Status::Error(ErrorCode::kInvalidArgument, "播放帧不属于当前会话");
     }
     return output_.Push(frame);
@@ -280,6 +342,7 @@ Status VoiceSession::Stop() {
         ++generation_;
         config_.generation = generation_;
         next_sequence_ = 0;
+        audio_ready_ = false;
         state_ = VoiceSessionState::kStopped;
         generation = generation_;
     }

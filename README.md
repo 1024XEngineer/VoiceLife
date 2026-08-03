@@ -189,13 +189,13 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 | SQLite 存储资格测试 | 已完成基线验证 | FATFS/WL 四轮通过；LittleFS 路线已否决；真实断电与寿命测试待补 |
 | Profile 驱动 Runtime 装配 | 待开发 | 当前只完成 Schema、构建选择和设计契约 |
 | 语音 Port、会话状态与 Provider Registry | 已完成 | 主机契约通过；下行音频也通过 generation 绑定到会话 |
-| Linx XRobot 协议与 Provider Adapter | 主机 + ESP-IDF 构建完成 | hello/listen/detect/abort、STT/TTS、二进制音频、非法消息和 hello 超时有离线契约测试；ESP32-S3 WSS Transport 已编译进固件，但尚未完成真实云端与真机闭环 |
+| Linx XRobot 协议与 Provider Adapter | 主机 + ESP-IDF 构建完成 | 已覆盖 16 kHz 上行/24 kHz 下行协商、hello/listen/detect/abort、STT/TTS、断线阻断、重连 hello 与旧代次拒绝；ESP32-S3 WSS Transport 已编译进固件，但尚未完成真实云端音频闭环 |
 | 小智音频与 ESP32-S3 XRobot Adapter | 待开发 | 从上游能力逐段迁移，真实板优先 |
 | 持久化 Adapter | 待开发 | 必须满足原子写入和重启恢复；只允许基于已验证底座实现，并复用单连接、迁移和事务生命周期 |
 | 微信 / 飞书 IM Adapter | 待开发 | 先稳定平台无关语义契约 |
 | 真机闭环与用户试用 | 待开发 | 属于 MS3 功能 Issue |
 
-> ESP32-S3 Transport 当前只完成可审查的 WSS/TLS 外壳、固定大小事件队列和分片重组。没有刷写真实板，也没有把 Linx token 写进 Profile；真实 headers、TLS、hello、断线重连和音频闭环必须在 [Issue #107](https://github.com/1024XEngineer/XE6-15/issues/107) 中用脱敏日志补齐。
+> ESP32-S3 的物理板身份、Flash/PSRAM 和双 OTA 分区已经在 115200 下完成只读核对与数据分区备份；新固件已只写入非活动 `ota_1` 槽并真实启动，随后恢复 `otadata`、确认原固件从 `ota_0` 启动。Linx token 没有进入 Profile；真实 headers、TLS、hello、断线重连、ASR/TTS 和音频闭环仍须在 [Issue #107](https://github.com/1024XEngineer/XE6-15/issues/107) 中用脱敏日志补齐。
 
 ## 文档
 
@@ -204,6 +204,7 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 - [ADR 0002：采用能力驱动的适配器 Profile](./docs/adr/0002-capability-driven-adapters.md)
 - [小智能力迁移方案](./docs/architecture/xiaozhi-migration.md)
 - [语音模块子架构](./docs/architecture/voice-subarchitecture.md)
+- [ESP32-S3 实板变更与恢复](./docs/engineering/esp32-hardware-validation.md)
 - [提交描述规范](./docs/engineering/commit-convention.md)
 - [协同开发规范](./docs/engineering/collaboration.md)
 - [SQLite 实板验证与 Flash 恢复手册](./docs/engineering/board-storage-validation.md)

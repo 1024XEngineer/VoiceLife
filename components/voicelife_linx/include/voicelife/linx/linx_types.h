@@ -64,6 +64,8 @@ struct LinxInboundMessage {
 
 /** 保存 Linx 传输层向 Provider 上报事件的回调集合。 */
 struct LinxTransportSink {
+    std::function<void()> on_connected;
+    std::function<void()> on_disconnected;
     std::function<void(std::string_view)> on_text;
     std::function<void(const std::vector<uint8_t>&)> on_binary;
     std::function<void(Status)> on_error;

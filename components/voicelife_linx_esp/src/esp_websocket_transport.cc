@@ -54,7 +54,10 @@ class EspWebSocketTransport::Impl final {
     ~Impl() { Close(); }
 
     Status Connect(const linx::LinxConnectionConfig& config, linx::LinxTransportSink sink) {
-        if (!config.valid() || config.websocket_url.rfind("wss://", 0) != 0 ||
+        const bool secure = config.websocket_url.rfind("wss://", 0) == 0;
+        const bool explicitly_allowed_insecure =
+            options_.allow_insecure_ws && config.websocket_url.rfind("ws://", 0) == 0;
+        if (!config.valid() || (!secure && !explicitly_allowed_insecure) ||
             options_.event_queue_capacity == 0 || options_.event_chunk_bytes == 0 ||
             options_.event_chunk_bytes > kMaxEventChunkBytes || options_.max_message_bytes == 0) {
             return Status::Error(ErrorCode::kInvalidArgument, "ESP Linx WSS 配置无效");
@@ -90,7 +93,7 @@ class EspWebSocketTransport::Impl final {
         websocket_config.reconnect_timeout_ms = options_.reconnect_timeout_ms;
         websocket_config.network_timeout_ms = options_.network_timeout_ms;
         websocket_config.buffer_size = static_cast<int>(options_.event_chunk_bytes);
-        websocket_config.crt_bundle_attach = esp_crt_bundle_attach;
+        websocket_config.crt_bundle_attach = secure ? esp_crt_bundle_attach : nullptr;
         websocket_config.skip_cert_common_name_check = false;
         websocket_config.user_context = this;
 
@@ -314,6 +317,9 @@ class EspWebSocketTransport::Impl final {
         switch (envelope.kind) {
             case EventKind::kConnected:
                 state_ = TransportState::kConnected;
+                if (sink_.on_connected) {
+                    sink_.on_connected();
+                }
                 xEventGroupSetBits(state_events_, kConnectedBit);
                 return;
             case EventKind::kDisconnected:
@@ -323,6 +329,9 @@ class EspWebSocketTransport::Impl final {
                 }
                 state_ = closing_.load() ? TransportState::kDisconnected
                                          : TransportState::kReconnecting;
+                if (sink_.on_disconnected) {
+                    sink_.on_disconnected();
+                }
                 return;
             case EventKind::kError:
                 error_status_ = Status::Error(ErrorCode::kUnavailable,

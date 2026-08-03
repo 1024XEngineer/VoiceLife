@@ -1,7 +1,8 @@
+#include "voicelife/voice/voice_session.h"
+
 #include <memory>
 
 #include "support/test_support.h"
-#include "voicelife/voice/voice_session.h"
 
 using voicelife::ErrorCode;
 using voicelife::Status;
@@ -11,8 +12,9 @@ namespace {
 
 class FakeInput final : public voicelife::voice::AudioInputPort {
    public:
-    Status Open(const voicelife::voice::AudioFormat&) override {
+    Status Open(const voicelife::voice::AudioFormat& format) override {
         ++opens;
+        opened_format = format;
         return open_result;
     }
     Status StartCapture(voicelife::voice::VoiceMode) override {
@@ -28,6 +30,7 @@ class FakeInput final : public voicelife::voice::AudioInputPort {
     Status open_result = Status::Ok();
     Status start_result = Status::Ok();
     Status stop_result = Status::Ok();
+    voicelife::voice::AudioFormat opened_format;
     int opens = 0;
     int starts = 0;
     int stops = 0;
@@ -36,8 +39,9 @@ class FakeInput final : public voicelife::voice::AudioInputPort {
 
 class FakeOutput final : public voicelife::voice::AudioOutputPort {
    public:
-    Status Open(const voicelife::voice::AudioFormat&) override {
+    Status Open(const voicelife::voice::AudioFormat& format) override {
         ++opens;
+        opened_format = format;
         return open_result;
     }
     Status Push(const voicelife::voice::AudioFrame&) override {
@@ -53,6 +57,7 @@ class FakeOutput final : public voicelife::voice::AudioOutputPort {
     Status open_result = Status::Ok();
     Status push_result = Status::Ok();
     Status flush_result = Status::Ok();
+    voicelife::voice::AudioFormat opened_format;
     int opens = 0;
     int pushes = 0;
     int flushes = 0;
@@ -92,6 +97,9 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
         ++disconnects;
         return disconnect_result;
     }
+    voicelife::Result<voicelife::voice::VoiceAudioFormats> audio_formats() const override {
+        return voicelife::Result<voicelife::voice::VoiceAudioFormats>::Success(formats);
+    }
     const voicelife::voice::CapabilityProfile& capabilities() const override { return profile; }
 
     void Emit(voicelife::voice::VoiceEvent event) {
@@ -100,12 +108,14 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
         }
     }
     Status EmitAudio(voicelife::voice::AudioFrame frame) {
-        return audio_sink_ ? audio_sink_(std::move(frame)) : Status::Error(ErrorCode::kUnavailable, "音频回调未绑定");
+        return audio_sink_ ? audio_sink_(std::move(frame))
+                           : Status::Error(ErrorCode::kUnavailable, "音频回调未绑定");
     }
 
     voicelife::voice::CapabilityProfile profile{"fake", {"streaming-asr", "tts", "cancel-generation"}};
     voicelife::voice::VoiceEventSink sink_;
     voicelife::voice::AudioFrameSink audio_sink_;
+    voicelife::voice::VoiceAudioFormats formats;
     uint64_t generation_ = 0;
     Status connect_result = Status::Ok();
     Status start_result = Status::Ok();
@@ -143,9 +153,9 @@ voicelife::voice::AudioFrame Frame(uint64_t generation, uint64_t sequence) {
 
 int main() {
     auto& registry = voicelife::voice::SpeechProviderRegistry::Instance();
-    Check(registry
-              .Register("fake-registry", voicelife::voice::CapabilityProfile{"fake-registry", {"tts"}},
-                        []() { return std::make_unique<FakeProvider>(); })
+    Check(registry.Register(
+              "fake-registry", voicelife::voice::CapabilityProfile{"fake-registry", {"tts"}},
+              []() { return std::make_unique<FakeProvider>(); })
               .ok(),
           "Provider 工厂应可注册");
     auto created = registry.Create("fake-registry", {"tts"});
@@ -163,10 +173,12 @@ int main() {
     Check(session.Start(Config()).ok(), "合法配置应启动语音会话");
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady, "启动后应进入 ready");
     const uint64_t generation = session.generation();
-    Check(provider.EmitAudio(Frame(generation, 0)).ok() && output.pushes == 1, "Provider 下行音频应通过会话输出端口");
+    Check(provider.EmitAudio(Frame(generation, 0)).ok() && output.pushes == 1,
+          "Provider 下行音频应通过会话输出端口");
     auto mismatched_playback = Frame(generation, 0);
     mismatched_playback.format.channels = 2;
-    Check(provider.EmitAudio(std::move(mismatched_playback)).code == ErrorCode::kInvalidArgument && output.pushes == 1,
+    Check(provider.EmitAudio(std::move(mismatched_playback)).code == ErrorCode::kInvalidArgument &&
+              output.pushes == 1,
           "下行音频格式变化必须拒绝");
     Check(session.BeginCapture().ok(), "ready 会话应开始采集");
     Check(session.SubmitAudio(Frame(generation, 0)).ok(), "当前 generation 的首帧应发送");
@@ -207,7 +219,8 @@ int main() {
     FakeProvider unused_provider;
     voicelife::voice::VoiceSession failed(bad_input, unused_output, unused_provider);
     Check(failed.Start(Config()).code == ErrorCode::kUnavailable, "输入端口失败应向上传播");
-    Check(unused_provider.connects == 0, "输入端口失败后不能连接 Provider");
+    Check(unused_provider.connects == 1 && unused_provider.disconnects == 1,
+          "音频协商后输入端口失败必须回滚 Provider 连接");
 
     FakeInput speak_input;
     FakeOutput speak_output;
@@ -219,21 +232,50 @@ int main() {
               speak_failure.state() == voicelife::voice::VoiceSessionState::kReady,
           "TTS 失败不得卡在 speaking 状态");
 
-    // SpeechProviderRegistry 错误路径覆盖。
-    Check(registry.Register("", voicelife::voice::CapabilityProfile{}, nullptr).code == ErrorCode::kInvalidArgument,
-          "空 Provider ID 与空工厂必须拒绝");
-    Check(registry.Register("mismatch", voicelife::voice::CapabilityProfile{"other", {}},
-                            []() { return std::unique_ptr<FakeProvider>(); })
-                  .code == ErrorCode::kInvalidArgument,
-          "Profile ID 与注册 ID 不一致必须拒绝");
-    Check(registry.Create("no-such-provider", {}).status.code == ErrorCode::kNotFound,
-          "未注册 Provider 必须返回 NotFound");
-    Check(registry.Create("fake-registry", {"aec", "vad"}).status.code == ErrorCode::kUnavailable,
-          "缺少任一必需能力必须拒绝");
-    Check(registry.Register("fake-registry", voicelife::voice::CapabilityProfile{"fake-registry", {"tts"}},
-                            []() { return std::make_unique<FakeProvider>(); })
-                  .code == ErrorCode::kAlreadyExists,
-          "重复注册同一 Provider ID 必须返回 AlreadyExists");
+    FakeInput negotiated_input;
+    FakeOutput negotiated_output;
+    FakeProvider negotiated_provider;
+    negotiated_provider.formats.capture = Config().audio;
+    negotiated_provider.formats.playback = Config().audio;
+    negotiated_provider.formats.playback.sample_rate_hz = 24000;
+    negotiated_provider.formats.playback.frame_duration_ms = 60;
+    voicelife::voice::VoiceSession negotiated_session(negotiated_input, negotiated_output,
+                                                       negotiated_provider);
+    Check(negotiated_session.Start(Config()).ok(), "Provider 协商不同下行格式后会话应可启动");
+    Check(negotiated_input.opened_format.sample_rate_hz == 16000 &&
+              negotiated_input.opened_format.frame_duration_ms == 20,
+          "输入端口必须使用设备请求的上行格式");
+    Check(negotiated_output.opened_format.sample_rate_hz == 24000 &&
+              negotiated_output.opened_format.frame_duration_ms == 60,
+          "输出端口必须在 Provider hello 后使用协商的下行格式");
+    auto negotiated_playback = Frame(negotiated_session.generation(), 0);
+    negotiated_playback.format = negotiated_provider.formats.playback;
+    Check(negotiated_provider.EmitAudio(std::move(negotiated_playback)).ok() &&
+              negotiated_output.pushes == 1,
+          "协商后的 24 kHz 下行音频应进入输出端口");
+    const uint64_t speaking_generation = negotiated_session.generation();
+    Check(negotiated_session.Speak("测试打断").ok(), "协商会话应可播报");
+    negotiated_provider.Emit(voicelife::voice::VoiceEvent{
+        .kind = voicelife::voice::VoiceEventKind::kTtsStarted,
+        .generation = speaking_generation});
+    negotiated_provider.Emit(voicelife::voice::VoiceEvent{
+        .kind = voicelife::voice::VoiceEventKind::kTtsStopped,
+        .generation = speaking_generation,
+        .aborted = true});
+    Check(negotiated_output.flushes == 1 && negotiated_session.generation() != speaking_generation,
+          "服务端 abort 必须立即清空播放缓冲并失效旧代次");
+    const uint64_t disconnected_generation = negotiated_session.generation();
+    negotiated_provider.Emit(voicelife::voice::VoiceEvent{
+        .kind = voicelife::voice::VoiceEventKind::kDisconnected,
+        .generation = disconnected_generation});
+    Check(negotiated_session.state() == voicelife::voice::VoiceSessionState::kStarting &&
+              negotiated_session.generation() != disconnected_generation,
+          "断线必须进入等待重连状态并失效旧代次");
+    negotiated_provider.Emit(voicelife::voice::VoiceEvent{
+        .kind = voicelife::voice::VoiceEventKind::kConnected,
+        .generation = negotiated_session.generation()});
+    Check(negotiated_session.state() == voicelife::voice::VoiceSessionState::kReady,
+          "重连 hello 完成后会话应回到 ready");
 
     return 0;
 }

@@ -31,6 +31,7 @@ struct EspWebSocketTransportOptions {
     uint32_t network_timeout_ms = 10000;
     uint32_t reconnect_timeout_ms = 1000;
     bool enable_close_reconnect = true;
+    bool allow_insecure_ws = false;
 };
 
 // ESP-IDF implementation of the Linx transport. ESP-IDF headers stay in the
