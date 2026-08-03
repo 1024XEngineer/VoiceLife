@@ -72,7 +72,7 @@ STOPPED -> STARTING -> READY -> CAPTURING -> READY
 
 ## 4. Linx XRobot WebSocket 防腐层
 
-官方协议（2026-08-04 读取）给出的接入边界如下。当前已把协议编解码和 Provider 行为落到 `components/voicelife_linx`；ESP-IDF 的 socket 句柄、TLS、token 解析仍留在下一层 Transport Adapter，不把它们伪装成已完成的真机能力。
+官方协议（2026-08-04 读取）给出的接入边界如下。协议编解码和 Provider 行为落在 `components/voicelife_linx`，ESP-IDF 的 socket 句柄、TLS、token 解析落在 `components/voicelife_linx_esp`；两层之间只通过 `LinxTransportPort` 协作。Transport 已能进入 ESP-IDF 6.0.2 / ESP32-S3 固件构建，但还没有被 Runtime 创建，也没有被真实板刷写验证。
 
 - 推荐 `wss://xrobo-io.qiniuapi.com/v1/ws/`，内网可用 `ws://xrobo-io.qiniuapi.com/v1/ws/`；地址也可由 OTA 动态下发。
 - 握手头包含 `Authorization: Bearer <token>`、`Protocol-Version: 1`、`Device-Id` 和 `Client-Id`。token 只能来自 `secret://`/NVS/安全配置引用。
@@ -100,6 +100,18 @@ STOPPED -> STARTING -> READY -> CAPTURING -> READY
 - [Linx WebSocket 协议](https://linx.qiniu.com/docs/xrobot/platform/websocket)
 - [Linx 开源文档仓库](https://github.com/qiniu/Xrobot-docs/blob/main/docs/xrobot/platform/websocket.md)
 - [Linx 小智固件接入指南](https://linx.qiniu.com/docs/xrobot/guide/xiaozhi-firmware)
+
+### 4.2 ESP-IDF Transport 当前实现
+
+`components/voicelife_linx_esp` 是平台适配层，不向上暴露 ESP-IDF 头文件：
+
+- `EspWebSocketTransport` 用 PImpl 隔离 `esp_websocket_client`，依赖固定为 `espressif/esp_websocket_client==1.8.0`；WSS 使用证书 bundle，明确关闭 `skip_cert_common_name_check`。
+- `SecretResolverPort` 只接收 `secret://` 等引用并返回受控 token；Transport 组装 `Authorization`、`Protocol-Version`、`Device-Id`、`Client-Id`，日志不打印 header 内容。
+- ESP WebSocket callback 只复制 `data_ptr/data_len/payload_len/payload_offset/fin/op_code` 到固定大小的 FreeRTOS 队列。队列满时丢弃事件并把 Transport 标成失败，不在 callback 内调用 stop/destroy。
+- `WebSocketFragmentAssembler` 在主机和 ESP32-S3 共用，处理 text/binary/continuation、非法 offset、消息大小上限、连接关闭清理和 generation 隔离；完整消息才交给 `LinxTransportSink`。
+- Provider 在发送 hello 后等待服务端 hello；超时、音频参数不一致或 Transport error 都以 `Status`/`VoiceEvent` 返回，不把半连接状态交给 `VoiceSession`。
+
+这层现在是“可构建、可单测、未上板”的状态。Issue #107 的真机顺序是：固定 115200 备份与设备确认 → 受控 WSS/echo → Linx hello → 断线/重连 → 之后才迁移 I2S/AFE/Opus。不要用当前 scaffold 固件的启动日志替代真实 Provider 验收。
 
 ## 5. 小智迁移边界
 
@@ -156,4 +168,4 @@ STOPPED -> STARTING -> READY -> CAPTURING -> READY
 - Integration：Linx/xiaozhi Adapter 解析测试不依赖网络；
 - Hardware：ESP32-S3 真机验证采集、上行、ASR、TTS、打断、重连和资源预算，主机绿灯不能代替这些证据。
 
-当前本 PR 只完成 Port、状态和 Provider Registry 骨架，真实 Linx WebSocket、Opus、AEC、Wake 和板上闭环仍是后续 PR 的明确待办。
+当前 #106 完成 Port、状态、Provider Registry 和 Linx 协议防腐层；#107 已补上可主机测试、可 ESP-IDF 构建的 WSS Transport 外壳。真实 Linx 云端、Opus、AEC、Wake 和板上闭环仍是明确待办，不能把构建通过写成语音功能已完成。

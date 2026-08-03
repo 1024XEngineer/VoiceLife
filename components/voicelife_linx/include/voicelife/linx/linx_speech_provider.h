@@ -1,6 +1,8 @@
 #pragma once
 
+#include <condition_variable>
 #include <cstdint>
+#include <mutex>
 #include <string>
 
 #include "voicelife/linx/linx_types.h"
@@ -100,6 +102,10 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     uint64_t generation_ = 0;
     uint64_t output_sequence_ = 0;
     bool connected_ = false;
+    mutable std::mutex hello_mutex_;
+    std::condition_variable hello_cv_;
+    bool hello_received_ = false;
+    Status hello_status_ = Status::Ok();
 };
 
 }  // namespace voicelife::linx

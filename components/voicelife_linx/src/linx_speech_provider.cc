@@ -1,5 +1,6 @@
 #include "voicelife/linx/linx_speech_provider.h"
 
+#include <chrono>
 #include <utility>
 
 namespace voicelife::linx {
@@ -34,6 +35,7 @@ void LinxSpeechProviderAdapter::SetGeneration(uint64_t generation) {
     if (connected_ && generation != 0) {
         generation_ = generation;
         output_sequence_ = 0;
+        transport_.SetGeneration(generation);
     }
 }
 
@@ -47,16 +49,50 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
     config_ = config;
     generation_ = config.generation;
     output_sequence_ = 0;
+    {
+        std::lock_guard<std::mutex> lock(hello_mutex_);
+        hello_received_ = false;
+        hello_status_ = Status::Ok();
+    }
     event_sink_ = std::move(sink);
     LinxTransportSink transport_sink;
     transport_sink.on_text = [this](std::string_view message) { OnText(message); };
     transport_sink.on_binary = [this](const std::vector<uint8_t>& payload) { OnBinary(payload); };
+    transport_sink.on_error = [this](Status status) {
+        {
+            std::lock_guard<std::mutex> lock(hello_mutex_);
+            if (!hello_received_) {
+                hello_status_ = status;
+                hello_received_ = true;
+            }
+        }
+        hello_cv_.notify_all();
+        Emit(Event(voice::VoiceEventKind::kError, status.message));
+    };
     Status status = transport_.Connect(connection_, std::move(transport_sink));
     if (!status.ok()) {
         event_sink_ = {};
         return status;
     }
     status = Send(codec_.EncodeHello(config_, connection_));
+    if (!status.ok()) {
+        transport_.Close();
+        event_sink_ = {};
+        return status;
+    }
+
+    std::unique_lock<std::mutex> hello_lock(hello_mutex_);
+    const bool received = hello_cv_.wait_for(
+        hello_lock, std::chrono::milliseconds(config_.hello_timeout_ms),
+        [this]() { return hello_received_; });
+    if (!received) {
+        hello_lock.unlock();
+        transport_.Close();
+        event_sink_ = {};
+        return Status::Error(ErrorCode::kUnavailable, "Linx hello 等待超时");
+    }
+    status = hello_status_;
+    hello_lock.unlock();
     if (!status.ok()) {
         transport_.Close();
         event_sink_ = {};
@@ -106,6 +142,7 @@ Status LinxSpeechProviderAdapter::Speak(std::string_view text) {
 
 Status LinxSpeechProviderAdapter::Disconnect() {
     const Status status = transport_.Close();
+    hello_cv_.notify_all();
     connected_ = false;
     generation_ = 0;
     output_sequence_ = 0;
@@ -137,6 +174,10 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
     const LinxInboundMessage& inbound = *decoded.value;
     switch (inbound.kind) {
         case LinxMessageKind::kHello:
+            {
+                std::lock_guard<std::mutex> lock(hello_mutex_);
+                hello_received_ = true;
+            }
             if (inbound.audio_params.has_value()) {
                 const LinxAudioParams& negotiated = *inbound.audio_params;
                 if (negotiated.codec != config_.audio.codec ||
@@ -145,9 +186,20 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
                     negotiated.bits_per_sample != config_.audio.bits_per_sample ||
                     negotiated.frame_duration_ms != config_.audio.frame_duration_ms) {
                     Emit(Event(voice::VoiceEventKind::kError, "Linx hello 音频参数与会话请求不一致"));
+                    {
+                        std::lock_guard<std::mutex> lock(hello_mutex_);
+                        hello_status_ = Status::Error(ErrorCode::kInvalidArgument,
+                                                      "Linx hello 音频参数与会话请求不一致");
+                    }
+                    hello_cv_.notify_all();
                     return;
                 }
             }
+            {
+                std::lock_guard<std::mutex> lock(hello_mutex_);
+                hello_status_ = Status::Ok();
+            }
+            hello_cv_.notify_all();
             Emit(Event(voice::VoiceEventKind::kConnected));
             return;
         case LinxMessageKind::kStt:

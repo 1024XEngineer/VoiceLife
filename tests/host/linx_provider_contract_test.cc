@@ -22,6 +22,10 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
     }
     Status SendText(std::string_view message) override {
         texts.emplace_back(message);
+        if (emit_hello && message.find("\"type\":\"hello\"") != std::string_view::npos &&
+            sink_.on_text) {
+            sink_.on_text(R"({"type":"hello","transport":"websocket"})");
+        }
         return send_text_result;
     }
     Status SendAudio(const voicelife::voice::AudioFrame& frame) override {
@@ -52,6 +56,7 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
     Status send_text_result = Status::Ok();
     Status send_audio_result = Status::Ok();
     Status close_result = Status::Ok();
+    bool emit_hello = true;
     int connects = 0;
     int closes = 0;
 };
@@ -116,7 +121,6 @@ int main() {
     Check(transport.connects == 1 && transport.texts.size() == 1 &&
               transport.texts.front().find("\"type\":\"hello\"") != std::string::npos,
           "连接必须只发送一次 hello");
-    transport.EmitText(R"({"type":"hello","transport":"websocket"})");
     Check(!events.empty() && events.back().kind == voicelife::voice::VoiceEventKind::kConnected &&
               events.back().generation == 7,
           "hello 事件必须携带当前 generation");
@@ -148,8 +152,10 @@ int main() {
     FakeTransport failed_transport;
     failed_transport.connect_result = Status::Error(ErrorCode::kUnavailable, "网络不可用");
     voicelife::linx::LinxSpeechProviderAdapter failed_provider(failed_transport, codec, connection);
-    Check(failed_provider.Connect(session_config, {}).code == ErrorCode::kUnavailable, "传输连接失败应向上传播");
-    Check(failed_provider.StartCapture(config.mode).code == ErrorCode::kUnavailable, "连接失败后不能发送 listen");
+    Check(failed_provider.Connect(session_config, {}).code == ErrorCode::kUnavailable,
+          "传输连接失败应向上传播");
+    Check(failed_provider.StartCapture(config.mode).code == ErrorCode::kUnavailable,
+          "连接失败后不能发送 listen");
 
     // 补充错误路径与边界覆盖,提升 patch 覆盖率。
     auto invalid_audio = config;
@@ -167,11 +173,14 @@ int main() {
     detect_config.session_id = "";
     Check(codec.EncodeListenDetect(detect_config, "测试").ok(), "无 session_id 的 detect 应可编码");
     auto stop_json = codec.EncodeListenStop(config);
-    Check(stop_json.ok() && stop_json.value->find("\"state\":\"stop\"") != std::string::npos, "stop 消息必须带 state");
+    Check(stop_json.ok() && stop_json.value->find("\"state\":\"stop\"") != std::string::npos,
+          "stop 消息必须带 state");
 
     Check(codec.DecodeText("not-json").status.code == ErrorCode::kInvalidArgument, "非 JSON 输入必须拒绝");
-    Check(codec.DecodeText(R"({"type":123})").status.code == ErrorCode::kInvalidArgument, "type 非字符串必须拒绝");
-    Check(codec.DecodeText(R"({"type":"stt"})").status.code == ErrorCode::kInvalidArgument, "stt 缺少 text 必须拒绝");
+    Check(codec.DecodeText(R"({"type":123})").status.code == ErrorCode::kInvalidArgument,
+          "type 非字符串必须拒绝");
+    Check(codec.DecodeText(R"({"type":"stt"})").status.code == ErrorCode::kInvalidArgument,
+          "stt 缺少 text 必须拒绝");
     Check(codec.DecodeText(R"({"type":"tts","state":"unknown"})").status.code == ErrorCode::kInvalidArgument,
           "未知 tts 状态必须拒绝");
     Check(codec.DecodeText(R"({"type":"hello","transport":"tcp"})").status.code == ErrorCode::kInvalidArgument,
@@ -216,5 +225,13 @@ int main() {
     Check(codec.DecodeText(R"({"type":"hello","audio_params":{"format":"wav","sample_rate":16000,"channels":1}})")
                   .status.code == ErrorCode::kInvalidArgument,
           "不支持的音频格式必须拒绝");
+
+    FakeTransport timeout_transport;
+    timeout_transport.emit_hello = false;
+    voicelife::linx::LinxSpeechProviderAdapter timeout_provider(timeout_transport, codec, connection);
+    auto timeout_config = session_config;
+    timeout_config.hello_timeout_ms = 5;
+    Check(timeout_provider.Connect(timeout_config, {}).code == ErrorCode::kUnavailable,
+          "未收到 Linx hello 必须在超时后失败");
     return 0;
 }

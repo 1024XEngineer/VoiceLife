@@ -56,11 +56,15 @@ PR 只说“用了某某模式”不算设计依据，必须说明它改善了�
 ```text
 voicelife_runtime                  只组装
 ├── inbound: voicelife_voice, voicelife_mcp
-├── outbound: voicelife_im, voicelife_platform
+├── outbound: voicelife_linx, voicelife_linx_esp, voicelife_im, voicelife_platform
 └── voicelife_application         跨领域用例
     ├── voicelife_schedule        日程事实
     ├── voicelife_timing          调度事实
     └── voicelife_contracts       最小公共类型
+
+语音出站链路再细分一层：`voicelife_linx` 只做 Linx 协议防腐和 Provider，
+`voicelife_linx_esp` 才能依赖 ESP-IDF WebSocket/TLS；Runtime 负责选择并组装，
+核心 Voice Port 不认识这两个组件的 SDK 句柄。
 ```
 
 规则：

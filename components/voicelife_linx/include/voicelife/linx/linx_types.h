@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -65,6 +66,7 @@ struct LinxInboundMessage {
 struct LinxTransportSink {
     std::function<void(std::string_view)> on_text;
     std::function<void(const std::vector<uint8_t>&)> on_binary;
+    std::function<void(Status)> on_error;
 };
 
 /** 定义 Linx WebSocket 传输的异步端口。 */
@@ -96,6 +98,7 @@ class LinxTransportPort {
      * @return 关闭结果。
      */
     virtual Status Close() = 0;
+    virtual void SetGeneration(uint64_t) {}
 };
 
 /** 定义 Linx 控制消息与领域语义之间的编解码端口。 */
