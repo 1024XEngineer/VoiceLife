@@ -24,6 +24,9 @@ target_link_libraries(schedule PUBLIC contracts)
 add_voicelife_library(timing voicelife_timing
     "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc")
 target_link_libraries(timing PUBLIC contracts)
+add_voicelife_library(mcp voicelife_mcp
+    "${ROOT_DIR}/components/voicelife_mcp/src/mcp_tool_gateway.cc")
+target_link_libraries(mcp PUBLIC contracts)
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
 target_link_libraries(voice PUBLIC contracts)
@@ -43,5 +46,11 @@ target_link_libraries(schedule_contract_test PRIVATE schedule)
 add_voicelife_test(timing_policy_test "unit;timing" timing_policy_test.cc)
 target_link_libraries(timing_policy_test PRIVATE timing)
 
+add_voicelife_test(mcp_tool_gateway_test "unit;mcp" mcp_tool_gateway_test.cc)
+target_link_libraries(mcp_tool_gateway_test PRIVATE mcp)
+
 add_voicelife_test(voice_session_coordinator_test "unit;voice" voice_session_coordinator_test.cc)
 target_link_libraries(voice_session_coordinator_test PRIVATE voice)
+
+add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
+target_link_libraries(runtime_smoke_test PRIVATE mcp voice)

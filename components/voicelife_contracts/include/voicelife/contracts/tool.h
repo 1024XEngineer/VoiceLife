@@ -2,12 +2,15 @@
 
 #include <string>
 #include <unordered_map>
+#include <variant>
 
 #include "voicelife/contracts/status.h"
 
 namespace voicelife {
 
-using ToolArguments = std::unordered_map<std::string, std::string>;
+// 工具调用参数当前支持的运行时值类型。
+using ToolValue = std::variant<bool, int64_t, std::string>;
+using ToolArguments = std::unordered_map<std::string, ToolValue>;
 
 struct ToolCall {
     std::string request_id;

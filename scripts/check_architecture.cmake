@@ -6,6 +6,7 @@ endif()
 
 set(known_components
     voicelife_contracts
+    voicelife_mcp
     voicelife_runtime
     voicelife_schedule
     voicelife_timing
@@ -79,9 +80,11 @@ assert_dependencies(voicelife_schedule PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_schedule PRIVATE)
 assert_dependencies(voicelife_timing PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_timing PRIVATE)
+assert_dependencies(voicelife_mcp PUBLIC voicelife_contracts)
+assert_dependencies(voicelife_mcp PRIVATE)
 assert_dependencies(voicelife_voice PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_voice PRIVATE)
 assert_dependencies(voicelife_runtime PUBLIC voicelife_contracts)
-assert_dependencies(voicelife_runtime PRIVATE voicelife_voice)
+assert_dependencies(voicelife_runtime PRIVATE voicelife_mcp voicelife_voice)
 
 message(STATUS "PASS component names, include paths, and dependency graph")

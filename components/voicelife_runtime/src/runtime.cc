@@ -1,5 +1,6 @@
 #include "voicelife/runtime/runtime.h"
 
+#include "voicelife/mcp/mcp_tool_gateway.h"
 #include "voicelife/voice/voice_session_coordinator.h"
 
 namespace voicelife::runtime {
@@ -8,44 +9,38 @@ namespace {
 // 提供可启动的音频设备占位适配器。
 class ScaffoldAudioAdapter final : public voice::AudioDevicePort {
    public:
-    // 打开占位音频设备。
     Status Open() override { return Status::Ok(); }
-
-    // 关闭占位音频设备。
     void Close() override {}
 };
 
 // 提供可连接的语音服务占位适配器。
 class ScaffoldSpeechAdapter final : public voice::SpeechProviderPort {
    public:
-    // 连接占位语音服务。
     Status Connect() override { return Status::Ok(); }
-
-    // 断开占位语音服务。
     void Disconnect() override {}
 };
 
-// 日程工具尚未接入时拒绝所有工具调用。
-class DisabledToolGateway final : public voice::ToolGatewayPort {
+// 将语音工具调用转发给通用 MCP 注册中心。
+class McpVoiceBridge final : public voice::ToolGatewayPort {
    public:
-    // 在工具网关未接入期间返回不可用状态。
-    ToolResult Call(const ToolCall&) override {
-        return {.status = Status::Error(ErrorCode::kUnavailable, "工具网关尚未接入"), .output = {}};
-    }
+    explicit McpVoiceBridge(mcp::McpToolGateway& gateway) : gateway_(gateway) {}
+    ToolResult Call(const ToolCall& call) override { return gateway_.call(call); }
+
+   private:
+    mcp::McpToolGateway& gateway_;
 };
 
-// 组装当前可用的语音运行时基础能力。
+// 组装当前可用的语音和 MCP 基础能力。
 class Runtime final {
    public:
-    Runtime() : voice_(audio_, speech_, tools_) {}
-
-    // 启动语音会话。
+    Runtime() : mcp_voice_bridge_(mcp_), voice_(audio_, speech_, mcp_voice_bridge_) {}
     Status Start() { return voice_.Start(); }
 
    private:
+    mcp::McpToolGateway mcp_;
+    McpVoiceBridge mcp_voice_bridge_;
     ScaffoldAudioAdapter audio_;
     ScaffoldSpeechAdapter speech_;
-    DisabledToolGateway tools_;
     voice::VoiceSessionCoordinator voice_;
 };
 
