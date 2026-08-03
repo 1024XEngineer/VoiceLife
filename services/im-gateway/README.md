@@ -1,6 +1,6 @@
 # VoiceLife IM Gateway skeleton
 
-这是 VoiceLife IM 模块的可编译空骨架。它用代码表达模块边界、跨端契约和依赖方向，并以 Issue #65 的 Proposal-Accepted 共识为接口基线；不包含生产数据库、真实 Koishi Bot 或微信验签实现。
+这是 VoiceLife IM 模块的可编译空骨架。它用代码表达模块边界、跨端契约和依赖方向，并以 Issue #95 作为当前交付与验收基线；本目录不包含生产数据库、真实 Koishi Bot 或微信验签实现。
 
 ## 边界
 
@@ -16,6 +16,8 @@
 - DeliveryAttempt、DeliveryReceipt、Action 分别记录平台受理、投递证据和用户动作。
 - Koishi Plugin、Handler 与 IM Application 同进程组合，通过 Application/Port 直接调用，不保留内部管理 HTTP 接口。
 - HTTP/SSE Controller 只承载设备侧与 Action UI 的真实跨部署边界。
+- HTTP JSON 在进入 Application 前按 `schemaVersion`、字段、枚举和 ISO 8601 时间完成运行时校验。
+- 请求级幂等记录同时保存规范化指纹和原始响应；相同事件 ID 的异内容重放会明确冲突。
 
 ## 目录
 
@@ -37,7 +39,10 @@ src/
 ```bash
 pnpm --dir services/im-gateway check
 pnpm --dir services/im-gateway build
+pnpm --dir services/im-gateway test
 ```
+
+跨端 JSON fixture 位于 `contracts/im-gateway/v1/fixtures`，由 C++ 主机测试与 TypeScript 测试共同消费。
 
 `createMockImGateway()` 使用内存 Repository 和 Mock 通道，可用于后续主干串联测试。生产装配应替换为 PostgreSQL、Koishi、微信 Capability Plugin 和真实 SSE Hub。
 
