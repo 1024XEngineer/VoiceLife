@@ -5,12 +5,14 @@ import type {
   ReminderTriggerId,
 } from "../../contracts/ids.js";
 import type {
-  NotificationIntent,
   NotificationSubmission,
   ReminderActionCommand,
-  ReminderActionResult,
-  ScheduleReceiptIntent,
 } from "../../contracts/device-gateway.js";
+import {
+  parseNotificationIntent,
+  parseReminderActionResult,
+  parseScheduleReceiptIntent,
+} from "../../contracts/device-gateway-parser.js";
 import type {
   ActionApplication,
   CreatePairingSessionCommand,
@@ -59,10 +61,10 @@ export const DEVICE_API_ENDPOINTS = {
   },
 } as const;
 
-export interface AuthenticatedIntentRequest<TBody> {
+export interface AuthenticatedIntentRequest {
   readonly authorization: string;
   readonly idempotencyKey: string;
-  readonly body: TBody;
+  readonly body: unknown;
 }
 
 /** Framework-neutral HTTP controller contract for the device-facing surface. */
@@ -95,33 +97,36 @@ export class DeviceIntentController {
   }
 
   public async postScheduleReceipt(
-    input: AuthenticatedIntentRequest<ScheduleReceiptIntent>,
+    input: AuthenticatedIntentRequest,
   ): Promise<NotificationSubmission> {
-    await this.authenticateDevice(input.authorization, input.body.deviceId);
-    this.assertIdempotencyKey(input.idempotencyKey, input.body.eventId);
-    return this.notifications.submitScheduleReceipt(input.body);
+    const body = parseScheduleReceiptIntent(input.body);
+    await this.authenticateDevice(input.authorization, body.deviceId);
+    this.assertIdempotencyKey(input.idempotencyKey, body.eventId);
+    return this.notifications.submitScheduleReceipt(body);
   }
 
   public async postNotification(
-    input: AuthenticatedIntentRequest<NotificationIntent>,
+    input: AuthenticatedIntentRequest,
   ): Promise<NotificationSubmission> {
+    const body = parseNotificationIntent(input.body);
     await this.authenticateDevice(
       input.authorization,
-      input.body.recipient.deviceId,
+      body.recipient.deviceId,
     );
     this.assertIdempotencyKey(
       input.idempotencyKey,
-      input.body.businessEventId,
+      body.businessEventId,
     );
-    return this.notifications.submitNotification(input.body);
+    return this.notifications.submitNotification(body);
   }
 
   public async postReminderActionResult(input: {
     readonly authorization: string;
     readonly deviceId: DeviceId;
     readonly commandId: ActionId;
-    readonly body: ReminderActionResult;
+    readonly body: unknown;
   }): Promise<ImAction> {
+    const body = parseReminderActionResult(input.body);
     const principal = await this.authentication.authenticate(input.authorization);
     if (principal.deviceId !== input.deviceId) {
       throw new ImGatewayError(
@@ -132,7 +137,7 @@ export class DeviceIntentController {
     return this.actions.recordResult(
       input.commandId,
       input.deviceId,
-      input.body,
+      body,
     );
   }
 

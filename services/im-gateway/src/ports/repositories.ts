@@ -22,6 +22,7 @@ import type {
   ImBinding,
   ImOutboxEvent,
   InboundEventRecord,
+  IntentSubmissionRecord,
   PairingSession,
 } from "../domain/models.js";
 import type { IsoDateTime } from "../shared/types.js";
@@ -94,6 +95,14 @@ export interface DeliveryRepository {
   saveReceipt(receipt: DeliveryReceipt): Promise<void>;
 }
 
+export interface IntentSubmissionRepository {
+  findByBusinessKey(
+    businessEventId: EventId,
+    kind: IntentSubmissionRecord["kind"],
+  ): Promise<IntentSubmissionRecord | undefined>;
+  save(record: IntentSubmissionRecord): Promise<void>;
+}
+
 export interface ActionRepository {
   findById(id: ActionId): Promise<ImAction | undefined>;
   findByOperationId(operationId: OperationId): Promise<ImAction | undefined>;
@@ -117,6 +126,7 @@ export interface ImUnitOfWorkContext {
   readonly identities: IdentityRepository;
   readonly bindings: BindingRepository;
   readonly inboundEvents: InboundEventRepository;
+  readonly intentSubmissions: IntentSubmissionRepository;
   readonly deliveries: DeliveryRepository;
   readonly actions: ActionRepository;
   readonly outbox: OutboxRepository;

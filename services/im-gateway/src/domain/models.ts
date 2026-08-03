@@ -18,6 +18,7 @@ import type {
   UserId,
 } from "../contracts/ids.js";
 import type {
+  NotificationSubmission,
   ReminderActionKind,
   ReminderActionResult,
 } from "../contracts/device-gateway.js";
@@ -132,6 +133,15 @@ export interface Delivery {
   readonly lastErrorCode?: string;
   readonly createdAt: IsoDateTime;
   readonly updatedAt: IsoDateTime;
+}
+
+/** Request-level idempotency record, including zero-delivery submissions. */
+export interface IntentSubmissionRecord {
+  readonly businessEventId: EventId;
+  readonly kind: Delivery["kind"];
+  readonly requestFingerprint: string;
+  readonly submission: NotificationSubmission;
+  readonly createdAt: IsoDateTime;
 }
 
 export interface DeliveryAttempt {

@@ -1,4 +1,6 @@
 export type ImGatewayErrorCode =
+  | "invalid_contract"
+  | "idempotency_conflict"
   | "binding_not_found"
   | "delivery_not_found"
   | "action_not_found"

@@ -2,11 +2,11 @@ import type {
   ActionUiApplication,
   ActionUiView,
 } from "../../application/api.js";
-import type {
-  ActionIntent,
-  ReminderActionCommand,
-  ReminderActionKind,
-} from "../../contracts/device-gateway.js";
+import type { ReminderActionCommand } from "../../contracts/device-gateway.js";
+import {
+  parseActionToken,
+  parseReminderActionIntent,
+} from "../../contracts/device-gateway-parser.js";
 
 export const ACTION_UI_ROUTES = {
   show: "/voicelife/reminder-actions/:token",
@@ -17,13 +17,11 @@ export const ACTION_UI_ROUTES = {
 export class ActionUiController {
   public constructor(private readonly actionUi: ActionUiApplication) {}
 
-  public get(token: string): Promise<ActionUiView> {
-    return this.actionUi.show(token);
+  public get(token: unknown): Promise<ActionUiView> {
+    return this.actionUi.show(parseActionToken(token));
   }
 
-  public post(input: Pick<ActionIntent, "token" | "params"> & {
-    readonly action: ReminderActionKind;
-  }): Promise<ReminderActionCommand> {
-    return this.actionUi.execute(input);
+  public post(input: unknown): Promise<ReminderActionCommand> {
+    return this.actionUi.execute(parseReminderActionIntent(input));
   }
 }

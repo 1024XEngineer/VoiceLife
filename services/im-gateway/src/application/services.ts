@@ -45,10 +45,12 @@ import type {
   ExternalIdentityProtector,
   IdGenerator,
   ImChannelPort,
+  ImSendAcceptance,
   PairingCodePort,
 } from "../ports/external.js";
 import type { ImUnitOfWork } from "../ports/repositories.js";
 import { ImGatewayError } from "../shared/errors.js";
+import { canonicalizeJson } from "../shared/json.js";
 import type { IsoDateTime, JsonValue } from "../shared/types.js";
 import type {
   ActionApplication,
@@ -200,7 +202,17 @@ export class DefaultPairingApplication implements PairingApplication {
         );
       }
 
-      const userId = command.userId ?? session.userId;
+      if (
+        session.userId !== undefined &&
+        command.userId !== undefined &&
+        session.userId !== command.userId
+      ) {
+        throw new ImGatewayError(
+          "invalid_transition",
+          "Pairing confirmation user does not match the pairing session",
+        );
+      }
+      const userId = session.userId ?? command.userId;
       if (userId === undefined) {
         throw new ImGatewayError(
           "binding_not_found",
@@ -492,6 +504,21 @@ export class DefaultNotificationApplication implements NotificationApplication {
     readonly actionStream?: NonNullable<NotificationSubmission["actionStream"]>;
   }): Promise<NotificationSubmission> {
     return this.unitOfWork.transaction(async (tx) => {
+      const requestFingerprint = canonicalizeJson(input.payload);
+      const existingSubmission = await tx.intentSubmissions.findByBusinessKey(
+        input.businessEventId,
+        input.kind,
+      );
+      if (existingSubmission !== undefined) {
+        if (existingSubmission.requestFingerprint !== requestFingerprint) {
+          throw new ImGatewayError(
+            "idempotency_conflict",
+            "Business event ID was already used with different contract content",
+          );
+        }
+        return existingSubmission.submission;
+      }
+
       const bindings = input.userId === undefined
         ? input.deviceId === undefined
           ? []
@@ -560,7 +587,7 @@ export class DefaultNotificationApplication implements NotificationApplication {
         });
       }
 
-      return {
+      const submission: NotificationSubmission = {
         businessEventId: input.businessEventId,
         status: "accepted",
         deliveries,
@@ -568,6 +595,14 @@ export class DefaultNotificationApplication implements NotificationApplication {
           ? {}
           : { actionStream: input.actionStream }),
       };
+      await tx.intentSubmissions.save({
+        businessEventId: input.businessEventId,
+        kind: input.kind,
+        requestFingerprint,
+        submission,
+        createdAt: now,
+      });
+      return submission;
     });
   }
 }
@@ -705,11 +740,20 @@ export class DefaultDeliveryDispatchApplication
       return started;
     });
 
-    const acceptance = await this.channel.send({
-      delivery: target.delivery,
-      conversation,
-      content: renderedPayload,
-    });
+    let acceptance: ImSendAcceptance;
+    try {
+      acceptance = await this.channel.send({
+        delivery: target.delivery,
+        conversation,
+        content: renderedPayload,
+      });
+    } catch {
+      acceptance = {
+        accepted: false,
+        retryable: true,
+        errorCode: "channel_send_exception",
+      } as const;
+    }
     return this.unitOfWork.transaction(async (tx) => {
       const status = acceptance.accepted
         ? "accepted"
@@ -1033,7 +1077,11 @@ export class DefaultActionApplication implements ActionApplication {
       await tx.actions.save(updated);
       return updated;
     });
-    if (result.status !== "retryable_failed") await this.stream.close(updated.id);
+    if (result.status === "retryable_failed") {
+      await this.dispatch(toCommand(updated));
+    } else {
+      await this.stream.close(updated.id);
+    }
     return updated;
   }
 

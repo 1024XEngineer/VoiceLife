@@ -1,10 +1,14 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 
 #include "voicelife/application/calendar_application.h"
 
 namespace voicelife::im {
+
+inline constexpr std::string_view kDeviceContractVersion = "1";
+inline constexpr std::string_view kNotificationIntentPath = "/v1/im/notifications";
 
 struct ImGatewayRequest {
     std::string url;

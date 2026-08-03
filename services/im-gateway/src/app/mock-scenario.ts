@@ -13,6 +13,7 @@ import type {
 } from "../contracts/ids.js";
 import { unsafeId } from "../contracts/ids.js";
 import type { IsoDateTime } from "../shared/types.js";
+import { ImGatewayError } from "../shared/errors.js";
 import { FixedClock } from "../infrastructure/mock-support.js";
 import { createMockImGateway } from "./create-im-gateway.js";
 
@@ -46,6 +47,27 @@ export async function runMockNotificationScenario(): Promise<void> {
     externalUserId: "mock-open-id",
   });
 
+  const conflictingPairing = await gateway.deviceApi.postPairingSession({
+    authorization: "Bearer mock-device-token",
+    body: { userId, deviceId },
+  });
+  let mismatchedUserRejected = false;
+  try {
+    await gateway.application.pairing.confirm({
+      displayCode: conflictingPairing.displayCode,
+      channelAccountId: channel.id,
+      externalUserId: "another-open-id",
+      userId: unsafeId<UserId>("user-other"),
+    });
+  } catch (error) {
+    mismatchedUserRejected =
+      error instanceof ImGatewayError && error.code === "invalid_transition";
+  }
+  if (!mismatchedUserRejected) {
+    throw new Error("Pairing confirmation accepted a mismatched session user");
+  }
+  await gateway.application.pairing.cancel(conflictingPairing.session.id);
+
   const scheduleReceipt = await gateway.deviceApi.postScheduleReceipt({
     authorization: "Bearer mock-device-token",
     idempotencyKey: "event-schedule-receipt",
@@ -56,7 +78,7 @@ export async function runMockNotificationScenario(): Promise<void> {
       userId,
       deviceId,
       operationType: "created",
-      scheduleId: unsafeId<ScheduleId>(100),
+      scheduleId: unsafeId<ScheduleId>("schedule-100"),
       result: "succeeded",
       summary: "日程已创建",
       occurredAt: "2026-08-03T00:00:00.000Z" as IsoDateTime,
@@ -66,40 +88,63 @@ export async function runMockNotificationScenario(): Promise<void> {
     throw new Error("ScheduleReceiptIntent HTTPS mapping did not create Delivery");
   }
 
+  const strongIntent = {
+    schemaVersion: DEVICE_CONTRACT_VERSION,
+    businessEventId: unsafeId<EventId>("event-strong"),
+    correlationId: unsafeId<CorrelationId>("correlation-demo"),
+    kind: "reminder_due",
+    recipient: { userId, deviceId },
+    scheduleId: unsafeId<ScheduleId>("schedule-1"),
+    taskId: unsafeId<TimerTaskId>("task-demo"),
+    instanceId: unsafeId<TimerInstanceId>("instance-demo"),
+    reminderTriggerId: unsafeId<ReminderTriggerId>("trigger-demo"),
+    reminderType: "strong",
+    content: { title: "Mock reminder" },
+    plannedAt: "2026-08-03T00:00:00.000Z" as IsoDateTime,
+    triggerAt: "2026-08-03T00:00:00.000Z" as IsoDateTime,
+    actions: [
+      { kind: "command", type: "acknowledge", label: "知道了" },
+      {
+        kind: "command",
+        type: "snooze",
+        label: "推迟 5 分钟",
+        params: { minutes: 5 },
+      },
+    ],
+    occurredAt: "2026-08-03T00:00:00.000Z" as IsoDateTime,
+  } as const;
   const strong = await gateway.deviceApi.postNotification({
     authorization: "Bearer mock-device-token",
     idempotencyKey: "event-strong",
-    body: {
-      schemaVersion: DEVICE_CONTRACT_VERSION,
-      businessEventId: unsafeId<EventId>("event-strong"),
-      correlationId: unsafeId<CorrelationId>("correlation-demo"),
-      kind: "reminder_due",
-      recipient: { userId, deviceId },
-      scheduleId: unsafeId<ScheduleId>(1),
-      taskId: unsafeId<TimerTaskId>("task-demo"),
-      instanceId: unsafeId<TimerInstanceId>("instance-demo"),
-      reminderTriggerId: unsafeId<ReminderTriggerId>("trigger-demo"),
-      reminderType: "strong",
-      content: { title: "Mock reminder" },
-      plannedAt: "2026-08-03T00:00:00.000Z" as IsoDateTime,
-      triggerAt: "2026-08-03T00:00:00.000Z" as IsoDateTime,
-      actions: [
-        { kind: "command", type: "acknowledge", label: "知道了" },
-        {
-          kind: "command",
-          type: "snooze",
-          label: "推迟 5 分钟",
-          params: { minutes: 5 },
-        },
-      ],
-      occurredAt: "2026-08-03T00:00:00.000Z" as IsoDateTime,
-    },
+    body: strongIntent,
   });
   if (strong.deliveries.length !== 1 || strong.actionStream === undefined) {
     throw new Error("Strong reminder did not create Delivery and action window");
   }
   const strongDelivery = strong.deliveries[0];
   if (strongDelivery === undefined) throw new Error("Strong Delivery is missing");
+  const replayedStrong = await gateway.deviceApi.postNotification({
+    authorization: "Bearer mock-device-token",
+    idempotencyKey: "event-strong",
+    body: strongIntent,
+  });
+  if (replayedStrong.deliveries[0]?.deliveryId !== strongDelivery.deliveryId) {
+    throw new Error("Identical notification replay did not return its original result");
+  }
+  let conflictingReplayRejected = false;
+  try {
+    await gateway.deviceApi.postNotification({
+      authorization: "Bearer mock-device-token",
+      idempotencyKey: "event-strong",
+      body: { ...strongIntent, reminderType: "weak", actions: [] },
+    });
+  } catch (error) {
+    conflictingReplayRejected =
+      error instanceof ImGatewayError && error.code === "idempotency_conflict";
+  }
+  if (!conflictingReplayRejected) {
+    throw new Error("Conflicting notification replay was not rejected");
+  }
   const actionToken = await gateway.application.actionUi.issue(
     strongDelivery.deliveryId,
   );
@@ -268,7 +313,7 @@ export async function runMockNotificationScenario(): Promise<void> {
       correlationId: unsafeId<CorrelationId>("correlation-weak"),
       kind: "reminder_due",
       recipient: { userId, deviceId },
-      scheduleId: unsafeId<ScheduleId>(2),
+      scheduleId: unsafeId<ScheduleId>("schedule-2"),
       taskId: unsafeId<TimerTaskId>("task-weak"),
       instanceId: unsafeId<TimerInstanceId>("instance-weak"),
       reminderTriggerId: unsafeId<ReminderTriggerId>("trigger-weak"),
@@ -293,7 +338,7 @@ export async function runMockNotificationScenario(): Promise<void> {
       correlationId: unsafeId<CorrelationId>("correlation-expiring"),
       kind: "reminder_due",
       recipient: { userId, deviceId },
-      scheduleId: unsafeId<ScheduleId>(3),
+      scheduleId: unsafeId<ScheduleId>("schedule-3"),
       taskId: unsafeId<TimerTaskId>("task-expiring"),
       instanceId: unsafeId<TimerInstanceId>("instance-expiring"),
       reminderTriggerId: unsafeId<ReminderTriggerId>("trigger-expiring"),

@@ -174,6 +174,7 @@ export function createImGateway(
 export function createMockImGateway(
   deviceId: DeviceId = unsafeId<DeviceId>("device-demo"),
   clock: FixedClock = new FixedClock(),
+  overrides: Partial<ImGatewayDependencies> = {},
 ): ImGatewayRuntime {
   return createImGateway({
     unitOfWork: new InMemoryImUnitOfWork(),
@@ -189,5 +190,6 @@ export function createMockImGateway(
     identityProtector: new MockExternalIdentityProtector(),
     clock,
     ids: new SequentialIdGenerator(),
+    ...overrides,
   });
 }

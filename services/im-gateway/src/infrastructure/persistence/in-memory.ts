@@ -22,6 +22,7 @@ import type {
   ImBinding,
   ImOutboxEvent,
   InboundEventRecord,
+  IntentSubmissionRecord,
   PairingSession,
 } from "../../domain/models.js";
 import type {
@@ -33,6 +34,7 @@ import type {
   ImUnitOfWork,
   ImUnitOfWorkContext,
   InboundEventRepository,
+  IntentSubmissionRepository,
   OutboxRepository,
   PairingSessionRepository,
 } from "../../ports/repositories.js";
@@ -45,6 +47,7 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
   public readonly identities: IdentityRepository = this;
   public readonly bindings: BindingRepository = this;
   public readonly inboundEvents: InboundEventRepository = this;
+  public readonly intentSubmissions: IntentSubmissionRepository = this;
   public readonly deliveries: DeliveryRepository = this;
   public readonly actions: ActionRepository = this;
   public readonly outbox: OutboxRepository = this;
@@ -54,6 +57,7 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
   private readonly identityRows = new Map<ExternalIdentityId, ExternalIdentity>();
   private readonly bindingRows = new Map<BindingId, ImBinding>();
   private readonly inboundRows = new Map<string, InboundEventRecord>();
+  private readonly intentSubmissionRows = new Map<string, IntentSubmissionRecord>();
   private readonly deliveryRows = new Map<DeliveryId, Delivery>();
   private readonly attemptRows = new Map<string, DeliveryAttempt>();
   private readonly receiptRows = new Map<string, DeliveryReceipt>();
@@ -71,6 +75,7 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
   public save(value: ExternalIdentity): Promise<void>;
   public save(value: ImBinding): Promise<void>;
   public save(value: InboundEventRecord): Promise<void>;
+  public save(value: IntentSubmissionRecord): Promise<void>;
   public save(value: Delivery): Promise<void>;
   public save(value: ImAction): Promise<void>;
   public save(
@@ -80,6 +85,7 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
       | ExternalIdentity
       | ImBinding
       | InboundEventRecord
+      | IntentSubmissionRecord
       | Delivery
       | ImAction,
   ): Promise<void> {
@@ -91,6 +97,11 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
     else if ("externalEventId" in value && "eventType" in value) {
       this.inboundRows.set(
         inboundKey(value.channelAccountId, value.externalEventId),
+        value,
+      );
+    } else if ("requestFingerprint" in value) {
+      this.intentSubmissionRows.set(
+        intentSubmissionKey(value.businessEventId, value.kind),
         value,
       );
     } else if ("businessEventId" in value) this.deliveryRows.set(value.id, value);
@@ -211,12 +222,26 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
     businessEventId: EventId,
     bindingId: BindingId,
     kind: Delivery["kind"],
-  ): Promise<Delivery | undefined> {
+  ): Promise<Delivery | undefined>;
+  public findByBusinessKey(
+    businessEventId: EventId,
+    kind: IntentSubmissionRecord["kind"],
+  ): Promise<IntentSubmissionRecord | undefined>;
+  public findByBusinessKey(
+    businessEventId: EventId,
+    bindingIdOrKind: BindingId | IntentSubmissionRecord["kind"],
+    kind?: Delivery["kind"],
+  ): Promise<Delivery | IntentSubmissionRecord | undefined> {
+    if (kind === undefined) {
+      return Promise.resolve(
+        this.intentSubmissionRows.get(intentSubmissionKey(businessEventId, bindingIdOrKind as IntentSubmissionRecord["kind"])),
+      );
+    }
     return Promise.resolve(
       [...this.deliveryRows.values()].find(
         (delivery) =>
           delivery.businessEventId === businessEventId &&
-          delivery.bindingId === bindingId &&
+          delivery.bindingId === bindingIdOrKind &&
           delivery.kind === kind,
       ),
     );
@@ -373,6 +398,13 @@ function inboundKey(
   externalEventId: string,
 ): string {
   return `${channelAccountId}:${externalEventId}`;
+}
+
+function intentSubmissionKey(
+  businessEventId: EventId,
+  kind: IntentSubmissionRecord["kind"],
+): string {
+  return `${businessEventId}:${kind}`;
 }
 
 function attemptKey(deliveryId: DeliveryId, attemptNo: number): string {

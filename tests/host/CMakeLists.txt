@@ -68,6 +68,7 @@ target_link_libraries(voice_session_coordinator_test PRIVATE voice)
 
 add_voicelife_test(im_gateway_adapter_test "unit;im" im_gateway_adapter_test.cc)
 target_link_libraries(im_gateway_adapter_test PRIVATE im)
+target_compile_definitions(im_gateway_adapter_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
 
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice im platform)

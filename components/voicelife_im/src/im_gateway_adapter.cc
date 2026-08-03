@@ -29,7 +29,7 @@ Status ImGatewayAdapter::Publish(const application::NotificationIntent& intent) 
         return Status::Error(ErrorCode::kUnavailable, "IM Gateway 未配置");
     }
     return transport_.Send({
-        .url = base_url_ + "/v1/notification-intents",
+        .url = base_url_ + std::string(kNotificationIntentPath),
         .bearer_token = bearer_token_,
         .intent = intent,
     });

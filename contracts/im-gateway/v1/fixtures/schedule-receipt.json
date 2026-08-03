@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1",
+  "eventId": "event-schedule-fixture",
+  "correlationId": "correlation-schedule-fixture",
+  "userId": "user-fixture",
+  "deviceId": "device-fixture",
+  "operationType": "created",
+  "scheduleId": "schedule-fixture",
+  "result": "succeeded",
+  "summary": "日程已创建",
+  "occurredAt": "2026-08-03T00:00:00.000Z"
+}
