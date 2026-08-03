@@ -6,6 +6,18 @@
 namespace voicelife::mcp {
 namespace {
 
+bool MatchesType(const ToolValue& value, ToolInputType type) {
+    switch (type) {
+        case ToolInputType::kString:
+            return std::holds_alternative<std::string>(value);
+        case ToolInputType::kInteger:
+            return std::holds_alternative<int64_t>(value);
+        case ToolInputType::kBoolean:
+            return std::holds_alternative<bool>(value);
+    }
+    return false;
+}
+
 // 将状态统一转换为无输出内容的工具调用失败结果。
 ToolResult Failure(Status status) { return {.status = std::move(status), .output = {}}; }
 
@@ -29,6 +41,9 @@ Status ValidateDefinition(const ToolDefinition& definition, const ToolHandler& h
         if (!input_names.insert(field.name).second) {
             return Status::Error(ErrorCode::kInvalidArgument, "工具入参名称重复：" + field.name);
         }
+        if (field.default_value.has_value() && !MatchesType(*field.default_value, field.type)) {
+            return Status::Error(ErrorCode::kInvalidArgument, "工具默认值类型错误：" + field.name);
+        }
     }
     return Status::Ok();
 }
@@ -45,6 +60,8 @@ Status NormalizeArguments(const ToolDefinition& definition, ToolCall& call) {
             } else if (field.required) {
                 return Status::Error(ErrorCode::kInvalidArgument, "缺少参数：" + field.name);
             }
+        } else if (!MatchesType(argument->second, field.type)) {
+            return Status::Error(ErrorCode::kInvalidArgument, "工具参数类型错误：" + field.name);
         }
     }
     for (const auto& argument : call.arguments) {
