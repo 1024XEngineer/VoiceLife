@@ -33,6 +33,13 @@ ToolDefinition EchoDefinition(std::string name = "voicelife.test.echo") {
     };
 }
 
+ToolDefinition DefaultEchoDefinition() {
+    auto definition = EchoDefinition("voicelife.test.default-echo");
+    definition.input.front().required = false;
+    definition.input.front().default_value = "default";
+    return definition;
+}
+
 ToolResult OkResult(const ToolCall& call) {
     return {.status = Status::Ok(), .output = {{"echo", call.arguments.at("text")}}};
 }
@@ -71,6 +78,29 @@ int main() {
     });
     Check(called.status.ok() && called.output.at("echo") == "hello", "工具调用应分发给已注册 handler");
     Check(handler_calls == 1, "每次工具调用只应执行一次 handler");
+
+    Check(gateway.call({
+              .request_id = "request-2",
+              .name = "voicelife.test.echo",
+              .arguments = {},
+          })
+              .status.code == ErrorCode::kInvalidArgument,
+          "缺少必填参数时 Gateway 应拒绝调用");
+    Check(gateway.call({
+              .request_id = "request-3",
+              .name = "voicelife.test.echo",
+              .arguments = {{"text", "hello"}, {"extra", "value"}},
+          })
+              .status.code == ErrorCode::kInvalidArgument,
+          "携带未定义参数时 Gateway 应拒绝调用");
+
+    Check(gateway.register_tool(DefaultEchoDefinition(), OkResult).ok(), "应能注册带默认值的工具");
+    const auto default_result = gateway.call({
+        .request_id = "request-4",
+        .name = "voicelife.test.default-echo",
+        .arguments = {},
+    });
+    Check(default_result.status.ok() && default_result.output.at("echo") == "default", "Gateway 应补齐默认参数");
 
     Check(gateway.call({.request_id = "", .name = "voicelife.test.echo", .arguments = {}}).status.code ==
               ErrorCode::kInvalidArgument,

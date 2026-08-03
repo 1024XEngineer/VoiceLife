@@ -33,6 +33,28 @@ Status ValidateDefinition(const ToolDefinition& definition, const ToolHandler& h
     return Status::Ok();
 }
 
+// 校验调用参数，并补齐定义中声明的默认值后交给 handler。
+Status NormalizeArguments(const ToolDefinition& definition, ToolCall& call) {
+    std::unordered_set<std::string> defined_names;
+    for (const auto& field : definition.input) {
+        defined_names.insert(field.name);
+        const auto argument = call.arguments.find(field.name);
+        if (argument == call.arguments.end()) {
+            if (field.default_value.has_value()) {
+                call.arguments.emplace(field.name, *field.default_value);
+            } else if (field.required) {
+                return Status::Error(ErrorCode::kInvalidArgument, "缺少参数：" + field.name);
+            }
+        }
+    }
+    for (const auto& argument : call.arguments) {
+        if (!defined_names.contains(argument.first)) {
+            return Status::Error(ErrorCode::kInvalidArgument, "不支持的参数：" + argument.first);
+        }
+    }
+    return Status::Ok();
+}
+
 }  // namespace
 
 Status McpToolGateway::register_tool(ToolDefinition definition, ToolHandler handler) {
@@ -76,7 +98,12 @@ ToolResult McpToolGateway::call(const ToolCall& call) const {
     if (registered == tools_.end()) {
         return Failure(Status::Error(ErrorCode::kNotFound, "工具不存在：" + call.name));
     }
-    return registered->second.handler(call);
+    ToolCall normalized_call = call;
+    const Status validation = NormalizeArguments(registered->second.definition, normalized_call);
+    if (!validation.ok()) {
+        return Failure(validation);
+    }
+    return registered->second.handler(normalized_call);
 }
 
 }  // namespace voicelife::mcp

@@ -9,14 +9,9 @@
 
 namespace voicelife::mcp {
 
-// 工具入参支持的数据类型，用于生成发送给模型的输入 Schema。
+// 当前字符串参数契约支持的数据类型，用于生成发送给模型的输入 Schema。
 enum class ToolInputType {
     kString,
-    kInteger,
-    kNumber,
-    kBoolean,
-    kObject,
-    kArray,
 };
 
 // 单个工具入参的声明信息。
