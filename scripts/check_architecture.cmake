@@ -5,11 +5,8 @@ if(NOT DEFINED VOICELIFE_ROOT)
 endif()
 
 set(known_components
-    voicelife_application
     voicelife_contracts
-    voicelife_im
     voicelife_mcp
-    voicelife_platform
     voicelife_runtime
     voicelife_schedule
     voicelife_timing
@@ -83,25 +80,11 @@ assert_dependencies(voicelife_schedule PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_schedule PRIVATE)
 assert_dependencies(voicelife_timing PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_timing PRIVATE)
-assert_dependencies(voicelife_application PUBLIC voicelife_contracts voicelife_schedule voicelife_timing)
-assert_dependencies(voicelife_application PRIVATE)
-assert_dependencies(voicelife_mcp PUBLIC voicelife_application voicelife_contracts)
+assert_dependencies(voicelife_mcp PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_mcp PRIVATE)
 assert_dependencies(voicelife_voice PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_voice PRIVATE)
-assert_dependencies(voicelife_im PUBLIC voicelife_application voicelife_contracts)
-assert_dependencies(voicelife_im PRIVATE)
-assert_dependencies(voicelife_platform PUBLIC voicelife_application voicelife_contracts)
-assert_dependencies(voicelife_platform PRIVATE)
 assert_dependencies(voicelife_runtime PUBLIC voicelife_contracts)
-assert_dependencies(
-    voicelife_runtime
-    PRIVATE
-    voicelife_application
-    voicelife_im
-    voicelife_mcp
-    voicelife_platform
-    voicelife_voice
-)
+assert_dependencies(voicelife_runtime PRIVATE voicelife_mcp voicelife_voice)
 
 message(STATUS "PASS component names, include paths, and dependency graph")

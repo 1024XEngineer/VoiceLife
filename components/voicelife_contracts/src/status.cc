@@ -10,6 +10,8 @@ const char* ErrorCodeName(ErrorCode code) {
             return "invalid_argument";
         case ErrorCode::kNotFound:
             return "not_found";
+        case ErrorCode::kAlreadyExists:
+            return "already_exists";
         case ErrorCode::kConflict:
             return "conflict";
         case ErrorCode::kUnavailable:

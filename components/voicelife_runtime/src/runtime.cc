@@ -1,62 +1,42 @@
 #include "voicelife/runtime/runtime.h"
 
-#include "voicelife/application/calendar_application.h"
-#include "voicelife/im/im_gateway_adapter.h"
 #include "voicelife/mcp/mcp_tool_gateway.h"
-#include "voicelife/platform/in_memory_calendar_store.h"
-#include "voicelife/platform/sequential_id_generator.h"
-#include "voicelife/platform/system_clock.h"
 #include "voicelife/voice/voice_session_coordinator.h"
 
 namespace voicelife::runtime {
 namespace {
 
+// 提供可启动的音频设备占位适配器。
 class ScaffoldAudioAdapter final : public voice::AudioDevicePort {
    public:
     Status Open() override { return Status::Ok(); }
     void Close() override {}
 };
 
+// 提供可连接的语音服务占位适配器。
 class ScaffoldSpeechAdapter final : public voice::SpeechProviderPort {
    public:
     Status Connect() override { return Status::Ok(); }
     void Disconnect() override {}
 };
 
-class DisabledImTransport final : public im::ImTransportPort {
-   public:
-    Status Send(const im::ImGatewayRequest&) override {
-        return Status::Error(ErrorCode::kUnavailable, "IM 网络适配器尚未接入");
-    }
-};
-
+// 将语音工具调用转发给通用 MCP 注册中心。
 class McpVoiceBridge final : public voice::ToolGatewayPort {
    public:
     explicit McpVoiceBridge(mcp::McpToolGateway& gateway) : gateway_(gateway) {}
-    ToolResult Call(const ToolCall& call) override { return gateway_.Call(call); }
+    ToolResult Call(const ToolCall& call) override { return gateway_.call(call); }
 
    private:
     mcp::McpToolGateway& gateway_;
 };
 
+// 组装当前可用的语音和 MCP 基础能力。
 class Runtime final {
    public:
-    Runtime()
-        : im_gateway_(im_transport_),
-          calendar_(store_, im_gateway_, ids_, clock_),
-          mcp_(calendar_),
-          mcp_voice_bridge_(mcp_),
-          voice_(audio_, speech_, mcp_voice_bridge_) {}
-
+    Runtime() : mcp_voice_bridge_(mcp_), voice_(audio_, speech_, mcp_voice_bridge_) {}
     Status Start() { return voice_.Start(); }
 
    private:
-    platform::InMemoryCalendarStore store_;
-    platform::SequentialIdGenerator ids_;
-    platform::SystemClock clock_;
-    DisabledImTransport im_transport_;
-    im::ImGatewayAdapter im_gateway_;
-    application::CalendarApplication calendar_;
     mcp::McpToolGateway mcp_;
     McpVoiceBridge mcp_voice_bridge_;
     ScaffoldAudioAdapter audio_;
@@ -66,6 +46,7 @@ class Runtime final {
 
 }  // namespace
 
+// 启动全局运行时实例。
 Status Start() {
     static Runtime runtime;
     return runtime.Start();
