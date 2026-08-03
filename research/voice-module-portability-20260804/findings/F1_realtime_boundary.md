@@ -6,7 +6,7 @@ H1、H2 得到支持。采集、编解码、网络传输、播放和业务写入
 
 ## 落地
 
-- `AudioInputPort` / `AudioOutputPort` 只处理音频帧与硬件生命周期。
+- `AudioInputPort` / `AudioOutputPort` 只处理音频帧与硬件生命周期；输入端口只提交格式和负载，`VoiceSession` 统一补齐 generation/sequence。
 - `SpeechProviderAdapter` 只处理 hello、listen、STT/TTS、abort 和能力。
 - SQLite 写入由应用控制面提交；音频任务不得打开数据库、等待事务或记录原始 PCM。
 - `BoundedAudioFrameQueue` 公开满载策略、generation、high-watermark 和丢帧统计。

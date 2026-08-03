@@ -72,6 +72,7 @@ class VoiceSession {
    private:
     void Emit(std::string_view event, std::string_view detail);
     void HandleEvent(const VoiceEvent& event);
+    Status HandleInputAudio(AudioFrame frame);
     bool AcceptFrameLocked(const AudioFrame& frame) const;
 
     AudioInputPort& input_;

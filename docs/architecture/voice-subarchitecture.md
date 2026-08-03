@@ -75,7 +75,7 @@ PR 只能声明已经拿到证据的层级。#107 已完成第 1 层、ESP-IDF �
 
 | Port | 责任 | ESP32-S3 首个实现 | 其他实现策略 |
 | --- | --- | --- | --- |
-| `AudioInputPort` | 打开输入、开始/停止采集、关闭 | ESP-IDF I2S + AFE/Wake Adapter | Zephyr I2S、厂商 HAL，先做能力探针 |
+| `AudioInputPort` | 绑定采集 sink、打开输入、开始/停止采集、关闭 | ESP-IDF I2S + AFE/Wake Adapter | Zephyr I2S、厂商 HAL，先做能力探针 |
 | `AudioOutputPort` | 接收解码帧、刷新缓冲、关闭 | ESP-IDF I2S/DAC Adapter | 各板 Codec/扬声器驱动 |
 | `VoiceTransportPort` | 连接、文本帧、二进制音频帧、关闭 | TLS WebSocket Adapter | MQTT/UDP 仅在契约满足时接入 |
 | `CodecStrategy` | PCM/Opus 编解码 | 小智 Opus 参数迁移 | PCM 直通或其他硬件 Codec |
@@ -83,6 +83,10 @@ PR 只能声明已经拿到证据的层级。#107 已完成第 1 层、ESP-IDF �
 | `SpeechProviderAdapter` | Provider 生命周期、采集、播报、打断、能力 | `voicelife_linx` 的 `LinxSpeechProviderAdapter` | `xiaozhi-websocket`、主机 fake |
 | `ASRAdapter` / `TTSAdapter` / `RealtimeAdapter` | 外部事件映射与模式差异 | 由 Provider 组合 | 不强迫所有 Provider 继承万能基类 |
 | `EvidenceSink` | 记录可关联事件 | 串口/JSON 证据 | CI artifact、真机日志和 JUnit 摘要 |
+
+`AudioInputPort` 的 sink 是单向数据回调，不是会话控制接口。I2S/AFE Adapter 只提交 `AudioFrame.format` 与 `payload`；`generation` 和 `sequence` 必须留空或视为不可信，由 `VoiceSession` 在持有当前采集状态后统一补齐，再调用 Provider。这样板卡驱动不需要知道重连、打断或会话代次，也不会因为复用旧帧元数据而把采集帧误判为新会话。
+
+绑定关系由 `VoiceSession` 拥有：Provider hello 和双向格式协商完成后绑定输入 sink，输入端口打开失败或会话 Stop 时清空 sink。采集结束后，Adapter 可能仍有一个已经排队的回调；会话以 `CAPTURING` 状态和当前格式做最后一道校验，迟到帧只返回错误，不再触碰 Provider 或 SQLite。
 
 ### 3.3 会话状态与安全迁移
 
@@ -97,11 +101,12 @@ STOPPED -> STARTING -> READY -> CAPTURING -> READY
 
 1. `Start` 先校验配置并完成 Provider hello，再读取 `VoiceAudioFormats` 打开输入和输出；任何一步失败都按 Output → Input → Provider 回滚，不能让音频硬件先于协议协商定型。
 2. `BeginCapture` 同时通知 Provider 和本地输入；输入失败时发送停止，不能留下半开的远端 listen epoch。
-3. `SubmitAudio` 只接受当前 generation 且严格连续的 sequence；旧 generation 直接丢弃并记录证据。
-4. `Interrupt` 发送 Provider abort、刷新输出队列，然后递增 generation；本地不依赖云端迟到的 `tts.stop` 才恢复可用。
-5. Transport 断线后立即阻断上行并递增 generation；自动重连只有重新完成 hello 才能从 `STARTING` 回到 `READY`，不会自动恢复上一次采集。
-6. 收到 `tts.stop(is_aborted=true)` 时立即 `Flush` 并递增 generation，防止服务端已取消的迟到音频重新进入播放队列。
-7. `Stop` 幂等，关闭顺序固定为 Provider → Output → Input，并使旧 generation 全部失效。
+3. 输入 sink 只接受当前 capture 格式和非空 payload；会话为每个有效回调补齐当前 generation 和下一个 sequence。手动 `SubmitAudio` 仍要求调用方提供匹配的代次和严格连续的序号。
+4. `SubmitAudio` 只接受当前 generation 且严格连续的 sequence；旧 generation 直接丢弃并记录证据。
+5. `Interrupt` 发送 Provider abort、刷新输出队列，然后递增 generation；本地不依赖云端迟到的 `tts.stop` 才恢复可用。
+6. Transport 断线后立即阻断上行并递增 generation；自动重连只有重新完成 hello 才能从 `STARTING` 回到 `READY`，不会自动恢复上一次采集。
+7. 收到 `tts.stop(is_aborted=true)` 时立即 `Flush` 并递增 generation，防止服务端已取消的迟到音频重新进入播放队列。
+8. `Stop` 幂等，先让旧 generation 失效，再按 Provider → Output → Input 回收资源并清空输入/下行 sink。
 
 Transport worker 的回调可以与控制任务并发到达：`VoiceSession` 用生命周期锁串行化资源操作，用状态锁把 generation 检查和 `Flush` 绑定起来；证据回调在锁外执行，避免日志或上层观察者反向阻塞实时路径。
 

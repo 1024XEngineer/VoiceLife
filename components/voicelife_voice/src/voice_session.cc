@@ -79,6 +79,7 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
     Status status = provider_.Connect(provider_config,
                                       [this](const VoiceEvent& event) { HandleEvent(event); });
     if (!status.ok()) {
+        provider_.SetAudioSink({});
         {
             std::lock_guard<std::mutex> lock(mutex_);
             state_ = VoiceSessionState::kFailed;
@@ -88,6 +89,7 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
     }
     auto negotiated = provider_.audio_formats();
     if (!negotiated.ok() || !negotiated.value.has_value() || !negotiated.value->valid()) {
+        provider_.SetAudioSink({});
         provider_.Disconnect();
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -104,8 +106,11 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
         std::lock_guard<std::mutex> lock(mutex_);
         audio_formats_ = *negotiated.value;
     }
+    input_.SetAudioSink([this](AudioFrame frame) { return HandleInputAudio(std::move(frame)); });
     status = input_.Open(negotiated.value->capture);
     if (!status.ok()) {
+        input_.SetAudioSink({});
+        provider_.SetAudioSink({});
         provider_.Disconnect();
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -116,6 +121,8 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
     }
     status = output_.Open(negotiated.value->playback);
     if (!status.ok()) {
+        input_.SetAudioSink({});
+        provider_.SetAudioSink({});
         input_.Close();
         provider_.Disconnect();
         {
@@ -261,6 +268,39 @@ Status VoiceSession::SubmitAudio(AudioFrame frame) {
     return status;
 }
 
+Status VoiceSession::HandleInputAudio(AudioFrame frame) {
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+    uint64_t generation = 0;
+    uint64_t sequence = 0;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (state_ != VoiceSessionState::kCapturing) {
+            return Status::Error(ErrorCode::kUnavailable, "语音会话当前不能发送采集音频");
+        }
+        const AudioFormat& expected = audio_formats_.capture;
+        if (!frame.format.valid() || frame.format.codec != expected.codec ||
+            frame.format.sample_rate_hz != expected.sample_rate_hz ||
+            frame.format.channels != expected.channels ||
+            frame.format.bits_per_sample != expected.bits_per_sample ||
+            frame.format.frame_duration_ms != expected.frame_duration_ms || frame.payload.empty()) {
+            return Status::Error(ErrorCode::kInvalidArgument, "采集帧格式与会话不一致");
+        }
+        generation = generation_;
+        sequence = next_sequence_;
+        frame.generation = generation;
+        frame.sequence = sequence;
+    }
+    Status status = provider_.SendAudio(frame);
+    if (status.ok()) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (state_ == VoiceSessionState::kCapturing && generation_ == generation &&
+            next_sequence_ == sequence) {
+            ++next_sequence_;
+        }
+    }
+    return status;
+}
+
 Status VoiceSession::HandleAudio(AudioFrame frame) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (state_ != VoiceSessionState::kReady && state_ != VoiceSessionState::kSpeaking) {
@@ -347,12 +387,11 @@ Status VoiceSession::Stop() {
         generation = generation_;
     }
     provider_.SetGeneration(generation);
+    provider_.SetAudioSink({});
     Status provider_status = provider_.Disconnect();
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        output_.Close();
-        input_.Close();
-    }
+    output_.Close();
+    input_.SetAudioSink({});
+    input_.Close();
     Emit("stopped", "");
     return provider_status;
 }

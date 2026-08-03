@@ -1,6 +1,7 @@
 #include "voicelife/voice/voice_session.h"
 
 #include <memory>
+#include <utility>
 
 #include "support/test_support.h"
 
@@ -12,6 +13,7 @@ namespace {
 
 class FakeInput final : public voicelife::voice::AudioInputPort {
    public:
+    void SetAudioSink(voicelife::voice::AudioFrameSink sink) override { audio_sink_ = std::move(sink); }
     Status Open(const voicelife::voice::AudioFormat& format) override {
         ++opens;
         opened_format = format;
@@ -27,6 +29,11 @@ class FakeInput final : public voicelife::voice::AudioInputPort {
     }
     void Close() override { ++closes; }
 
+    Status EmitCapture(voicelife::voice::AudioFrame frame) {
+        return audio_sink_ ? audio_sink_(std::move(frame))
+                           : Status::Error(ErrorCode::kUnavailable, "音频采集回调未绑定");
+    }
+
     Status open_result = Status::Ok();
     Status start_result = Status::Ok();
     Status stop_result = Status::Ok();
@@ -35,6 +42,9 @@ class FakeInput final : public voicelife::voice::AudioInputPort {
     int starts = 0;
     int stops = 0;
     int closes = 0;
+
+   private:
+    voicelife::voice::AudioFrameSink audio_sink_;
 };
 
 class FakeOutput final : public voicelife::voice::AudioOutputPort {
@@ -81,8 +91,9 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
         ++stops;
         return stop_result;
     }
-    Status SendAudio(const voicelife::voice::AudioFrame&) override {
+    Status SendAudio(const voicelife::voice::AudioFrame& frame) override {
         ++audio_frames;
+        last_audio_frame = frame;
         return send_result;
     }
     Status Abort(std::string_view) override {
@@ -115,6 +126,7 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
     voicelife::voice::CapabilityProfile profile{"fake", {"streaming-asr", "tts", "cancel-generation"}};
     voicelife::voice::VoiceEventSink sink_;
     voicelife::voice::AudioFrameSink audio_sink_;
+    voicelife::voice::AudioFrame last_audio_frame;
     voicelife::voice::VoiceAudioFormats formats;
     uint64_t generation_ = 0;
     Status connect_result = Status::Ok();
@@ -182,6 +194,10 @@ int main() {
           "下行音频格式变化必须拒绝");
     Check(session.BeginCapture().ok(), "ready 会话应开始采集");
     Check(session.SubmitAudio(Frame(generation, 0)).ok(), "当前 generation 的首帧应发送");
+    Check(input.EmitCapture(Frame(0, 0)).ok() && provider.audio_frames == 2,
+          "输入端口采集回调应转发为上行音频");
+    Check(provider.last_audio_frame.generation == generation && provider.last_audio_frame.sequence == 1,
+          "会话应为输入回调补齐当前 generation 和连续序号");
     auto mismatched_format = Frame(generation, 1);
     mismatched_format.format.sample_rate_hz = 8000;
     Check(session.SubmitAudio(mismatched_format).code == ErrorCode::kInvalidArgument,
@@ -190,10 +206,12 @@ int main() {
     mismatched_codec.format.codec = voicelife::voice::AudioCodec::kOpus;
     Check(session.SubmitAudio(mismatched_codec).code == ErrorCode::kInvalidArgument,
           "编码与会话不一致的音频帧必须拒绝");
-    Check(session.SubmitAudio(Frame(generation, 2)).code == ErrorCode::kConflict, "跳号音频帧必须拒绝");
+    Check(session.SubmitAudio(Frame(generation, 3)).code == ErrorCode::kConflict, "跳号音频帧必须拒绝");
     Check(session.SubmitAudio(Frame(generation - 1, 1)).code == ErrorCode::kInvalidArgument,
           "旧 generation 音频帧必须拒绝");
     Check(session.EndCapture().ok(), "采集应可正常结束");
+    Check(input.EmitCapture(Frame(0, 0)).code == ErrorCode::kUnavailable,
+          "结束采集后迟到的输入帧必须拒绝");
     Check(session.Speak("测试播报").ok(), "ready 会话应允许播报");
     voicelife::voice::VoiceEvent tts_started;
     tts_started.kind = voicelife::voice::VoiceEventKind::kTtsStarted;
@@ -211,6 +229,8 @@ int main() {
           "缺少 generation 的迟到 Provider 事件不能改变新会话状态");
     Check(session.Stop().ok() && session.state() == voicelife::voice::VoiceSessionState::kStopped,
           "停止应关闭 Provider 和音频端口");
+    Check(input.EmitCapture(Frame(0, 0)).code == ErrorCode::kUnavailable,
+          "停止会话应清理输入回调，避免资源关闭后的迟到帧");
     Check(evidence_count >= 4, "会话生命周期应产出可关联的证据事件");
 
     FakeInput bad_input;

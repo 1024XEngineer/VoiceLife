@@ -20,6 +20,9 @@ using AudioFrameSink = std::function<Status(AudioFrame)>;
 class AudioInputPort {
    public:
     virtual ~AudioInputPort() = default;
+    // The input adapter supplies format and payload. VoiceSession assigns the
+    // current generation and sequence before forwarding the frame upstream.
+    virtual void SetAudioSink(AudioFrameSink sink) = 0;
     virtual Status Open(const AudioFormat& format) = 0;
     virtual Status StartCapture(VoiceMode mode) = 0;
     virtual Status StopCapture() = 0;
