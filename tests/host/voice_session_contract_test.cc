@@ -257,23 +257,30 @@ int main() {
     Check(negotiated_session.Speak("测试打断").ok(), "协商会话应可播报");
     negotiated_provider.Emit(voicelife::voice::VoiceEvent{
         .kind = voicelife::voice::VoiceEventKind::kTtsStarted,
-        .generation = speaking_generation});
+        .generation = speaking_generation,
+        .text = {},
+        .aborted = false});
     negotiated_provider.Emit(voicelife::voice::VoiceEvent{
         .kind = voicelife::voice::VoiceEventKind::kTtsStopped,
         .generation = speaking_generation,
+        .text = {},
         .aborted = true});
     Check(negotiated_output.flushes == 1 && negotiated_session.generation() != speaking_generation,
           "服务端 abort 必须立即清空播放缓冲并失效旧代次");
     const uint64_t disconnected_generation = negotiated_session.generation();
     negotiated_provider.Emit(voicelife::voice::VoiceEvent{
         .kind = voicelife::voice::VoiceEventKind::kDisconnected,
-        .generation = disconnected_generation});
+        .generation = disconnected_generation,
+        .text = {},
+        .aborted = false});
     Check(negotiated_session.state() == voicelife::voice::VoiceSessionState::kStarting &&
               negotiated_session.generation() != disconnected_generation,
           "断线必须进入等待重连状态并失效旧代次");
     negotiated_provider.Emit(voicelife::voice::VoiceEvent{
         .kind = voicelife::voice::VoiceEventKind::kConnected,
-        .generation = negotiated_session.generation()});
+        .generation = negotiated_session.generation(),
+        .text = {},
+        .aborted = false});
     Check(negotiated_session.state() == voicelife::voice::VoiceSessionState::kReady,
           "重连 hello 完成后会话应回到 ready");
 
