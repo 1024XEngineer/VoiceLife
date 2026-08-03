@@ -119,7 +119,6 @@ flowchart LR
 XE6-15/
 ├── .github/
 │   ├── ISSUE_TEMPLATE/          # Bug、功能、设计和工程任务入口
-│   ├── actionlint.yaml          # 七牛自托管 Runner 标签声明
 │   ├── workflows/ci.yml         # 提交、主机测试、架构和 ESP-IDF 构建检查
 │   └── pull_request_template.md # PR 结论、验证、风险和 Review 清单
 ├── components/

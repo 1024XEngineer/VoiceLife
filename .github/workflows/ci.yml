@@ -16,7 +16,7 @@ concurrency:
 jobs:
   host-tests:
     name: 主机测试与架构边界
-    runs-on: github-runner-ubuntu-24-04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
@@ -38,7 +38,7 @@ jobs:
   esp-idf-build:
     name: ESP-IDF 6.0 / ESP32-S3
     needs: host-tests
-    runs-on: github-runner-ubuntu-24-04
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6

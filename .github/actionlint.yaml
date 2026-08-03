@@ -1,3 +1,0 @@
-self-hosted-runner:
-  labels:
-    - github-runner-ubuntu-24-04

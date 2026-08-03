@@ -113,9 +113,9 @@ Reviewer 先判断行为和边界，再看代码风格：
 
 涉及硬件的 PR 还要在正文记录板卡、固件 hash、操作步骤和结果。涉及外部服务的 PR 要区分 mock、沙箱和真实环境，不能把 mock 通过写成端到端通过。
 
-私有仓库 CI 统一运行在七牛沙箱 Runner `github-runner-ubuntu-24-04`。同一 PR 的旧任务会在新提交到达后取消，避免重复占用 Runner。
+当前仓库是公开仓库，CI 使用 GitHub 托管的 `ubuntu-24.04`。只有仓库转为私有，且组织仍要求迁移时，才按七牛接入文档改用 `github-runner-ubuntu-24-04`；切换前必须由组织管理员确认 GitHub App 已覆盖本仓库、Repository readiness 和 Runner policy 正常，并用一次实际 job 证明 Runner 已注册和接单。
 
-只有 job 确实接入七牛 S3 缓存时，才把仓库已有的 `ACCESS_KEY`、`SECRET_KEY` 分别映射为脚本约定的 `RUNNER_S3_AK`、`RUNNER_S3_SK`。未使用缓存的 job 不读取这两个 secret。
+七牛 AK/SK 只用于 S3 缓存，不负责 Runner 注册。只有 job 已接入文档约定的缓存脚本时，才通过 GitHub Secrets 提供 `RUNNER_S3_AK`、`RUNNER_S3_SK`；`SSH_KEY` 也只在拉取私有 Go module 时配置。当前项目没有这些需求，CI 不读取上述 secret。
 
 CI 不使用未说明用途的 secret，历史遗留的 AI 变量也不得在新工作流引用。将来接入 AI Review 时，必须先建立供应商无关变量名、最小权限、输出脱敏、成本上限和“AI 意见不替代人工批准”规则。
 
