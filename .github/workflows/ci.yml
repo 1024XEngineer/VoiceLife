@@ -14,6 +14,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  im-gateway-tests:
+    name: IM Gateway / Node 24
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: 配置 Node 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: 固定 pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.17.1 --activate
+          pnpm --version
+      - name: 安装冻结依赖
+        run: pnpm --dir services/im-gateway install --frozen-lockfile
+      - name: 检查契约与类型
+        run: pnpm --dir services/im-gateway check
+      - name: 运行共享 fixture 与状态机测试
+        run: pnpm --dir services/im-gateway test
+
   host-tests:
     name: 主机测试与架构边界
     runs-on: ubuntu-24.04
