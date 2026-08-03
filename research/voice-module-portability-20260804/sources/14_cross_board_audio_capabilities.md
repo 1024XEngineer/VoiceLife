@@ -1,7 +1,7 @@
 # Source 14：ESP32 系列跨板音频能力矩阵
 
 - 主要来源：<https://raw.githubusercontent.com/espressif/esp-idf/v6.0.2/docs/en/api-reference/peripherals/i2s.rst>
-- 补充来源：<https://docs.zephyrproject.org/latest/services/audio/index.html>
+- 补充来源：<https://docs.zephyrproject.org/latest/services/file_system/index.html>
 - 读取日期：2026-08-04
 - 类型：芯片厂商文档与 RTOS 官方服务文档
 
