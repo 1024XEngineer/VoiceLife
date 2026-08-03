@@ -159,6 +159,14 @@ int main() {
     const uint64_t generation = session.generation();
     Check(session.BeginCapture().ok(), "ready 会话应开始采集");
     Check(session.SubmitAudio(Frame(generation, 0)).ok(), "当前 generation 的首帧应发送");
+    auto mismatched_format = Frame(generation, 1);
+    mismatched_format.format.sample_rate_hz = 8000;
+    Check(session.SubmitAudio(mismatched_format).code == ErrorCode::kInvalidArgument,
+          "采样率与会话不一致的音频帧必须拒绝");
+    auto mismatched_codec = Frame(generation, 1);
+    mismatched_codec.format.codec = voicelife::voice::AudioCodec::kOpus;
+    Check(session.SubmitAudio(mismatched_codec).code == ErrorCode::kInvalidArgument,
+          "编码与会话不一致的音频帧必须拒绝");
     Check(session.SubmitAudio(Frame(generation, 2)).code == ErrorCode::kConflict, "跳号音频帧必须拒绝");
     Check(session.SubmitAudio(Frame(generation - 1, 1)).code == ErrorCode::kInvalidArgument,
           "旧 generation 音频帧必须拒绝");
@@ -171,6 +179,9 @@ int main() {
     Check(session.state() == voicelife::voice::VoiceSessionState::kSpeaking, "TTS start 应进入 speaking");
     Check(session.Interrupt().ok(), "播报应支持打断");
     Check(session.generation() != generation && output.flushes == 1, "打断应刷新播放并失效旧 generation");
+    provider.Emit(voicelife::voice::VoiceEvent{});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
+          "缺少 generation 的迟到 Provider 事件不能改变新会话状态");
     Check(session.Stop().ok() && session.state() == voicelife::voice::VoiceSessionState::kStopped,
           "停止应关闭 Provider 和音频端口");
     Check(evidence_count >= 4, "会话生命周期应产出可关联的证据事件");

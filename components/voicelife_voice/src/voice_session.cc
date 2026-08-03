@@ -19,8 +19,14 @@ void VoiceSession::Emit(std::string_view event, std::string_view detail) {
 }
 
 bool VoiceSession::AcceptFrame(const AudioFrame& frame) const {
+    const AudioFormat& expected = config_.audio;
+    const AudioFormat& actual = frame.format;
     return state_ == VoiceSessionState::kCapturing && frame.generation == generation_ &&
-           frame.format.valid() && !frame.payload.empty();
+           actual.valid() && actual.codec == expected.codec &&
+           actual.sample_rate_hz == expected.sample_rate_hz &&
+           actual.channels == expected.channels &&
+           actual.bits_per_sample == expected.bits_per_sample &&
+           actual.frame_duration_ms == expected.frame_duration_ms && !frame.payload.empty();
 }
 
 Status VoiceSession::Start(const VoiceSessionConfig& config) {
@@ -53,7 +59,10 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
         return status;
     }
     status = provider_.Connect(config_, [this](const VoiceEvent& event) {
-        if (event.generation != 0 && event.generation != generation_) {
+        // Every provider event belongs to one connection/session epoch. A zero
+        // generation is not a wildcard: accepting it would let a late event
+        // mutate state after interrupt or stop invalidated the old epoch.
+        if (event.generation != generation_) {
             Emit("stale_event_dropped", "provider event generation mismatch");
             return;
         }

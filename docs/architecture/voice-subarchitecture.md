@@ -23,7 +23,13 @@ VoiceSession <- stt / tts / tool-call / error events
 VoiceSession -> Application / MCP（只交稳定语义）
 ```
 
-小智音频服务的当前实现将采集、编码、发送与接收、解码、播放放在独立任务和有界队列中；本项目沿用这个事实边界，但不复制它的全局状态和板卡目录。SQLite 提交必须进入业务队列，不能从音频任务直接持有数据库连接。当前实板提交中位数约 1.16 秒，已经超过实时音频路径预算。
+小智音频服务的当前实现将采集、编码、发送与接收、解码、播放放在独立任务和有界队列中；本项目沿用这个事实边界，但不复制它的全局状态和板卡目录。旧 MVP 的 `AudioService` 具体给出三条可迁移的工程约束：
+
+- `AudioInputTask` 只读取 Codec 并投递 PCM；`OpusCodecTask` 独立处理编码/解码；`AudioOutputTask` 只负责把播放队列写回 Codec；
+- 编码、发送、解码、播放队列都是固定上限，队列满时按策略丢弃或等待，不能让网络或业务反向阻塞麦克风；
+- AFE 的 WakeNet/MultiNet、VAD 和 AEC 共用一个处理实例，并用控制代次拒绝 disable/re-enable 期间迟到的 fetch 结果。
+
+新实现将这些事实分别落到 `AudioInputPort`、`AudioOutputPort`、`CodecStrategy`、有界队列适配器和 `generation` 契约中；不会把旧 MVP 的 FreeRTOS 全局事件位、板卡宏或 `Application` 状态机带入核心。SQLite 提交必须进入业务队列，不能从音频任务直接持有数据库连接。当前实板提交中位数约 1.16 秒，已经超过实时音频路径预算。
 
 ## 3. 代码契约
 
@@ -87,11 +93,12 @@ STOPPED -> STARTING -> READY -> CAPTURING -> READY
 
 小智不是新的 Domain。迁移按以下顺序推进：
 
-1. 先把 `AudioService` 的队列、Opus 参数、AEC/Wake 资源约束包进 `AudioInput/AudioOutput/CodecStrategy`；
-2. 再把 WebSocket/MQTT 事件转换为 `VoiceTransportPort`，保留连接 generation 和有界队列；
-3. 最后把 MCP 工具描述和调用映射到现有 `ToolGatewayPort`，不把小智的工具注册中心复制进 Application。
+1. 先把 `AudioService` 的队列、Opus 参数、AEC/Wake 资源约束包进 `AudioInput/AudioOutput/CodecStrategy`；优先迁移 `audio_service.h/.cc`、`audio_engine.h`、S3 的 `afe_audio_engine.*` 和实际使用的 `audio_codec.*`，而不是整个 `main/`；
+2. 再把 `WebsocketProtocol::OpenAudioChannel` 的握手头、hello 等待、服务端音频参数解析和二进制帧边界转换为 `VoiceTransportPort`/`SpeechProviderAdapter`，保留连接 generation 和有界队列；
+3. 将 `AudioService::ResetDecoder`、播放代次和打断后的队列清理映射为 `AudioOutputPort::Flush` + 会话 generation 失效，不把旧的全局 event group 传播到 Domain；
+4. 最后把 MCP 工具描述和调用映射到现有 `ToolGatewayPort`，不把小智的工具注册中心复制进 Application。
 
-必须固定上游 commit 和 MIT 许可；每迁移一段，都用相同音频输入、同一帧序列和同一错误注入做对照测试。来源：[78/xiaozhi-esp32 音频服务](https://github.com/78/xiaozhi-esp32/blob/main/main/audio/audio_service.h)。
+必须固定上游 commit 和 MIT 许可；每迁移一段，都用相同音频输入、同一帧序列和同一错误注入做对照测试。当前参考基线为 `78/xiaozhi-esp32@dd99da00dc4c89ed4ab07fcec038c03f13f4de50`，实际迁移入口见旧 MVP 的 `voicelife-pcb-native-mvp/firmware/main/audio/` 与 `.../protocols/websocket_protocol.*`。来源：[78/xiaozhi-esp32 音频服务](https://github.com/78/xiaozhi-esp32/blob/main/main/audio/audio_service.h)。
 
 ## 6. 模式选择与不做过度抽象
 
