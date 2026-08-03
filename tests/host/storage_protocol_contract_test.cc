@@ -37,7 +37,7 @@ int main() {
     Check(raw_sql.Validate().code == ErrorCode::kInvalidArgument,
           "原始 SQL 或表名不能进入统一协议");
 
-    StorageStatement invalid_query{.name = "Calendar.List"};
+    StorageStatement invalid_query{.name = "Calendar.List", .arguments = {}};
     Check(invalid_query.Validate().code == ErrorCode::kInvalidArgument,
           "命名语句必须使用稳定的小写标识");
     return 0;
