@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "esp32s3-lichuang-audio-probe",
+  "id": "esp32s3-voicelife-pcb-pcm",
   "target": "esp32s3",
   "adapters": {
     "audio": {
       "driver": "esp32s3-pcm-probe",
-      "capabilities": ["pcm-probe", "external-codec-duplex"],
+      "capabilities": ["pcm-probe", "direct-i2s-simplex", "physical-pcm-evidence"],
       "configRef": "env://VOICELIFE_AUDIO_PROFILE"
     },
     "speech": {
@@ -24,6 +24,7 @@
   "sdkconfig": [
     "CONFIG_LOG_DEFAULT_LEVEL_INFO=y",
     "CONFIG_VOICELIFE_AUDIO_PROBE=y",
-    "CONFIG_VOICELIFE_AUDIO_PROBE_PROFILE_LICHUANG=y"
+    "CONFIG_VOICELIFE_AUDIO_PROBE_PROFILE_VOICELIFE_PCB=y",
+    "CONFIG_VOICELIFE_AUDIO_PROBE_REPLAY=y"
   ]
 }
