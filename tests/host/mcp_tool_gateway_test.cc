@@ -72,9 +72,11 @@ int main() {
     Check(called.status.ok() && called.output.at("echo") == "hello", "工具调用应分发给已注册 handler");
     Check(handler_calls == 1, "每次工具调用只应执行一次 handler");
 
-    Check(gateway.call({.name = "voicelife.test.echo"}).status.code == ErrorCode::kInvalidArgument,
+    Check(gateway.call({.request_id = "", .name = "voicelife.test.echo", .arguments = {}}).status.code ==
+              ErrorCode::kInvalidArgument,
           "工具调用必须携带 request_id");
-    Check(gateway.call({.request_id = "request-2", .name = "voicelife.unknown"}).status.code == ErrorCode::kNotFound,
+    Check(gateway.call({.request_id = "request-2", .name = "voicelife.unknown", .arguments = {}}).status.code ==
+              ErrorCode::kNotFound,
           "调用未注册工具应返回 not_found");
 
     Check(gateway.register_tool({}, OkResult).code == ErrorCode::kInvalidArgument, "空工具定义应被拒绝");
