@@ -17,7 +17,10 @@ import { ImGatewayError } from '../shared/errors.js';
 import { FixedClock } from '../infrastructure/mock-support.js';
 import { createMockImGateway } from './create-im-gateway.js';
 
-/** Minimal executable seam for future architecture tests. */
+/**
+ * Executes the minimal notification scenario used by architecture checks.
+ * @returns Promise fulfilled after the scenario assertions complete.
+ */
 export async function runMockNotificationScenario(): Promise<void> {
     const deviceId = unsafeId<DeviceId>('device-demo');
     const userId = unsafeId<UserId>('user-demo');

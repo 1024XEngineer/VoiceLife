@@ -24,6 +24,11 @@ export type DeliveryReceiptId = Brand<string, 'DeliveryReceiptId'>;
 export type ActionId = Brand<string, 'ActionId'>;
 export type OutboxEventId = Brand<string, 'OutboxEventId'>;
 
+/**
+ * Rebrands a validated string as an opaque identifier.
+ * @param value String value that has already been validated by its caller.
+ * @returns The value with the requested identifier brand.
+ */
 export function unsafeId<T>(value: string): T {
     return value as T;
 }

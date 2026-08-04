@@ -54,6 +54,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: 配置 Node 24
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -66,6 +68,8 @@ jobs:
       - name: 安装冻结依赖
         run: pnpm --dir services/im-gateway install --frozen-lockfile
       - name: 检查格式、静态规则、类型与测试
+        env:
+          TSDOC_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: pnpm --dir services/im-gateway run ci
 
   coverage:
