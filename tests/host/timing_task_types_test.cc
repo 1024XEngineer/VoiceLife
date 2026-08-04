@@ -1,5 +1,6 @@
-#include "support/test_support.h"
 #include "voicelife/timing/timing_task_types.h"
+
+#include "support/test_support.h"
 
 using voicelife::test::Check;
 using voicelife::timing::RecurrenceFrequency;

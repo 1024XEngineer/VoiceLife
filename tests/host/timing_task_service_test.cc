@@ -1,12 +1,13 @@
+#include "voicelife/timing/timing_task_service.h"
+
 #include "support/test_support.h"
 #include "support/timing_fakes.h"
-#include "voicelife/timing/timing_task_service.h"
 
 using voicelife::test::Check;
 using voicelife::test::InMemoryTimingTaskStore;
 using voicelife::timing::DefaultTimingTaskService;
-using voicelife::timing::ReminderType;
 using voicelife::timing::RegisterTimerTaskCommand;
+using voicelife::timing::ReminderType;
 using voicelife::timing::TimingClockPort;
 using voicelife::timing::TimingIdGeneratorPort;
 using voicelife::timing::TimingTaskStatus;

@@ -14,8 +14,7 @@ Result<T> NotImplemented(const char* operation) {
 
 }  // namespace
 
-Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(
-    const RegisterTimerTaskCommand& command) {
+Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(const RegisterTimerTaskCommand& command) {
     const RegisterTimingTaskCommand policy_command{
         .schedule_id = command.schedule_id,
         .starts_at = command.start_at,
@@ -75,8 +74,7 @@ Result<CancelTimerTaskResult> DefaultTimingTaskService::CancelTimerTask(const Ca
     return NotImplemented<CancelTimerTaskResult>("CancelTimerTask");
 }
 
-Result<UpsertReminderRulesResult> DefaultTimingTaskService::UpsertReminderRules(
-    const UpsertReminderRulesCommand&) {
+Result<UpsertReminderRulesResult> DefaultTimingTaskService::UpsertReminderRules(const UpsertReminderRulesCommand&) {
     return NotImplemented<UpsertReminderRulesResult>("UpsertReminderRules");
 }
 

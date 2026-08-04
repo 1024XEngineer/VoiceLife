@@ -10,14 +10,11 @@ int main() {
     Check(!CanTransition(TimerInstanceStatus::kCompleted, TimerInstanceStatus::kTriggered),
           "已完成实例不应回退到 triggered");
 
-    Check(!CanTransition(ReminderType::kWeak, ReminderTriggerStatus::kTriggered,
-                         ReminderTriggerStatus::kSnoozed),
+    Check(!CanTransition(ReminderType::kWeak, ReminderTriggerStatus::kTriggered, ReminderTriggerStatus::kSnoozed),
           "弱提醒不应允许 snooze");
-    Check(CanTransition(ReminderType::kStrong, ReminderTriggerStatus::kTriggered,
-                        ReminderTriggerStatus::kSnoozed),
+    Check(CanTransition(ReminderType::kStrong, ReminderTriggerStatus::kTriggered, ReminderTriggerStatus::kSnoozed),
           "强提醒应允许从 triggered 进入 snoozed");
-    Check(!CanTransition(ReminderType::kStrong, ReminderTriggerStatus::kDismissed,
-                         ReminderTriggerStatus::kTriggered),
+    Check(!CanTransition(ReminderType::kStrong, ReminderTriggerStatus::kDismissed, ReminderTriggerStatus::kTriggered),
           "已关闭提醒不应回退到 triggered");
     return 0;
 }

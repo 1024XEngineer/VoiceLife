@@ -46,9 +46,8 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
                 result.push_back(rule);
             }
         }
-        std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
-            return left.offset_minutes < right.offset_minutes;
-        });
+        std::sort(result.begin(), result.end(),
+                  [](const auto& left, const auto& right) { return left.offset_minutes < right.offset_minutes; });
         return Result<std::vector<timing::ReminderRule>>::Success(std::move(result));
     }
 
