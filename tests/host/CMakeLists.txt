@@ -27,7 +27,9 @@ function(add_voicelife_library target component)
 endfunction()
 
 add_voicelife_library(contracts voicelife_contracts
-    "${ROOT_DIR}/components/voicelife_contracts/src/status.cc")
+    "${ROOT_DIR}/components/voicelife_contracts/src/status.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/json.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_intent.cc")
 add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_module.cc")
 target_link_libraries(schedule PUBLIC contracts)
@@ -67,6 +69,10 @@ target_link_libraries(voice_session_coordinator_test PRIVATE voice)
 
 add_voicelife_test(im_gateway_contract_test "unit;im" im_gateway_contract_test.cc)
 target_compile_definitions(im_gateway_contract_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
+
+add_voicelife_test(im_contract_parser_test "unit;im" im_contract_parser_test.cc)
+target_link_libraries(im_contract_parser_test PRIVATE contracts)
+target_compile_definitions(im_contract_parser_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
 
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
