@@ -136,7 +136,7 @@ jobs:
           cmake --version | head -n 1
           python3 --version
       - name: 检查提交描述
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
         run: python3 scripts/check_commit_message.py --range "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
       - name: 运行快速质量门禁
         run: ./scripts/run_checks.sh
