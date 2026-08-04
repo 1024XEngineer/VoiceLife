@@ -5,15 +5,21 @@
 #include "voicelife/contracts/status.h"
 
 using voicelife::ErrorCode;
+using voicelife::Result;
+using voicelife::Status;
 using voicelife::test::Check;
 using voicelife::test::InMemoryTimingTaskStore;
 using voicelife::timing::DefaultTimingTaskService;
 using voicelife::timing::RecurrenceFrequency;
 using voicelife::timing::RegisterTimerTaskCommand;
+using voicelife::timing::ReminderRule;
 using voicelife::timing::ReminderType;
 using voicelife::timing::TimingClockPort;
 using voicelife::timing::TimingIdGeneratorPort;
+using voicelife::timing::TimingTask;
+using voicelife::timing::TimingTaskId;
 using voicelife::timing::TimingTaskStatus;
+using voicelife::timing::TimingTaskStorePort;
 
 namespace {
 
@@ -29,6 +35,53 @@ class FixedTimingIdGenerator final : public TimingIdGeneratorPort {
 
    private:
     int next_rule_ = 1;
+};
+
+class LookupFailureStore final : public TimingTaskStorePort {
+   public:
+    Status RegisterTaskWithRules(const TimingTask&, const std::vector<ReminderRule>&) override {
+        return Status::Error(ErrorCode::kInternal, "unexpected register");
+    }
+
+    Result<TimingTask> FindTaskByRequestId(const std::string&) override {
+        return Result<TimingTask>::Failure(ErrorCode::kUnavailable, "store unavailable");
+    }
+
+    Result<TimingTask> FindTask(const TimingTaskId&) override {
+        return Result<TimingTask>::Failure(ErrorCode::kInternal, "unexpected find");
+    }
+
+    Result<std::vector<ReminderRule>> ListRules(const TimingTaskId&) override {
+        return Result<std::vector<ReminderRule>>::Failure(ErrorCode::kInternal, "unexpected list");
+    }
+};
+
+class ConcurrentReplayStore final : public TimingTaskStorePort {
+   public:
+    explicit ConcurrentReplayStore(TimingTask replayed_task) : replayed_task_(std::move(replayed_task)) {}
+
+    Status RegisterTaskWithRules(const TimingTask&, const std::vector<ReminderRule>&) override {
+        return Status::Error(ErrorCode::kConflict, "request registered concurrently");
+    }
+
+    Result<TimingTask> FindTaskByRequestId(const std::string&) override {
+        if (lookup_count_++ == 0) {
+            return Result<TimingTask>::Failure(ErrorCode::kNotFound, "request not found");
+        }
+        return Result<TimingTask>::Success(replayed_task_);
+    }
+
+    Result<TimingTask> FindTask(const TimingTaskId&) override {
+        return Result<TimingTask>::Failure(ErrorCode::kInternal, "unexpected find");
+    }
+
+    Result<std::vector<ReminderRule>> ListRules(const TimingTaskId&) override {
+        return Result<std::vector<ReminderRule>>::Failure(ErrorCode::kInternal, "unexpected list");
+    }
+
+   private:
+    TimingTask replayed_task_;
+    int lookup_count_ = 0;
 };
 
 }  // namespace
@@ -157,5 +210,53 @@ int main() {
         .recurrence = {.frequency = RecurrenceFrequency::kYear, .by_months = {13}},
     });
     Check(invalid_year.status.code == ErrorCode::kInvalidArgument, "每年规则的月份值必须在 1 到 12 之间");
+
+    LookupFailureStore lookup_failure_store;
+    FixedTimingIdGenerator lookup_failure_ids;
+    DefaultTimingTaskService lookup_failure_service(lookup_failure_store, clock, lookup_failure_ids);
+    const auto lookup_failure = lookup_failure_service.RegisterTimerTask({
+        .request_id = "request-unavailable",
+        .schedule_id = "schedule-unavailable",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+    });
+    Check(lookup_failure.status.code == ErrorCode::kUnavailable, "幂等查询失败时应返回 Store 错误");
+
+    ConcurrentReplayStore concurrent_replay_store({
+        .id = "task-concurrent",
+        .schedule_id = "schedule-concurrent",
+        .request_id = "request-concurrent",
+        .start_at = 1785834000,
+        .next_trigger_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+    });
+    FixedTimingIdGenerator concurrent_replay_ids;
+    DefaultTimingTaskService concurrent_replay_service(concurrent_replay_store, clock, concurrent_replay_ids);
+    const auto concurrent_replay = concurrent_replay_service.RegisterTimerTask({
+        .request_id = "request-concurrent",
+        .schedule_id = "schedule-concurrent",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+    });
+    Check(concurrent_replay.ok() && concurrent_replay.value->task_id == "task-concurrent",
+          "并发注册同一请求时应回读并返回已保存任务");
+
+    ConcurrentReplayStore concurrent_conflict_store({
+        .id = "task-concurrent-conflict",
+        .schedule_id = "another-schedule",
+        .request_id = "request-concurrent-conflict",
+        .start_at = 1785834000,
+        .next_trigger_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+    });
+    FixedTimingIdGenerator concurrent_conflict_ids;
+    DefaultTimingTaskService concurrent_conflict_service(concurrent_conflict_store, clock, concurrent_conflict_ids);
+    const auto concurrent_conflict = concurrent_conflict_service.RegisterTimerTask({
+        .request_id = "request-concurrent-conflict",
+        .schedule_id = "schedule-concurrent-conflict",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+    });
+    Check(concurrent_conflict.status.code == ErrorCode::kConflict, "并发注册复用 request_id 到不同内容时应返回冲突");
     return 0;
 }
