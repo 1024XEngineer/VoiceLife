@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string>
 
 #include "voicelife/linx/linx_types.h"
@@ -94,6 +95,7 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     bool hello_received_ = false;
     bool audio_formats_ready_ = false;
     bool has_negotiated_formats_ = false;
+    std::optional<std::string> remote_session_id_;
     voice::VoiceAudioFormats audio_formats_;
     voice::VoiceAudioFormats last_audio_formats_;
     Status hello_status_ = Status::Ok();
