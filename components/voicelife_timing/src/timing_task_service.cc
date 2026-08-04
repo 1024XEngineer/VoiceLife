@@ -7,13 +7,10 @@
 namespace voicelife::timing {
 namespace {
 
-// Contract-only placeholders are excluded until their behavior slices are implemented.
-// GCOVR_EXCL_START
 template <typename T>
-Result<T> NotImplemented(const char* operation) {
-    return Result<T>::Failure(ErrorCode::kUnavailable, std::string(operation) + " 尚未实现");
+Result<T> NotImplemented(const char* operation) {                                              // GCOVR_EXCL_LINE
+    return Result<T>::Failure(ErrorCode::kUnavailable, std::string(operation) + " 尚未实现");  // GCOVR_EXCL_LINE
 }
-// GCOVR_EXCL_STOP
 
 }  // namespace
 
@@ -69,38 +66,44 @@ Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(cons
     });
 }
 
-// GCOVR_EXCL_START
-Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const UpdateTimerTaskCommand&) {
-    return NotImplemented<UpdateTimerTaskResult>("UpdateTimerTask");
+// Contract-only placeholders are excluded until their behavior slices are implemented.
+Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(  // GCOVR_EXCL_LINE
+    const UpdateTimerTaskCommand&) {                                      // GCOVR_EXCL_LINE
+    return NotImplemented<UpdateTimerTaskResult>("UpdateTimerTask");      // GCOVR_EXCL_LINE
 }
 
-Result<CancelTimerTaskResult> DefaultTimingTaskService::CancelTimerTask(const CancelTimerTaskCommand&) {
-    return NotImplemented<CancelTimerTaskResult>("CancelTimerTask");
+Result<CancelTimerTaskResult> DefaultTimingTaskService::CancelTimerTask(  // GCOVR_EXCL_LINE
+    const CancelTimerTaskCommand&) {                                      // GCOVR_EXCL_LINE
+    return NotImplemented<CancelTimerTaskResult>("CancelTimerTask");      // GCOVR_EXCL_LINE
 }
 
-Result<UpsertReminderRulesResult> DefaultTimingTaskService::UpsertReminderRules(const UpsertReminderRulesCommand&) {
-    return NotImplemented<UpsertReminderRulesResult>("UpsertReminderRules");
+Result<UpsertReminderRulesResult> DefaultTimingTaskService::UpsertReminderRules(  // GCOVR_EXCL_LINE
+    const UpsertReminderRulesCommand&) {                                          // GCOVR_EXCL_LINE
+    return NotImplemented<UpsertReminderRulesResult>("UpsertReminderRules");      // GCOVR_EXCL_LINE
 }
 
-Result<DeleteReminderRuleResult> DefaultTimingTaskService::DeleteReminderRule(const DeleteReminderRuleCommand&) {
-    return NotImplemented<DeleteReminderRuleResult>("DeleteReminderRule");
+Result<DeleteReminderRuleResult> DefaultTimingTaskService::DeleteReminderRule(  // GCOVR_EXCL_LINE
+    const DeleteReminderRuleCommand&) {                                         // GCOVR_EXCL_LINE
+    return NotImplemented<DeleteReminderRuleResult>("DeleteReminderRule");      // GCOVR_EXCL_LINE
 }
 
-Result<CalendarView> DefaultTimingTaskService::ListCalendarView(const CalendarViewQuery&) {
-    return NotImplemented<CalendarView>("ListCalendarView");
+Result<CalendarView> DefaultTimingTaskService::ListCalendarView(const CalendarViewQuery&) {  // GCOVR_EXCL_LINE
+    return NotImplemented<CalendarView>("ListCalendarView");                                 // GCOVR_EXCL_LINE
 }
 
-Result<ReminderTriggerPage> DefaultTimingTaskService::ListReminderTriggers(const ReminderTriggerQuery&) {
-    return NotImplemented<ReminderTriggerPage>("ListReminderTriggers");
+Result<ReminderTriggerPage> DefaultTimingTaskService::ListReminderTriggers(  // GCOVR_EXCL_LINE
+    const ReminderTriggerQuery&) {                                           // GCOVR_EXCL_LINE
+    return NotImplemented<ReminderTriggerPage>("ListReminderTriggers");      // GCOVR_EXCL_LINE
 }
 
-Result<ReminderTrigger> DefaultTimingTaskService::SnoozeReminderTrigger(const SnoozeReminderTriggerCommand&) {
-    return NotImplemented<ReminderTrigger>("SnoozeReminderTrigger");
+Result<ReminderTrigger> DefaultTimingTaskService::SnoozeReminderTrigger(  // GCOVR_EXCL_LINE
+    const SnoozeReminderTriggerCommand&) {                                // GCOVR_EXCL_LINE
+    return NotImplemented<ReminderTrigger>("SnoozeReminderTrigger");      // GCOVR_EXCL_LINE
 }
 
-Result<ReminderTrigger> DefaultTimingTaskService::DismissReminderTrigger(const DismissReminderTriggerCommand&) {
-    return NotImplemented<ReminderTrigger>("DismissReminderTrigger");
+Result<ReminderTrigger> DefaultTimingTaskService::DismissReminderTrigger(  // GCOVR_EXCL_LINE
+    const DismissReminderTriggerCommand&) {                                // GCOVR_EXCL_LINE
+    return NotImplemented<ReminderTrigger>("DismissReminderTrigger");      // GCOVR_EXCL_LINE
 }
-// GCOVR_EXCL_STOP
 
 }  // namespace voicelife::timing

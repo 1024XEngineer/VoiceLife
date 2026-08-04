@@ -15,7 +15,7 @@ bool CanTransition(TimerInstanceStatus from, TimerInstanceStatus to) {
         case TimerInstanceStatus::kSkipped:
             return false;
     }
-    return false;
+    return false;  // GCOVR_EXCL_LINE: enum switch is exhaustive.
 }
 
 bool CanTransition(ReminderType type, ReminderTriggerStatus from, ReminderTriggerStatus to) {
@@ -40,7 +40,7 @@ bool CanTransition(ReminderType type, ReminderTriggerStatus from, ReminderTrigge
         case ReminderTriggerStatus::kFailed:
             return false;
     }
-    return false;
+    return false;  // GCOVR_EXCL_LINE: enum switch is exhaustive.
 }
 
 }  // namespace voicelife::timing
