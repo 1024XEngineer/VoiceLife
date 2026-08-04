@@ -11,7 +11,11 @@ using voicelife::timing::TimingTaskStatus;
 template <typename Rule>
 concept HasRecurrenceStartAt = requires(Rule rule) { rule.start_at; };
 
+template <typename Rule>
+concept HasRecurrenceTimeZone = requires(Rule rule) { rule.time_zone; };
+
 static_assert(!HasRecurrenceStartAt<RecurrenceRule>);
+static_assert(!HasRecurrenceTimeZone<RecurrenceRule>);
 
 int main() {
     const TimingTask task{

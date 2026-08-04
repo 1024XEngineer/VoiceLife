@@ -19,7 +19,6 @@ Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(cons
     }
 
     task.value->recurrence = command.recurrence;
-    task.value->recurrence.time_zone = command.time_zone;
     task.value->updated_at = task.value->created_at;
 
     ReminderRule weak_rule{};

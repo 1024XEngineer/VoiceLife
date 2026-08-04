@@ -32,10 +32,9 @@ enum class RecurrenceFrequency {
     kYear,
 };  // 日、周、月、年
 
-/// 描述定时任务的周期展开规则。
+/// 描述定时任务的周期展开规则，时区和周期锚点由所属任务统一提供。
 struct RecurrenceRule {
     RecurrenceFrequency frequency = RecurrenceFrequency::kNone;
-    std::string time_zone = "Asia/Shanghai";
     std::vector<int> by_weekdays{};
     std::vector<int> by_month_days{};
     std::vector<int> by_months{};

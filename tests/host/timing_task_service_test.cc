@@ -82,7 +82,7 @@ int main() {
     const auto recurring = recurring_service.RegisterTimerTask({
         .schedule_id = "schedule-recurring",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "UTC",
         .recurrence =
             {
                 .frequency = RecurrenceFrequency::kDay,
@@ -92,5 +92,6 @@ int main() {
     const auto stored_recurring = recurring_store.FindTask(recurring.value->task_id);
     Check(stored_recurring.ok() && stored_recurring.value->start_at == 1785834000,
           "周期任务应使用命令开始时间作为唯一锚点");
+    Check(stored_recurring.ok() && stored_recurring.value->time_zone == "UTC", "周期任务应使用命令顶层时区");
     return 0;
 }
