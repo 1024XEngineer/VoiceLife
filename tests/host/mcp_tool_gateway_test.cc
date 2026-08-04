@@ -76,8 +76,7 @@ int main() {
     Check(found.found && found.tool.has_value(), "应能按名称查询已注册工具");
     Check(found.tool->input.size() == 1 && found.tool->input.front().required, "查询结果应包含完整入参定义");
 
-    Check(gateway.register_tool(EchoDefinition(), OkResult).code == ErrorCode::kAlreadyExists,
-          "同名工具不能重复注册");
+    Check(gateway.register_tool(EchoDefinition(), OkResult).code == ErrorCode::kAlreadyExists, "同名工具不能重复注册");
     Check(gateway.register_tool(EchoDefinition("voicelife.test.second"), OkResult).ok(), "应能注册不同名称的工具");
 
     const auto listed = gateway.list_tools();
@@ -94,18 +93,18 @@ int main() {
     Check(handler_calls == 1, "每次工具调用只应执行一次 handler");
 
     Check(gateway.call({
-              .request_id = "request-2",
-              .name = "voicelife.test.echo",
-              .arguments = {},
-          })
-              .status.code == ErrorCode::kInvalidArgument,
+                           .request_id = "request-2",
+                           .name = "voicelife.test.echo",
+                           .arguments = {},
+                       })
+                  .status.code == ErrorCode::kInvalidArgument,
           "缺少必填参数时 Gateway 应拒绝调用");
     Check(gateway.call({
-              .request_id = "request-3",
-              .name = "voicelife.test.echo",
-              .arguments = {{"text", "hello"}, {"extra", "value"}},
-          })
-              .status.code == ErrorCode::kInvalidArgument,
+                           .request_id = "request-3",
+                           .name = "voicelife.test.echo",
+                           .arguments = {{"text", "hello"}, {"extra", "value"}},
+                       })
+                  .status.code == ErrorCode::kInvalidArgument,
           "携带未定义参数时 Gateway 应拒绝调用");
 
     Check(gateway.register_tool(DefaultEchoDefinition(), OkResult).ok(), "应能注册带默认值的工具");
@@ -116,16 +115,24 @@ int main() {
     });
     Check(default_result.status.ok() && default_result.output.at("echo") == "default", "Gateway 应补齐默认参数");
 
-    Check(gateway.register_tool(IntegerDefinition(), [](const ToolCall& call) {
-              return ToolResult{.status = Status::Ok(),
-                                .output = {{"value", std::to_string(std::get<int64_t>(call.arguments.at("value")))}}};
-          }).ok(),
+    Check(gateway
+              .register_tool(
+                  IntegerDefinition(),
+                  [](const ToolCall& call) {
+                      return ToolResult{
+                          .status = Status::Ok(),
+                          .output = {{"value", std::to_string(std::get<int64_t>(call.arguments.at("value")))}}};
+                  })
+              .ok(),
           "应能注册整数参数工具");
-    Check(gateway.call({.request_id = "request-5", .name = "voicelife.test.integer", .arguments = {{"value", int64_t{7}}}})
+    Check(gateway
+              .call({.request_id = "request-5", .name = "voicelife.test.integer", .arguments = {{"value", int64_t{7}}}})
               .status.ok(),
           "整数参数应通过类型校验");
-    Check(gateway.call({.request_id = "request-6", .name = "voicelife.test.integer", .arguments = {{"value", std::string("7")}}})
-              .status.code == ErrorCode::kInvalidArgument,
+    Check(gateway.call({.request_id = "request-6",
+                        .name = "voicelife.test.integer",
+                        .arguments = {{"value", std::string("7")}}})
+                  .status.code == ErrorCode::kInvalidArgument,
           "字符串不能伪装成整数参数");
 
     Check(gateway.call({.request_id = "", .name = "voicelife.test.echo", .arguments = {}}).status.code ==

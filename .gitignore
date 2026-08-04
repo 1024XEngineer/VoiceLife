@@ -9,14 +9,19 @@ dependencies.lock
 
 # Host build and editor files
 build-host*/
+build-coverage/
 dist/
+coverage/
 .cache/
 .clangd/
 .vscode/
 .DS_Store
 __pycache__/
 *.py[cod]
+*.gcda
+*.gcno
 .pytest_cache/
+.pnpm-store/
 
 # Local secrets and generated binaries
 .env

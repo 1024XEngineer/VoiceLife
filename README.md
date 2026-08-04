@@ -19,7 +19,7 @@
 </p>
 
 <p>
-<img src="https://img.shields.io/github/actions/workflow/status/1024XEngineer/XE6-15/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" />
+<img src="https://img.shields.io/github/actions/workflow/status/1024XEngineer/VoiceLife/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" />
 <img src="https://img.shields.io/badge/ESP--IDF-6.0.2-E7352C?style=flat-square" alt="ESP-IDF 6.0.2" />
 <img src="https://img.shields.io/badge/Target-ESP32--S3-222222?style=flat-square" alt="ESP32-S3" />
 <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square" alt="C++ 20" />
@@ -30,19 +30,13 @@
 > [!IMPORTANT]
 > 当前仓库交付的是可编译、可串联、可验证的架构主干。日程创建链路已经通过内存适配器跑通；真实音频、XRobot、持久化和 IM 平台适配器仍待后续 Issue 填实，不能当作可用产品固件。
 
-## 为什么重新搭主干
-
-前期 PCB MVP 证明了语音日程、到点提醒和 IM 动作可以跑通，也暴露出一个问题：继续在单个 `Application` 和文件状态上追加功能，下一次换语音平台、板卡或 IM 通道时，迁移成本会越来越高。
-
-这次重建保留已经验证的业务判断，不搬运 MVP 实现。代码先把边界立住，再逐个迁移能力。
-
 ## 快速开始
 
 需要 CMake，以及构建设备固件时所需的 ESP-IDF 6.0.2。Ninja 可选；未安装时主机测试会使用 CMake 默认生成器。
 
 ```bash
-# 完整快速门禁，不需要 ESP-IDF
-./scripts/run_checks.sh
+# 提交前完整门禁，不需要 ESP-IDF
+./scripts/run_pre_submit_checks.sh
 
 # TDD 内循环：只运行当前模块测试
 ./scripts/run_host_tests.sh -R schedule_policy_test
@@ -114,7 +108,7 @@ flowchart LR
 ### 文件树
 
 ```text
-XE6-15/
+VoiceLife/
 ├── .github/
 │   ├── ISSUE_TEMPLATE/          # Bug、功能、设计和工程任务入口
 │   ├── workflows/ci.yml         # 提交、主机测试、架构和 ESP-IDF 构建检查
