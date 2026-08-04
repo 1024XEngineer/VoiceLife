@@ -88,12 +88,20 @@ jobs:
           corepack prepare pnpm@10.17.1 --activate
           pnpm --dir services/im-gateway install --frozen-lockfile
           pnpm --dir services/im-gateway run coverage
-      - name: 上传覆盖率报告
+      - name: 上传 C++ 覆盖率报告
         uses: codecov/codecov-action@v5
         with:
           use_oidc: true
-          files: coverage/cpp.xml,services/im-gateway/coverage/lcov.info
-          flags: unit
+          files: coverage/cpp.xml
+          flags: cpp
+          fail_ci_if_error: true
+          verbose: true
+      - name: 上传 TypeScript 覆盖率报告
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: services/im-gateway/coverage/lcov.info
+          flags: typescript
           fail_ci_if_error: true
           verbose: true
 

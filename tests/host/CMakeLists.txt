@@ -53,6 +53,9 @@ endfunction()
 add_voicelife_test(schedule_contract_test "unit;schedule" schedule_contract_test.cc)
 target_link_libraries(schedule_contract_test PRIVATE schedule)
 
+add_voicelife_test(status_test "unit;contracts" status_test.cc)
+target_link_libraries(status_test PRIVATE contracts)
+
 add_voicelife_test(timing_policy_test "unit;timing" timing_policy_test.cc)
 target_link_libraries(timing_policy_test PRIVATE timing)
 
