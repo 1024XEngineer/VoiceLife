@@ -1,5 +1,6 @@
 #include "voicelife/mcp/mcp_tool_gateway.h"
 
+#include <algorithm>
 #include <unordered_set>
 #include <utility>
 
@@ -33,16 +34,24 @@ Status ValidateDefinition(const ToolDefinition& definition, const ToolHandler& h
         return Status::Error(ErrorCode::kInvalidArgument, "工具 handler 不能为空");
     }
 
-    std::unordered_set<std::string> input_names;
-    for (const auto& field : definition.input) {
-        if (field.name.empty()) {
+    if (definition.input_schema.type != "object") {
+        return Status::Error(ErrorCode::kInvalidArgument, "工具 inputSchema.type 必须为 object");
+    }
+    std::unordered_set<std::string> required_names;
+    for (const auto& name : definition.input_schema.required) {
+        if (!required_names.insert(name).second) {
+            return Status::Error(ErrorCode::kInvalidArgument, "工具必填参数重复：" + name);
+        }
+        if (!definition.input_schema.properties.contains(name)) {
+            return Status::Error(ErrorCode::kInvalidArgument, "工具必填参数未定义：" + name);
+        }
+    }
+    for (const auto& [name, field] : definition.input_schema.properties) {
+        if (name.empty()) {
             return Status::Error(ErrorCode::kInvalidArgument, "工具入参名称不能为空");
         }
-        if (!input_names.insert(field.name).second) {
-            return Status::Error(ErrorCode::kInvalidArgument, "工具入参名称重复：" + field.name);
-        }
         if (field.default_value.has_value() && !MatchesType(*field.default_value, field.type)) {
-            return Status::Error(ErrorCode::kInvalidArgument, "工具默认值类型错误：" + field.name);
+            return Status::Error(ErrorCode::kInvalidArgument, "工具默认值类型错误：" + name);
         }
     }
     return Status::Ok();
@@ -50,22 +59,21 @@ Status ValidateDefinition(const ToolDefinition& definition, const ToolHandler& h
 
 // 校验调用参数，并补齐定义中声明的默认值后交给 handler。
 Status NormalizeArguments(const ToolDefinition& definition, ToolCall& call) {
-    std::unordered_set<std::string> defined_names;
-    for (const auto& field : definition.input) {
-        defined_names.insert(field.name);
-        const auto argument = call.arguments.find(field.name);
+    for (const auto& [name, field] : definition.input_schema.properties) {
+        const auto argument = call.arguments.find(name);
         if (argument == call.arguments.end()) {
             if (field.default_value.has_value()) {
-                call.arguments.emplace(field.name, *field.default_value);
-            } else if (field.required) {
-                return Status::Error(ErrorCode::kInvalidArgument, "缺少参数：" + field.name);
+                call.arguments.emplace(name, *field.default_value);
+            } else if (std::find(definition.input_schema.required.begin(), definition.input_schema.required.end(), name) !=
+                       definition.input_schema.required.end()) {
+                return Status::Error(ErrorCode::kInvalidArgument, "缺少参数：" + name);
             }
         } else if (!MatchesType(argument->second, field.type)) {
-            return Status::Error(ErrorCode::kInvalidArgument, "工具参数类型错误：" + field.name);
+            return Status::Error(ErrorCode::kInvalidArgument, "工具参数类型错误：" + name);
         }
     }
     for (const auto& argument : call.arguments) {
-        if (!defined_names.contains(argument.first)) {
+        if (!definition.input_schema.properties.contains(argument.first)) {
             return Status::Error(ErrorCode::kInvalidArgument, "不支持的参数：" + argument.first);
         }
     }

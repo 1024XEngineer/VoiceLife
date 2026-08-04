@@ -20,23 +20,23 @@ ToolDefinition EchoDefinition(std::string name = "voicelife.test.echo") {
     return {
         .name = std::move(name),
         .description = "回显指定文本",
-        .input =
+        .input_schema =
             {
-                ToolInputField{
-                    .name = "text",
+                .type = "object",
+                .properties = {{"text", ToolInputField{
                     .type = ToolInputType::kString,
-                    .required = true,
                     .default_value = std::nullopt,
                     .description = "需要回显的文本",
-                },
+                }}},
+                .required = {"text"},
             },
     };
 }
 
 ToolDefinition DefaultEchoDefinition() {
     auto definition = EchoDefinition("voicelife.test.default-echo");
-    definition.input.front().required = false;
-    definition.input.front().default_value = std::string("default");
+    definition.input_schema.required.clear();
+    definition.input_schema.properties.at("text").default_value = std::string("default");
     return definition;
 }
 
@@ -44,13 +44,11 @@ ToolDefinition IntegerDefinition() {
     return {
         .name = "voicelife.test.integer",
         .description = "读取整数",
-        .input = {ToolInputField{
-            .name = "value",
+        .input_schema = {.type = "object", .properties = {{"value", ToolInputField{
             .type = ToolInputType::kInteger,
-            .required = true,
             .default_value = std::nullopt,
             .description = "整数值",
-        }},
+        }}}, .required = {"value"}},
     };
 }
 
@@ -74,7 +72,8 @@ int main() {
 
     const auto found = gateway.get_tool("voicelife.test.echo");
     Check(found.found && found.tool.has_value(), "应能按名称查询已注册工具");
-    Check(found.tool->input.size() == 1 && found.tool->input.front().required, "查询结果应包含完整入参定义");
+    Check(found.tool->input_schema.properties.size() == 1 && found.tool->input_schema.required.size() == 1,
+          "查询结果应包含完整入参定义");
 
     Check(gateway.register_tool(EchoDefinition(), OkResult).code == ErrorCode::kAlreadyExists,
           "同名工具不能重复注册");
@@ -140,8 +139,8 @@ int main() {
           "空 handler 应被拒绝");
 
     auto duplicate_input = EchoDefinition("voicelife.test.duplicate-input");
-    duplicate_input.input.push_back(duplicate_input.input.front());
+    duplicate_input.input_schema.required.push_back("text");
     Check(gateway.register_tool(std::move(duplicate_input), OkResult).code == ErrorCode::kInvalidArgument,
-          "重复入参名称应被拒绝");
+          "重复必填参数应被拒绝");
     return 0;
 }
