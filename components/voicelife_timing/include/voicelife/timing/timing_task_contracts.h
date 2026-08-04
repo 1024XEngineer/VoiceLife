@@ -83,11 +83,22 @@ struct CancelTimerTaskResult {
     int affected_instance_count = 0;
 };
 
+/// 提供调用方可设置的单条提醒规则字段。
+struct ReminderRuleInput {
+    std::string reminder_rule_id{};
+    ReminderType type = ReminderType::kWeak;
+    int offset_minutes = 0;
+    int max_snooze_count = 0;
+    int snooze_interval_minutes = 0;
+    std::string channel = "voice";
+    std::string source = "user_defined";
+};
+
 /// 提供批量创建或更新提醒规则所需的数据。
 struct UpsertReminderRulesCommand {
     TimingTaskId task_id{};
     ScheduleId schedule_id{};
-    std::vector<ReminderRule> rules{};
+    std::vector<ReminderRuleInput> rules{};
 };
 
 /// 返回任务当前的完整提醒规则列表。

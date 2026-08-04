@@ -6,6 +6,16 @@
 using namespace voicelife;
 using namespace voicelife::timing;
 
+template <typename Rule>
+concept HasTaskId = requires(Rule rule) { rule.task_id; };
+
+template <typename Rule>
+concept HasStatus = requires(Rule rule) { rule.status; };
+
+static_assert(!HasTaskId<ReminderRuleInput>);
+static_assert(!HasStatus<ReminderRuleInput>);
+static_assert(std::same_as<decltype(UpsertReminderRulesCommand{}.rules), std::vector<ReminderRuleInput>>);
+
 template <typename Service>
 concept TimingTaskServiceContract = requires(
     Service& service, const RegisterTimerTaskCommand& register_command, const UpdateTimerTaskCommand& update_command,
