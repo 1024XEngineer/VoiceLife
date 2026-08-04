@@ -10,8 +10,8 @@ bool IsStatementName(std::string_view name) {
         return false;
     }
     for (const unsigned char character : name) {
-        if (!(std::islower(character) || std::isdigit(character) || character == '_' ||
-              character == '.' || character == '-')) {
+        if (!(std::islower(character) || std::isdigit(character) || character == '_' || character == '.' ||
+              character == '-')) {
             return false;
         }
     }

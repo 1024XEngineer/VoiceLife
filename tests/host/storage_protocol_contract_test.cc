@@ -13,8 +13,7 @@ int main() {
         .statements = {{.name = "calendar.create", .arguments = {std::int64_t{42}, true}}},
     };
     Check(write.Validate().ok(), "命名语句写事务应通过校验");
-    Check(std::get<std::int64_t>(write.statements.front().arguments.front()) == 42,
-          "结构化值应保留整数类型");
+    Check(std::get<std::int64_t>(write.statements.front().arguments.front()) == 42, "结构化值应保留整数类型");
 
     StorageReadRequest read{
         .context = {.request_id = "req-43", .deadline_ms = 1000},
@@ -24,21 +23,17 @@ int main() {
 
     auto missing_request = write;
     missing_request.context.request_id.clear();
-    Check(missing_request.Validate().code == ErrorCode::kInvalidArgument,
-          "缺少 request_id 必须拒绝");
+    Check(missing_request.Validate().code == ErrorCode::kInvalidArgument, "缺少 request_id 必须拒绝");
 
     auto empty_write = write;
     empty_write.statements.clear();
-    Check(empty_write.Validate().code == ErrorCode::kInvalidArgument,
-          "空写事务必须拒绝");
+    Check(empty_write.Validate().code == ErrorCode::kInvalidArgument, "空写事务必须拒绝");
 
     auto raw_sql = write;
     raw_sql.statements.front().name = "INSERT schedule";
-    Check(raw_sql.Validate().code == ErrorCode::kInvalidArgument,
-          "原始 SQL 或表名不能进入统一协议");
+    Check(raw_sql.Validate().code == ErrorCode::kInvalidArgument, "原始 SQL 或表名不能进入统一协议");
 
     StorageStatement invalid_query{.name = "Calendar.List", .arguments = {}};
-    Check(invalid_query.Validate().code == ErrorCode::kInvalidArgument,
-          "命名语句必须使用稳定的小写标识");
+    Check(invalid_query.Validate().code == ErrorCode::kInvalidArgument, "命名语句必须使用稳定的小写标识");
     return 0;
 }

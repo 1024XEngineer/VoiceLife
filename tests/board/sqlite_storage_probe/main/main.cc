@@ -1,7 +1,8 @@
+#include <unistd.h>
+
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <unistd.h>
 
 #include "esp_app_desc.h"
 #include "esp_log.h"
@@ -75,13 +76,10 @@ void CheckScalarText(sqlite3* db, const char* sql, const char* expected, const c
     CheckSqlite(sqlite3_finalize(statement), db, step);
 }
 
-void CheckQuickCheck(sqlite3* db, const char* step) {
-    CheckScalarText(db, "PRAGMA quick_check", "ok", step);
-}
+void CheckQuickCheck(sqlite3* db, const char* step) { CheckScalarText(db, "PRAGMA quick_check", "ok", step); }
 
 void CheckCommittedState(sqlite3* db, int expected_rows) {
-    const int table_rows =
-        ScalarInt(db, "SELECT count(id) FROM schedule NOT INDEXED", "count schedule table rows");
+    const int table_rows = ScalarInt(db, "SELECT count(id) FROM schedule NOT INDEXED", "count schedule table rows");
     const int index_rows = ScalarInt(db,
                                      "SELECT count(id) FROM schedule "
                                      "INDEXED BY sqlite_autoindex_schedule_1",
@@ -128,8 +126,7 @@ void WritePhase(int phase) {
     if (phase_file == nullptr) {
         Halt("persist probe phase");
     }
-    if (fprintf(phase_file, "%s\n%s\n%d\n", kStateMagic, image_id, phase) < 0 ||
-        fflush(phase_file) != 0 ||
+    if (fprintf(phase_file, "%s\n%s\n%d\n", kStateMagic, image_id, phase) < 0 || fflush(phase_file) != 0 ||
         fsync(fileno(phase_file)) != 0 || fclose(phase_file) != 0) {
         Halt("persist probe phase");
     }
@@ -264,8 +261,7 @@ void BenchmarkAtomicWrites(sqlite3* db) {
                 "prepare schedule");
     CheckSqlite(sqlite3_prepare_v2(db, "INSERT INTO timing_task VALUES(?1,?2)", -1, &timing, nullptr), db,
                 "prepare timing");
-    CheckSqlite(sqlite3_prepare_v2(db, "INSERT INTO outbox VALUES(?1,?2)", -1, &outbox, nullptr), db,
-                "prepare outbox");
+    CheckSqlite(sqlite3_prepare_v2(db, "INSERT INTO outbox VALUES(?1,?2)", -1, &outbox, nullptr), db, "prepare outbox");
     CheckSqlite(sqlite3_prepare_v2(db, "INSERT INTO request_dedup VALUES(?1,?2)", -1, &dedup, nullptr), db,
                 "prepare dedup");
 
@@ -327,8 +323,8 @@ void BenchmarkAtomicWrites(sqlite3* db) {
         Halt("atomic table counts", db);
     }
 
-    const int duplicate_rc = sqlite3_exec(
-        db, "INSERT INTO request_dedup VALUES('request-00','schedule-00')", nullptr, nullptr, nullptr);
+    const int duplicate_rc =
+        sqlite3_exec(db, "INSERT INTO request_dedup VALUES('request-00','schedule-00')", nullptr, nullptr, nullptr);
     if (duplicate_rc != SQLITE_CONSTRAINT_PRIMARYKEY) {
         Halt("idempotency constraint", db, duplicate_rc);
     }
@@ -340,9 +336,9 @@ void StartCrashRecoveryScenario(sqlite3* db) {
     Exec(db, "BEGIN IMMEDIATE", "crash begin");
 
     sqlite3_stmt* statement = nullptr;
-    CheckSqlite(sqlite3_prepare_v2(db, "INSERT INTO crash_row(payload) VALUES(randomblob(2048))", -1,
-                                  &statement, nullptr),
-                db, "prepare crash row");
+    CheckSqlite(
+        sqlite3_prepare_v2(db, "INSERT INTO crash_row(payload) VALUES(randomblob(2048))", -1, &statement, nullptr), db,
+        "prepare crash row");
     for (int index = 0; index < 24; ++index) {
         if (sqlite3_step(statement) != SQLITE_DONE) {
             Halt("insert crash row", db);
@@ -390,8 +386,7 @@ void VerifyCommittedDurability(sqlite3* db) {
              "reset=host-en "
              "avg_commit_us=%d max_commit_us=%d fs_used=%llu fs_total=%llu free_heap=%u",
              sqlite3_libversion(), average, maximum, static_cast<unsigned long long>(total - free),
-             static_cast<unsigned long long>(total),
-             static_cast<unsigned>(esp_get_free_heap_size()));
+             static_cast<unsigned long long>(total), static_cast<unsigned>(esp_get_free_heap_size()));
 }
 
 }  // namespace
@@ -407,8 +402,7 @@ extern "C" void app_main() {
         .disk_status_check_enable = false,
         .use_one_fat = false,
     };
-    ESP_ERROR_CHECK(
-        esp_vfs_fat_spiflash_mount_rw_wl("/data", kDataPartitionLabel, &mount, &g_wear_levelling));
+    ESP_ERROR_CHECK(esp_vfs_fat_spiflash_mount_rw_wl("/data", kDataPartitionLabel, &mount, &g_wear_levelling));
 
     CheckSqlite(sqlite3_initialize(), nullptr, "sqlite initialize");
     if (sqlite3_threadsafe() != 0 || sqlite3_vfs_find("unix-none") == nullptr) {
