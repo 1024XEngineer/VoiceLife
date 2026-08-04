@@ -103,11 +103,13 @@ Reviewer 先判断行为和边界，再看代码风格：
 
 当前必须通过：
 
-- PR 内提交描述检查；
-- Profile Schema/语义校验；
-- 纯 C++ 主机测试；
-- 组件依赖方向检查；
-- ESP-IDF 6.0.2 / ESP32-S3 构建。
+- PR 内提交描述、C/C++ 与 Python 格式和静态规则检查；
+- IM Gateway 的 Prettier、ESLint、TypeScript 与测试；
+- Profile Schema/语义校验、纯 C++ 主机测试和组件依赖方向检查；
+- C++ 与 TypeScript 覆盖率门禁；
+- ESP-IDF 6.0.2 / ESP32-S3 构建和 CodeQL 扫描。
+
+依赖变更审查会先确认仓库是否开启 Dependency Graph；未开启时必须在 job 日志中明确记录跳过原因，开启后按同一门禁执行。
 
 本地完整入口是 `./scripts/run_pre_submit_checks.sh`。`./scripts/run_checks.sh` 只负责公共 API、主机测试、架构、Profile 和 Python 测试；开发中的单测可以用 `./scripts/run_host_tests.sh -R <test-name>` 缩小范围。格式、IM Gateway 和代码规模也属于提交门禁，不能只跑局部测试。
 

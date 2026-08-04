@@ -19,7 +19,40 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+      - name: 检查 Dependency Graph
+        id: dependency-graph
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --location \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output /dev/null \
+            --write-out "%{http_code}" \
+            "https://api.github.com/repos/${REPOSITORY}/dependency-graph/sbom")"
+          case "${status}" in
+            200)
+              echo "enabled=true" >> "${GITHUB_OUTPUT}"
+              ;;
+            404)
+              echo "enabled=false" >> "${GITHUB_OUTPUT}"
+              echo "::warning::Dependency Graph 未启用，暂跳过 Dependency Review；请仓库管理员在 Settings > Security & analysis 中启用。"
+              ;;
+            *)
+              echo "Dependency Graph 探测失败（HTTP ${status}），不能确认依赖审查能力。" >&2
+              exit 1
+              ;;
+          esac
+      - name: 运行依赖变更审查
+        if: steps.dependency-graph.outputs.enabled == 'true'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+      - name: 记录依赖审查跳过原因
+        if: steps.dependency-graph.outputs.enabled != 'true'
+        run: echo "Dependency Graph 尚未启用，本次只记录跳过原因；启用后将执行真实依赖审查。"
 
   codeql:
     name: CodeQL（${{ matrix.id }}）

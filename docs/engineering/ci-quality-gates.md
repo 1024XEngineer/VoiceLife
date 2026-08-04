@@ -33,10 +33,12 @@ git fetch origin main
 | 主机测试与架构边界 | 领域行为回归、组件反向依赖 | 必须通过 CTest、Profile 校验和架构检查 |
 | 变更源码规模 | 新模块过大、职责无法继续拆分 | 新增源码文件超过 500 行直接失败；现有文件超过 800 行给出警告并要求在 Review 中说明 |
 | ESP-IDF 构建 | 头文件和组件依赖在目标板上无法编译 | 必须通过 ESP-IDF 6.0.2 / ESP32-S3 构建 |
-| 依赖变更审查 | PR 引入已知漏洞或不允许的许可证变化 | 必须通过 Dependency Review |
+| 依赖变更审查 | PR 引入已知漏洞或不允许的许可证变化 | Dependency Graph 已启用时必须通过；未启用时必须在日志中留下跳过原因 |
 | CodeQL | C/C++、Python、TypeScript 的数据流和安全缺陷 | 必须通过对应语言扫描 |
 
 CI 将第三方 Action 固定到完整 commit SHA，并在同一行保留版本注释；Dependabot 负责提出升级 PR。工作流默认只申请 `contents: read`，需要额外权限的 job 必须把权限写在 job 级别，并在 PR 中说明用途。
+
+依赖审查有一个仓库级前提：GitHub 的 Dependency Graph 必须开启。工作流会先读取仓库的 SBOM 接口；返回 `404` 时只记录 warning 并保持 job 可合并，避免把“仓库能力未开”误报成代码失败。管理员开启 Dependency Graph 后，同一 job 会自动执行 `actions/dependency-review-action`；真实的漏洞或许可证违规仍会让 job 失败，不能用 `continue-on-error` 静默吞掉。
 
 当前 VoiceLife 是公开仓库，使用 GitHub 托管的 `ubuntu-24.04`。仓库改为私有且组织要求迁移时，才切换到七牛文档约定的 Runner label；切换前必须用一次真实 job 证明 Runner 已注册并接单。AK、SK、SSH_KEY 和任何 AI 服务变量都不能写进 workflow，当前项目也不读取它们。
 
