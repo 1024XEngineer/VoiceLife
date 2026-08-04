@@ -32,7 +32,10 @@ add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_module.cc")
 target_link_libraries(schedule PUBLIC contracts)
 add_voicelife_library(timing voicelife_timing
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc")
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_stubs.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_state.cc")
 target_link_libraries(timing PUBLIC contracts)
 add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_tool_gateway.cc")
@@ -61,6 +64,21 @@ target_link_libraries(status_test PRIVATE contracts)
 
 add_voicelife_test(timing_policy_test "unit;timing" timing_policy_test.cc)
 target_link_libraries(timing_policy_test PRIVATE timing)
+
+add_voicelife_test(timing_task_types_test "unit;timing" timing_task_types_test.cc)
+target_include_directories(timing_task_types_test PRIVATE "${ROOT_DIR}/components/voicelife_timing/include")
+
+add_voicelife_test(timing_task_state_test "unit;timing" timing_task_state_test.cc)
+target_link_libraries(timing_task_state_test PRIVATE timing)
+
+add_voicelife_test(timing_task_service_test "unit;timing" timing_task_service_test.cc)
+target_link_libraries(timing_task_service_test PRIVATE timing)
+
+add_voicelife_test(timing_task_store_test "unit;timing" timing_task_store_test.cc)
+target_link_libraries(timing_task_store_test PRIVATE timing)
+
+add_voicelife_test(timing_task_service_contract_test "unit;timing" timing_task_service_contract_test.cc)
+target_link_libraries(timing_task_service_contract_test PRIVATE timing)
 
 add_voicelife_test(mcp_tool_gateway_test "unit;mcp" mcp_tool_gateway_test.cc)
 target_link_libraries(mcp_tool_gateway_test PRIVATE mcp)
