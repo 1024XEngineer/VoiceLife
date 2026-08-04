@@ -9,28 +9,32 @@ namespace voicelife::timing {
 using TimingTaskId = std::string;
 using ScheduleId = std::string;
 
+/// 表示定时任务的生命周期状态。
 enum class TimingTaskStatus {
     kActive,
     kTerminated,
 };
 
+/// 表示任务支持的周期频率。
 enum class RecurrenceFrequency {
     kNone,
     kDay,
     kWeek,
     kMonth,
     kYear,
-}; //日、周、月、年
+};  // 日、周、月、年
 
+/// 描述定时任务的周期展开规则。
 struct RecurrenceRule {
     RecurrenceFrequency frequency = RecurrenceFrequency::kNone;
     int64_t start_at = 0;
-    std::string time_zone = "Asia/Shanghai";  //默认Asia/Shanghai时区，符合文档要求。
+    std::string time_zone = "Asia/Shanghai";
     std::vector<int> by_weekdays{};
     std::vector<int> by_month_days{};
     std::vector<int> by_months{};
 };
 
+/// 保存任务的调度规则、生命周期和下一次触发时间。
 struct TimingTask {
     TimingTaskId id{};
     ScheduleId schedule_id{};
