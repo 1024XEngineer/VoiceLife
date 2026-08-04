@@ -64,8 +64,7 @@ void CheckIntervalConflicts(const ScheduleService& service) {
     const auto conflict_result = service.create_schedule(conflict);
     Check(conflict_result.status.code == ErrorCode::kConflict && !conflict_result.schedule.has_value(),
           "默认应拒绝冲突日程");
-    Check(conflict_result.conflicts.size() == 1 && !conflict_result.error.empty(),
-          "冲突结果应返回已有日程和错误信息");
+    Check(conflict_result.conflicts.size() == 1 && !conflict_result.error.empty(), "冲突结果应返回已有日程和错误信息");
 
     conflict.ignore_conflict = true;
     const auto ignored_result = service.create_schedule(conflict);
@@ -101,8 +100,7 @@ void CheckNearbySchedules(const ScheduleService& service) {
     fifteen_minutes.start_time = At(1'800'004'500);
     fifteen_minutes.end_time = At(1'800'005'100);
     const auto nearby_result = service.create_schedule(fifteen_minutes);
-    Check(nearby_result.status.ok() && nearby_result.nearby_schedules.size() == 1,
-          "相距十五分钟的不冲突日程应被返回");
+    Check(nearby_result.status.ok() && nearby_result.nearby_schedules.size() == 1, "相距十五分钟的不冲突日程应被返回");
     Check(nearby_result.message == "日程创建成功，附近还有其他日程", "临近日程应反映在成功消息中");
 
     CreateScheduleCommand outside_window;

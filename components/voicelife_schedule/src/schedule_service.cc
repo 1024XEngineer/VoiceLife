@@ -24,11 +24,10 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
     if (!command.start_time.has_value() && command.end_time.has_value()) {
         return InvalidCreateScheduleResult("日程提供结束时间时必须同时提供开始时间");
     }
-    if (command.start_time.has_value() && command.end_time.has_value() &&
-        *command.end_time <= *command.start_time) {
+    if (command.start_time.has_value() && command.end_time.has_value() && *command.end_time <= *command.start_time) {
         return InvalidCreateScheduleResult("日程结束时间必须晚于开始时间");
     }
-    
+
     // 组装日程
     Schedule schedule{
         .id = 0,
@@ -42,7 +41,6 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
         .created_at = {},
         .updated_at = {},
     };
-    
 
     // 搜集与当前日程冲突日程+临近日程
     std::vector<Schedule> conflicts;

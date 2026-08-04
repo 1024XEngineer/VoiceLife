@@ -14,9 +14,8 @@ std::string TrimScheduleText(std::string_view value) {
 }
 
 std::size_t ScheduleTextLength(std::string_view value) {
-    return static_cast<std::size_t>(std::count_if(value.begin(), value.end(), [](unsigned char character) {
-        return (character & 0xC0U) != 0x80U;
-    }));
+    return static_cast<std::size_t>(std::count_if(
+        value.begin(), value.end(), [](unsigned char character) { return (character & 0xC0U) != 0x80U; }));
 }
 
 CreateScheduleResult InvalidCreateScheduleResult(std::string error) {
