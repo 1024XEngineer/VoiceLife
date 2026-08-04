@@ -295,5 +295,21 @@ int main() {
     Check(negotiated_session.state() == voicelife::voice::VoiceSessionState::kReady,
           "重连 hello 完成后会话应回到 ready");
 
+    // SpeechProviderRegistry 错误路径覆盖。
+    Check(registry.Register("", voicelife::voice::CapabilityProfile{}, nullptr).code == ErrorCode::kInvalidArgument,
+          "空 Provider ID 与空工厂必须拒绝");
+    Check(registry.Register("mismatch", voicelife::voice::CapabilityProfile{"other", {}},
+                            []() { return std::unique_ptr<FakeProvider>(); })
+                  .code == ErrorCode::kInvalidArgument,
+          "Profile ID 与注册 ID 不一致必须拒绝");
+    Check(registry.Create("no-such-provider", {}).status.code == ErrorCode::kNotFound,
+          "未注册 Provider 必须返回 NotFound");
+    Check(registry.Create("fake-registry", {"aec", "vad"}).status.code == ErrorCode::kUnavailable,
+          "缺少任一必需能力必须拒绝");
+    Check(registry.Register("fake-registry", voicelife::voice::CapabilityProfile{"fake-registry", {"tts"}},
+                            []() { return std::make_unique<FakeProvider>(); })
+                  .code == ErrorCode::kAlreadyExists,
+          "重复注册同一 Provider ID 必须返回 AlreadyExists");
+
     return 0;
 }

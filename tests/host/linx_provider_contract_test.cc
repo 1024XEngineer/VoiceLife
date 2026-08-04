@@ -201,5 +201,33 @@ int main() {
           "未收到 Linx hello 必须在超时后失败");
     Check(timeout_provider.Connect(timeout_config, {}).code == ErrorCode::kConflict,
           "hello 失败但物理连接尚未完成清理时不得重复 Connect");
+
+    // 补充错误路径与边界覆盖,提升 patch 覆盖率。
+    auto invalid_audio = config;
+    invalid_audio.audio.sample_rate_hz = 0;
+    Check(codec.EncodeHello(invalid_audio, connection).status.code == ErrorCode::kInvalidArgument,
+          "hello 必须拒绝无效音频参数");
+    Check(codec.EncodeAbort(config, "").status.code == ErrorCode::kInvalidArgument, "空 abort 原因必须拒绝");
+    Check(codec.DecodeText("not-json").status.code == ErrorCode::kInvalidArgument, "非 JSON 输入必须拒绝");
+    Check(codec.DecodeText(R"({"type":123})").status.code == ErrorCode::kInvalidArgument, "type 非字符串必须拒绝");
+    Check(codec.DecodeText(R"({"type":"stt"})").status.code == ErrorCode::kInvalidArgument, "stt 缺少 text 必须拒绝");
+    Check(codec.DecodeText(R"({"type":"tts","state":"unknown"})").status.code == ErrorCode::kInvalidArgument,
+          "未知 tts 状态必须拒绝");
+    Check(codec.DecodeText(R"({"type":"hello","transport":"tcp"})").status.code == ErrorCode::kInvalidArgument,
+          "非 websocket transport 必须拒绝");
+    Check(codec.DecodeText(R"({"type":"hello","audio_params":{"format":"pcm","sample_rate":16000,"channels":0}})")
+                  .status.code == ErrorCode::kInvalidArgument,
+          "超出范围的音频参数必须拒绝");
+    Check(codec.DecodeText(R"({"type":"error","message":"boom"})").value->kind ==
+              voicelife::linx::LinxMessageKind::kError,
+          "error 消息应解析 message");
+    Check(codec.DecodeText(R"({"type":"stt","text":"听写"})").value->kind == voicelife::linx::LinxMessageKind::kStt,
+          "stt 消息应解析 text");
+    Check(codec.DecodeText("{\"type\":\"tts\",\"state\":\"sentence_start\",\"text\":\"x\\uy\"}").status.code ==
+              ErrorCode::kInvalidArgument,
+          "\\u 转义在便携 codec 中必须拒绝");
+    Check(codec.DecodeText(R"({"type":"hello","audio_params":{"format":"wav","sample_rate":16000,"channels":1}})")
+                  .status.code == ErrorCode::kInvalidArgument,
+          "不支持的音频格式必须拒绝");
     return 0;
 }
