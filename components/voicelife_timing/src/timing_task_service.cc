@@ -7,10 +7,13 @@
 namespace voicelife::timing {
 namespace {
 
+// Contract-only placeholders are excluded until their behavior slices are implemented.
+// GCOVR_EXCL_START
 template <typename T>
 Result<T> NotImplemented(const char* operation) {
     return Result<T>::Failure(ErrorCode::kUnavailable, std::string(operation) + " 尚未实现");
 }
+// GCOVR_EXCL_STOP
 
 }  // namespace
 
@@ -66,6 +69,7 @@ Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(cons
     });
 }
 
+// GCOVR_EXCL_START
 Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const UpdateTimerTaskCommand&) {
     return NotImplemented<UpdateTimerTaskResult>("UpdateTimerTask");
 }
@@ -97,5 +101,6 @@ Result<ReminderTrigger> DefaultTimingTaskService::SnoozeReminderTrigger(const Sn
 Result<ReminderTrigger> DefaultTimingTaskService::DismissReminderTrigger(const DismissReminderTriggerCommand&) {
     return NotImplemented<ReminderTrigger>("DismissReminderTrigger");
 }
+// GCOVR_EXCL_STOP
 
 }  // namespace voicelife::timing

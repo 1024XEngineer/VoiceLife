@@ -7,10 +7,16 @@ using namespace voicelife::timing;
 int main() {
     Check(CanTransition(TimerInstanceStatus::kPending, TimerInstanceStatus::kModified),
           "待处理实例应允许进入 modified");
+    Check(CanTransition(TimerInstanceStatus::kPending, TimerInstanceStatus::kTriggered),
+          "待处理实例应允许进入 triggered");
+    Check(CanTransition(TimerInstanceStatus::kPending, TimerInstanceStatus::kSkipped), "待处理实例应允许进入 skipped");
     Check(CanTransition(TimerInstanceStatus::kModified, TimerInstanceStatus::kTriggered),
           "已修改实例应允许进入 triggered");
+    Check(CanTransition(TimerInstanceStatus::kModified, TimerInstanceStatus::kSkipped), "已修改实例应允许进入 skipped");
     Check(CanTransition(TimerInstanceStatus::kTriggered, TimerInstanceStatus::kCompleted),
           "已触发实例应允许进入 completed");
+    Check(CanTransition(TimerInstanceStatus::kTriggered, TimerInstanceStatus::kSkipped),
+          "已触发实例应允许进入 skipped");
     Check(!CanTransition(TimerInstanceStatus::kCompleted, TimerInstanceStatus::kTriggered),
           "已完成实例不应回退到 triggered");
     Check(!CanTransition(TimerInstanceStatus::kSkipped, TimerInstanceStatus::kTriggered),
@@ -18,6 +24,10 @@ int main() {
 
     Check(CanTransition(ReminderType::kWeak, ReminderTriggerStatus::kPending, ReminderTriggerStatus::kTriggered),
           "待处理提醒应允许进入 triggered");
+    Check(CanTransition(ReminderType::kWeak, ReminderTriggerStatus::kPending, ReminderTriggerStatus::kSkipped),
+          "待处理提醒应允许进入 skipped");
+    Check(CanTransition(ReminderType::kWeak, ReminderTriggerStatus::kPending, ReminderTriggerStatus::kCancelled),
+          "待处理提醒应允许进入 cancelled");
     Check(CanTransition(ReminderType::kWeak, ReminderTriggerStatus::kTriggered, ReminderTriggerStatus::kDelivered),
           "已触发提醒应允许进入 delivered");
     Check(CanTransition(ReminderType::kWeak, ReminderTriggerStatus::kTriggered, ReminderTriggerStatus::kFailed),
@@ -26,8 +36,14 @@ int main() {
           "弱提醒不应允许 snooze");
     Check(CanTransition(ReminderType::kStrong, ReminderTriggerStatus::kTriggered, ReminderTriggerStatus::kSnoozed),
           "强提醒应允许从 triggered 进入 snoozed");
+    Check(CanTransition(ReminderType::kStrong, ReminderTriggerStatus::kTriggered, ReminderTriggerStatus::kDismissed),
+          "强提醒应允许从 triggered 进入 dismissed");
     Check(CanTransition(ReminderType::kStrong, ReminderTriggerStatus::kSnoozed, ReminderTriggerStatus::kTriggered),
           "已推迟强提醒应允许再次进入 triggered");
+    Check(CanTransition(ReminderType::kStrong, ReminderTriggerStatus::kSnoozed, ReminderTriggerStatus::kDismissed),
+          "已推迟强提醒应允许进入 dismissed");
+    Check(CanTransition(ReminderType::kStrong, ReminderTriggerStatus::kSnoozed, ReminderTriggerStatus::kFailed),
+          "已推迟强提醒应允许进入 failed");
     Check(!CanTransition(ReminderType::kWeak, ReminderTriggerStatus::kSnoozed, ReminderTriggerStatus::kTriggered),
           "弱提醒不应从 snoozed 进入 triggered");
     Check(!CanTransition(ReminderType::kStrong, ReminderTriggerStatus::kDelivered, ReminderTriggerStatus::kTriggered),
