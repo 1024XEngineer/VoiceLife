@@ -26,9 +26,9 @@ bool SameAudioFormats(const voice::VoiceAudioFormats& left, const voice::VoiceAu
 
 }  // namespace
 
-LinxSpeechProviderAdapter::LinxSpeechProviderAdapter(
-    LinxTransportPort& transport, LinxProtocolCodecPort& codec, LinxConnectionConfig connection,
-    voice::CapabilityProfile capabilities)
+LinxSpeechProviderAdapter::LinxSpeechProviderAdapter(LinxTransportPort& transport, LinxProtocolCodecPort& codec,
+                                                     LinxConnectionConfig connection,
+                                                     voice::CapabilityProfile capabilities)
     : transport_(transport),
       codec_(codec),
       connection_(std::move(connection)),
@@ -52,8 +52,7 @@ void LinxSpeechProviderAdapter::SetGeneration(uint64_t generation) {
     }
 }
 
-Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& config,
-                                          voice::VoiceEventSink sink) {
+Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& config, voice::VoiceEventSink sink) {
     if (!connection_.valid() || config.provider_id != capabilities_.provider_id || config.generation == 0) {
         return Status::Error(ErrorCode::kInvalidArgument, "Linx Provider 连接配置无效");
     }
@@ -103,9 +102,8 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
         return status;
     }
     std::unique_lock<std::mutex> hello_lock(hello_mutex_);
-    const bool received = hello_cv_.wait_for(
-        hello_lock, std::chrono::milliseconds(config_.hello_timeout_ms),
-        [this]() { return hello_received_; });
+    const bool received = hello_cv_.wait_for(hello_lock, std::chrono::milliseconds(config_.hello_timeout_ms),
+                                             [this]() { return hello_received_; });
     if (!received) {
         hello_lock.unlock();
         transport_.Close();
@@ -127,8 +125,7 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
 Result<voice::VoiceAudioFormats> LinxSpeechProviderAdapter::audio_formats() const {
     std::lock_guard<std::mutex> lock(hello_mutex_);
     if (!connected_.load() || !audio_formats_ready_) {
-        return Result<voice::VoiceAudioFormats>::Failure(
-            ErrorCode::kUnavailable, "Linx hello 尚未完成音频格式协商");
+        return Result<voice::VoiceAudioFormats>::Failure(ErrorCode::kUnavailable, "Linx hello 尚未完成音频格式协商");
     }
     return Result<voice::VoiceAudioFormats>::Success(audio_formats_);
 }
@@ -222,8 +219,7 @@ void LinxSpeechProviderAdapter::OnTransportDisconnected() {
         std::lock_guard<std::mutex> lock(hello_mutex_);
         if (!hello_received_) {
             hello_received_ = true;
-            hello_status_ = Status::Error(ErrorCode::kUnavailable,
-                                          "Linx Transport 在 hello 完成前断开");
+            hello_status_ = Status::Error(ErrorCode::kUnavailable, "Linx Transport 在 hello 完成前断开");
         }
     }
     hello_cv_.notify_all();
@@ -267,13 +263,12 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
             if (inbound.audio_params.has_value()) {
                 const LinxAudioParams& negotiated = *inbound.audio_params;
                 if (negotiated.codec != config_.audio.codec) {
-                    Emit(Event(voice::VoiceEventKind::kError,
-                               "Linx hello 改变音频编码，但当前未配置转码策略"));
+                    Emit(Event(voice::VoiceEventKind::kError, "Linx hello 改变音频编码，但当前未配置转码策略"));
                     {
                         std::lock_guard<std::mutex> lock(hello_mutex_);
                         hello_received_ = true;
-                        hello_status_ = Status::Error(ErrorCode::kInvalidArgument,
-                                                      "Linx hello 改变音频编码，但当前未配置转码策略");
+                        hello_status_ =
+                            Status::Error(ErrorCode::kInvalidArgument, "Linx hello 改变音频编码，但当前未配置转码策略");
                     }
                     hello_cv_.notify_all();
                     return;
@@ -293,9 +288,9 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
                 }
                 if (has_negotiated_formats_ && !SameAudioFormats(last_audio_formats_, formats)) {
                     format_changed = true;
-                    format_status = Status::Error(
-                        ErrorCode::kInvalidArgument,
-                        "Linx 重连 hello 改变已协商音频格式，当前未配置 AudioOutput 重配置策略");
+                    format_status =
+                        Status::Error(ErrorCode::kInvalidArgument,
+                                      "Linx 重连 hello 改变已协商音频格式，当前未配置 AudioOutput 重配置策略");
                     hello_received_ = true;
                     audio_formats_ready_ = false;
                     hello_status_ = format_status;

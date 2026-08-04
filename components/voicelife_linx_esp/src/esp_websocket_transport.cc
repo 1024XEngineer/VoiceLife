@@ -1,7 +1,5 @@
 #include "voicelife/linx_esp/esp_websocket_transport.h"
 
-#include "voicelife/linx_esp/websocket_fragment_assembler.h"
-
 #include <array>
 #include <atomic>
 #include <climits>
@@ -18,6 +16,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "voicelife/linx_esp/websocket_fragment_assembler.h"
 
 namespace voicelife::linx_esp {
 namespace {
@@ -40,8 +39,7 @@ struct EventEnvelope {
 };
 
 Status EspError(const char* operation, esp_err_t error) {
-    return Status::Error(ErrorCode::kUnavailable,
-                         std::string(operation) + " 失败，esp_err_t=" + std::to_string(error));
+    return Status::Error(ErrorCode::kUnavailable, std::string(operation) + " 失败，esp_err_t=" + std::to_string(error));
 }
 
 }  // namespace
@@ -57,9 +55,9 @@ class EspWebSocketTransport::Impl final {
         const bool secure = config.websocket_url.rfind("wss://", 0) == 0;
         const bool explicitly_allowed_insecure =
             options_.allow_insecure_ws && config.websocket_url.rfind("ws://", 0) == 0;
-        if (!config.valid() || (!secure && !explicitly_allowed_insecure) ||
-            options_.event_queue_capacity == 0 || options_.event_chunk_bytes == 0 ||
-            options_.event_chunk_bytes > kMaxEventChunkBytes || options_.max_message_bytes == 0) {
+        if (!config.valid() || (!secure && !explicitly_allowed_insecure) || options_.event_queue_capacity == 0 ||
+            options_.event_chunk_bytes == 0 || options_.event_chunk_bytes > kMaxEventChunkBytes ||
+            options_.max_message_bytes == 0) {
             return Status::Error(ErrorCode::kInvalidArgument, "ESP Linx WSS 配置无效");
         }
         if (state_ == TransportState::kConnecting || state_ == TransportState::kConnected ||
@@ -72,8 +70,7 @@ class EspWebSocketTransport::Impl final {
 
         auto token = secrets_.Resolve(config.token_ref);
         if (!token.ok() || !token.value.has_value() || token.value->empty()) {
-            return token.ok() ? Status::Error(ErrorCode::kInvalidArgument, "Linx token 为空")
-                              : token.status;
+            return token.ok() ? Status::Error(ErrorCode::kInvalidArgument, "Linx token 为空") : token.status;
         }
         headers_ = BuildHeaders(config, *token.value);
         state_ = TransportState::kConnecting;
@@ -116,9 +113,8 @@ class EspWebSocketTransport::Impl final {
             return EspError("启动 WebSocket client", status);
         }
 
-        const EventBits_t bits = xEventGroupWaitBits(
-            state_events_, kConnectedBit | kFailedBit, pdTRUE, pdFALSE,
-            pdMS_TO_TICKS(options_.connect_timeout_ms));
+        const EventBits_t bits = xEventGroupWaitBits(state_events_, kConnectedBit | kFailedBit, pdTRUE, pdFALSE,
+                                                     pdMS_TO_TICKS(options_.connect_timeout_ms));
         if ((bits & kConnectedBit) != 0) {
             return Status::Ok();
         }
@@ -136,11 +132,9 @@ class EspWebSocketTransport::Impl final {
             message.size() > static_cast<size_t>(INT_MAX)) {
             return Status::Error(ErrorCode::kUnavailable, "ESP Linx Transport 尚未连接或消息过大");
         }
-        const int sent = esp_websocket_client_send_text(client_, message.data(),
-                                                        static_cast<int>(message.size()),
+        const int sent = esp_websocket_client_send_text(client_, message.data(), static_cast<int>(message.size()),
                                                         pdMS_TO_TICKS(options_.network_timeout_ms));
-        return sent < 0 ? Status::Error(ErrorCode::kUnavailable, "发送 Linx 文本消息失败")
-                        : Status::Ok();
+        return sent < 0 ? Status::Error(ErrorCode::kUnavailable, "发送 Linx 文本消息失败") : Status::Ok();
     }
 
     Status SendAudio(const voice::AudioFrame& frame) {
@@ -148,9 +142,9 @@ class EspWebSocketTransport::Impl final {
             frame.payload.size() > static_cast<size_t>(INT_MAX)) {
             return Status::Error(ErrorCode::kUnavailable, "ESP Linx Transport 尚未连接");
         }
-        const int sent = esp_websocket_client_send_bin(
-            client_, reinterpret_cast<const char*>(frame.payload.data()),
-            static_cast<int>(frame.payload.size()), pdMS_TO_TICKS(options_.network_timeout_ms));
+        const int sent = esp_websocket_client_send_bin(client_, reinterpret_cast<const char*>(frame.payload.data()),
+                                                       static_cast<int>(frame.payload.size()),
+                                                       pdMS_TO_TICKS(options_.network_timeout_ms));
         return sent < 0 ? Status::Error(ErrorCode::kUnavailable, "发送 Linx 音频失败") : Status::Ok();
     }
 
@@ -198,14 +192,13 @@ class EspWebSocketTransport::Impl final {
     TransportState state() const { return state_.load(); }
 
    private:
-    static std::string BuildHeaders(const linx::LinxConnectionConfig& config,
-                                    std::string_view token) {
+    static std::string BuildHeaders(const linx::LinxConnectionConfig& config, std::string_view token) {
         std::string authorization(token);
         if (authorization.rfind("Bearer ", 0) != 0) {
             authorization.insert(0, "Bearer ");
         }
-        return "Authorization: " + authorization + "\r\nProtocol-Version: 1\r\nDevice-Id: " +
-               config.device_id + "\r\nClient-Id: " + config.client_id + "\r\n";
+        return "Authorization: " + authorization + "\r\nProtocol-Version: 1\r\nDevice-Id: " + config.device_id +
+               "\r\nClient-Id: " + config.client_id + "\r\n";
     }
 
     bool PrepareWorker() {
@@ -244,8 +237,7 @@ class EspWebSocketTransport::Impl final {
     }
 
     static void OnEvent(void* handler_args, esp_event_base_t, int32_t event_id, void* event_data) {
-        static_cast<Impl*>(handler_args)->Enqueue(event_id,
-                                                  static_cast<esp_websocket_event_data_t*>(event_data));
+        static_cast<Impl*>(handler_args)->Enqueue(event_id, static_cast<esp_websocket_event_data_t*>(event_data));
     }
 
     void Enqueue(int32_t event_id, const esp_websocket_event_data_t* event_data) {
@@ -305,8 +297,7 @@ class EspWebSocketTransport::Impl final {
     }
 
     void HandleQueueOverflow() {
-        const Status status = Status::Error(ErrorCode::kUnavailable,
-                                            "ESP Linx WebSocket 事件队列溢出");
+        const Status status = Status::Error(ErrorCode::kUnavailable, "ESP Linx WebSocket 事件队列溢出");
         error_status_ = status;
         if (sink_.on_error) {
             sink_.on_error(status);
@@ -322,20 +313,17 @@ class EspWebSocketTransport::Impl final {
                 }
                 xEventGroupSetBits(state_events_, kConnectedBit);
                 return;
-            case EventKind::kDisconnected:
-                {
-                    std::lock_guard<std::mutex> lock(assembler_mutex_);
-                    assembler_.Reset();
-                }
-                state_ = closing_.load() ? TransportState::kDisconnected
-                                         : TransportState::kReconnecting;
+            case EventKind::kDisconnected: {
+                std::lock_guard<std::mutex> lock(assembler_mutex_);
+                assembler_.Reset();
+            }
+                state_ = closing_.load() ? TransportState::kDisconnected : TransportState::kReconnecting;
                 if (sink_.on_disconnected) {
                     sink_.on_disconnected();
                 }
                 return;
             case EventKind::kError:
-                error_status_ = Status::Error(ErrorCode::kUnavailable,
-                                              "ESP Linx WebSocket 收到错误事件");
+                error_status_ = Status::Error(ErrorCode::kUnavailable, "ESP Linx WebSocket 收到错误事件");
                 state_ = TransportState::kFailed;
                 xEventGroupSetBits(state_events_, kFailedBit);
                 if (sink_.on_error) {
@@ -409,24 +397,18 @@ class EspWebSocketTransport::Impl final {
     Status error_status_ = Status::Ok();
 };
 
-EspWebSocketTransport::EspWebSocketTransport(SecretResolverPort& secrets,
-                                             EspWebSocketTransportOptions options)
+EspWebSocketTransport::EspWebSocketTransport(SecretResolverPort& secrets, EspWebSocketTransportOptions options)
     : impl_(std::make_unique<Impl>(secrets, std::move(options))) {}
 
 EspWebSocketTransport::~EspWebSocketTransport() = default;
 
-Status EspWebSocketTransport::Connect(const linx::LinxConnectionConfig& config,
-                                      linx::LinxTransportSink sink) {
+Status EspWebSocketTransport::Connect(const linx::LinxConnectionConfig& config, linx::LinxTransportSink sink) {
     return impl_->Connect(config, std::move(sink));
 }
 
-Status EspWebSocketTransport::SendText(std::string_view message) {
-    return impl_->SendText(message);
-}
+Status EspWebSocketTransport::SendText(std::string_view message) { return impl_->SendText(message); }
 
-Status EspWebSocketTransport::SendAudio(const voice::AudioFrame& frame) {
-    return impl_->SendAudio(frame);
-}
+Status EspWebSocketTransport::SendAudio(const voice::AudioFrame& frame) { return impl_->SendAudio(frame); }
 
 Status EspWebSocketTransport::Close() { return impl_->Close(); }
 

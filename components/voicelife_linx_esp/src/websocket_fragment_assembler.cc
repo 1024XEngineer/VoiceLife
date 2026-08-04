@@ -7,8 +7,7 @@ namespace voicelife::linx_esp {
 WebSocketFragmentAssembler::WebSocketFragmentAssembler(size_t max_message_bytes)
     : max_message_bytes_(max_message_bytes) {}
 
-Result<WebSocketAssemblyResult> WebSocketFragmentAssembler::Reject(ErrorCode code,
-                                                                    const char* message) {
+Result<WebSocketAssemblyResult> WebSocketFragmentAssembler::Reject(ErrorCode code, const char* message) {
     Reset();
     return Result<WebSocketAssemblyResult>::Failure(code, message);
 }
@@ -23,8 +22,7 @@ Result<WebSocketAssemblyResult> WebSocketFragmentAssembler::Complete() {
     return Result<WebSocketAssemblyResult>::Success(std::move(result));
 }
 
-Result<WebSocketAssemblyResult> WebSocketFragmentAssembler::Push(
-    const WebSocketFragment& fragment) {
+Result<WebSocketAssemblyResult> WebSocketFragmentAssembler::Push(const WebSocketFragment& fragment) {
     if (max_message_bytes_ == 0 || fragment.payload_len > max_message_bytes_ ||
         fragment.data_len > max_message_bytes_ || fragment.payload_offset > fragment.payload_len ||
         fragment.data_len > fragment.payload_len - fragment.payload_offset ||
@@ -36,12 +34,10 @@ Result<WebSocketAssemblyResult> WebSocketFragmentAssembler::Push(
         if (fragment.opcode == WebSocketOpcode::kContinuation) {
             return Reject(ErrorCode::kInvalidArgument, "没有首帧的 continuation");
         }
-        if (fragment.opcode != WebSocketOpcode::kText &&
-            fragment.opcode != WebSocketOpcode::kBinary) {
+        if (fragment.opcode != WebSocketOpcode::kText && fragment.opcode != WebSocketOpcode::kBinary) {
             return Reject(ErrorCode::kInvalidArgument, "WebSocket opcode 不支持");
         }
-        if (fragment.payload_offset != 0 ||
-            (fragment.fin && fragment.data_len != fragment.payload_len) ||
+        if (fragment.payload_offset != 0 || (fragment.fin && fragment.data_len != fragment.payload_len) ||
             (!fragment.fin && (fragment.payload_len == 0 || fragment.data_len == 0))) {
             return Reject(ErrorCode::kInvalidArgument, "WebSocket 首帧边界无效");
         }
@@ -54,8 +50,7 @@ Result<WebSocketAssemblyResult> WebSocketFragmentAssembler::Push(
         if (fragment.generation != generation_) {
             return Reject(ErrorCode::kConflict, "WebSocket 分片 generation 已过期");
         }
-        if (fragment.opcode != WebSocketOpcode::kContinuation ||
-            fragment.payload_len != expected_payload_len_ ||
+        if (fragment.opcode != WebSocketOpcode::kContinuation || fragment.payload_len != expected_payload_len_ ||
             fragment.payload_offset != payload_.size()) {
             return Reject(ErrorCode::kConflict, "WebSocket continuation 序列无效");
         }

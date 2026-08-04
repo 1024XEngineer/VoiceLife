@@ -9,12 +9,20 @@
 
 namespace voicelife::linx_esp {
 
+/** 定义从安全存储解析密钥引用的端口。 */
 class SecretResolverPort {
    public:
+    /** @brief 允许通过接口类型释放密钥解析端口。 */
     virtual ~SecretResolverPort() = default;
+    /**
+     * @brief 解析一个密钥引用。
+     * @param reference 非敏感的密钥引用。
+     * @return 解析出的密钥或错误。
+     */
     virtual Result<std::string> Resolve(std::string_view reference) = 0;
 };
 
+/** 表示 ESP WebSocket 传输的生命周期状态。 */
 enum class TransportState {
     kDisconnected,
     kConnecting,
@@ -23,6 +31,7 @@ enum class TransportState {
     kFailed,
 };
 
+/** 配置 ESP WebSocket 传输的容量、超时和安全策略。 */
 struct EspWebSocketTransportOptions {
     size_t max_message_bytes = 16 * 1024;
     size_t event_queue_capacity = 8;
@@ -34,26 +43,68 @@ struct EspWebSocketTransportOptions {
     bool allow_insecure_ws = false;
 };
 
-// ESP-IDF implementation of the Linx transport. ESP-IDF headers stay in the
-// .cc file; callers only see the Linx port and platform-neutral options.
+/** 使用 ESP-IDF WebSocket 客户端实现 Linx 传输端口。 */
 class EspWebSocketTransport final : public linx::LinxTransportPort {
    public:
-    EspWebSocketTransport(SecretResolverPort& secrets,
-                          EspWebSocketTransportOptions options = {});
+    /**
+     * @brief 创建 ESP WebSocket 传输。
+     * @param secrets 提供密钥解析的端口。
+     * @param options 传输容量、超时和安全选项。
+     */
+    EspWebSocketTransport(SecretResolverPort& secrets, EspWebSocketTransportOptions options = {});
+    /** @brief 释放 WebSocket 传输资源。 */
     ~EspWebSocketTransport() override;
 
-    EspWebSocketTransport(const EspWebSocketTransport&) = delete;
-    EspWebSocketTransport& operator=(const EspWebSocketTransport&) = delete;
+    /**
+     * @brief 禁止复制 WebSocket 传输。
+     * @param other 复制源对象。
+     */
+    EspWebSocketTransport(const EspWebSocketTransport& other) = delete;
+    /**
+     * @brief 禁止赋值 WebSocket 传输。
+     * @param other 赋值源对象。
+     * @return 当前对象引用。
+     */
+    EspWebSocketTransport& operator=(const EspWebSocketTransport& other) = delete;
 
+    /**
+     * @brief 建立 Linx WebSocket 连接。
+     * @param config Linx 连接配置。
+     * @param sink 接收传输事件的回调。
+     * @return 连接结果。
+     */
     Status Connect(const linx::LinxConnectionConfig& config, linx::LinxTransportSink sink) override;
+    /**
+     * @brief 发送文本控制消息。
+     * @param message 待发送文本。
+     * @return 发送结果。
+     */
     Status SendText(std::string_view message) override;
+    /**
+     * @brief 发送一帧音频数据。
+     * @param frame 待发送音频帧。
+     * @return 发送结果。
+     */
     Status SendAudio(const voice::AudioFrame& frame) override;
+    /**
+     * @brief 关闭 WebSocket 连接。
+     * @return 关闭结果。
+     */
     Status Close() override;
+    /**
+     * @brief 设置当前会话代次。
+     * @param generation 当前会话代次。
+     */
     void SetGeneration(uint64_t generation) override;
 
+    /**
+     * @brief 返回当前 WebSocket 传输状态。
+     * @return 传输状态。
+     */
     [[nodiscard]] TransportState state() const;
 
    private:
+    /** 隐藏 ESP-IDF 细节的传输实现。 */
     class Impl;
     std::unique_ptr<Impl> impl_;
 };

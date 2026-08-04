@@ -76,8 +76,7 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
         std::lock_guard<std::mutex> lock(mutex_);
         provider_config = config_;
     }
-    Status status = provider_.Connect(provider_config,
-                                      [this](const VoiceEvent& event) { HandleEvent(event); });
+    Status status = provider_.Connect(provider_config, [this](const VoiceEvent& event) { HandleEvent(event); });
     if (!status.ok()) {
         provider_.SetAudioSink({});
         {
@@ -96,8 +95,7 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
             state_ = VoiceSessionState::kFailed;
         }
         const Status failure = negotiated.ok()
-                                   ? Status::Error(ErrorCode::kInvalidArgument,
-                                                   "Provider 返回的双向音频格式无效")
+                                   ? Status::Error(ErrorCode::kInvalidArgument, "Provider 返回的双向音频格式无效")
                                    : negotiated.status;
         Emit("audio_negotiation_failed", failure.message);
         return failure;
@@ -163,8 +161,7 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
             generation = generation_;
             generation_changed = true;
             disconnected = true;
-        } else if (event.kind == VoiceEventKind::kConnected && audio_ready_ &&
-                   state_ == VoiceSessionState::kStarting) {
+        } else if (event.kind == VoiceEventKind::kConnected && audio_ready_ && state_ == VoiceSessionState::kStarting) {
             state_ = VoiceSessionState::kReady;
         } else if (event.kind == VoiceEventKind::kTtsStarted) {
             state_ = VoiceSessionState::kSpeaking;
@@ -279,8 +276,7 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
         }
         const AudioFormat& expected = audio_formats_.capture;
         if (!frame.format.valid() || frame.format.codec != expected.codec ||
-            frame.format.sample_rate_hz != expected.sample_rate_hz ||
-            frame.format.channels != expected.channels ||
+            frame.format.sample_rate_hz != expected.sample_rate_hz || frame.format.channels != expected.channels ||
             frame.format.bits_per_sample != expected.bits_per_sample ||
             frame.format.frame_duration_ms != expected.frame_duration_ms || frame.payload.empty()) {
             return Status::Error(ErrorCode::kInvalidArgument, "采集帧格式与会话不一致");
@@ -293,8 +289,7 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
     Status status = provider_.SendAudio(frame);
     if (status.ok()) {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (state_ == VoiceSessionState::kCapturing && generation_ == generation &&
-            next_sequence_ == sequence) {
+        if (state_ == VoiceSessionState::kCapturing && generation_ == generation && next_sequence_ == sequence) {
             ++next_sequence_;
         }
     }
@@ -308,8 +303,7 @@ Status VoiceSession::HandleAudio(AudioFrame frame) {
     }
     const AudioFormat& expected = audio_formats_.playback;
     if (frame.generation != generation_ || frame.format.codec != expected.codec ||
-        frame.format.sample_rate_hz != expected.sample_rate_hz ||
-        frame.format.channels != expected.channels ||
+        frame.format.sample_rate_hz != expected.sample_rate_hz || frame.format.channels != expected.channels ||
         frame.format.bits_per_sample != expected.bits_per_sample ||
         frame.format.frame_duration_ms != expected.frame_duration_ms || frame.payload.empty()) {
         return Status::Error(ErrorCode::kInvalidArgument, "播放帧不属于当前会话");

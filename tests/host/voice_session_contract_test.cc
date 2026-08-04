@@ -194,8 +194,7 @@ int main() {
           "下行音频格式变化必须拒绝");
     Check(session.BeginCapture().ok(), "ready 会话应开始采集");
     Check(session.SubmitAudio(Frame(generation, 0)).ok(), "当前 generation 的首帧应发送");
-    Check(input.EmitCapture(Frame(0, 0)).ok() && provider.audio_frames == 2,
-          "输入端口采集回调应转发为上行音频");
+    Check(input.EmitCapture(Frame(0, 0)).ok() && provider.audio_frames == 2, "输入端口采集回调应转发为上行音频");
     Check(provider.last_audio_frame.generation == generation && provider.last_audio_frame.sequence == 1,
           "会话应为输入回调补齐当前 generation 和连续序号");
     auto mismatched_format = Frame(generation, 1);
@@ -210,8 +209,7 @@ int main() {
     Check(session.SubmitAudio(Frame(generation - 1, 1)).code == ErrorCode::kInvalidArgument,
           "旧 generation 音频帧必须拒绝");
     Check(session.EndCapture().ok(), "采集应可正常结束");
-    Check(input.EmitCapture(Frame(0, 0)).code == ErrorCode::kUnavailable,
-          "结束采集后迟到的输入帧必须拒绝");
+    Check(input.EmitCapture(Frame(0, 0)).code == ErrorCode::kUnavailable, "结束采集后迟到的输入帧必须拒绝");
     Check(session.Speak("测试播报").ok(), "ready 会话应允许播报");
     voicelife::voice::VoiceEvent tts_started;
     tts_started.kind = voicelife::voice::VoiceEventKind::kTtsStarted;
@@ -221,8 +219,7 @@ int main() {
     Check(session.Interrupt().ok(), "播报应支持打断");
     Check(session.generation() != generation && provider.generation_ == session.generation() && output.flushes == 1,
           "打断应刷新播放并让 Provider 切换到新 generation");
-    Check(provider.EmitAudio(Frame(generation, 1)).code == ErrorCode::kInvalidArgument &&
-              output.pushes == 1,
+    Check(provider.EmitAudio(Frame(generation, 1)).code == ErrorCode::kInvalidArgument && output.pushes == 1,
           "打断后迟到的旧 generation 音频不得重新进入播放队列");
     provider.Emit(voicelife::voice::VoiceEvent{});
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
@@ -259,8 +256,7 @@ int main() {
     negotiated_provider.formats.playback = Config().audio;
     negotiated_provider.formats.playback.sample_rate_hz = 24000;
     negotiated_provider.formats.playback.frame_duration_ms = 60;
-    voicelife::voice::VoiceSession negotiated_session(negotiated_input, negotiated_output,
-                                                       negotiated_provider);
+    voicelife::voice::VoiceSession negotiated_session(negotiated_input, negotiated_output, negotiated_provider);
     Check(negotiated_session.Start(Config()).ok(), "Provider 协商不同下行格式后会话应可启动");
     Check(negotiated_input.opened_format.sample_rate_hz == 16000 &&
               negotiated_input.opened_format.frame_duration_ms == 20,
@@ -270,37 +266,32 @@ int main() {
           "输出端口必须在 Provider hello 后使用协商的下行格式");
     auto negotiated_playback = Frame(negotiated_session.generation(), 0);
     negotiated_playback.format = negotiated_provider.formats.playback;
-    Check(negotiated_provider.EmitAudio(std::move(negotiated_playback)).ok() &&
-              negotiated_output.pushes == 1,
+    Check(negotiated_provider.EmitAudio(std::move(negotiated_playback)).ok() && negotiated_output.pushes == 1,
           "协商后的 24 kHz 下行音频应进入输出端口");
     const uint64_t speaking_generation = negotiated_session.generation();
     Check(negotiated_session.Speak("测试打断").ok(), "协商会话应可播报");
-    negotiated_provider.Emit(voicelife::voice::VoiceEvent{
-        .kind = voicelife::voice::VoiceEventKind::kTtsStarted,
-        .generation = speaking_generation,
-        .text = {},
-        .aborted = false});
-    negotiated_provider.Emit(voicelife::voice::VoiceEvent{
-        .kind = voicelife::voice::VoiceEventKind::kTtsStopped,
-        .generation = speaking_generation,
-        .text = {},
-        .aborted = true});
+    negotiated_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
+                                                          .generation = speaking_generation,
+                                                          .text = {},
+                                                          .aborted = false});
+    negotiated_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStopped,
+                                                          .generation = speaking_generation,
+                                                          .text = {},
+                                                          .aborted = true});
     Check(negotiated_output.flushes == 1 && negotiated_session.generation() != speaking_generation,
           "服务端 abort 必须立即清空播放缓冲并失效旧代次");
     const uint64_t disconnected_generation = negotiated_session.generation();
-    negotiated_provider.Emit(voicelife::voice::VoiceEvent{
-        .kind = voicelife::voice::VoiceEventKind::kDisconnected,
-        .generation = disconnected_generation,
-        .text = {},
-        .aborted = false});
+    negotiated_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kDisconnected,
+                                                          .generation = disconnected_generation,
+                                                          .text = {},
+                                                          .aborted = false});
     Check(negotiated_session.state() == voicelife::voice::VoiceSessionState::kStarting &&
               negotiated_session.generation() != disconnected_generation,
           "断线必须进入等待重连状态并失效旧代次");
-    negotiated_provider.Emit(voicelife::voice::VoiceEvent{
-        .kind = voicelife::voice::VoiceEventKind::kConnected,
-        .generation = negotiated_session.generation(),
-        .text = {},
-        .aborted = false});
+    negotiated_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kConnected,
+                                                          .generation = negotiated_session.generation(),
+                                                          .text = {},
+                                                          .aborted = false});
     Check(negotiated_session.state() == voicelife::voice::VoiceSessionState::kReady,
           "重连 hello 完成后会话应回到 ready");
 
