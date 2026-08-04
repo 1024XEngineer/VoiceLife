@@ -4,6 +4,7 @@
 
 #include "support/test_support.h"
 #include "voicelife/contracts/im/notification_intent.h"
+#include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/contracts/json.h"
 
 using voicelife::ErrorCode;
@@ -12,6 +13,8 @@ using voicelife::Status;
 using voicelife::contracts::im::kDeviceContractVersion;
 using voicelife::contracts::im::NotificationIntent;
 using voicelife::contracts::im::ParseNotificationIntent;
+using voicelife::contracts::im::ParseScheduleReceiptIntent;
+using voicelife::contracts::im::ScheduleReceiptIntent;
 using voicelife::test::Check;
 
 namespace {
@@ -32,9 +35,23 @@ Status ParseFixture(const char* name, NotificationIntent& out) {
     return ParseNotificationIntent(root, out);
 }
 
+Status ParseScheduleReceiptFixture(const char* name, ScheduleReceiptIntent& out) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) {
+        return json_status;
+    }
+    return ParseScheduleReceiptIntent(root, out);
+}
+
 void RequireRejected(const char* name, const char* message) {
     NotificationIntent intent;
     const Status status = ParseFixture(name, intent);
+    Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
+}
+
+void RequireScheduleReceiptRejected(const char* name, const char* message) {
+    ScheduleReceiptIntent intent;
+    const Status status = ParseScheduleReceiptFixture(name, intent);
     Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
 }
 
@@ -66,5 +83,21 @@ int main() {
     RequireRejected("notification-invalid-enum.json", "非法枚举 fixture 必须被 C++ 拒绝");
     RequireRejected("notification-invalid-time.json", "非法时间 fixture 必须被 C++ 拒绝");
     RequireRejected("notification-missing-field.json", "缺字段 fixture 必须被 C++ 拒绝");
+
+    // 日程回执：字段与 TS parseScheduleReceiptIntent 一致
+    ScheduleReceiptIntent receipt;
+    Check(ParseScheduleReceiptFixture("schedule-receipt.json", receipt).ok(), "共享日程回执 fixture 必须被 C++ 解析");
+    Check(receipt.schemaVersion == kDeviceContractVersion, "日程回执必须共享设备契约版本");
+    Check(receipt.eventId == "event-schedule-fixture" && receipt.correlationId == "correlation-schedule-fixture",
+          "日程回执事件与关联标识必须被保留");
+    Check(receipt.userId.has_value() && *receipt.userId == "user-fixture", "可选 userId 必须被保留");
+    Check(receipt.deviceId == "device-fixture", "日程回执 deviceId 必须被保留");
+    Check(receipt.operationType == "created" && receipt.result == "succeeded", "日程回执枚举必须与 TS 语义一致");
+    Check(receipt.scheduleId == "schedule-fixture" && receipt.summary == "日程已创建", "日程回执载荷必须被保留");
+
+    // 非法日程回执 fixture：与 TS 一致的拒绝语义
+    RequireScheduleReceiptRejected("schedule-receipt-invalid-version.json", "非法版本日程回执必须被 C++ 拒绝");
+    RequireScheduleReceiptRejected("schedule-receipt-invalid-enum.json", "非法枚举日程回执必须被 C++ 拒绝");
+    RequireScheduleReceiptRejected("schedule-receipt-invalid-time.json", "非法时间日程回执必须被 C++ 拒绝");
     return 0;
 }

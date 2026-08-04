@@ -107,6 +107,19 @@ async function runContractFixtureTests() {
     );
   }
 
+  for (const name of [
+    "schedule-receipt-invalid-version.json",
+    "schedule-receipt-invalid-enum.json",
+    "schedule-receipt-invalid-time.json",
+  ]) {
+    const invalidScheduleReceipt = await readFixture(name);
+    await expectGatewayError(
+      () => Promise.resolve(parseScheduleReceiptIntent(invalidScheduleReceipt)),
+      "invalid_contract",
+      `${name} was accepted by the runtime parser`,
+    );
+  }
+
   await expectGatewayError(
     () =>
       Promise.resolve(
