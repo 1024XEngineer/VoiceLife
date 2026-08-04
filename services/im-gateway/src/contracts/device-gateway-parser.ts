@@ -27,6 +27,11 @@ type JsonObject = Record<string, unknown>;
 
 const ISO_8601 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:Z|[+-](\d{2}):(\d{2}))$/;
 
+/**
+ * Parses and validates a device schedule-operation receipt.
+ * @param input Untrusted request payload.
+ * @returns Normalized receipt intent for the application layer.
+ */
 export function parseScheduleReceiptIntent(input: unknown): ScheduleReceiptIntent {
     const value = objectAt(input, 'body');
     const userId = optionalId<UserId>(value, 'userId', 'body.userId');
@@ -48,6 +53,11 @@ export function parseScheduleReceiptIntent(input: unknown): ScheduleReceiptInten
     };
 }
 
+/**
+ * Parses and validates a device notification request.
+ * @param input Untrusted request payload.
+ * @returns Normalized notification intent for the application layer.
+ */
 export function parseNotificationIntent(input: unknown): NotificationIntent {
     const value = objectAt(input, 'body');
     const recipient = objectAt(value.recipient, 'body.recipient');
@@ -96,6 +106,11 @@ export function parseNotificationIntent(input: unknown): NotificationIntent {
           };
 }
 
+/**
+ * Parses a device callback reporting reminder-action execution.
+ * @param input Untrusted request payload.
+ * @returns Normalized reminder-action result.
+ */
 export function parseReminderActionResult(input: unknown): ReminderActionResult {
     const value = objectAt(input, 'body');
     const nextTriggerAt = optionalIsoDateTime(value, 'nextTriggerAt', 'body.nextTriggerAt');
@@ -117,6 +132,11 @@ export function parseReminderActionResult(input: unknown): ReminderActionResult 
     };
 }
 
+/**
+ * Parses a user action submitted through an action entry point.
+ * @param input Untrusted request payload.
+ * @returns Validated reminder-action intent.
+ */
 export function parseReminderActionIntent(input: unknown): ReminderActionIntent {
     const value = objectAt(input, 'body');
     const action = enumAt(value.action, ['acknowledge', 'snooze'] as const, 'body.action');
@@ -134,6 +154,11 @@ export function parseReminderActionIntent(input: unknown): ReminderActionIntent 
     };
 }
 
+/**
+ * Parses the opaque token submitted by an action UI.
+ * @param input Untrusted token payload.
+ * @returns Non-empty action token.
+ */
 export function parseActionToken(input: unknown): string {
     return stringAt(input, 'token');
 }

@@ -47,3 +47,7 @@ pnpm --dir services/im-gateway test
 `createMockImGateway()` 使用内存 Repository 和 Mock 通道，可用于后续主干串联测试。生产装配应替换为 PostgreSQL、Koishi、微信 Capability Plugin 和真实 SSE Hub。
 
 当前 mock 场景覆盖：PairingSession 绑定/过期、强弱提醒分流、DeliveryAttempt 与 H5 Token 渲染、复合入站幂等键、`externalMessageId` 回执归并、Receipt 去重及迟到回执不倒退、H5/平台 Action 入口合流、SSE 持久化回放、HTTPS Result 回传与 Action 过期关闭。
+
+## TSDoc 规范
+
+从本次改动起，任何新增或修改的导出 class、interface、type、enum、const 和 function 都必须紧邻 `/** ... */` TSDoc 注释。导出函数还必须逐一使用 `@param` 说明参数，并通过 `@returns` 说明非 `void` 返回值。内部实现不强制；已有公开 API 采用增量迁移，修改到相应声明时必须补齐注释。
