@@ -76,5 +76,11 @@ add_voicelife_test(im_contract_parser_test "unit;im" im_contract_parser_test.cc)
 target_link_libraries(im_contract_parser_test PRIVATE contracts)
 target_compile_definitions(im_contract_parser_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
 
+add_voicelife_test(im_json_parser_test "unit;im" im_json_parser_test.cc)
+target_link_libraries(im_json_parser_test PRIVATE contracts)
+
+add_voicelife_test(im_contract_validation_test "unit;im" im_contract_validation_test.cc)
+target_link_libraries(im_contract_validation_test PRIVATE contracts)
+
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
