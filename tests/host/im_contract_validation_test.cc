@@ -205,6 +205,31 @@ int main() {
     RequireNotificationRejected(
         "{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\",\"kind\":\"reminder_due\","
         "\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},\"scheduleId\":\"s\",\"taskId\":\"t\","
+        "\"instanceId\":\"i\",\"reminderTriggerId\":\"r\",\"reminderType\":\"strong\",\"content\":{\"title\":\"x\"},"
+        "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\","
+        "\"actions\":[{\"type\":\"acknowledge\",\"label\":\"x\"}],\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    RequireNotificationRejected(
+        "{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\",\"kind\":\"reminder_due\","
+        "\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},\"scheduleId\":\"s\",\"taskId\":\"t\","
+        "\"instanceId\":\"i\",\"reminderTriggerId\":\"r\",\"reminderType\":\"strong\",\"content\":{\"title\":\"x\"},"
+        "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\","
+        "\"actions\":[{\"kind\":\"command\",\"label\":\"x\"}],\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    RequireNotificationRejected(
+        "{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\",\"kind\":\"reminder_due\","
+        "\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},\"scheduleId\":\"s\",\"taskId\":\"t\","
+        "\"instanceId\":\"i\",\"reminderTriggerId\":\"r\",\"reminderType\":\"strong\",\"content\":{\"title\":\"x\"},"
+        "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\","
+        "\"actions\":[{\"kind\":\"command\",\"type\":\"snooze\",\"label\":\"x\",\"params\":42}],"
+        "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    RequireNotificationRejected(
+        "{\"schemaVersion\":\"1\",\"businessEventId\":\"\",\"correlationId\":\"c\",\"kind\":\"reminder_due\","
+        "\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},\"scheduleId\":\"s\",\"taskId\":\"t\","
+        "\"instanceId\":\"i\",\"reminderTriggerId\":\"r\",\"reminderType\":\"weak\",\"content\":{\"title\":\"x\"},"
+        "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\",\"actions\":[],"
+        "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    RequireNotificationRejected(
+        "{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\",\"kind\":\"reminder_due\","
+        "\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},\"scheduleId\":\"s\",\"taskId\":\"t\","
         "\"instanceId\":\"i\",\"reminderTriggerId\":\"r\",\"reminderType\":\"weak\",\"content\":{\"title\":\"x\"},"
         "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"bad\",\"actions\":[],\"occurredAt\":"
         "\"2026-01-01T00:00:00Z\"}");
@@ -305,6 +330,10 @@ int main() {
         "{\"schemaVersion\":\"1\",\"eventId\":\"e\",\"correlationId\":\"c\",\"userId\":\"u\",\"deviceId\":\"d\","
         "\"scheduleId\":\"s\",\"result\":\"succeeded\",\"summary\":\"x\","
         "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    RequireScheduleRejected(
+        "{\"schemaVersion\":\"1\",\"eventId\":\"e\",\"correlationId\":\"c\",\"userId\":\"\",\"deviceId\":\"d\","
+        "\"operationType\":\"created\",\"scheduleId\":\"s\",\"result\":\"succeeded\",\"summary\":\"x\","
+        "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
 
     // ===== ReminderActionResult 校验分支 =====
     RequireResultRejected("null");
@@ -320,6 +349,9 @@ int main() {
     RequireResultRejected(
         "{\"schemaVersion\":\"1\",\"operationId\":\"o\",\"reminderTriggerId\":\"r\","
         "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    RequireResultRejected(
+        "{\"schemaVersion\":\"1\",\"operationId\":\"o\",\"reminderTriggerId\":\"r\",\"status\":\"succeeded\","
+        "\"errorCode\":\"\",\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
     RequireResultRejected(
         "{\"schemaVersion\":\"1\",\"operationId\":\"o\",\"reminderTriggerId\":\"r\",\"status\":\"suspended\","
         "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
