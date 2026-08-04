@@ -18,10 +18,9 @@ std::string ReadFixture(const char* name) {
     std::ostringstream content;
     content << input.rdbuf();
     std::string compact = content.str();
-    compact.erase(std::remove_if(compact.begin(), compact.end(), [](unsigned char value) {
-                      return std::isspace(value) != 0;
-                  }),
-                  compact.end());
+    compact.erase(
+        std::remove_if(compact.begin(), compact.end(), [](unsigned char value) { return std::isspace(value) != 0; }),
+        compact.end());
     return compact;
 }
 
@@ -42,8 +41,7 @@ int main() {
     const std::string invalid_time = ReadFixture("notification-invalid-time.json");
     const std::string missing_field = ReadFixture("notification-missing-field.json");
 
-    Check(HasStringField(strong, "schemaVersion", kDeviceContractVersion),
-          "C++ 与 TypeScript 必须共享设备契约版本");
+    Check(HasStringField(strong, "schemaVersion", kDeviceContractVersion), "C++ 与 TypeScript 必须共享设备契约版本");
     Check(HasStringField(strong, "scheduleId", "schedule-fixture") &&
               HasStringField(schedule, "scheduleId", "schedule-fixture"),
           "Issue #65 规定跨端 ScheduleId 为不透明字符串");

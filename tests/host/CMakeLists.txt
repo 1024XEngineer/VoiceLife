@@ -5,8 +5,18 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(VOICELIFE_ENABLE_COVERAGE "Instrument host tests for gcov coverage reports" OFF)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Werror -Wpedantic -Wmissing-field-initializers)
+endif()
+
+if(VOICELIFE_ENABLE_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        message(FATAL_ERROR "VOICELIFE_ENABLE_COVERAGE currently requires GCC/gcov")
+    endif()
+    add_compile_options(-O0 -g --coverage)
+    add_link_options(--coverage)
 endif()
 
 set(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../..")
@@ -42,6 +52,9 @@ endfunction()
 
 add_voicelife_test(schedule_contract_test "unit;schedule" schedule_contract_test.cc)
 target_link_libraries(schedule_contract_test PRIVATE schedule)
+
+add_voicelife_test(status_test "unit;contracts" status_test.cc)
+target_link_libraries(status_test PRIVATE contracts)
 
 add_voicelife_test(timing_policy_test "unit;timing" timing_policy_test.cc)
 target_link_libraries(timing_policy_test PRIVATE timing)

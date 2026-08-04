@@ -19,7 +19,8 @@ Refs #
 
 ## 验证
 
-- [ ] `./scripts/run_checks.sh`
+- [ ] `./scripts/run_pre_submit_checks.sh`
+- [ ] 远端 CI 的工作流、格式、IM Gateway、主机测试、架构、ESP-IDF 和 CodeQL 均通过；依赖图已启用时依赖审查也通过，未启用时已记录跳过原因
 - [ ] ESP-IDF 对应 Profile 构建
 - [ ] 真机或外部服务验证（如适用）
 

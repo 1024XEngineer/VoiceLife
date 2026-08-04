@@ -1,0 +1,33 @@
+coverage:
+  status:
+    project:
+      cpp:
+        flags:
+          - cpp
+        target: 80%
+        threshold: 0%
+      typescript:
+        flags:
+          - typescript
+        target: 80%
+        threshold: 0%
+    patch:
+      cpp:
+        flags:
+          - cpp
+        target: 80%
+        threshold: 0%
+      typescript:
+        flags:
+          - typescript
+        target: 80%
+        threshold: 0%
+
+comment:
+  layout: "diff, flags, files"
+  require_changes: true
+
+ignore:
+  - "tests/**"
+  - "services/im-gateway/test/**"
+  - "main/**"

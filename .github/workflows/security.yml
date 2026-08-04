@@ -1,0 +1,104 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: 依赖变更审查
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: 检查 Dependency Graph
+        id: dependency-graph
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --location \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output /dev/null \
+            --write-out "%{http_code}" \
+            "https://api.github.com/repos/${REPOSITORY}/dependency-graph/sbom")"
+          case "${status}" in
+            200)
+              echo "enabled=true" >> "${GITHUB_OUTPUT}"
+              ;;
+            404)
+              echo "enabled=false" >> "${GITHUB_OUTPUT}"
+              echo "::warning::Dependency Graph 未启用，暂跳过 Dependency Review；请仓库管理员在 Settings > Security & analysis 中启用。"
+              ;;
+            *)
+              echo "Dependency Graph 探测失败（HTTP ${status}），不能确认依赖审查能力。" >&2
+              exit 1
+              ;;
+          esac
+      - name: 运行依赖变更审查
+        if: steps.dependency-graph.outputs.enabled == 'true'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+      - name: 记录依赖审查跳过原因
+        if: steps.dependency-graph.outputs.enabled != 'true'
+        run: echo "Dependency Graph 尚未启用，本次只记录跳过原因；启用后将执行真实依赖审查。"
+
+  codeql:
+    name: CodeQL（${{ matrix.id }}）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: cpp
+            language: cpp
+            build-mode: manual
+          - id: python
+            language: python
+            build-mode: none
+          - id: typescript
+            language: javascript-typescript
+            build-mode: none
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: github/codeql-action/init@d1ba80a13dd99fba24a470575428917156a28b43 # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - name: 构建主机 C++ 测试
+        if: matrix.id == 'cpp'
+        run: ./scripts/run_host_tests.sh
+      - name: 安装并构建 IM Gateway
+        if: matrix.id == 'typescript'
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.17.1
+      - name: 设置 Node.js
+        if: matrix.id == 'typescript'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: services/im-gateway/pnpm-lock.yaml
+      - name: 运行 IM Gateway 构建
+        if: matrix.id == 'typescript'
+        working-directory: services/im-gateway
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+      - uses: github/codeql-action/analyze@d1ba80a13dd99fba24a470575428917156a28b43 # v4
