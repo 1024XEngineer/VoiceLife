@@ -1,7 +1,7 @@
 # 语音模块子架构
 
-一句话结论：VoiceLife 的语音模块采用“实时音频数据面 + 会话控制面 + Provider 防腐层”的三段式结构，ESP32-S3 是本期唯一主验证平台；#111 已把当前 `SKU=voicelife-pcb` 板的纯 I2S PCM 数据面跑到非活动 OTA 槽并完成可回退验证。
-下一步动作：以 `esp32s3-voicelife-pcb-pcm` 的实测参数继续接入 Audio Port，再做 Codec/AFE/Opus 和真实 Linx 云端闭环；其他 MCU 只进入 Profile 与能力调研，不提前宣称可用。
+一句话结论：VoiceLife 的语音模块采用“实时音频数据面 + 会话控制面 + Provider 防腐层”的三段式结构，ESP32-S3 是本期唯一主验证平台；#113 已把 Profile 驱动的 PCM Audio Port 跑到非活动 OTA 槽并完成可回退验证。
+下一步动作：把 Audio Port 接入 Linx WSS 会话，再做 Opus、受控声学录放和有 playback reference 证据的 AFE/AEC；其他 MCU 只进入 Profile 与能力调研，不提前宣称可用。
 
 ## 1. 为什么单独拆语音
 
@@ -140,7 +140,17 @@ Transport worker 的回调可以与控制任务并发到达：`VoiceSession` 用
 
 这套契约来自旧 MVP 的 `AudioService` 队列和 `ResetDecoder` 行为，代码位于 [`audio_frame_queue.h`](../../components/voicelife_voice/include/voicelife/voice/audio_frame_queue.h)，主机契约测试位于 [`audio_frame_queue_contract_test.cc`](../../tests/host/audio_frame_queue_contract_test.cc)。
 
-### 3.5 SQLite 与实时音频的边界
+### 3.5 硬件 period 与传输帧分离
+
+`VoiceLifePcbEsp32s3Profile` 的采集和播放硬件 period 都是 10 ms；Linx hello 协商的是 20/40/60 ms 传输帧，两者不能共用一个“frame size”字段。`PcmFrameAssembler` 只负责把若干完整硬件 period 组装为 PCM S16LE 传输帧，时长不是整数倍、样本数不是完整声道或计算溢出时立即拒绝。
+
+Audio Port 内部保持三条执行路径：I2S capture 只采样和转换，delivery task 只把完整帧交给 `VoiceSession`，output task 只拆成硬件 period 写回 I2S。上行队列满时丢最旧帧，下行队列满时拒绝新帧；网络回调不会堵住 I2S 采集。这个边界来自旧 MVP 的任务拆分，但不迁移其全局 `Application` 状态机。
+
+2026-08-04 的真实 ESP32-S3 smoke 使用 60 ms PCM 传输帧，采集 4 帧、播放 1 帧，输入丢帧、输出拒绝、短读和短写均为 0，最低空闲堆 358016 B，`AUDIO_PORT_SIGNAL=1`。镜像只写入 `ota_1@0x410000`，回读一致；测试后恢复原 `otadata`，原固件从 `ota_0` 启动并加载 7 个事件、8 个提醒、0 条笔记。
+
+同次探针出现 `228/4800` 个削波样本（47500 ppm），高于 #111 的静态对照。它不否定总线和任务生命周期通过，但表明输入增益仍需在受控声源下复测；当前能力声明不包含声学质量、AFE、AEC 或 Opus。
+
+### 3.6 SQLite 与实时音频的边界
 
 SQLite 不作为 `AudioInputPort` 或 `AudioOutputPort` 的同步依赖。MCP/Calendar Application 通过控制面 `StorageTransactionPort` 提交业务命令，Storage Adapter 独占连接并返回 `transaction_id`、提交状态、影响行数、完整性摘要和错误；音频任务只发布异步事件。
 
@@ -179,6 +189,7 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 - [Linx 开源文档仓库](https://github.com/qiniu/Xrobot-docs/blob/main/docs/xrobot/platform/websocket.md)
 - [Linx 小智固件接入指南](https://linx.qiniu.com/docs/xrobot/guide/xiaozhi-firmware)
 - [Linx 当前平台目录与 MQTT 反证](../../research/voice-module-portability-20260804/sources/12_linx_current_access_matrix.md)
+- [Linx WebSocket 与 OTA 线上契约核验](../../research/voice-module-portability-20260804/sources/16_linx_websocket_ota_live_20260804.md)
 - [ESP-IDF 6.0.2 I2S 当前边界](../../research/voice-module-portability-20260804/sources/13_esp_idf_i2s_6_0_2.md)
 
 ### 4.2 ESP-IDF Transport 当前实现
@@ -251,4 +262,4 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 - Integration：Linx/xiaozhi Adapter 解析测试不依赖网络；
 - Hardware：ESP32-S3 真机验证采集、上行、ASR、TTS、打断、重连和资源预算，主机绿灯不能代替这些证据。
 
-当前 #106 完成 Port、状态、Provider Registry 和 Linx 协议防腐层；#107 完成可主机测试、可 ESP-IDF 构建、可在非活动 OTA 槽启动并可恢复的 WSS Transport 外壳；#111 完成当前纯 I2S Profile 的数字 PCM 探针。真实 Linx 云端、Opus、AEC、Wake、Codec 录放和物理声学闭环仍是明确待办，不能把构建或启动通过写成语音功能已完成。
+当前 #106 完成 Port、状态、Provider Registry 和 Linx 协议防腐层；#107 完成 WSS Transport 外壳；#111 完成纯 I2S 数字 PCM 探针；#113 完成 10 ms period 到 60 ms 帧的组装、独立采集/投递/播放任务和真实板可回退 smoke。真实 Linx 云端、Opus、AEC、Wake、Codec 录放和物理声学闭环仍是明确待办。

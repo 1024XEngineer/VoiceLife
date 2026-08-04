@@ -94,3 +94,27 @@ shasum -a 256 /tmp/voicelife-ota1-readback.bin
 ## 7. PR 最低证据
 
 硬件 PR 至少写清板卡、固件 SHA-256、App 大小、目标槽、串口波特率、测试步骤、PCM 样本/非零/变化/削波/均方值、最低空闲堆和恢复结果。失败同样是有效证据；真正不能接受的是没有恢复路径的“再试一次”。
+
+## 8. #113 PCM Audio Port 验证
+
+2026-08-04 在 `/dev/cu.usbmodem5A840116301` 以 115200 验证 Profile 驱动 Audio Port。写入前重新读取板上分区表，并完整备份 `nvs` 16 KiB、`otadata` 8 KiB 和 `voicelife` 2 MiB；`voicelife` 备份 SHA-256 为 `b00a74d6a87f5376d027a4f7665989934198ab9706689f287a545b4e18daaf72`。
+
+测试镜像为 249952 B（`0x3d060`），SHA-256 `6ca07655c4a218b56967e7a074335817708e3ea8ada154fa9df299160964cdb7`。镜像只写入 `ota_1@0x410000`，回读 249952 B 后哈希和逐字节比较均一致。
+
+启动日志：
+
+```text
+AUDIO_PORT_READY=1
+AUDIO_PORT_CAPTURE_FRAMES=4
+AUDIO_PORT_PLAYED_FRAMES=1
+AUDIO_PORT_DROPPED_INPUT=0
+AUDIO_PORT_REJECTED_OUTPUT=0
+AUDIO_PORT_SHORT_READS=0
+AUDIO_PORT_SHORT_WRITES=0
+AUDIO_PORT_MIN_HEAP=358016
+AUDIO_PORT_SIGNAL=1
+```
+
+同次底层探针记录 `pcm_samples=4800`、`nonzero=4797`、`changed=4487`、`saturated=228`、`saturation_ppm=47500`。这次验证证明 10 ms I2S period、60 ms PCM 组帧、有界队列和总线回放任务可用；较高削波需要受控声源复测，不能宣称声学质量已通过。
+
+结束后恢复原 `otadata`，恢复前后 SHA-256 均为 `8ba3b110139f45443d4f268d1a3373ef99a1718b71d51664531b83ee2d4b91a3`。复位日志确认原固件从 `ota_0` 启动，SQLite 仍加载 7 个事件、8 个提醒、0 条笔记。

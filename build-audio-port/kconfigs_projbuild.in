@@ -1,0 +1,7 @@
+source "/Users/mac/esp-idf-v6.0.2/components/app_update/Kconfig.projbuild"
+source "/Users/mac/esp-idf-v6.0.2/components/bootloader/Kconfig.projbuild"
+source "/Users/mac/esp-idf-v6.0.2/components/esp_app_format/Kconfig.projbuild"
+source "/Users/mac/esp-idf-v6.0.2/components/esp_rom/Kconfig.projbuild"
+source "/Users/mac/esp-idf-v6.0.2/components/esptool_py/Kconfig.projbuild"
+source "/Users/mac/esp-idf-v6.0.2/components/partition_table/Kconfig.projbuild"
+source "/Users/mac/Desktop/project/XE6-15-voice-pcm/main/Kconfig.projbuild"

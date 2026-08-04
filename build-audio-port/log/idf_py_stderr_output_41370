@@ -1,0 +1,5 @@
+Command: cmake -G Ninja -B /Users/mac/Desktop/project/XE6-15-voice-pcm/build-audio-port -DPYTHON_DEPS_CHECKED=1 -DPYTHON=/Users/mac/.espressif/python_env/idf6.0_py3.12_env/bin/python -DESP_PLATFORM=1 -DIDF_TARGET=esp32s3 -DCCACHE_ENABLE=False /Users/mac/Desktop/project/XE6-15-voice-pcm
+Loading defaults file /Users/mac/Desktop/project/XE6-15-voice-pcm/sdkconfig.defaults...
+NOTE: Kconfig parser version: 1
+NOTE: Kconfig defaults policy: use sdkconfig
+NOTE: Status: Finished successfully

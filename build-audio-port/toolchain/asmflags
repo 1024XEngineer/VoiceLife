@@ -1,0 +1,5 @@
+-mlongcalls
+-fno-builtin-memcpy
+-fno-builtin-memset
+-fno-builtin-bzero
+"-specs=/Users/mac/Desktop/project/XE6-15-voice-pcm/build-audio-port/specs/picolibc.specs"
