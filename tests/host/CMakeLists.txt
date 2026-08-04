@@ -54,10 +54,12 @@ function(add_voicelife_test target labels)
     set_tests_properties(${target} PROPERTIES LABELS "${labels}")
 endfunction()
 
-add_voicelife_test(schedule_contract_test "unit;schedule" schedule_contract_test.cc)
+add_voicelife_test(schedule_contract_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_contract_test.cc")
 target_link_libraries(schedule_contract_test PRIVATE schedule)
 
-add_voicelife_test(schedule_create_test "unit;schedule" schedule_create_test.cc)
+add_voicelife_test(schedule_create_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_create_test.cc")
 target_link_libraries(schedule_create_test PRIVATE schedule)
 
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
