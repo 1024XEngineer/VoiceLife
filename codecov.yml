@@ -17,11 +17,15 @@ coverage:
           - cpp
         target: 80%
         threshold: 0%
+        paths:
+          - "components/**"
       typescript:
         flags:
           - typescript
         target: 80%
         threshold: 0%
+        paths:
+          - "services/im-gateway/src/**"
 
 comment:
   layout: "diff, flags, files"
