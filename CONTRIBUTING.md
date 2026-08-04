@@ -56,9 +56,20 @@ git push -u fork HEAD
 ## 常用检查
 
 ```bash
+# C/C++ 格式、Python 格式与静态规则（需 clang-format 和 ruff）
+./scripts/check_format.sh
+
+# 公共 C++ API 文档、主机测试、架构边界、固件配置与 Python 测试
 ./scripts/run_checks.sh
+
+# IM Gateway 的格式、Lint、类型与测试
+pnpm install --dir services/im-gateway --frozen-lockfile
+pnpm --dir services/im-gateway run ci
+
 python3 scripts/firmware.py build esp32s3-dev
 ```
+
+公共 C++ API 位于 `components/**/include`。类型和枚举使用简洁的 `///` Doxygen 注释；公开函数必须使用 `/** ... */`，包含 `@brief`，并为每个参数添加 `@param`、为每个非 `void` 返回值添加 `@return`。注释应说明职责和签名无法表达的语义（例如错误、所有权、时间单位或并发约束），不要为私有实现添加重复代码的注释。
 
 提交前可手动检查描述：
 

@@ -1,0 +1,62 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: CodeQL（${{ matrix.id }}）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: cpp
+            language: cpp
+            build-mode: manual
+          - id: python
+            language: python
+            build-mode: none
+          - id: typescript
+            language: javascript-typescript
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v6
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - name: 构建主机 C++ 测试
+        if: matrix.id == 'cpp'
+        run: ./scripts/run_host_tests.sh
+      - name: 安装并构建 IM Gateway
+        if: matrix.id == 'typescript'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+      - name: 设置 Node.js
+        if: matrix.id == 'typescript'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: services/im-gateway/pnpm-lock.yaml
+      - name: 运行 IM Gateway 构建
+        if: matrix.id == 'typescript'
+        working-directory: services/im-gateway
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+      - uses: github/codeql-action/analyze@v4

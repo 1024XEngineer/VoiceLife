@@ -14,6 +14,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  format:
+    name: 格式与 Python 静态检查
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: 安装格式检查工具
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes clang-format
+          python -m pip install --disable-pip-version-check "ruff==0.12.7"
+      - name: 检查代码格式与 Python 静态规则
+        run: ./scripts/check_format.sh
+
   im-gateway-tests:
     name: IM Gateway / Node 24
     runs-on: ubuntu-24.04
@@ -31,10 +50,8 @@ jobs:
           pnpm --version
       - name: 安装冻结依赖
         run: pnpm --dir services/im-gateway install --frozen-lockfile
-      - name: 检查契约与类型
-        run: pnpm --dir services/im-gateway check
-      - name: 运行共享 fixture 与状态机测试
-        run: pnpm --dir services/im-gateway test
+      - name: 检查格式、静态规则、类型与测试
+        run: pnpm --dir services/im-gateway run ci
 
   host-tests:
     name: 主机测试与架构边界

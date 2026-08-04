@@ -1,0 +1,12 @@
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+extend-exclude = ["build", "build-host", "build-host-*", "managed_components"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
