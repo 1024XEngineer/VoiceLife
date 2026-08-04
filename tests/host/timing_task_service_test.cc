@@ -222,6 +222,15 @@ int main() {
     });
     Check(lookup_failure.status.code == ErrorCode::kUnavailable, "幂等查询失败时应返回 Store 错误");
 
+    const auto invalid_before_lookup = lookup_failure_service.RegisterTimerTask({
+        .request_id = "request-invalid-before-lookup",
+        .schedule_id = "",
+        .start_at = 0,
+        .time_zone = "Asia/Shanghai",
+    });
+    Check(invalid_before_lookup.status.code == ErrorCode::kInvalidArgument,
+          "非法任务参数应在 Store 查询前返回参数错误");
+
     ConcurrentReplayStore concurrent_replay_store({
         .id = "task-concurrent",
         .schedule_id = "schedule-concurrent",

@@ -74,6 +74,16 @@ Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(cons
         return Result<RegisterTimerTaskResult>::Failure(ErrorCode::kInvalidArgument, "注册请求缺少 request_id");
     }
 
+    const RegisterTimingTaskCommand policy_command{
+        .schedule_id = command.schedule_id,
+        .starts_at = command.start_at,
+        .time_zone = command.time_zone,
+    };
+    const Status policy_status = TimingPolicy{}.Validate(policy_command);
+    if (!policy_status.ok()) {
+        return Result<RegisterTimerTaskResult>::Failure(policy_status.code, policy_status.message);
+    }
+
     const Status recurrence_status = ValidateRecurrence(command.recurrence);
     if (!recurrence_status.ok()) {
         return Result<RegisterTimerTaskResult>::Failure(recurrence_status.code, recurrence_status.message);
@@ -89,12 +99,6 @@ Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(cons
     if (existing.status.code != ErrorCode::kNotFound) {
         return Result<RegisterTimerTaskResult>::Failure(existing.status.code, existing.status.message);
     }
-
-    const RegisterTimingTaskCommand policy_command{
-        .schedule_id = command.schedule_id,
-        .starts_at = command.start_at,
-        .time_zone = command.time_zone,
-    };
 
     auto task = TimingPolicy{}.Register(policy_command, ids_.NextTaskId(), clock_.Now());
     if (!task.ok()) {
