@@ -16,6 +16,25 @@ bool ValuesInRange(const std::vector<int>& values, int minimum, int maximum) {
     return true;
 }
 
+bool SameRecurrence(const RecurrenceRule& left, const RecurrenceRule& right) {
+    return left.frequency == right.frequency && left.by_weekdays == right.by_weekdays &&
+           left.by_month_days == right.by_month_days && left.by_months == right.by_months;
+}
+
+bool MatchesRegistration(const TimingTask& task, const RegisterTimerTaskCommand& command) {
+    return task.request_id == command.request_id && task.schedule_id == command.schedule_id &&
+           task.start_at == command.start_at && task.time_zone == command.time_zone &&
+           SameRecurrence(task.recurrence, command.recurrence);
+}
+
+Result<RegisterTimerTaskResult> RegistrationResult(const TimingTask& task) {
+    return Result<RegisterTimerTaskResult>::Success({
+        .task_id = task.id,
+        .status = task.status,
+        .next_trigger_at = task.next_trigger_at,
+    });
+}
+
 Status ValidateRecurrence(const RecurrenceRule& recurrence) {
     const bool has_weekdays = !recurrence.by_weekdays.empty();
     const bool has_month_days = !recurrence.by_month_days.empty();
@@ -51,9 +70,24 @@ Status ValidateRecurrence(const RecurrenceRule& recurrence) {
 }  // namespace
 
 Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(const RegisterTimerTaskCommand& command) {
+    if (command.request_id.empty()) {
+        return Result<RegisterTimerTaskResult>::Failure(ErrorCode::kInvalidArgument, "注册请求缺少 request_id");
+    }
+
     const Status recurrence_status = ValidateRecurrence(command.recurrence);
     if (!recurrence_status.ok()) {
         return Result<RegisterTimerTaskResult>::Failure(recurrence_status.code, recurrence_status.message);
+    }
+
+    const auto existing = store_.FindTaskByRequestId(command.request_id);
+    if (existing.ok()) {
+        if (!MatchesRegistration(*existing.value, command)) {
+            return Result<RegisterTimerTaskResult>::Failure(ErrorCode::kConflict, "request_id 已用于不同的注册请求");
+        }
+        return RegistrationResult(*existing.value);
+    }
+    if (existing.status.code != ErrorCode::kNotFound) {
+        return Result<RegisterTimerTaskResult>::Failure(existing.status.code, existing.status.message);
     }
 
     const RegisterTimingTaskCommand policy_command{
@@ -67,6 +101,7 @@ Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(cons
         return Result<RegisterTimerTaskResult>::Failure(task.status.code, task.status.message);
     }
 
+    task.value->request_id = command.request_id;
     task.value->recurrence = command.recurrence;
     task.value->updated_at = task.value->created_at;
 
@@ -93,14 +128,20 @@ Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(cons
 
     const Status saved = store_.RegisterTaskWithRules(*task.value, {weak_rule, strong_rule});
     if (!saved.ok()) {
+        if (saved.code == ErrorCode::kConflict) {
+            const auto replay = store_.FindTaskByRequestId(command.request_id);
+            if (replay.ok()) {
+                if (!MatchesRegistration(*replay.value, command)) {
+                    return Result<RegisterTimerTaskResult>::Failure(ErrorCode::kConflict,
+                                                                    "request_id 已用于不同的注册请求");
+                }
+                return RegistrationResult(*replay.value);
+            }
+        }
         return Result<RegisterTimerTaskResult>::Failure(saved.code, saved.message);
     }
 
-    return Result<RegisterTimerTaskResult>::Success({
-        .task_id = std::move(task.value->id),
-        .status = task.value->status,
-        .next_trigger_at = task.value->next_trigger_at,
-    });
+    return RegistrationResult(*task.value);
 }
 
 }  // namespace voicelife::timing

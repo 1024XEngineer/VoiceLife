@@ -98,6 +98,7 @@ enum class TimingEventStatus {
 struct TimingTask {
     TimingTaskId id{};
     ScheduleId schedule_id{};
+    std::string request_id{};
     int64_t start_at = 0;
     int64_t next_trigger_at = 0;
     std::string time_zone = "Asia/Shanghai";

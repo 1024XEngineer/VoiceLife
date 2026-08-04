@@ -28,8 +28,9 @@ enum class TriggerSortBy {
     kCreatedAt,
 };
 
-/// 提供注册定时任务所需的数据。
+/// 提供注册定时任务所需的数据；request_id 非空且用于重试幂等。
 struct RegisterTimerTaskCommand {
+    std::string request_id{};
     ScheduleId schedule_id{};
     int64_t start_at = 0;
     std::string time_zone = "Asia/Shanghai";

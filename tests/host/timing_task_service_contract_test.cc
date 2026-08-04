@@ -12,8 +12,12 @@ concept HasTaskId = requires(Rule rule) { rule.task_id; };
 template <typename Rule>
 concept HasStatus = requires(Rule rule) { rule.status; };
 
+template <typename Command>
+concept HasRequestId = requires(Command command) { command.request_id; };
+
 static_assert(!HasTaskId<ReminderRuleInput>);
 static_assert(!HasStatus<ReminderRuleInput>);
+static_assert(HasRequestId<RegisterTimerTaskCommand>);
 static_assert(std::same_as<decltype(UpsertReminderRulesCommand{}.rules), std::vector<ReminderRuleInput>>);
 
 template <typename Service>

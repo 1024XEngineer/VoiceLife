@@ -18,9 +18,15 @@ class TimingTaskStorePort {
      * @brief 原子保存任务及其初始提醒规则。
      * @param task 要注册的任务。
      * @param rules 与任务同时提交的提醒规则。
-     * @return 全部提交成功或完全不写入的结果；重复标识返回冲突。
+     * @return 全部提交成功或完全不写入的结果；重复 request_id、task_id 或 schedule_id 返回冲突。
      */
     virtual Status RegisterTaskWithRules(const TimingTask& task, const std::vector<ReminderRule>& rules) = 0;
+    /**
+     * @brief 按幂等请求标识查询已注册任务。
+     * @param request_id 注册命令的幂等标识。
+     * @return 已保存的任务、不存在结果或存储错误。
+     */
+    virtual Result<TimingTask> FindTaskByRequestId(const std::string& request_id) = 0;
     /**
      * @brief 按标识查询任务。
      * @param task_id 定时任务标识。

@@ -40,6 +40,7 @@ int main() {
     DefaultTimingTaskService service(store, clock, ids);
 
     const auto registered = service.RegisterTimerTask({
+        .request_id = "request-1",
         .schedule_id = "schedule-1",
         .start_at = 1785747600,
         .time_zone = "Asia/Shanghai",
@@ -66,10 +67,36 @@ int main() {
     Check(has_weak_rule, "默认弱提醒应提前十分钟");
     Check(has_strong_rule, "默认强提醒应在事件开始时触发");
 
+    const auto replayed = service.RegisterTimerTask({
+        .request_id = "request-1",
+        .schedule_id = "schedule-1",
+        .start_at = 1785747600,
+        .time_zone = "Asia/Shanghai",
+    });
+    Check(replayed.ok() && replayed.value->task_id == registered.value->task_id,
+          "相同 request_id 重试应返回原注册结果");
+
+    const auto request_conflict = service.RegisterTimerTask({
+        .request_id = "request-1",
+        .schedule_id = "schedule-1",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+    });
+    Check(request_conflict.status.code == ErrorCode::kConflict, "相同 request_id 不能复用到不同注册内容");
+
+    const auto duplicate_schedule = service.RegisterTimerTask({
+        .request_id = "request-2",
+        .schedule_id = "schedule-1",
+        .start_at = 1785747600,
+        .time_zone = "Asia/Shanghai",
+    });
+    Check(duplicate_schedule.status.code == ErrorCode::kConflict, "同一日程使用不同 request_id 不应重复注册");
+
     const auto invalid = service.RegisterTimerTask({});
     Check(invalid.status.code == ErrorCode::kInvalidArgument, "注册服务应返回领域参数校验错误");
 
     const auto duplicate = service.RegisterTimerTask({
+        .request_id = "request-3",
         .schedule_id = "schedule-2",
         .start_at = 1785834000,
         .time_zone = "Asia/Shanghai",
@@ -80,6 +107,7 @@ int main() {
     FixedTimingIdGenerator recurring_ids;
     DefaultTimingTaskService recurring_service(recurring_store, clock, recurring_ids);
     const auto recurring = recurring_service.RegisterTimerTask({
+        .request_id = "request-recurring",
         .schedule_id = "schedule-recurring",
         .start_at = 1785834000,
         .time_zone = "UTC",
@@ -95,6 +123,7 @@ int main() {
     Check(stored_recurring.ok() && stored_recurring.value->time_zone == "UTC", "周期任务应使用命令顶层时区");
 
     const auto invalid_day = recurring_service.RegisterTimerTask({
+        .request_id = "request-invalid-day",
         .schedule_id = "invalid-day",
         .start_at = 1785834000,
         .time_zone = "UTC",
@@ -103,6 +132,7 @@ int main() {
     Check(invalid_day.status.code == ErrorCode::kInvalidArgument, "每日规则不应接受星期筛选");
 
     const auto invalid_week = recurring_service.RegisterTimerTask({
+        .request_id = "request-invalid-week",
         .schedule_id = "invalid-week",
         .start_at = 1785834000,
         .time_zone = "UTC",
@@ -111,6 +141,7 @@ int main() {
     Check(invalid_week.status.code == ErrorCode::kInvalidArgument, "每周规则的星期值必须在 1 到 7 之间");
 
     const auto invalid_month = recurring_service.RegisterTimerTask({
+        .request_id = "request-invalid-month",
         .schedule_id = "invalid-month",
         .start_at = 1785834000,
         .time_zone = "UTC",
@@ -119,6 +150,7 @@ int main() {
     Check(invalid_month.status.code == ErrorCode::kInvalidArgument, "每月规则的日期值必须在 1 到 31 之间");
 
     const auto invalid_year = recurring_service.RegisterTimerTask({
+        .request_id = "request-invalid-year",
         .schedule_id = "invalid-year",
         .start_at = 1785834000,
         .time_zone = "UTC",
