@@ -5,8 +5,18 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(VOICELIFE_ENABLE_COVERAGE "Instrument host tests for gcov coverage reports" OFF)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Werror -Wpedantic -Wmissing-field-initializers)
+endif()
+
+if(VOICELIFE_ENABLE_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        message(FATAL_ERROR "VOICELIFE_ENABLE_COVERAGE currently requires GCC/gcov")
+    endif()
+    add_compile_options(-O0 -g --coverage)
+    add_link_options(--coverage)
 endif()
 
 set(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../..")

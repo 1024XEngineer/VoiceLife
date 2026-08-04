@@ -1,0 +1,19 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 80%
+        threshold: 0%
+    patch:
+      default:
+        target: 80%
+        threshold: 0%
+
+comment:
+  layout: "diff, flags, files"
+  require_changes: true
+
+ignore:
+  - "tests/**"
+  - "services/im-gateway/test/**"
+  - "main/**"

@@ -53,6 +53,54 @@ jobs:
       - name: 检查格式、静态规则、类型与测试
         run: pnpm --dir services/im-gateway run ci
 
+  coverage:
+    name: 覆盖率（Codecov）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: 安装覆盖率工具
+        run: python -m pip install --disable-pip-version-check coverage gcovr
+      - name: 生成 C++ 覆盖率报告
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p coverage
+          cmake -S tests/host -B build-coverage -DVOICELIFE_ENABLE_COVERAGE=ON -DCMAKE_CXX_COMPILER=g++
+          cmake --build build-coverage --parallel
+          ctest --test-dir build-coverage --output-on-failure
+          gcovr --root . --filter components --exclude tests --xml-pretty -o coverage/cpp.xml
+      - name: 生成 Python 覆盖率报告
+        run: |
+          coverage run --source=scripts -m unittest discover -s tests/python -p "test_*.py"
+          coverage xml -o coverage/python.xml
+      - name: 生成 Gateway 覆盖率报告
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.17.1 --activate
+          pnpm --dir services/im-gateway install --frozen-lockfile
+          pnpm --dir services/im-gateway run coverage
+      - name: 上传覆盖率报告
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: coverage/cpp.xml,coverage/python.xml,services/im-gateway/coverage/lcov.info
+          flags: unit
+          fail_ci_if_error: true
+          verbose: true
+
   host-tests:
     name: 主机测试与架构边界
     runs-on: ubuntu-24.04
