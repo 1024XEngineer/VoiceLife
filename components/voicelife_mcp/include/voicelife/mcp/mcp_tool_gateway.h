@@ -8,36 +8,36 @@
 
 namespace voicelife::mcp {
 
-/// Manages tool definitions and dispatches model calls to registered handlers.
+/// 管理工具定义，并把模型调用分发给已注册的处理器。
 class McpToolGateway {
    public:
     /**
-     * @brief Registers a tool definition and handler without replacing an existing name.
-     * @param definition Public tool contract to register.
-     * @param handler Local callback that executes the tool.
-     * @return Registration result; duplicate names are rejected.
+     * @brief 注册工具定义和处理器，不覆盖已有同名工具。
+     * @param definition 要注册的公开工具契约。
+     * @param handler 执行工具的本地回调。
+     * @return 注册结果；重复名称会被拒绝。
      */
     Status register_tool(ToolDefinition definition, ToolHandler handler);
 
     /**
-     * @brief Looks up a public tool definition by name.
-     * @param name Name of the registered tool.
-     * @return Lookup result with a found flag and optional definition.
+     * @brief 按名称查询公开工具定义。
+     * @param name 已注册工具的名称。
+     * @return 带 found 标记和可选定义的查询结果。
      */
     [[nodiscard]] GetToolResult get_tool(std::string_view name) const;
 
-    /** @brief Lists public tools in registration order. @return All registered public tools. */
+    /** @brief 按注册顺序返回公开工具。 @return 全部已注册的公开工具。 */
     [[nodiscard]] ListToolsResult list_tools() const;
 
     /**
-     * @brief Executes the handler registered for a tool call.
-     * @param call Tool invocation to dispatch.
-     * @return Semantic result of the tool invocation.
+     * @brief 执行工具调用对应的处理器。
+     * @param call 要分发的工具调用。
+     * @return 工具调用的语义化结果。
      */
     ToolResult call(const ToolCall& call) const;
 
    private:
-    /// Holds a public definition and its non-exported local handler.
+    /// 保存公开定义和不对外导出的本地处理器。
     struct RegisteredTool {
         ToolDefinition definition;
         ToolHandler handler;

@@ -12,14 +12,14 @@ namespace voicelife {
 using ToolValue = std::variant<bool, int64_t, std::string>;
 using ToolArguments = std::unordered_map<std::string, ToolValue>;
 
-/// Describes one incoming tool invocation.
+/// 描述一次进入设备侧的工具调用。
 struct ToolCall {
     std::string request_id;
     std::string name;
     ToolArguments arguments;
 };
 
-/// Contains the status and named output values of a tool invocation.
+/// 保存工具调用的状态和具名输出值。
 struct ToolResult {
     Status status;
     std::unordered_map<std::string, std::string> output;

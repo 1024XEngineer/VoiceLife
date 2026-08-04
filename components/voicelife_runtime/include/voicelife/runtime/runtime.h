@@ -4,7 +4,7 @@
 
 namespace voicelife::runtime {
 
-/** @brief Initializes and starts the embedded runtime. @return Runtime-start result. */
+/** @brief 初始化并启动设备运行时。 @return 运行时启动结果。 */
 Status Start();
 
 }  // namespace voicelife::runtime

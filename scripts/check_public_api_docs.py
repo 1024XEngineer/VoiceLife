@@ -15,6 +15,7 @@ FUNCTION_DECLARATION = re.compile(
     r"(?:(?:[\w:<>]+(?:\s+[\w:<>]+)*\s*[*&]?\s+)?~?\w+)\s*\("
 )
 ACCESS_SPECIFIER = re.compile(r"^(public|private|protected):$")
+CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 
 
 class DocComment(NamedTuple):
@@ -102,6 +103,8 @@ def check_header(path: Path) -> list[str]:
             kind = "类型" if is_type else "公开函数"
             errors.append(f"{path}:{number + 1}: {kind} 缺少紧邻的 Doxygen 注释（/// 或 /**）")
             continue
+        if (is_type or is_public_function) and not CJK.search(doc.text):
+            errors.append(f"{path}:{number + 1}: 公共 API 注释必须包含中文说明")
         if not is_public_function:
             continue
         if doc.style != "block":

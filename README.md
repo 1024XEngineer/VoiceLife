@@ -19,7 +19,7 @@
 </p>
 
 <p>
-<img src="https://img.shields.io/github/actions/workflow/status/1024XEngineer/XE6-15/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" />
+<img src="https://img.shields.io/github/actions/workflow/status/1024XEngineer/VoiceLife/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" />
 <img src="https://img.shields.io/badge/ESP--IDF-6.0.2-E7352C?style=flat-square" alt="ESP-IDF 6.0.2" />
 <img src="https://img.shields.io/badge/Target-ESP32--S3-222222?style=flat-square" alt="ESP32-S3" />
 <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square" alt="C++ 20" />
@@ -41,8 +41,8 @@
 需要 CMake，以及构建设备固件时所需的 ESP-IDF 6.0.2。Ninja 可选；未安装时主机测试会使用 CMake 默认生成器。
 
 ```bash
-# 完整快速门禁，不需要 ESP-IDF
-./scripts/run_checks.sh
+# 提交前完整门禁，不需要 ESP-IDF
+./scripts/run_pre_submit_checks.sh
 
 # TDD 内循环：只运行当前模块测试
 ./scripts/run_host_tests.sh -R schedule_policy_test
@@ -113,7 +113,7 @@ flowchart LR
 ### 文件树
 
 ```text
-XE6-15/
+VoiceLife/
 ├── .github/
 │   ├── ISSUE_TEMPLATE/          # Bug、功能、设计和工程任务入口
 │   ├── workflows/ci.yml         # 提交、主机测试、架构和 ESP-IDF 构建检查

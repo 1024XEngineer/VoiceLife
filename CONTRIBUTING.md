@@ -9,7 +9,7 @@
 3. 从最新 `main` 创建短分支，命名为 `dev/<issue>-<short-name>`，例如 `dev/91-tdd-architecture`。仓库不维护长期共享的裸 `dev` 分支。
 4. 先写失败测试并记录 RED 原因，再补最小实现使其 GREEN；重构期间保持测试通过。
 5. 小步提交。每个提交只表达一个可回退的意图，并保持可编译。
-6. 本地运行 `./scripts/run_checks.sh`；设备相关改动还要运行对应 Profile 构建和真机检查。
+6. 本地运行 `./scripts/run_pre_submit_checks.sh`；设备相关改动还要运行对应 Profile 构建和真机检查。
 7. PR 使用中文写结论、TDD 记录、验证和风险，关联 Issue，等待 CI 与 Review 通过后合并。
 
 `main` 始终保持可构建、可回退。只有多个任务确实需要联合验证时，才临时建立 `integration/<milestone>-<topic>`；联调结束后通过一个 PR 合回 `main` 并删除该分支，不能把它变成第二条长期主线。
@@ -36,8 +36,8 @@ git push -u fork HEAD
 # GREEN / REFACTOR：反复运行同一个测试
 ./scripts/run_host_tests.sh -R schedule_policy_test
 
-# 提交前跑完整门禁
-./scripts/run_checks.sh
+# 提交前跑完整门禁（格式、规模、主机、架构、固件配置和 IM Gateway）
+./scripts/run_pre_submit_checks.sh
 ```
 
 领域规则、Application 和协议映射优先在主机测试完成。真实 Codec、网络重连、掉电恢复等硬件行为使用 ESP-IDF Unity 测试与真机证据，不能用主机 mock 冒充设备通过。
@@ -56,7 +56,7 @@ git push -u fork HEAD
 ## 常用检查
 
 ```bash
-# C/C++ 格式、Python 格式与静态规则（需 clang-format 和 ruff）
+# 只检查 C/C++、Python 格式与静态规则（需 clang-format 和 ruff）
 ./scripts/check_format.sh
 
 # 公共 C++ API 文档、主机测试、架构边界、固件配置与 Python 测试
@@ -80,3 +80,5 @@ python3 scripts/check_commit_message.py --file .git/COMMIT_EDITMSG
 ```
 
 提交格式、允许使用的 Gitmoji 和完整示例见 [提交描述规范](./docs/engineering/commit-convention.md)。
+
+格式、注释、代码规模、工作流安全和 CI 任务的完整解释见 [CI 与提交前质量门禁](./docs/engineering/ci-quality-gates.md)。
