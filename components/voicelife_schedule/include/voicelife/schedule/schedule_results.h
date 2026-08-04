@@ -15,6 +15,7 @@ struct CreateScheduleResult {
     std::string message;
     std::optional<Schedule> schedule;
     std::vector<Schedule> conflicts;
+    std::vector<Schedule> nearby_schedules;
     std::string error;
 };
 
