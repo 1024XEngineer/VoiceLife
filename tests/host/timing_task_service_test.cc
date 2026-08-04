@@ -2,10 +2,13 @@
 
 #include "support/test_support.h"
 #include "support/timing_fakes.h"
+#include "voicelife/contracts/status.h"
 
+using voicelife::ErrorCode;
 using voicelife::test::Check;
 using voicelife::test::InMemoryTimingTaskStore;
 using voicelife::timing::DefaultTimingTaskService;
+using voicelife::timing::RecurrenceFrequency;
 using voicelife::timing::RegisterTimerTaskCommand;
 using voicelife::timing::ReminderType;
 using voicelife::timing::TimingClockPort;
@@ -60,5 +63,33 @@ int main() {
     }
     Check(has_weak_rule, "默认弱提醒应提前十分钟");
     Check(has_strong_rule, "默认强提醒应在事件开始时触发");
+
+    const auto invalid = service.RegisterTimerTask({});
+    Check(invalid.status.code == ErrorCode::kInvalidArgument, "注册服务应返回领域参数校验错误");
+
+    const auto duplicate = service.RegisterTimerTask({
+        .schedule_id = "schedule-2",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+    });
+    Check(duplicate.status.code == ErrorCode::kConflict, "注册服务应返回存储冲突错误");
+
+    InMemoryTimingTaskStore recurring_store;
+    FixedTimingIdGenerator recurring_ids;
+    DefaultTimingTaskService recurring_service(recurring_store, clock, recurring_ids);
+    const auto recurring = recurring_service.RegisterTimerTask({
+        .schedule_id = "schedule-recurring",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+        .recurrence =
+            {
+                .frequency = RecurrenceFrequency::kDay,
+                .start_at = 1785920400,
+            },
+    });
+    Check(recurring.ok(), "带显式周期起点的任务应注册成功");
+    const auto stored_recurring = recurring_store.FindTask(recurring.value->task_id);
+    Check(stored_recurring.ok() && stored_recurring.value->recurrence.start_at == 1785920400,
+          "注册服务应保留显式周期起点");
     return 0;
 }
