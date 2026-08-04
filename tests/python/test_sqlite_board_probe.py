@@ -1,13 +1,12 @@
 import importlib.util
 import json
-from pathlib import Path
 import struct
 import sys
 import tempfile
-from types import SimpleNamespace
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
-
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "scripts" / "sqlite_board_probe.py"
@@ -37,9 +36,7 @@ def partition_table_bytes():
             partition_entry("voicelife", 1, 0x82, 0xE00000, 0x200000),
         ]
     )
-    return (entries + b"\xff" * probe.PARTITION_ENTRY.size).ljust(
-        probe.PARTITION_TABLE_SIZE, b"\xff"
-    )
+    return (entries + b"\xff" * probe.PARTITION_ENTRY.size).ljust(probe.PARTITION_TABLE_SIZE, b"\xff")
 
 
 def write_backup_manifest(directory, *, erased_slot=False):
@@ -50,9 +47,7 @@ def write_backup_manifest(directory, *, erased_slot=False):
     ota_path = directory / "otadata.bin"
     ota_path.write_bytes(b"ota".ljust(0x2000, b"\0"))
     slot_path = directory / "ota_1.bin"
-    slot_path.write_bytes(
-        b"\xff" * 0x3F0000 if erased_slot else b"slot!".ljust(0x3F0000, b"\0")
-    )
+    slot_path.write_bytes(b"\xff" * 0x3F0000 if erased_slot else b"slot!".ljust(0x3F0000, b"\0"))
     manifest = {
         "schema_version": 1,
         "chip": "esp32s3",
@@ -159,9 +154,7 @@ class ResetSequenceTest(unittest.TestCase):
         sequence = probe.ResetSequence()
 
         sequence.observe("PROBE_PHASE: phase=0 image=0123456789abcdef")
-        self.assertEqual(
-            sequence.observe("HOST_RESET_POINT: OPEN_TRANSACTION"), "reset"
-        )
+        self.assertEqual(sequence.observe("HOST_RESET_POINT: OPEN_TRANSACTION"), "reset")
         sequence.observe("PROBE_PHASE: phase=1 image=0123456789abcdef")
         self.assertEqual(sequence.observe("HOST_RESET_POINT: AFTER_COMMIT"), "reset")
         sequence.observe("PROBE_PHASE: phase=2 image=0123456789abcdef")
@@ -226,20 +219,14 @@ class RestoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             table_path = write_backup_manifest(directory)
-            args = SimpleNamespace(
-                yes=True, directory=directory, port="/dev/cu.test", baud=115200
-            )
+            args = SimpleNamespace(yes=True, directory=directory, port="/dev/cu.test", baud=115200)
 
-            def copy_partition_table(
-                _port, _baud, _offset, _size, destination, **_kwargs
-            ):
+            def copy_partition_table(_port, _baud, _offset, _size, destination, **_kwargs):
                 destination.write_bytes(table_path.read_bytes())
 
             with (
                 mock.patch("builtins.print"),
-                mock.patch.object(
-                    probe.probe_io, "read_flash", side_effect=copy_partition_table
-                ) as read_flash,
+                mock.patch.object(probe.probe_io, "read_flash", side_effect=copy_partition_table) as read_flash,
                 mock.patch.object(probe.probe_io, "esptool") as esptool,
                 mock.patch.object(probe.probe_io, "verify_flash"),
             ):
@@ -255,20 +242,14 @@ class RestoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             table_path = write_backup_manifest(directory, erased_slot=True)
-            args = SimpleNamespace(
-                yes=True, directory=directory, port="/dev/cu.test", baud=115200
-            )
+            args = SimpleNamespace(yes=True, directory=directory, port="/dev/cu.test", baud=115200)
 
-            def copy_partition_table(
-                _port, _baud, _offset, _size, destination, **_kwargs
-            ):
+            def copy_partition_table(_port, _baud, _offset, _size, destination, **_kwargs):
                 destination.write_bytes(table_path.read_bytes())
 
             with (
                 mock.patch("builtins.print"),
-                mock.patch.object(
-                    probe.probe_io, "read_flash", side_effect=copy_partition_table
-                ),
+                mock.patch.object(probe.probe_io, "read_flash", side_effect=copy_partition_table),
                 mock.patch.object(probe.probe_io, "esptool") as esptool,
                 mock.patch.object(probe.probe_io, "verify_flash") as verify_flash,
             ):
@@ -314,12 +295,8 @@ class BackupTest(unittest.TestCase):
             ):
                 probe.backup(args)
 
-            manifest = json.loads(
-                (directory / "manifest.json").read_text(encoding="utf-8")
-            )
-            self.assertEqual(
-                set(manifest["artifacts"]), {"data", "probe_slot", "otadata"}
-            )
+            manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(set(manifest["artifacts"]), {"data", "probe_slot", "otadata"})
             self.assertTrue((directory / "ota_1.bin").read_bytes().startswith(b"slot!"))
 
 
@@ -355,9 +332,7 @@ class WriteProbeTest(unittest.TestCase):
             )
 
             def changed_table(_port, _baud, _offset, _size, destination, **_kwargs):
-                destination.write_bytes(
-                    b"changed".ljust(probe.PARTITION_TABLE_SIZE, b"\xff")
-                )
+                destination.write_bytes(b"changed".ljust(probe.PARTITION_TABLE_SIZE, b"\xff"))
 
             with (
                 mock.patch.object(probe, "read_flash", side_effect=changed_table),
@@ -367,11 +342,11 @@ class WriteProbeTest(unittest.TestCase):
                 otatool = Path(idf) / "components" / "app_update" / "otatool.py"
                 otatool.parent.mkdir(parents=True)
                 otatool.write_text("# test", encoding="utf-8")
-                with mock.patch.dict(probe.os.environ, {"IDF_PATH": idf}, clear=True):
-                    with self.assertRaisesRegex(
-                        probe.ProbeError, "partition table changed"
-                    ):
-                        probe.write_probe(args)
+                with (
+                    mock.patch.dict(probe.os.environ, {"IDF_PATH": idf}, clear=True),
+                    self.assertRaisesRegex(probe.ProbeError, "partition table changed"),
+                ):
+                    probe.write_probe(args)
 
             esptool.assert_not_called()
 
@@ -398,9 +373,9 @@ class WriteProbeTest(unittest.TestCase):
                 mock.patch.dict(probe.os.environ, {}, clear=True),
                 mock.patch.object(probe, "read_flash", side_effect=current_table),
                 mock.patch.object(probe, "esptool") as esptool,
+                self.assertRaisesRegex(probe.ProbeError, "IDF_PATH is not set"),
             ):
-                with self.assertRaisesRegex(probe.ProbeError, "IDF_PATH is not set"):
-                    probe.write_probe(args)
+                probe.write_probe(args)
 
             esptool.assert_not_called()
 
@@ -427,9 +402,7 @@ class ManifestTest(unittest.TestCase):
             manifest["artifacts"]["data"]["partition"]["offset"] = 0xA00000
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-            with self.assertRaisesRegex(
-                probe.ProbeError, "partition metadata mismatch"
-            ):
+            with self.assertRaisesRegex(probe.ProbeError, "partition metadata mismatch"):
                 probe.load_manifest(directory)
 
     def test_rejects_symlinked_backup_artifact(self):

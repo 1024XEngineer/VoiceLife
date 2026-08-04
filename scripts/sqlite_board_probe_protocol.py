@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import hashlib
-from pathlib import Path
 import struct
-
+from dataclasses import dataclass
+from pathlib import Path
 
 PARTITION_TABLE_OFFSET = 0x8000
 PARTITION_TABLE_SIZE = 0x1000
@@ -80,15 +79,10 @@ class ResetSequence:
                 raise ProbeError("malformed probe phase marker") from error
 
             expected_index = len(self.phases)
-            if (
-                expected_index >= len(EXPECTED_PHASES)
-                or phase != EXPECTED_PHASES[expected_index]
-            ):
+            if expected_index >= len(EXPECTED_PHASES) or phase != EXPECTED_PHASES[expected_index]:
                 raise ProbeError(f"unexpected probe phase: {phase}")
             if phase != len(self.reset_points):
-                raise ProbeError(
-                    f"probe phase {phase} was not preceded by the required reset"
-                )
+                raise ProbeError(f"probe phase {phase} was not preceded by the required reset")
             if self.image is None:
                 self.image = image
             elif image != self.image:
@@ -97,22 +91,15 @@ class ResetSequence:
         if "HOST_RESET_POINT:" in line:
             point = line.split("HOST_RESET_POINT:", 1)[1].strip()
             expected_index = len(self.reset_points)
-            if (
-                expected_index >= len(EXPECTED_RESET_POINTS)
-                or point != EXPECTED_RESET_POINTS[expected_index]
-            ):
+            if expected_index >= len(EXPECTED_RESET_POINTS) or point != EXPECTED_RESET_POINTS[expected_index]:
                 raise ProbeError(f"unexpected reset point order: {point}")
             if self.phases != list(EXPECTED_PHASES[: expected_index + 1]):
-                raise ProbeError(
-                    f"reset point {point} appeared outside its probe phase"
-                )
+                raise ProbeError(f"reset point {point} appeared outside its probe phase")
             self.reset_points.append(point)
             return "reset"
         if "PROBE_RESULT: PASS" in line:
             if tuple(self.reset_points) != EXPECTED_RESET_POINTS:
-                raise ProbeError(
-                    f"probe passed without required resets: {self.reset_points}"
-                )
+                raise ProbeError(f"probe passed without required resets: {self.reset_points}")
             if tuple(self.phases) != EXPECTED_PHASES:
                 raise ProbeError(f"probe passed without required phases: {self.phases}")
             return "pass"
@@ -124,9 +111,7 @@ def parse_partition_table(content: bytes) -> list[Partition]:
 
     partitions: list[Partition] = []
     terminated_at: int | None = None
-    for position in range(
-        0, len(content) - PARTITION_ENTRY.size + 1, PARTITION_ENTRY.size
-    ):
+    for position in range(0, len(content) - PARTITION_ENTRY.size + 1, PARTITION_ENTRY.size):
         entry = content[position : position + PARTITION_ENTRY.size]
         magic = struct.unpack_from("<H", entry)[0]
         if magic == 0xFFFF:
@@ -135,22 +120,14 @@ def parse_partition_table(content: bytes) -> list[Partition]:
         if magic == PARTITION_MD5_MAGIC:
             continue
         if magic != PARTITION_MAGIC:
-            raise ProbeError(
-                f"invalid partition entry magic 0x{magic:04x} at 0x{position:x}"
-            )
-        _, type_value, subtype, offset, size, raw_label, flags = PARTITION_ENTRY.unpack(
-            entry
-        )
+            raise ProbeError(f"invalid partition entry magic 0x{magic:04x} at 0x{position:x}")
+        _, type_value, subtype, offset, size, raw_label, flags = PARTITION_ENTRY.unpack(entry)
         try:
             label = raw_label.split(b"\0", 1)[0].decode("ascii")
         except UnicodeDecodeError as error:
-            raise ProbeError(
-                f"partition label at 0x{position:x} is not ASCII"
-            ) from error
+            raise ProbeError(f"partition label at 0x{position:x} is not ASCII") from error
         partitions.append(Partition(label, type_value, subtype, offset, size, flags))
-    if terminated_at is not None and content[terminated_at:] != b"\xff" * (
-        len(content) - terminated_at
-    ):
+    if terminated_at is not None and content[terminated_at:] != b"\xff" * (len(content) - terminated_at):
         raise ProbeError("partition table has non-FF bytes after its terminator")
     if not partitions:
         raise ProbeError("partition table contains no entries")

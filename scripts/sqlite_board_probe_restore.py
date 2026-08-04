@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 try:
     import scripts.sqlite_board_probe_io as probe_io
@@ -45,11 +45,7 @@ def is_erased(path: Path) -> bool:
 def manifest_file(directory: Path, file_name: object, field: str) -> Path:
     """校验备份清单中的文件名为安全的相对路径。"""
 
-    if (
-        not isinstance(file_name, str)
-        or not file_name
-        or Path(file_name).name != file_name
-    ):
+    if not isinstance(file_name, str) or not file_name or Path(file_name).name != file_name:
         raise ProbeError(f"invalid backup file for {field}")
     path = directory / file_name
     if path.is_symlink():
@@ -93,25 +89,17 @@ def load_manifest(directory: Path) -> dict:
         if name == "probe_slot":
             erased = artifact.get("erased")
             if not isinstance(erased, bool) or erased != is_erased(path):
-                raise ProbeError(
-                    "probe_slot erased flag does not match its backup image"
-                )
+                raise ProbeError("probe_slot erased flag does not match its backup image")
         artifact_partitions[name] = partition
     table = manifest.get("partition_table")
     if not isinstance(table, dict):
         raise ProbeError("backup manifest has no partition table")
-    if (
-        table.get("offset") != PARTITION_TABLE_OFFSET
-        or table.get("size") != PARTITION_TABLE_SIZE
-    ):
+    if table.get("offset") != PARTITION_TABLE_OFFSET or table.get("size") != PARTITION_TABLE_SIZE:
         raise ProbeError("backup partition table location is invalid")
     table_path = manifest_file(directory, table.get("file"), "partition_table")
     if table_path.stat().st_size != PARTITION_TABLE_SIZE:
         raise ProbeError("local partition table size mismatch")
-    if (
-        not isinstance(table.get("sha256"), str)
-        or sha256(table_path) != table["sha256"]
-    ):
+    if not isinstance(table.get("sha256"), str) or sha256(table_path) != table["sha256"]:
         raise ProbeError("local partition table digest mismatch")
     backed_up_partitions = parse_partition_table(table_path.read_bytes())
     if artifact_partitions["otadata"].label != "otadata":
@@ -148,9 +136,7 @@ def restore(args) -> None:
             after="no-reset",
         )
         if sha256(current_table) != table_info["sha256"]:
-            raise ProbeError(
-                "board partition table changed since backup; refusing restore"
-            )
+            raise ProbeError("board partition table changed since backup; refusing restore")
 
         data = manifest["artifacts"]["data"]
         data_partition = Partition(**data["partition"])
@@ -212,6 +198,4 @@ def restore(args) -> None:
             before="no-reset",
             after="hard-reset",
         )
-    print(
-        "PASS data, original probe slot, and OTA metadata restored with full verification"
-    )
+    print("PASS data, original probe slot, and OTA metadata restored with full verification")

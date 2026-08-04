@@ -24,9 +24,7 @@ def monitor(args) -> None:
     try:
         import serial
     except ImportError as error:
-        raise ProbeError(
-            "pyserial is required; use the ESP-IDF Python environment"
-        ) from error
+        raise ProbeError("pyserial is required; use the ESP-IDF Python environment") from error
 
     device = serial.Serial(port=None, baudrate=args.baud, timeout=0.1)
     device.dtr = False

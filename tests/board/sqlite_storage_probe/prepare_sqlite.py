@@ -4,13 +4,12 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import urllib.request
 import zipfile
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 COMPONENT = ROOT / "components" / "sqlite3"
