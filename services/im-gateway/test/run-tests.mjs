@@ -79,6 +79,7 @@ async function runContractFixtureTests() {
   const replay = await readFixture("notification-strong-replay.json");
   const weak = await readFixture("notification-weak.json");
   const conflict = await readFixture("notification-conflict.json");
+  const actionResult = await readFixture("reminder-action-result.json");
 
   assert(
     parseScheduleReceiptIntent(scheduleReceipt).scheduleId === "schedule-fixture",
@@ -115,6 +116,24 @@ async function runContractFixtureTests() {
     const invalidScheduleReceipt = await readFixture(name);
     await expectGatewayError(
       () => Promise.resolve(parseScheduleReceiptIntent(invalidScheduleReceipt)),
+      "invalid_contract",
+      `${name} was accepted by the runtime parser`,
+    );
+  }
+
+  assert(
+    parseReminderActionResult(actionResult).status === "succeeded" &&
+      parseReminderActionResult(actionResult).operationId === "operation-fixture" &&
+      parseReminderActionResult(actionResult).nextTriggerAt === "2026-08-03T00:10:00.000Z",
+    "ReminderActionResult fixture did not preserve the execution result",
+  );
+  for (const name of [
+    "reminder-action-result-invalid-status.json",
+    "reminder-action-result-invalid-time.json",
+  ]) {
+    const invalidActionResult = await readFixture(name);
+    await expectGatewayError(
+      () => Promise.resolve(parseReminderActionResult(invalidActionResult)),
       "invalid_contract",
       `${name} was accepted by the runtime parser`,
     );

@@ -4,6 +4,7 @@
 
 #include "support/test_support.h"
 #include "voicelife/contracts/im/notification_intent.h"
+#include "voicelife/contracts/im/reminder_action_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/contracts/json.h"
 
@@ -13,7 +14,9 @@ using voicelife::Status;
 using voicelife::contracts::im::kDeviceContractVersion;
 using voicelife::contracts::im::NotificationIntent;
 using voicelife::contracts::im::ParseNotificationIntent;
+using voicelife::contracts::im::ParseReminderActionResult;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
+using voicelife::contracts::im::ReminderActionResult;
 using voicelife::contracts::im::ScheduleReceiptIntent;
 using voicelife::test::Check;
 
@@ -43,6 +46,14 @@ Status ParseScheduleReceiptFixture(const char* name, ScheduleReceiptIntent& out)
     return ParseScheduleReceiptIntent(root, out);
 }
 
+Status ParseActionResultFixture(const char* name, ReminderActionResult& out) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) {
+        return json_status;
+    }
+    return ParseReminderActionResult(root, out);
+}
+
 void RequireRejected(const char* name, const char* message) {
     NotificationIntent intent;
     const Status status = ParseFixture(name, intent);
@@ -52,6 +63,12 @@ void RequireRejected(const char* name, const char* message) {
 void RequireScheduleReceiptRejected(const char* name, const char* message) {
     ScheduleReceiptIntent intent;
     const Status status = ParseScheduleReceiptFixture(name, intent);
+    Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
+}
+
+void RequireActionResultRejected(const char* name, const char* message) {
+    ReminderActionResult intent;
+    const Status status = ParseActionResultFixture(name, intent);
     Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
 }
 
@@ -99,5 +116,20 @@ int main() {
     RequireScheduleReceiptRejected("schedule-receipt-invalid-version.json", "非法版本日程回执必须被 C++ 拒绝");
     RequireScheduleReceiptRejected("schedule-receipt-invalid-enum.json", "非法枚举日程回执必须被 C++ 拒绝");
     RequireScheduleReceiptRejected("schedule-receipt-invalid-time.json", "非法时间日程回执必须被 C++ 拒绝");
+
+    // 动作结果：字段与 TS parseReminderActionResult 一致
+    ReminderActionResult action_result;
+    Check(ParseActionResultFixture("reminder-action-result.json", action_result).ok(),
+          "共享动作结果 fixture 必须被 C++ 解析");
+    Check(action_result.schemaVersion == kDeviceContractVersion, "动作结果必须共享设备契约版本");
+    Check(action_result.operationId == "operation-fixture", "动作结果 operationId 必须被保留");
+    Check(action_result.reminderTriggerId == "trigger-fixture", "动作结果 reminderTriggerId 必须被保留");
+    Check(action_result.status == "succeeded", "动作结果状态枚举必须与 TS 语义一致");
+    Check(action_result.nextTriggerAt.has_value() && *action_result.nextTriggerAt == "2026-08-03T00:10:00.000Z",
+          "可选 nextTriggerAt 必须被保留");
+
+    // 非法动作结果 fixture：与 TS 一致的拒绝语义
+    RequireActionResultRejected("reminder-action-result-invalid-status.json", "非法状态动作结果必须被 C++ 拒绝");
+    RequireActionResultRejected("reminder-action-result-invalid-time.json", "非法时间动作结果必须被 C++ 拒绝");
     return 0;
 }

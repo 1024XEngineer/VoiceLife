@@ -144,5 +144,26 @@ inline Status RequireIsoDateTime(const JsonValue& root, const char* key, std::st
     return Status::Ok();
 }
 
+inline Status OptionalIsoDateTime(const JsonValue& root, const char* key, std::optional<std::string>& out) {
+    const JsonValue* value = root.Get(key);
+    if (value == nullptr) {
+        return Status::Ok();
+    }
+    if (!value->IsString() || !IsValidIsoDateTime(value->string)) {
+        return Reject("可选时间字段必须是合法 ISO 8601");
+    }
+    out = value->string;
+    return Status::Ok();
+}
+
+inline Status OptionalJsonValue(const JsonValue& root, const char* key, std::optional<JsonValue>& out) {
+    const JsonValue* value = root.Get(key);
+    if (value == nullptr) {
+        return Status::Ok();
+    }
+    out = *value;
+    return Status::Ok();
+}
+
 }  // namespace detail
 }  // namespace voicelife::contracts::im

@@ -30,7 +30,8 @@ add_voicelife_library(contracts voicelife_contracts
     "${ROOT_DIR}/components/voicelife_contracts/src/status.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/json.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_intent.cc"
-    "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_receipt.cc")
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_receipt.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_result.cc")
 add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_module.cc")
 target_link_libraries(schedule PUBLIC contracts)
