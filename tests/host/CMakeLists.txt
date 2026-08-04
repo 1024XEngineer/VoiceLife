@@ -59,6 +59,9 @@ target_link_libraries(status_test PRIVATE contracts)
 add_voicelife_test(timing_policy_test "unit;timing" timing_policy_test.cc)
 target_link_libraries(timing_policy_test PRIVATE timing)
 
+add_voicelife_test(timing_task_types_test "unit;timing" timing_task_types_test.cc)
+target_include_directories(timing_task_types_test PRIVATE "${ROOT_DIR}/components/voicelife_timing/include")
+
 add_voicelife_test(mcp_tool_gateway_test "unit;mcp" mcp_tool_gateway_test.cc)
 target_link_libraries(mcp_tool_gateway_test PRIVATE mcp)
 

@@ -4,27 +4,15 @@
 #include <string>
 
 #include "voicelife/contracts/status.h"
+#include "voicelife/timing/timingtask_types.h"
 
 namespace voicelife::timing {
-
-/// 表示定时任务的生命周期状态。
-enum class TimingTaskStatus { kActive, kTerminated };
 
 /// 提供注册定时任务所需的数据。
 struct RegisterTimingTaskCommand {
     std::string schedule_id;
     int64_t starts_at = 0;
     std::string time_zone;
-};
-
-/// 保存定时任务的触发信息和生命周期状态。
-struct TimingTask {
-    std::string id;
-    std::string schedule_id;
-    int64_t next_trigger_at = 0;
-    std::string time_zone;
-    TimingTaskStatus status = TimingTaskStatus::kActive;
-    int64_t created_at = 0;
 };
 
 /// 执行定时领域校验并构造任务。
