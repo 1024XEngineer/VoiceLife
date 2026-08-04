@@ -52,6 +52,8 @@ int main() {
 
     const auto task = store.FindTask(registered.value->task_id);
     Check(task.ok() && task.value->schedule_id == "schedule-1", "注册任务应被持久化");
+    Check(task.ok() && task.value->start_at == 1785747600, "任务应保存唯一的周期锚点");
+    Check(task.ok() && task.value->next_trigger_at == task.value->start_at, "首次触发时间应等于任务周期锚点");
 
     const auto rules = store.ListRules(registered.value->task_id);
     Check(rules.ok() && rules.value->size() == 2, "注册应原子创建两条默认提醒规则");
@@ -84,12 +86,11 @@ int main() {
         .recurrence =
             {
                 .frequency = RecurrenceFrequency::kDay,
-                .start_at = 1785920400,
             },
     });
-    Check(recurring.ok(), "带显式周期起点的任务应注册成功");
+    Check(recurring.ok(), "周期任务应注册成功");
     const auto stored_recurring = recurring_store.FindTask(recurring.value->task_id);
-    Check(stored_recurring.ok() && stored_recurring.value->recurrence.start_at == 1785920400,
-          "注册服务应保留显式周期起点");
+    Check(stored_recurring.ok() && stored_recurring.value->start_at == 1785834000,
+          "周期任务应使用命令开始时间作为唯一锚点");
     return 0;
 }

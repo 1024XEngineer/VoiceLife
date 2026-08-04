@@ -12,6 +12,7 @@ Result<TimingTask> TimingPolicy::Register(const RegisterTimingTaskCommand& comma
     TimingTask task{
         .id = std::move(task_id),
         .schedule_id = command.schedule_id,
+        .start_at = command.starts_at,
         .next_trigger_at = command.starts_at,
         .time_zone = command.time_zone,
         .status = TimingTaskStatus::kActive,

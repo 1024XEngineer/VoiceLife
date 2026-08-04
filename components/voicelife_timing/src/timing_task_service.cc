@@ -19,9 +19,6 @@ Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(cons
     }
 
     task.value->recurrence = command.recurrence;
-    if (task.value->recurrence.start_at == 0) {
-        task.value->recurrence.start_at = command.start_at;
-    }
     task.value->recurrence.time_zone = command.time_zone;
     task.value->updated_at = task.value->created_at;
 
