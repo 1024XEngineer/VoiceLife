@@ -93,5 +93,37 @@ int main() {
     Check(stored_recurring.ok() && stored_recurring.value->start_at == 1785834000,
           "周期任务应使用命令开始时间作为唯一锚点");
     Check(stored_recurring.ok() && stored_recurring.value->time_zone == "UTC", "周期任务应使用命令顶层时区");
+
+    const auto invalid_day = recurring_service.RegisterTimerTask({
+        .schedule_id = "invalid-day",
+        .start_at = 1785834000,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay, .by_weekdays = {1}},
+    });
+    Check(invalid_day.status.code == ErrorCode::kInvalidArgument, "每日规则不应接受星期筛选");
+
+    const auto invalid_week = recurring_service.RegisterTimerTask({
+        .schedule_id = "invalid-week",
+        .start_at = 1785834000,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kWeek, .by_weekdays = {0}},
+    });
+    Check(invalid_week.status.code == ErrorCode::kInvalidArgument, "每周规则的星期值必须在 1 到 7 之间");
+
+    const auto invalid_month = recurring_service.RegisterTimerTask({
+        .schedule_id = "invalid-month",
+        .start_at = 1785834000,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kMonth, .by_month_days = {32}},
+    });
+    Check(invalid_month.status.code == ErrorCode::kInvalidArgument, "每月规则的日期值必须在 1 到 31 之间");
+
+    const auto invalid_year = recurring_service.RegisterTimerTask({
+        .schedule_id = "invalid-year",
+        .start_at = 1785834000,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kYear, .by_months = {13}},
+    });
+    Check(invalid_year.status.code == ErrorCode::kInvalidArgument, "每年规则的月份值必须在 1 到 12 之间");
     return 0;
 }
