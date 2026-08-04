@@ -70,6 +70,9 @@ target_link_libraries(timing_task_state_test PRIVATE timing)
 add_voicelife_test(timing_task_service_test "unit;timing" timing_task_service_test.cc)
 target_link_libraries(timing_task_service_test PRIVATE timing)
 
+add_voicelife_test(timing_task_service_contract_test "unit;timing" timing_task_service_contract_test.cc)
+target_link_libraries(timing_task_service_contract_test PRIVATE timing)
+
 add_voicelife_test(mcp_tool_gateway_test "unit;mcp" mcp_tool_gateway_test.cc)
 target_link_libraries(mcp_tool_gateway_test PRIVATE mcp)
 
