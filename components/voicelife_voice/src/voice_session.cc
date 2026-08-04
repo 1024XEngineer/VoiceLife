@@ -21,11 +21,9 @@ void VoiceSession::Emit(std::string_view event, std::string_view detail) {
 bool VoiceSession::AcceptFrame(const AudioFrame& frame) const {
     const AudioFormat& expected = config_.audio;
     const AudioFormat& actual = frame.format;
-    return state_ == VoiceSessionState::kCapturing && frame.generation == generation_ &&
-           actual.valid() && actual.codec == expected.codec &&
-           actual.sample_rate_hz == expected.sample_rate_hz &&
-           actual.channels == expected.channels &&
-           actual.bits_per_sample == expected.bits_per_sample &&
+    return state_ == VoiceSessionState::kCapturing && frame.generation == generation_ && actual.valid() &&
+           actual.codec == expected.codec && actual.sample_rate_hz == expected.sample_rate_hz &&
+           actual.channels == expected.channels && actual.bits_per_sample == expected.bits_per_sample &&
            actual.frame_duration_ms == expected.frame_duration_ms && !frame.payload.empty();
 }
 

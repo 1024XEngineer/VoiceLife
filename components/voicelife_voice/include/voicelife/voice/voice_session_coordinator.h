@@ -19,6 +19,7 @@ class AudioDevicePort {
     virtual void Close() = 0;
 };
 
+/** 定义语音协调器调用工具网关的端口。 */
 class ToolGatewayPort {
    public:
     /** @brief 允许通过接口类型释放端口。 */

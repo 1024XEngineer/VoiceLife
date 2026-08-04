@@ -1,9 +1,9 @@
-#include "voicelife/linx/linx_types.h"
-
 #include <cctype>
 #include <cstdint>
 #include <limits>
 #include <sstream>
+
+#include "voicelife/linx/linx_types.h"
 
 namespace voicelife::linx {
 namespace {
@@ -15,7 +15,7 @@ void SkipSpace(std::string_view text, std::size_t& position) {
 }
 
 bool ReadJsonString(std::string_view text, std::size_t position, std::string& value,
-                   std::size_t* next_position = nullptr) {
+                    std::size_t* next_position = nullptr) {
     SkipSpace(text, position);
     if (position >= text.size() || text[position] != '"') {
         return false;
@@ -150,8 +150,7 @@ bool ReadUnsignedField(std::string_view object, std::string_view key, uint32_t& 
     return true;
 }
 
-bool ReadBoolField(std::string_view object, std::string_view key, bool& value, bool required,
-                   std::string& error) {
+bool ReadBoolField(std::string_view object, std::string_view key, bool& value, bool required, std::string& error) {
     std::size_t position = 0;
     if (!FindField(object, key, position)) {
         if (required) {
@@ -185,8 +184,8 @@ bool ReadBoolField(std::string_view object, std::string_view key, bool& value, b
     return false;
 }
 
-bool ReadObjectField(std::string_view object, std::string_view key, std::string_view& value,
-                    bool required, std::string& error) {
+bool ReadObjectField(std::string_view object, std::string_view key, std::string_view& value, bool required,
+                     std::string& error) {
     std::size_t position = 0;
     if (!FindField(object, key, position)) {
         if (required) {
@@ -259,9 +258,7 @@ std::string Quote(std::string_view text) {
     return result;
 }
 
-const char* CodecName(voice::AudioCodec codec) {
-    return codec == voice::AudioCodec::kOpus ? "opus" : "pcm";
-}
+const char* CodecName(voice::AudioCodec codec) { return codec == voice::AudioCodec::kOpus ? "opus" : "pcm"; }
 
 const char* ModeName(voice::VoiceMode mode) {
     switch (mode) {
@@ -297,8 +294,8 @@ Result<LinxAudioParams> ParseAudioParams(std::string_view object) {
     } else {
         return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument, "不支持的 Linx 音频格式");
     }
-    if (sample_rate > 0xFFFFFFFFU || channels > 0xFFU || bits > 0xFFU || duration > 0xFFFFU ||
-        sample_rate == 0 || channels == 0 || bits == 0 || duration == 0) {
+    if (sample_rate > 0xFFFFFFFFU || channels > 0xFFU || bits > 0xFFU || duration > 0xFFFFU || sample_rate == 0 ||
+        channels == 0 || bits == 0 || duration == 0) {
         return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument, "Linx 音频参数超出范围");
     }
     params.sample_rate_hz = sample_rate;
@@ -324,15 +321,13 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
          << ",\"channels\":" << static_cast<unsigned>(config.audio.channels)
          << ",\"bit_depth\":" << static_cast<unsigned>(config.audio.bits_per_sample)
          << ",\"endianness\":\"little\",\"frame_duration\":" << config.audio.frame_duration_ms
-         << ",\"frame_size\":" << frame_size
-         << ",\"sample_format\":\"signed_int16\",\"play_buffer_duration\":1000}}";
+         << ",\"frame_size\":" << frame_size << ",\"sample_format\":\"signed_int16\",\"play_buffer_duration\":1000}}";
     return Result<std::string>::Success(json.str());
 }
 
 Result<std::string> LinxJsonCodec::EncodeListenStart(const voice::VoiceSessionConfig& config) const {
     std::ostringstream json;
-    json << "{\"type\":\"listen\",\"state\":\"start\",\"mode\":"
-         << Quote(ModeName(config.mode));
+    json << "{\"type\":\"listen\",\"state\":\"start\",\"mode\":" << Quote(ModeName(config.mode));
     if (!config.session_id.empty()) {
         json << ",\"session_id\":" << Quote(config.session_id);
     }
@@ -342,8 +337,7 @@ Result<std::string> LinxJsonCodec::EncodeListenStart(const voice::VoiceSessionCo
 
 Result<std::string> LinxJsonCodec::EncodeListenStop(const voice::VoiceSessionConfig& config) const {
     std::ostringstream json;
-    json << "{\"type\":\"listen\",\"state\":\"stop\",\"mode\":"
-         << Quote(ModeName(config.mode));
+    json << "{\"type\":\"listen\",\"state\":\"stop\",\"mode\":" << Quote(ModeName(config.mode));
     if (!config.session_id.empty()) {
         json << ",\"session_id\":" << Quote(config.session_id);
     }
@@ -365,8 +359,7 @@ Result<std::string> LinxJsonCodec::EncodeListenDetect(const voice::VoiceSessionC
     return Result<std::string>::Success(json.str());
 }
 
-Result<std::string> LinxJsonCodec::EncodeAbort(const voice::VoiceSessionConfig& config,
-                                               std::string_view reason) const {
+Result<std::string> LinxJsonCodec::EncodeAbort(const voice::VoiceSessionConfig& config, std::string_view reason) const {
     if (reason.empty()) {
         return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx abort 原因不能为空");
     }

@@ -1,6 +1,6 @@
-#include "voicelife/voice/voice_ports.h"
-
 #include <utility>
+
+#include "voicelife/voice/voice_ports.h"
 
 namespace voicelife::voice {
 
@@ -36,19 +36,18 @@ Result<std::unique_ptr<SpeechProviderAdapter>> SpeechProviderRegistry::Create(
         }
     }
     if (entry == nullptr) {
-        return Result<std::unique_ptr<SpeechProviderAdapter>>::Failure(
-            ErrorCode::kNotFound, "语音 Provider 未注册");
+        return Result<std::unique_ptr<SpeechProviderAdapter>>::Failure(ErrorCode::kNotFound, "语音 Provider 未注册");
     }
     for (const std::string& capability : required_capabilities) {
         if (!entry->profile.Has(capability)) {
-            return Result<std::unique_ptr<SpeechProviderAdapter>>::Failure(
-                ErrorCode::kUnavailable, "语音 Provider 缺少所需能力: " + capability);
+            return Result<std::unique_ptr<SpeechProviderAdapter>>::Failure(ErrorCode::kUnavailable,
+                                                                           "语音 Provider 缺少所需能力: " + capability);
         }
     }
     std::unique_ptr<SpeechProviderAdapter> provider = entry->factory();
     if (!provider) {
-        return Result<std::unique_ptr<SpeechProviderAdapter>>::Failure(
-            ErrorCode::kInternal, "语音 Provider 工厂返回空实现");
+        return Result<std::unique_ptr<SpeechProviderAdapter>>::Failure(ErrorCode::kInternal,
+                                                                       "语音 Provider 工厂返回空实现");
     }
     return Result<std::unique_ptr<SpeechProviderAdapter>>::Success(std::move(provider));
 }

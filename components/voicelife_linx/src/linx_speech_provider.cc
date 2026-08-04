@@ -15,9 +15,9 @@ voice::VoiceEvent Event(voice::VoiceEventKind kind, std::string_view text = {}, 
 
 }  // namespace
 
-LinxSpeechProviderAdapter::LinxSpeechProviderAdapter(
-    LinxTransportPort& transport, LinxProtocolCodecPort& codec, LinxConnectionConfig connection,
-    voice::CapabilityProfile capabilities)
+LinxSpeechProviderAdapter::LinxSpeechProviderAdapter(LinxTransportPort& transport, LinxProtocolCodecPort& codec,
+                                                     LinxConnectionConfig connection,
+                                                     voice::CapabilityProfile capabilities)
     : transport_(transport),
       codec_(codec),
       connection_(std::move(connection)),
@@ -28,9 +28,7 @@ voice::CapabilityProfile LinxSpeechProviderAdapter::DefaultCapabilities() {
             .capabilities = {"streaming-asr", "tts", "cancel-generation", "pcm", "opus"}};
 }
 
-void LinxSpeechProviderAdapter::SetAudioSink(voice::AudioFrameSink sink) {
-    audio_sink_ = std::move(sink);
-}
+void LinxSpeechProviderAdapter::SetAudioSink(voice::AudioFrameSink sink) { audio_sink_ = std::move(sink); }
 
 void LinxSpeechProviderAdapter::SetGeneration(uint64_t generation) {
     if (connected_ && generation != 0) {
@@ -39,8 +37,7 @@ void LinxSpeechProviderAdapter::SetGeneration(uint64_t generation) {
     }
 }
 
-Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& config,
-                                          voice::VoiceEventSink sink) {
+Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& config, voice::VoiceEventSink sink) {
     if (!connection_.valid() || config.provider_id != capabilities_.provider_id || config.generation == 0) {
         return Status::Error(ErrorCode::kInvalidArgument, "Linx Provider 连接配置无效");
     }
