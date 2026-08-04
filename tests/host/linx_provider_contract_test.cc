@@ -150,5 +150,71 @@ int main() {
     voicelife::linx::LinxSpeechProviderAdapter failed_provider(failed_transport, codec, connection);
     Check(failed_provider.Connect(session_config, {}).code == ErrorCode::kUnavailable, "传输连接失败应向上传播");
     Check(failed_provider.StartCapture(config.mode).code == ErrorCode::kUnavailable, "连接失败后不能发送 listen");
+
+    // 补充错误路径与边界覆盖,提升 patch 覆盖率。
+    auto invalid_audio = config;
+    invalid_audio.audio.sample_rate_hz = 0;
+    Check(codec.EncodeHello(invalid_audio, connection).status.code == ErrorCode::kInvalidArgument,
+          "hello 必须拒绝无效音频参数");
+
+    voicelife::linx::LinxConnectionConfig bad_connection = connection;
+    bad_connection.websocket_url.clear();
+    Check(codec.EncodeHello(config, bad_connection).ok(), "hello 编码不应依赖 connection 字段");
+
+    Check(codec.EncodeAbort(config, "").status.code == ErrorCode::kInvalidArgument, "空 abort 原因必须拒绝");
+
+    auto detect_config = config;
+    detect_config.session_id = "";
+    Check(codec.EncodeListenDetect(detect_config, "测试").ok(), "无 session_id 的 detect 应可编码");
+    auto stop_json = codec.EncodeListenStop(config);
+    Check(stop_json.ok() && stop_json.value->find("\"state\":\"stop\"") != std::string::npos, "stop 消息必须带 state");
+
+    Check(codec.DecodeText("not-json").status.code == ErrorCode::kInvalidArgument, "非 JSON 输入必须拒绝");
+    Check(codec.DecodeText(R"({"type":123})").status.code == ErrorCode::kInvalidArgument, "type 非字符串必须拒绝");
+    Check(codec.DecodeText(R"({"type":"stt"})").status.code == ErrorCode::kInvalidArgument, "stt 缺少 text 必须拒绝");
+    Check(codec.DecodeText(R"({"type":"tts","state":"unknown"})").status.code == ErrorCode::kInvalidArgument,
+          "未知 tts 状态必须拒绝");
+    Check(codec.DecodeText(R"({"type":"hello","transport":"tcp"})").status.code == ErrorCode::kInvalidArgument,
+          "非 websocket transport 必须拒绝");
+    Check(codec.DecodeText(R"({"type":"hello","audio_params":{"format":"pcm","sample_rate":16000,"channels":0}})")
+                  .status.code == ErrorCode::kInvalidArgument,
+          "超出范围的音频参数必须拒绝");
+    Check(codec.DecodeText(R"({"type":"tts","state":"sentence_start","text":"好的"})").value->tts_state ==
+              voicelife::linx::LinxTtsState::kSentenceStart,
+          "sentence_start 应解析文本字段");
+    Check(codec.DecodeText(R"({"type":"error","message":"boom"})").value->kind ==
+              voicelife::linx::LinxMessageKind::kError,
+          "error 消息应解析 message");
+    Check(codec.DecodeText(R"({"type":"stt","text":"听写"})").value->kind == voicelife::linx::LinxMessageKind::kStt,
+          "stt 消息应解析 text");
+    Check(codec.DecodeText(R"({"type":"hello","transport":"websocket"})").value->kind ==
+              voicelife::linx::LinxMessageKind::kHello,
+          "hello 消息应解析 transport");
+
+    // Provider 重复连接与重复音频回调路径。
+    voicelife::linx::LinxSpeechProviderAdapter dup_provider(transport, codec, connection);
+    Check(dup_provider.Connect(session_config, {}).ok() &&
+              dup_provider.Connect(session_config, {}).code == ErrorCode::kConflict,
+          "重复 Connect 必须返回冲突");
+    transport.EmitText(R"({"type":"mystery"})");
+    Check(!events.empty() && events.back().kind == voicelife::voice::VoiceEventKind::kError,
+          "未知下行消息必须转为错误事件");
+
+    // JSON 转义与对象解析边界覆盖。
+    Check(
+        codec.DecodeText(R"({"type":"tts","state":"sentence_start","text":"a\"b\\c\/d\be\ff\ng\rh\ti"})").value->text ==
+            "a\"b\\c/d\be\ff\ng\rh\ti",
+        "字符串字段应支持常见 JSON 转义");
+    Check(codec.DecodeText("{\"type\":\"tts\",\"state\":\"sentence_start\",\"text\":\"x\\uy\"}").status.code ==
+              ErrorCode::kInvalidArgument,
+          "\\u 转义在便携 codec 中必须拒绝");
+    Check(codec.DecodeText("{\"type\":\"stt\",\"text\":\"ok\"}  ").ok(), "尾部空白应被忽略");
+    Check(codec.DecodeText(" {\"type\":\"error\",\"message\":\"m\"} ").ok(), "前导空白应被忽略");
+    Check(codec.DecodeText(R"({"type":"hello","audio_params":{"format":"opus","sample_rate":24000,"channels":2}})")
+                  .value->audio_params->codec == voicelife::voice::AudioCodec::kOpus,
+          "hello 应解析 opus 音频参数");
+    Check(codec.DecodeText(R"({"type":"hello","audio_params":{"format":"wav","sample_rate":16000,"channels":1}})")
+                  .status.code == ErrorCode::kInvalidArgument,
+          "不支持的音频格式必须拒绝");
     return 0;
 }
