@@ -8,9 +8,9 @@ VoiceLife version makes bind address, port, format, and output explicit.
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import socket
 import wave
+from pathlib import Path
 
 
 def main() -> int:

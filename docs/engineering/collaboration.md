@@ -55,7 +55,7 @@ git push -u fork HEAD
 1. **RED**：从 Issue 验收条件写出失败测试，确认它是因为目标行为尚未实现而失败，不是环境或语法错误。
 2. **GREEN**：只写让当前测试通过的最小实现，同时运行相关回归测试。
 3. **REFACTOR**：整理命名、重复和边界，测试必须一直为绿。
-4. **FULL CHECK**：提交前运行 `./scripts/run_checks.sh`；硬件行为另附 Unity、pytest-embedded 或真机证据。
+4. **FULL CHECK**：提交前运行 `./scripts/run_pre_submit_checks.sh`；硬件行为另附 Unity、pytest-embedded 或真机证据。
 
 为了让提交可检出和回退，仓库不要求保存一个编译失败的 RED commit。作者要在 PR 的 TDD 记录里写清测试名、RED 失败原因、GREEN 结果和重构范围。提交遵循 [Gitmoji 中文提交规范](./commit-convention.md)，每个提交仍应可编译、测试和回退。
 
@@ -103,13 +103,17 @@ Reviewer 先判断行为和边界，再看代码风格：
 
 当前必须通过：
 
-- PR 内提交描述检查；
-- Profile Schema/语义校验；
-- 纯 C++ 主机测试；
-- 组件依赖方向检查；
-- ESP-IDF 6.0.2 / ESP32-S3 构建。
+- PR 内提交描述、C/C++ 与 Python 格式和静态规则检查；
+- IM Gateway 的 Prettier、ESLint、TypeScript 与测试；
+- Profile Schema/语义校验、纯 C++ 主机测试和组件依赖方向检查；
+- C++ 与 TypeScript 覆盖率门禁；
+- ESP-IDF 6.0.2 / ESP32-S3 构建和 CodeQL 扫描。
 
-本地完整入口是 `./scripts/run_checks.sh`。开发中的单测可以用 `./scripts/run_host_tests.sh -R <test-name>` 缩小范围；不能因为局部测试通过就跳过提交前的完整门禁。
+依赖变更审查会先确认仓库是否开启 Dependency Graph；未开启时必须在 job 日志中明确记录跳过原因，开启后按同一门禁执行。
+
+本地完整入口是 `./scripts/run_pre_submit_checks.sh`。`./scripts/run_checks.sh` 只负责公共 API、主机测试、架构、Profile 和 Python 测试；开发中的单测可以用 `./scripts/run_host_tests.sh -R <test-name>` 缩小范围。格式、IM Gateway 和代码规模也属于提交门禁，不能只跑局部测试。
+
+门禁的任务分工、注释规则、代码规模阈值和 Action 安全要求见 [CI 与提交前质量门禁](./ci-quality-gates.md)。
 
 涉及硬件的 PR 还要在正文记录板卡、固件 hash、操作步骤和结果。涉及外部服务的 PR 要区分 mock、沙箱和真实环境，不能把 mock 通过写成端到端通过。
 
