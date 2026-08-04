@@ -179,9 +179,37 @@ Gateway 内部按能力选择微信、飞书或其他 Adapter：
 | --- | --- | --- | --- |
 | Voice | Session、Turn、Generation、Announcement | XRobot、小智协议、未来 Provider | `tool-call`、`cancel-generation`、`proactive-tts` |
 | Audio | PCM 帧、播放、采集状态 | I2S Codec、AFE、不同板卡 | `aec`、`full-duplex`、`wake-word` |
-| Storage | 原子提交、查询、恢复 | 内存、SQLite、NVS/SPIFFS 组合 | `transaction`、`restart-recovery` |
+| Storage | 原子提交、查询、恢复 | 内存、SQLite/FATFS-WL、未来经验证的块设备 VFS | `transaction`、`restart-recovery`、`capacity-report` |
 | Transport | 连接、消息、重连 | WebSocket、MQTT | `ordered-delivery`、`binary-audio` |
 | Clock | 单调时间、UTC、时区转换 | 系统时钟、测试时钟 | `sntp-synced`、`monotonic` |
+
+### 8.1 SQLite 统一底座，不做通用 CRUD
+
+领域模块继续拥有自己的 Store Port 和 SQL 行映射，但不得各自 mount 文件系统、打开数据库、执行 PRAGMA、维护迁移或解释 SQLite 错误。真实实现统一依赖 `voicelife_storage_sqlite`：
+
+```text
+Schedule / TimingTask / 其他领域
+        │  各自的业务语义 Store Port
+        ▼
+voicelife_*_sqlite Adapter
+        │  本领域 SQL、Prepared Statement、行映射
+        ▼
+voicelife_storage_sqlite
+        ├── FATFS/WL mount 与单数据库连接
+        ├── 单写者队列与显式事务保护
+        ├── schema_migrations 与启动自检
+        ├── PRAGMA 配置及读回校验
+        ├── SQLite -> ErrorCode 映射
+        └── 容量、延迟、完整性指标
+```
+
+统一的是数据库生命周期和事务设施，不是业务接口。禁止引入 `Repository<T>`、字符串表名、任意 SQL 执行器或跨模块共享数据对象；跨领域原子写入仍由用例层定义粗粒度 Port，在一笔 SQLite 事务中提交业务事实、幂等记录和 Outbox。
+
+Runtime 只能创建一个数据库实例。包括 TimingTask 在内的领域 SQLite Adapter 必须注入这一个实例，不得保留第二套 driver/runtime 生命周期。四轮实板测试的提交均值中位数约 1.16 秒，已经超过音频实时路径预算；写操作必须进入有界单写者队列，语音任务只等待业务级结果，不直接持有 SQLite 连接。
+
+当前唯一通过资格测试的组合是 SQLite 3.53.4、ESP-IDF 6.0.2、FATFS/WL 4 KiB 扇区、`DELETE + EXTRA + psow=0`。`joltwallet/littlefs 1.22.3` 的三组候选配置都出现显式回滚泄漏，不能作为兼容实现保留。生产挂载必须使用 `format_if_mount_failed=false`，失败时保留现场并进入受限模式。
+
+实板证据、Flash 操作规则和未完成验收见 [SQLite 实板验证与 Flash 恢复手册](../engineering/board-storage-validation.md)。
 
 ## 9. 数据、一致性与幂等
 
@@ -190,6 +218,7 @@ Gateway 内部按能力选择微信、飞书或其他 Adapter：
 - ID 跨边界统一为不透明字符串。不要把数据库自增规则暴露给 Agent 或 Gateway。
 - 写入先完成本地事实，再发布外部意图。通知失败不能伪装成本地业务失败。
 - 内存 Adapter 只用于串联和测试；生产存储必须证明掉电原子性、重启恢复和容量上限。
+- 存储实现必须通过目标文件系统/VFS 的同一套实板契约；上游库说明、主机测试或单次 `quick_check=ok` 不能替代故障注入。
 - 时间持久化使用 UTC，展示和周期计算显式携带 IANA 时区；单调时钟用于超时，不用于日历时间。
 
 ## 10. 安全与隐私

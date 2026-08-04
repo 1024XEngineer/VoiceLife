@@ -1,0 +1,8 @@
+# Name, Type, SubType, Offset, Size, Flags
+nvs,data,nvs,0x9000,16K,
+otadata,data,ota,0xd000,8K,
+phy_init,data,phy,0xf000,4K,
+ota_0,app,ota_0,0x20000,4032K,
+ota_1,app,ota_1,0x410000,4032K,
+assets,data,spiffs,0x800000,6M,
+voicelife,data,spiffs,0xe00000,2M,
