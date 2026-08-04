@@ -15,9 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CPP_VERSION_HEADER = (
-    ROOT / "components/voicelife_contracts/include/voicelife/contracts/im/im_contracts.h"
-)
+CPP_VERSION_HEADER = ROOT / "components/voicelife_contracts/include/voicelife/contracts/im/im_contracts.h"
 TS_VERSION_SOURCE = ROOT / "services/im-gateway/src/contracts/device-gateway.ts"
 FIXTURES_DIR = ROOT / "contracts/im-gateway/v1/fixtures"
 
@@ -31,12 +29,8 @@ def extract_version(text: str, marker: str) -> str:
 
 
 def main() -> int:
-    cpp_version = extract_version(
-        CPP_VERSION_HEADER.read_text(encoding="utf-8"), "kDeviceContractVersion"
-    )
-    ts_version = extract_version(
-        TS_VERSION_SOURCE.read_text(encoding="utf-8"), "DEVICE_CONTRACT_VERSION"
-    )
+    cpp_version = extract_version(CPP_VERSION_HEADER.read_text(encoding="utf-8"), "kDeviceContractVersion")
+    ts_version = extract_version(TS_VERSION_SOURCE.read_text(encoding="utf-8"), "DEVICE_CONTRACT_VERSION")
     if cpp_version != ts_version:
         sys.exit(f"FAIL 双端契约版本不一致: C++={cpp_version}, TypeScript={ts_version}")
 
