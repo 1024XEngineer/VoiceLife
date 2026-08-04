@@ -44,6 +44,15 @@ void RequireResultRejected(std::string_view json) {
     Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, "非法动作结果应被拒绝");
 }
 
+void RequireScheduleTimeRejected(const std::string& time) {
+    const std::string json =
+        "{\"schemaVersion\":\"1\",\"eventId\":\"e\",\"correlationId\":\"c\",\"userId\":\"u\",\"deviceId\":\"d\","
+        "\"operationType\":\"created\",\"scheduleId\":\"s\",\"result\":\"succeeded\",\"summary\":\"x\","
+        "\"occurredAt\":\"" +
+        time + "\"}";
+    RequireScheduleRejected(json);
+}
+
 }  // namespace
 
 int main() {
@@ -205,6 +214,19 @@ int main() {
         "\"instanceId\":\"i\",\"reminderTriggerId\":\"r\",\"reminderType\":\"weak\",\"content\":{\"title\":\"x\"},"
         "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\",\"actions\":[],"
         "\"occurredAt\":\"bad\"}");
+    // 带可选 body 的合法通知
+    NotificationIntent with_body;
+    Check(ParseNotificationIntent(
+              ParseDocument("{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\","
+                            "\"kind\":\"reminder_due\",\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},"
+                            "\"scheduleId\":\"s\",\"taskId\":\"t\",\"instanceId\":\"i\",\"reminderTriggerId\":\"r\","
+                            "\"reminderType\":\"weak\",\"content\":{\"title\":\"x\",\"body\":\"y\"},"
+                            "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\","
+                            "\"actions\":[],\"occurredAt\":\"2026-01-01T00:00:00Z\"}"),
+              with_body)
+                  .ok() &&
+              with_body.content.body.has_value(),
+          "可选 content.body 应被接受");
 
     // ===== ScheduleReceiptIntent 校验分支 =====
     RequireScheduleRejected("42");
@@ -255,6 +277,34 @@ int main() {
                 .ok() &&
             !without_user.userId.has_value(),
         "可选 userId 缺失与闰日应被接受");
+    // 带时区偏移的合法时间
+    ScheduleReceiptIntent offset;
+    Check(ParseScheduleReceiptIntent(
+              ParseDocument("{\"schemaVersion\":\"1\",\"eventId\":\"e\",\"correlationId\":\"c\",\"deviceId\":\"d\","
+                            "\"operationType\":\"created\",\"scheduleId\":\"s\",\"result\":\"succeeded\","
+                            "\"summary\":\"x\",\"occurredAt\":\"2026-01-01T00:00:00+08:00\"}"),
+              offset)
+              .ok(),
+          "带时区偏移的时间应被接受");
+    // ISO 8601 各非法变体分支
+    RequireScheduleTimeRejected("2026-01-01T00:00");
+    RequireScheduleTimeRejected("2026-01-01T00:00:00");
+    RequireScheduleTimeRejected("2026-01-01T00:00:00+0100");
+    RequireScheduleTimeRejected("2026-01-01T00:00:00+24:00");
+    RequireScheduleTimeRejected("2026-01-01T00:00:00+00:60");
+    RequireScheduleTimeRejected("2026-01-01T00:00:00.1234567890Z");
+    RequireScheduleTimeRejected("2026-13-01T00:00:00Z");
+    RequireScheduleTimeRejected("2026-01-00T00:00:00Z");
+    RequireScheduleTimeRejected("2026-01-32T00:00:00Z");
+    RequireScheduleTimeRejected("2026-01-01T00:60:00Z");
+    RequireScheduleTimeRejected("2026-01-01T00:00:60Z");
+    RequireScheduleTimeRejected("2026-1-01T00:00:00Z");
+    RequireScheduleTimeRejected("2026-01-01 00:00:00Z");
+    RequireScheduleTimeRejected("2026-01-01T00:00:00X");
+    RequireScheduleRejected(
+        "{\"schemaVersion\":\"1\",\"eventId\":\"e\",\"correlationId\":\"c\",\"userId\":\"u\",\"deviceId\":\"d\","
+        "\"scheduleId\":\"s\",\"result\":\"succeeded\",\"summary\":\"x\","
+        "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
 
     // ===== ReminderActionResult 校验分支 =====
     RequireResultRejected("null");
@@ -266,6 +316,9 @@ int main() {
         "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
     RequireResultRejected(
         "{\"schemaVersion\":\"1\",\"operationId\":\"o\",\"status\":\"succeeded\","
+        "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    RequireResultRejected(
+        "{\"schemaVersion\":\"1\",\"operationId\":\"o\",\"reminderTriggerId\":\"r\","
         "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
     RequireResultRejected(
         "{\"schemaVersion\":\"1\",\"operationId\":\"o\",\"reminderTriggerId\":\"r\",\"status\":\"suspended\","
