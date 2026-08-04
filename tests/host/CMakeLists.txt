@@ -71,6 +71,9 @@ target_link_libraries(timing_task_state_test PRIVATE timing)
 add_voicelife_test(timing_task_service_test "unit;timing" timing_task_service_test.cc)
 target_link_libraries(timing_task_service_test PRIVATE timing)
 
+add_voicelife_test(timing_task_store_test "unit;timing" timing_task_store_test.cc)
+target_link_libraries(timing_task_store_test PRIVATE timing)
+
 add_voicelife_test(timing_task_service_contract_test "unit;timing" timing_task_service_contract_test.cc)
 target_link_libraries(timing_task_service_contract_test PRIVATE timing)
 
