@@ -66,7 +66,7 @@ git push -u fork HEAD
 pnpm install --dir services/im-gateway --frozen-lockfile
 pnpm --dir services/im-gateway run ci
 
-# 覆盖率：CI 使用 GCC/gcovr、coverage.py 与 c8 上传到 Codecov
+# 覆盖率：CI 使用 GCC/gcovr 与 c8 上传到 Codecov
 # 本机生成 C++ 覆盖率需要 GCC 和 gcovr
 python3 scripts/firmware.py build esp32s3-dev
 ```

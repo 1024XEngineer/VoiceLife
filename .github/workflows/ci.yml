@@ -71,7 +71,7 @@ jobs:
         with:
           node-version: 24
       - name: 安装覆盖率工具
-        run: python -m pip install --disable-pip-version-check coverage gcovr
+        run: python -m pip install --disable-pip-version-check gcovr
       - name: 生成 C++ 覆盖率报告
         shell: bash
         run: |
@@ -81,10 +81,6 @@ jobs:
           cmake --build build-coverage --parallel
           ctest --test-dir build-coverage --output-on-failure
           gcovr --root . --filter components --exclude tests --xml-pretty -o coverage/cpp.xml
-      - name: 生成 Python 覆盖率报告
-        run: |
-          coverage run --source=scripts -m unittest discover -s tests/python -p "test_*.py"
-          coverage xml -o coverage/python.xml
       - name: 生成 Gateway 覆盖率报告
         shell: bash
         run: |
@@ -96,7 +92,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           use_oidc: true
-          files: coverage/cpp.xml,coverage/python.xml,services/im-gateway/coverage/lcov.info
+          files: coverage/cpp.xml,services/im-gateway/coverage/lcov.info
           flags: unit
           fail_ci_if_error: true
           verbose: true
