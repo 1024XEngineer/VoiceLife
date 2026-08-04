@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="./docs/assets/readme-hero.webp" alt="VoiceLife 声活黑色工业原型设备概念图" width="100%" />
-
 <h1>VoiceLife 声活</h1>
 
 <p><strong>语音优先、IM 辅助的本地日程与提醒系统</strong></p>
@@ -26,6 +24,14 @@
 </p>
 
 </div>
+
+<details>
+<summary>查看图片</summary>
+<p align="center">
+  <img src="./docs/assets/concept.png" alt="VoiceLife 声活设备概念图" width="720" /><br />
+  <sub>产品概念图（非当前交付固件）</sub>
+</p>
+</details>
 
 > [!IMPORTANT]
 > 当前仓库交付的是可编译、可串联、可验证的架构主干。日程创建链路已经通过内存适配器跑通；真实音频、XRobot、持久化和 IM 平台适配器仍待后续 Issue 填实，不能当作可用产品固件。
@@ -63,23 +69,7 @@ python3 scripts/firmware.py package esp32s3-dev
 
 VoiceLife 是一个 ESP-IDF 组件化模块单体。业务核心使用纯 C++，外部世界只能通过 Port 进入；XRobot、微信、飞书、Koishi、网络库、存储格式和具体板卡都留在 Adapter 一侧。
 
-```mermaid
-flowchart LR
-    User[用户] --> Audio[Audio Adapter]
-    Audio --> Voice[Voice Coordinator]
-    XRobot[XRobot / Speech Provider] --> Voice
-    Voice --> MCP[MCP Adapter]
-    MCP --> App[Calendar Use Cases]
-    App --> Schedule[Schedule Domain]
-    App --> Timing[TimingTask Domain]
-    App --> Store[(Atomic Local Store Port)]
-    App --> Intent[Notification Port]
-    Intent --> IM[IM Gateway Adapter]
-    IM --> Platforms[微信 / 飞书 / 其他平台]
-
-    classDef core fill:#f4f7f5,stroke:#28856f,color:#173d34;
-    class App,Schedule,Timing core;
-```
+![架构图](./docs/assets/架构图.png)
 
 依赖只有一个方向：适配器依赖用例，用例依赖领域，领域不反向认识 ESP-IDF、HTTP 或平台 SDK。`scripts/check_architecture.sh` 会在 CI 中检查这条规则。
 
