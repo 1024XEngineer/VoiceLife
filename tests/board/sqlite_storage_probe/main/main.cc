@@ -213,7 +213,9 @@ void Configure(sqlite3* db) {
         ScalarInt(db, "PRAGMA synchronous", "verify synchronous") != 3 ||
         ScalarInt(db, "PRAGMA foreign_keys", "verify foreign keys") != 1 ||
         ScalarInt(db, "PRAGMA temp_store", "verify temp store") != 2 ||
-        ScalarInt(db, "PRAGMA mmap_size", "verify mmap size") != 0) {
+        ScalarInt(db, "PRAGMA mmap_size", "verify mmap size") != 0 ||
+        ScalarInt(db, "PRAGMA cache_size", "verify cache size") != -128 ||
+        ScalarInt(db, "PRAGMA journal_size_limit", "verify journal size limit") != 262144) {
         Halt("verify sqlite configuration", db);
     }
 }
@@ -293,10 +295,10 @@ void BenchmarkAtomicWrites(sqlite3* db) {
             sqlite3_step(outbox) != SQLITE_DONE || sqlite3_step(dedup) != SQLITE_DONE) {
             Halt("atomic write statement", db);
         }
-        sqlite3_reset(schedule);
-        sqlite3_reset(timing);
-        sqlite3_reset(outbox);
-        sqlite3_reset(dedup);
+        CheckSqlite(sqlite3_reset(schedule), db, "reset schedule statement");
+        CheckSqlite(sqlite3_reset(timing), db, "reset timing statement");
+        CheckSqlite(sqlite3_reset(outbox), db, "reset outbox statement");
+        CheckSqlite(sqlite3_reset(dedup), db, "reset dedup statement");
         Exec(db, "COMMIT", "atomic write commit");
         const int64_t elapsed = esp_timer_get_time() - started;
         total_us += elapsed;
@@ -307,10 +309,10 @@ void BenchmarkAtomicWrites(sqlite3* db) {
         vTaskDelay(1);
     }
 
-    sqlite3_finalize(schedule);
-    sqlite3_finalize(timing);
-    sqlite3_finalize(outbox);
-    sqlite3_finalize(dedup);
+    CheckSqlite(sqlite3_finalize(schedule), db, "finalize schedule statement");
+    CheckSqlite(sqlite3_finalize(timing), db, "finalize timing statement");
+    CheckSqlite(sqlite3_finalize(outbox), db, "finalize outbox statement");
+    CheckSqlite(sqlite3_finalize(dedup), db, "finalize dedup statement");
 
     char metric_sql[256] = {};
     snprintf(metric_sql, sizeof(metric_sql),
@@ -345,12 +347,12 @@ void StartCrashRecoveryScenario(sqlite3* db) {
         if (sqlite3_step(statement) != SQLITE_DONE) {
             Halt("insert crash row", db);
         }
-        sqlite3_reset(statement);
+        CheckSqlite(sqlite3_reset(statement), db, "reset crash statement");
         if ((index + 1) % 4 == 0) {
             vTaskDelay(1);
         }
     }
-    sqlite3_finalize(statement);
+    CheckSqlite(sqlite3_finalize(statement), db, "finalize crash statement");
     CheckSqlite(sqlite3_db_cacheflush(db), db, "flush dirty pages before reset");
     ESP_LOGW(kTag, "HOST_RESET_POINT: OPEN_TRANSACTION");
     while (true) {

@@ -128,6 +128,15 @@ class PartitionTableTest(unittest.TestCase):
         with self.assertRaisesRegex(probe.ProbeError, "invalid partition entry magic"):
             probe.parse_partition_table(content)
 
+    def test_rejects_non_ff_bytes_after_partition_terminator(self):
+        content = partition_table_bytes()
+        terminator = 3 * probe.PARTITION_ENTRY.size
+        corrupted = content[:terminator] + b"\xff" * (probe.PARTITION_ENTRY.size - 1) + b"X" + content[
+            terminator + probe.PARTITION_ENTRY.size :
+        ]
+        with self.assertRaisesRegex(probe.ProbeError, "after its terminator"):
+            probe.parse_partition_table(corrupted)
+
     def test_rejects_duplicate_labels(self):
         content = b"".join(
             [
@@ -284,6 +293,20 @@ class BackupTest(unittest.TestCase):
 
 
 class WriteProbeTest(unittest.TestCase):
+    def test_requires_exact_confirmed_probe_slot(self):
+        args = SimpleNamespace(
+            yes=True,
+            confirm_inactive_slot="ota_0",
+            probe_slot="ota_1",
+            backup_directory=Path("/does/not/matter"),
+            binary=Path("/does/not/matter.bin"),
+            port="/dev/cu.test",
+            baud=115200,
+        )
+
+        with self.assertRaisesRegex(probe.ProbeError, "exact --confirm-inactive-slot"):
+            probe.write_probe(args)
+
     def test_refuses_to_write_if_the_partition_table_changed_after_backup(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -305,9 +328,13 @@ class WriteProbeTest(unittest.TestCase):
 
             with mock.patch.object(probe, "read_flash", side_effect=changed_table), mock.patch.object(
                 probe, "esptool"
-            ) as esptool:
-                with self.assertRaisesRegex(probe.ProbeError, "partition table changed"):
-                    probe.write_probe(args)
+            ) as esptool, tempfile.TemporaryDirectory() as idf:
+                otatool = Path(idf) / "components" / "app_update" / "otatool.py"
+                otatool.parent.mkdir(parents=True)
+                otatool.write_text("# test", encoding="utf-8")
+                with mock.patch.dict(probe.os.environ, {"IDF_PATH": idf}, clear=True):
+                    with self.assertRaisesRegex(probe.ProbeError, "partition table changed"):
+                        probe.write_probe(args)
 
             esptool.assert_not_called()
 
@@ -362,6 +389,21 @@ class ManifestTest(unittest.TestCase):
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
             with self.assertRaisesRegex(probe.ProbeError, "partition metadata mismatch"):
+                probe.load_manifest(directory)
+
+    def test_rejects_symlinked_backup_artifact(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            write_backup_manifest(directory)
+            target = directory / "outside.bin"
+            target.write_bytes(b"outside")
+            artifact = directory / "manifest.json"
+            manifest = json.loads(artifact.read_text(encoding="utf-8"))
+            (directory / "voicelife.bin").unlink()
+            (directory / "voicelife.bin").symlink_to(target)
+            manifest["artifacts"]["data"]["sha256"] = probe.sha256(target)
+            artifact.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(probe.ProbeError, "must not be a symlink"):
                 probe.load_manifest(directory)
 
 

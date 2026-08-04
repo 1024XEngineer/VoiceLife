@@ -9,7 +9,7 @@ config SQLITE_PROBE_PARTITION_LABEL
 
 config SQLITE_PROBE_ALLOW_FORMAT
     bool "Allow the probe to initialize its backed-up test partition"
-    default y
+    default n
     help
         This is only for the destructive board fixture. The host tool must back
         up and verify the selected partition before booting the probe.

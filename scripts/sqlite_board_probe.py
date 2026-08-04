@@ -109,10 +109,12 @@ def sha256(path: Path) -> str:
 
 def parse_partition_table(content: bytes) -> list[Partition]:
     partitions: list[Partition] = []
+    terminated_at: int | None = None
     for position in range(0, len(content) - PARTITION_ENTRY.size + 1, PARTITION_ENTRY.size):
         entry = content[position : position + PARTITION_ENTRY.size]
         magic = struct.unpack_from("<H", entry)[0]
         if magic == 0xFFFF:
+            terminated_at = position
             break
         if magic == PARTITION_MD5_MAGIC:
             continue
@@ -124,6 +126,8 @@ def parse_partition_table(content: bytes) -> list[Partition]:
         except UnicodeDecodeError as error:
             raise ProbeError(f"partition label at 0x{position:x} is not ASCII") from error
         partitions.append(Partition(label, type_value, subtype, offset, size, flags))
+    if terminated_at is not None and content[terminated_at:] != b"\xff" * (len(content) - terminated_at):
+        raise ProbeError("partition table has non-FF bytes after its terminator")
     if not partitions:
         raise ProbeError("partition table contains no entries")
     labels = [partition.label for partition in partitions]
@@ -322,6 +326,8 @@ def manifest_file(directory: Path, file_name: object, field: str) -> Path:
     if not isinstance(file_name, str) or not file_name or Path(file_name).name != file_name:
         raise ProbeError(f"invalid backup file for {field}")
     path = directory / file_name
+    if path.is_symlink():
+        raise ProbeError(f"backup file for {field} must not be a symlink")
     if not path.is_file():
         raise ProbeError(f"missing backup file for {field}: {path}")
     return path
@@ -399,6 +405,14 @@ def write_probe(args: argparse.Namespace) -> None:
     if not image.is_file() or image.stat().st_size > slot.size:
         raise ProbeError("probe image is missing or too large for the selected OTA slot")
 
+    idf_path_value = os.environ.get("IDF_PATH")
+    if not idf_path_value:
+        raise ProbeError("IDF_PATH is not set; load the ESP-IDF environment before writing Flash")
+    idf_path = Path(idf_path_value)
+    otatool = idf_path / "components" / "app_update" / "otatool.py"
+    if not otatool.is_file():
+        raise ProbeError("IDF_PATH does not point to an ESP-IDF installation containing otatool.py")
+
     table_info = manifest["partition_table"]
     with tempfile.TemporaryDirectory(prefix="voicelife-write-check-") as temporary:
         current_table = Path(temporary) / "partition-table.bin"
@@ -411,14 +425,6 @@ def write_probe(args: argparse.Namespace) -> None:
         )
         if sha256(current_table) != table_info["sha256"]:
             raise ProbeError("board partition table changed since backup; refusing probe write")
-
-    idf_path_value = os.environ.get("IDF_PATH")
-    if not idf_path_value:
-        raise ProbeError("IDF_PATH is not set; load the ESP-IDF environment before writing Flash")
-    idf_path = Path(idf_path_value)
-    otatool = idf_path / "components" / "app_update" / "otatool.py"
-    if not otatool.is_file():
-        raise ProbeError("IDF_PATH does not point to an ESP-IDF installation containing otatool.py")
 
     esptool(
         args.port,
