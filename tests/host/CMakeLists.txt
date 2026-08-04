@@ -74,6 +74,7 @@ add_voicelife_library(voice voicelife_voice
 target_link_libraries(voice PUBLIC contracts)
 add_voicelife_library(linx voicelife_linx
     "${ROOT_DIR}/components/voicelife_linx/src/linx_json_codec.cc"
+    "${ROOT_DIR}/components/voicelife_linx/src/linx_json_reader.cc"
     "${ROOT_DIR}/components/voicelife_linx/src/linx_speech_provider.cc")
 target_link_libraries(linx PUBLIC voice cjson)
 add_voicelife_library(linx_esp voicelife_linx_esp
@@ -86,7 +87,8 @@ add_voicelife_library(audio_esp voicelife_audio_esp
     "${ROOT_DIR}/components/voicelife_audio_esp/src/audio_board_profile.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_audio_probe.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/pcm_frame_assembler.cc"
-    "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_pcm_audio_port.cc")
+    "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_pcm_audio_port.cc"
+    "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_pcm_i2s_runtime.cc")
 target_link_libraries(audio_esp PUBLIC contracts voice)
 
 enable_testing()
