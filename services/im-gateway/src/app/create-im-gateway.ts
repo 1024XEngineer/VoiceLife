@@ -70,6 +70,11 @@ export interface ImGatewayRuntime {
     readonly actionUiApi: ActionUiController;
 }
 
+/**
+ * Composes the production Gateway application and transport controllers.
+ * @param dependencies Ports required by the Gateway composition root.
+ * @returns Ready-to-serve Gateway runtime.
+ */
 export function createImGateway(dependencies: ImGatewayDependencies): ImGatewayRuntime {
     const channels = new DefaultChannelAccountApplication(
         dependencies.unitOfWork,
@@ -138,6 +143,13 @@ export function createImGateway(dependencies: ImGatewayDependencies): ImGatewayR
     };
 }
 
+/**
+ * Composes an in-memory Gateway runtime for tests and local scenarios.
+ * @param deviceId Device identity returned by the mock authenticator.
+ * @param clock Clock used by mock adapters.
+ * @param overrides Ports that replace the default mock implementations.
+ * @returns Ready-to-use in-memory Gateway runtime.
+ */
 export function createMockImGateway(
     deviceId: DeviceId = unsafeId<DeviceId>('device-demo'),
     clock: FixedClock = new FixedClock(),

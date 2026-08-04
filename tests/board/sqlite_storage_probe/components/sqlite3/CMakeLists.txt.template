@@ -1,0 +1,34 @@
+idf_component_register(
+    SRCS "sqlite3.c"
+    INCLUDE_DIRS "."
+)
+
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    SQLITE_OS_UNIX=1
+    SQLITE_THREADSAFE=0
+    SQLITE_OMIT_LOAD_EXTENSION=1
+    SQLITE_OMIT_SHARED_CACHE=1
+    SQLITE_OMIT_WAL=1
+    SQLITE_TEMP_STORE=2
+    SQLITE_DEFAULT_FOREIGN_KEYS=1
+    SQLITE_DEFAULT_MEMSTATUS=0
+    SQLITE_DEFAULT_PAGE_SIZE=4096
+    SQLITE_DEFAULT_UNIX_VFS="unix-none"
+    SQLITE_MAX_DEFAULT_PAGE_SIZE=4096
+    SQLITE_MAX_MMAP_SIZE=0
+    SQLITE_MAX_LENGTH=1048576
+    SQLITE_MAX_SQL_LENGTH=131072
+    SQLITE_MAX_COLUMN=64
+    SQLITE_DQS=0
+    SQLITE_USE_URI=1
+    HAVE_FDATASYNC=0
+    HAVE_NANOSLEEP=0
+    HAVE_USLEEP=1
+)
+
+target_compile_options(${COMPONENT_LIB} PRIVATE
+    -Wno-unused-function
+    -Wno-unused-value
+    -Wno-unused-variable
+    -Wno-maybe-uninitialized
+)

@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="./docs/assets/readme-hero.webp" alt="VoiceLife 声活黑色工业原型设备概念图" width="100%" />
-
 <h1>VoiceLife 声活</h1>
 
 <p><strong>语音优先、IM 辅助的本地日程与提醒系统</strong></p>
@@ -27,8 +25,27 @@
 
 </div>
 
+<details>
+<summary>查看图片</summary>
+<p align="center">
+  <img src="./docs/assets/concept.png" alt="VoiceLife 声活设备概念图" width="720" /><br />
+  <sub>产品概念图（非当前交付固件）</sub>
+</p>
+</details>
+
 > [!IMPORTANT]
 > 当前仓库交付的是可编译、可串联、可验证的架构主干。日程创建链路已经通过内存适配器跑通；真实音频、XRobot、持久化和 IM 平台适配器仍待后续 Issue 填实，不能当作可用产品固件。
+
+## SQLite 不是“能跑就算过”
+
+我们在目标 ESP32-S3 上验证了 SQLite 与实际文件系统的事务行为，而不是只跑一条增删改查。结果很明确：`SQLite 3.53.4 + FATFS/Wear Levelling` 在四轮外部 EN 复位实验中通过；`LittleFS + SQLite` 的三组配置都在显式回滚后留下表记录、丢失索引记录，因此被否决。
+
+当前合格基线固定为 4 KiB FATFS/WL 扇区、`journal_mode=DELETE`、`synchronous=EXTRA`、`psow=0`、单连接和单写者。四轮平均提交耗时的中位数是 `1,162,373 us`，最慢一次 `1,518,898 us`，所以数据库提交不会进入音频实时路径。
+
+> [!NOTE]
+> 当前故障注入是串口控制线触发的外部 EN 复位，设备报告 `rst:0x1 (POWERON)`。它证明了重启恢复，不等于真实电源轨断电；断电、棕断、满容量和长期磨损仍在正式 Adapter 的验收清单中。
+
+这里真正可复用的能力不是“ESP32 能运行 SQLite”，而是一套面向目标板的存储资格测试：显式回滚、跨表原子提交、表/索引一致性、关闭重开、故障点复位、资源水位，以及可恢复的 Flash 备份与回读校验。完整步骤见 [SQLite 实板验证与 Flash 恢复手册](./docs/engineering/board-storage-validation.md)，去掉 VoiceLife 业务表后的通用版本维护在 [`esp32-sqlite-durability-lab`](https://github.com/ZhaoXingPeng/esp32-sqlite-durability-lab)。
 
 ## 快速开始
 
@@ -63,23 +80,7 @@ python3 scripts/firmware.py package esp32s3-dev
 
 VoiceLife 是一个 ESP-IDF 组件化模块单体。业务核心使用纯 C++，外部世界只能通过 Port 进入；XRobot、微信、飞书、Koishi、网络库、存储格式和具体板卡都留在 Adapter 一侧。
 
-```mermaid
-flowchart LR
-    User[用户] --> Audio[Audio Adapter]
-    Audio --> Voice[Voice Coordinator]
-    XRobot[XRobot / Speech Provider] --> Voice
-    Voice --> MCP[MCP Adapter]
-    MCP --> App[Calendar Use Cases]
-    App --> Schedule[Schedule Domain]
-    App --> Timing[TimingTask Domain]
-    App --> Store[(Atomic Local Store Port)]
-    App --> Intent[Notification Port]
-    Intent --> IM[IM Gateway Adapter]
-    IM --> Platforms[微信 / 飞书 / 其他平台]
-
-    classDef core fill:#f4f7f5,stroke:#28856f,color:#173d34;
-    class App,Schedule,Timing core;
-```
+![架构图](./docs/assets/架构图.png)
 
 依赖只有一个方向：适配器依赖用例，用例依赖领域，领域不反向认识 ESP-IDF、HTTP 或平台 SDK。`scripts/check_architecture.sh` 会在 CI 中检查这条规则。
 
@@ -103,6 +104,7 @@ flowchart LR
 | `voicelife_mcp` | Tool Schema、注册中心与调用路由 | contracts |
 | `voicelife_voice` | 会话、音频/传输 Port 与 Provider Registry | contracts |
 | `voicelife_linx` | Linx XRobot WebSocket 协议防腐层与 Provider | contracts、voice |
+| `voicelife_storage_sqlite` | SQLite 生命周期、命名语句、事务回执与健康指标底座 | contracts |
 | `voicelife_runtime` | 唯一组装入口，不承载业务规则 | contracts、mcp、voice、linx |
 
 ### 文件树
@@ -120,6 +122,7 @@ VoiceLife/
 │   ├── voicelife_mcp/           # MCP 工具注册中心
 │   ├── voicelife_voice/         # 语音会话、音频/传输 Port 与 Provider Registry
 │   ├── voicelife_linx/          # Linx/XRobot 协议编解码与 Provider Adapter
+│   ├── voicelife_storage_sqlite/ # SQLite 单连接、事务协议与健康指标底座
 │   └── voicelife_runtime/       # Composition Root
 ├── config/
 │   ├── adapter-profile.schema.json
@@ -130,8 +133,9 @@ VoiceLife/
 │   ├── engineering/             # 协作、Review 和提交规范
 │   └── assets/                  # README 素材
 ├── main/                        # ESP-IDF app_main，仅启动 Runtime
-├── scripts/                     # 构建、打包、音频诊断和边界检查
+├── scripts/                     # 构建、诊断、边界检查与实板恢复工具
 ├── tests/
+│   ├── board/                   # SQLite 等必须上板验证的故障探针
 │   ├── host/                    # 按组件拆分的纯 C++ 单元与串联测试
 │   └── python/                  # 构建工具与错误输入测试
 ├── third_party/licenses/        # 迁移代码与工具的第三方许可原文
@@ -168,6 +172,7 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 
 - `scripts/firmware.py`：Profile 校验、ESP-IDF 构建、合并镜像和可追溯打包。
 - `scripts/audio_debug_server.py`：抓取设备通过 UDP 发出的原始 PCM，保存为 WAV，供音频链路诊断。
+- `scripts/sqlite_board_probe.py`：按分区表备份、写入非活动槽、注入 EN 复位、逐段回读校验并恢复原始数据。
 
 上游来源和改造范围记录在 [THIRD_PARTY.md](./THIRD_PARTY.md)，后续源码迁移策略见 [小智能力迁移方案](./docs/architecture/xiaozhi-migration.md)。
 
@@ -179,11 +184,12 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 | 分组件 TDD 主机测试 | 已完成 | 7 个测试，可按名称和标签筛选 |
 | MCP → 日程 → 定时任务串联 | 已完成 | 使用内存适配器，仅证明架构 |
 | ESP32-S3 固件构建 | 已完成 | ESP-IDF 6.0.2 已验证 |
+| SQLite 存储资格测试 | 已完成基线验证 | FATFS/WL 四轮通过；LittleFS 路线已否决；真实断电与寿命测试待补 |
 | Profile 驱动 Runtime 装配 | 待开发 | 当前只完成 Schema、构建选择和设计契约 |
 | 语音 Port、会话状态与 Provider Registry | 已完成 | 主机契约通过；下行音频也通过 generation 绑定到会话 |
 | Linx XRobot 协议与 Provider Adapter | 主机完成 | hello/listen/detect/abort、STT/TTS、二进制音频和非法消息已有离线契约测试；ESP-IDF WebSocket 传输仍待接入 |
 | 小智音频与 ESP32-S3 XRobot Adapter | 待开发 | 从上游能力逐段迁移，真实板优先 |
-| 持久化 Adapter | 待开发 | 必须满足原子写入和重启恢复 |
+| 持久化 Adapter | 待开发 | 必须满足原子写入和重启恢复；只允许基于已验证底座实现，并复用单连接、迁移和事务生命周期 |
 | 微信 / 飞书 IM Adapter | 待开发 | 先稳定平台无关语义契约 |
 | 真机闭环与用户试用 | 待开发 | 属于 MS3 功能 Issue |
 
@@ -196,6 +202,7 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 - [语音模块子架构](./docs/architecture/voice-subarchitecture.md)
 - [提交描述规范](./docs/engineering/commit-convention.md)
 - [协同开发规范](./docs/engineering/collaboration.md)
+- [SQLite 实板验证与 Flash 恢复手册](./docs/engineering/board-storage-validation.md)
 - [参与开发](./CONTRIBUTING.md)
 
 ## 致谢

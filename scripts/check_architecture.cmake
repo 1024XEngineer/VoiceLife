@@ -9,6 +9,7 @@ set(known_components
     voicelife_mcp
     voicelife_runtime
     voicelife_schedule
+    voicelife_storage_sqlite
     voicelife_timing
     voicelife_voice
     voicelife_linx
@@ -79,6 +80,8 @@ assert_dependencies(voicelife_contracts PUBLIC)
 assert_dependencies(voicelife_contracts PRIVATE)
 assert_dependencies(voicelife_schedule PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_schedule PRIVATE)
+assert_dependencies(voicelife_storage_sqlite PUBLIC voicelife_contracts)
+assert_dependencies(voicelife_storage_sqlite PRIVATE)
 assert_dependencies(voicelife_timing PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_timing PRIVATE)
 assert_dependencies(voicelife_mcp PUBLIC voicelife_contracts)
