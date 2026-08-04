@@ -17,6 +17,7 @@ struct JsonDocument {
 
 /// JSON 值 DOM。契约解析器消费共享 fixture 前先解析为该结构。
 struct JsonValue {
+    /// JSON 值种类。
     enum class Kind {
         kNull,
         kBool,
@@ -25,6 +26,9 @@ struct JsonValue {
         kArray,
         kObject,
     };
+
+    /// JSON 对象成员表。
+    using ObjectMap = std::map<std::string, JsonValue>;
 
     Kind kind = Kind::kNull;
     bool boolean = false;
@@ -42,7 +46,7 @@ struct JsonValue {
     /** @brief 构造数组节点。 @param value 数组元素。 @return 对应节点。 */
     static JsonValue Array(std::vector<JsonValue> value);
     /** @brief 构造对象节点。 @param value 键值成员。 @return 对应节点。 */
-    static JsonValue Object(std::map<std::string, JsonValue> value);
+    static JsonValue Object(ObjectMap value);
 
     /** @brief 判断节点是否为字符串。 @return 是字符串时返回 true。 */
     [[nodiscard]] bool IsString() const { return kind == Kind::kString; }
