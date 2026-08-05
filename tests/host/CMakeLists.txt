@@ -68,6 +68,10 @@ add_voicelife_test(schedule_create_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_create_test.cc")
 target_link_libraries(schedule_create_test PRIVATE schedule)
 
+add_voicelife_test(schedule_delete_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_delete_test.cc")
+target_link_libraries(schedule_delete_test PRIVATE schedule)
+
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
 target_link_libraries(status_test PRIVATE contracts)
 

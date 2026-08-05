@@ -81,4 +81,35 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
     };
 }
 
+DeleteScheduleResult ScheduleService::delete_schedule(const DeleteScheduleCommand& command) {
+    // 健壮性判断
+    if (command.schedule_id <= 0) {
+        constexpr char kError[] = "日程 ID 必须为正整数";
+        return {
+            .status = Status::Error(ErrorCode::kInvalidArgument, kError),
+            .schedule_id = command.schedule_id,
+            .deleted = false,
+            .error = kError,
+        };
+    }
+
+    // mock 删除
+    const Result<Schedule> cancelled = CancelMockSchedule(command.schedule_id);
+    if (!cancelled.ok()) {
+        return {
+            .status = cancelled.status,
+            .schedule_id = command.schedule_id,
+            .deleted = false,
+            .error = cancelled.status.message,
+        };
+    }
+
+    return {
+        .status = Status::Ok(),
+        .schedule_id = command.schedule_id,
+        .deleted = true,
+        .error = {},
+    };
+}
+
 }  // namespace voicelife::schedule
