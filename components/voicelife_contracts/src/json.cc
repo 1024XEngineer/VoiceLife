@@ -62,64 +62,51 @@ struct YyJsonDeleter {
 
 using YyJsonDocument = std::unique_ptr<yyjson_doc, YyJsonDeleter>;
 
-Status ConvertValue(yyjson_val* source, JsonValue& out) {
-    if (yyjson_is_null(source)) {
+void ConvertValue(yyjson_val* source, JsonValue& out) {
+    if (unsafe_yyjson_is_null(source)) {
         out = JsonValue{};
-        return Status::Ok();
+        return;
     }
-    if (yyjson_is_bool(source)) {
-        out = JsonValue::Bool(yyjson_get_bool(source));
-        return Status::Ok();
+    if (unsafe_yyjson_is_bool(source)) {
+        out = JsonValue::Bool(unsafe_yyjson_get_bool(source));
+        return;
     }
-    if (yyjson_is_num(source)) {
-        out = JsonValue::Number(yyjson_get_num(source));
-        return Status::Ok();
+    if (unsafe_yyjson_is_num(source)) {
+        out = JsonValue::Number(unsafe_yyjson_get_num(source));
+        return;
     }
-    if (yyjson_is_str(source)) {
-        const char* value = yyjson_get_str(source);
-        if (value == nullptr) {
-            return InvalidJson("yyjson returned a string without a value");
-        }
-        out = JsonValue::String(std::string(value, yyjson_get_len(source)));
-        return Status::Ok();
+    if (unsafe_yyjson_is_str(source)) {
+        out = JsonValue::String(std::string(unsafe_yyjson_get_str(source), unsafe_yyjson_get_len(source)));
+        return;
     }
-    if (yyjson_is_arr(source)) {
+    if (unsafe_yyjson_is_arr(source)) {
         std::vector<JsonValue> values;
-        values.reserve(yyjson_arr_size(source));
+        values.reserve(unsafe_yyjson_get_len(source));
         size_t index = 0;
         size_t count = 0;
         yyjson_val* child = nullptr;
         yyjson_arr_foreach(source, index, count, child) {
             JsonValue value;
-            if (Status status = ConvertValue(child, value); !status.ok()) {
-                return status;
-            }
+            ConvertValue(child, value);
             values.push_back(std::move(value));
         }
         out = JsonValue::Array(std::move(values));
-        return Status::Ok();
+        return;
     }
-    if (yyjson_is_obj(source)) {
-        JsonValue::ObjectMap values;
-        size_t index = 0;
-        size_t count = 0;
-        yyjson_val* key = nullptr;
-        yyjson_val* value = nullptr;
-        yyjson_obj_foreach(source, index, count, key, value) {
-            const char* key_text = yyjson_get_str(key);
-            if (key_text == nullptr) {
-                return InvalidJson("yyjson returned an object member without a key");
-            }
-            JsonValue converted;
-            if (Status status = ConvertValue(value, converted); !status.ok()) {
-                return status;
-            }
-            values.insert_or_assign(std::string(key_text, yyjson_get_len(key)), std::move(converted));
-        }
-        out = JsonValue::Object(std::move(values));
-        return Status::Ok();
+
+    // Strict yyjson documents contain only the six standard JSON types, so the remaining type is object.
+    JsonValue::ObjectMap values;
+    size_t index = 0;
+    size_t count = 0;
+    yyjson_val* key = nullptr;
+    yyjson_val* value = nullptr;
+    yyjson_obj_foreach(source, index, count, key, value) {
+        JsonValue converted;
+        ConvertValue(value, converted);
+        values.insert_or_assign(std::string(unsafe_yyjson_get_str(key), unsafe_yyjson_get_len(key)),
+                                std::move(converted));
     }
-    return InvalidJson("yyjson returned an unsupported value type");
+    out = JsonValue::Object(std::move(values));
 }
 
 }  // namespace
@@ -131,9 +118,7 @@ Status ParseJson(std::string_view input, JsonValue& out) {
     }
 
     JsonValue parsed;
-    if (Status status = ConvertValue(yyjson_doc_get_root(document.get()), parsed); !status.ok()) {
-        return status;
-    }
+    ConvertValue(yyjson_doc_get_root(document.get()), parsed);
     out = std::move(parsed);
     return Status::Ok();
 }

@@ -61,6 +61,7 @@ int main() {
     // 对象
     JsonValue object = ParseOk("{\"a\": 1, \"b\": [true, null]}");
     Check(object.IsObject() && object.Get("a") != nullptr && object.Get("b")->IsArray(), "对象成员解析");
+    Check(ParseOk("null").Get("missing") == nullptr, "非对象读取成员应返回空指针");
     Check(ParseOk("{}").object.empty(), "空对象");
     Check(ParseOk("{\"a\":1,\"a\":2}").Get("a")->number == 2.0, "重复键后者覆盖");
 
