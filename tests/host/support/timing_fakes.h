@@ -12,8 +12,16 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
    public:
     Status RegisterTaskWithRules(const timing::TimingTask& task,
                                  const std::vector<timing::ReminderRule>& rules) override {
-        if (task.id.empty() || tasks_.contains(task.id)) {
+        if (task.id.empty() || task.request_id.empty()) {
+            return Status::Error(ErrorCode::kInvalidArgument, "task or request id is empty");
+        }
+        if (tasks_.contains(task.id)) {
             return Status::Error(ErrorCode::kConflict, "task exists");
+        }
+        for (const auto& [_, existing] : tasks_) {
+            if (existing.request_id == task.request_id || existing.schedule_id == task.schedule_id) {
+                return Status::Error(ErrorCode::kConflict, "request or schedule exists");
+            }
         }
 
         std::unordered_set<std::string> incoming_rule_ids;
@@ -29,6 +37,18 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
             rules_.emplace(rule.id, rule);
         }
         return Status::Ok();
+    }
+
+    Result<timing::TimingTask> FindTaskByRequestId(const std::string& request_id) override {
+        if (request_id.empty()) {
+            return Result<timing::TimingTask>::Failure(ErrorCode::kInvalidArgument, "request id is empty");
+        }
+        for (const auto& [_, task] : tasks_) {
+            if (task.request_id == request_id) {
+                return Result<timing::TimingTask>::Success(task);
+            }
+        }
+        return Result<timing::TimingTask>::Failure(ErrorCode::kNotFound, "request not found");
     }
 
     Result<timing::TimingTask> FindTask(const timing::TimingTaskId& task_id) override {

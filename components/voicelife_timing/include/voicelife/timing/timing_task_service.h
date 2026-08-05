@@ -12,7 +12,7 @@ class TimingTaskService {
     /** @brief 允许通过接口类型释放服务实现。 */
     virtual ~TimingTaskService() = default;
     /**
-     * @brief 注册一条一次性或周期定时任务。
+     * @brief 注册一条一次性或周期定时任务；相同 request_id 的重试返回原结果。
      * @param command 要注册的日程定时信息。
      * @return 注册结果或校验、持久化错误。
      */
@@ -80,7 +80,7 @@ class DefaultTimingTaskService final : public TimingTaskService {
         : store_(store), clock_(clock), ids_(ids) {}
 
     /**
-     * @brief 注册并持久化一条一次性或周期定时任务。
+     * @brief 注册并持久化一条一次性或周期定时任务；相同 request_id 的重试返回原结果。
      * @param command 要注册的日程定时信息。
      * @return 注册结果或校验、持久化错误。
      */

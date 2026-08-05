@@ -13,6 +13,7 @@ int main() {
     const TimingTask first_task{
         .id = "task-1",
         .schedule_id = "schedule-1",
+        .request_id = "request-1",
         .start_at = 1785747600,
         .next_trigger_at = 1785747600,
     };
@@ -21,10 +22,13 @@ int main() {
         .task_id = "task-1",
     };
     Check(store.RegisterTaskWithRules(first_task, {first_rule}).ok(), "首个任务和规则应保存成功");
+    const auto request_match = store.FindTaskByRequestId("request-1");
+    Check(request_match.ok() && request_match.value->id == "task-1", "Store 应能按 request_id 回读任务");
 
     const TimingTask conflicting_task{
         .id = "task-2",
-        .schedule_id = "schedule-2",
+        .schedule_id = "schedule-1",
+        .request_id = "request-2",
         .start_at = 1785834000,
         .next_trigger_at = 1785834000,
     };

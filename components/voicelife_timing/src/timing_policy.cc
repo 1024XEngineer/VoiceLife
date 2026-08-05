@@ -4,9 +4,17 @@
 
 namespace voicelife::timing {
 
+Status TimingPolicy::Validate(const RegisterTimingTaskCommand& command) const {
+    if (command.schedule_id.empty() || command.starts_at <= 0) {
+        return Status::Error(ErrorCode::kInvalidArgument, "定时任务缺少日程或时间");
+    }
+    return Status::Ok();
+}
+
 Result<TimingTask> TimingPolicy::Register(const RegisterTimingTaskCommand& command, std::string task_id,
                                           int64_t now) const {
-    if (command.schedule_id.empty() || command.starts_at <= 0 || task_id.empty()) {
+    const Status validation = Validate(command);
+    if (!validation.ok() || task_id.empty()) {
         return Result<TimingTask>::Failure(ErrorCode::kInvalidArgument, "定时任务缺少日程、时间或任务标识");
     }
     TimingTask task{

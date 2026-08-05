@@ -19,6 +19,13 @@ struct RegisterTimingTaskCommand {
 class TimingPolicy {
    public:
     /**
+     * @brief 校验定时任务注册所需的日程和开始时间。
+     * @param command 要校验的日程定时信息。
+     * @return 参数合法时返回成功，否则返回参数错误。
+     */
+    Status Validate(const RegisterTimingTaskCommand& command) const;
+
+    /**
      * @brief 为日程注册第一条定时任务。
      * @param command 要注册的日程定时信息。
      * @param task_id 分配给新任务的 ID。
