@@ -1,6 +1,6 @@
 #include "voicelife/runtime/runtime.h"
 
-#include "voicelife/mcp/mcp_tool_gateway.h"
+#include "voicelife/mcp/mcp_server.h"
 #include "voicelife/voice/voice_session_coordinator.h"
 
 namespace voicelife::runtime {
@@ -20,11 +20,11 @@ class ScaffoldSpeechAdapter final : public voice::SpeechProviderPort {
 
 class McpVoiceBridge final : public voice::ToolGatewayPort {
    public:
-    explicit McpVoiceBridge(mcp::McpToolGateway& gateway) : gateway_(gateway) {}
+    explicit McpVoiceBridge(mcp::McpServer& gateway) : gateway_(gateway) {}
     ToolResult Call(const ToolCall& call) override { return gateway_.call(call); }
 
    private:
-    mcp::McpToolGateway& gateway_;
+    mcp::McpServer& gateway_;
 };
 
 class Runtime final {
@@ -34,7 +34,7 @@ class Runtime final {
     Status Start() { return voice_.Start(); }
 
    private:
-    mcp::McpToolGateway mcp_;
+    mcp::McpServer mcp_;
     McpVoiceBridge mcp_voice_bridge_;
     ScaffoldAudioAdapter audio_;
     ScaffoldSpeechAdapter speech_;

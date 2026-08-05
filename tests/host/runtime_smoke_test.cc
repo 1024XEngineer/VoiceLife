@@ -1,5 +1,5 @@
 #include "support/test_support.h"
-#include "voicelife/mcp/mcp_tool_gateway.h"
+#include "voicelife/mcp/mcp_server.h"
 #include "voicelife/voice/voice_session_coordinator.h"
 
 using voicelife::ErrorCode;
@@ -24,17 +24,17 @@ class ReadySpeech final : public voicelife::voice::SpeechProviderPort {
 
 class McpBridge final : public voicelife::voice::ToolGatewayPort {
    public:
-    explicit McpBridge(voicelife::mcp::McpToolGateway& gateway) : gateway_(gateway) {}
-    ToolResult Call(const ToolCall& call) override { return gateway_.call(call); }
+    explicit McpBridge(voicelife::mcp::McpServer& server) : server_(server) {}
+    ToolResult Call(const ToolCall& call) override { return server_.call(call); }
 
    private:
-    voicelife::mcp::McpToolGateway& gateway_;
+    voicelife::mcp::McpServer& server_;
 };
 
 }  // namespace
 
 int main() {
-    voicelife::mcp::McpToolGateway mcp;
+    voicelife::mcp::McpServer mcp;
     ReadyAudio audio;
     ReadySpeech speech;
     McpBridge tools(mcp);

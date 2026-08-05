@@ -28,8 +28,11 @@ add_voicelife_library(application voicelife_application
     "${ROOT_DIR}/components/voicelife_application/src/calendar_application.cc")
 target_link_libraries(application PUBLIC contracts schedule timing)
 add_voicelife_library(mcp voicelife_mcp
-    "${ROOT_DIR}/components/voicelife_mcp/src/mcp_tool_gateway.cc")
-target_link_libraries(mcp PUBLIC contracts application)
+    "${ROOT_DIR}/components/voicelife_mcp/src/mcp_server.cc")
+find_path(CJSON_INCLUDE_DIR cjson/cJSON.h PATHS /usr/local/include /opt/homebrew/include REQUIRED)
+find_library(CJSON_LIBRARY cjson PATHS /usr/local/lib /opt/homebrew/lib REQUIRED)
+target_include_directories(mcp PUBLIC "${CJSON_INCLUDE_DIR}")
+target_link_libraries(mcp PUBLIC contracts application "${CJSON_LIBRARY}")
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
 target_link_libraries(voice PUBLIC contracts)
@@ -59,9 +62,6 @@ target_link_libraries(timing_policy_test PRIVATE timing)
 
 add_voicelife_test(calendar_application_test "unit;application" calendar_application_test.cc)
 target_link_libraries(calendar_application_test PRIVATE application)
-
-add_voicelife_test(mcp_tool_gateway_test "unit;mcp" mcp_tool_gateway_test.cc)
-target_link_libraries(mcp_tool_gateway_test PRIVATE mcp)
 
 add_voicelife_test(voice_session_coordinator_test "unit;voice" voice_session_coordinator_test.cc)
 target_link_libraries(voice_session_coordinator_test PRIVATE voice)
