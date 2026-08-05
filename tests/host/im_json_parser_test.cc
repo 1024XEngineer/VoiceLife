@@ -86,5 +86,9 @@ int main() {
     ParseRejected("\"\\udc00\"");
     ParseRejected("\"\\ud800\\u0041\"");
     ParseRejected("\"\\u12\"");
+    // 加固：未转义控制字符 / 深嵌套 / 非法 UTF-8
+    ParseRejected("\"a\nb\"");
+    ParseRejected(std::string(70, '[') + std::string(70, ']'));
+    ParseRejected("\"\xFF\"");
     return 0;
 }

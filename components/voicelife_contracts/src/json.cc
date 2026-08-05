@@ -1,10 +1,12 @@
 #include "voicelife/contracts/json.h"
 
 #include <cctype>
+#include <charconv>
 #include <cmath>
 #include <cstddef>
-#include <cstdlib>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -54,6 +56,9 @@ const JsonValue* JsonValue::Get(const std::string& key) const {
 }
 
 namespace {
+
+/// 最大嵌套深度，防止恶意深层嵌套耗尽调用栈。
+inline constexpr size_t kMaxDepth = 64;
 
 class JsonParser {
    public:
@@ -172,9 +177,11 @@ class JsonParser {
             }
         }
         const std::string token(input_.substr(start, position_ - start));
-        char* end = nullptr;
-        const double value = std::strtod(token.c_str(), &end);
-        if (end != token.c_str() + token.size() || !std::isfinite(value)) {
+        double value = 0.0;
+        const char* const begin = token.data();
+        const char* const end_ptr = token.data() + token.size();
+        const auto [ptr, ec] = std::from_chars(begin, end_ptr, value);
+        if (ec != std::errc() || ptr != end_ptr || !std::isfinite(value)) {
             return Error("JSON 数字超出可表示范围");
         }
         out = JsonValue::Number(value);
@@ -188,10 +195,16 @@ class JsonParser {
             const char current = input_[position_];
             if (current == '"') {
                 ++position_;
+                if (!IsValidUtf8(result)) {
+                    return Error("字符串包含非法 UTF-8");
+                }
                 out = JsonValue::String(std::move(result));
                 return Status::Ok();
             }
             if (current != '\\') {
+                if (static_cast<unsigned char>(current) < 0x20) {
+                    return Error("字符串包含未转义控制字符");
+                }
                 result.push_back(current);
                 ++position_;
                 continue;
@@ -283,11 +296,16 @@ class JsonParser {
     }
 
     Status ParseArray(JsonValue& out) {
+        if (++depth_ > kMaxDepth) {
+            --depth_;
+            return Error("JSON 嵌套深度超限");
+        }
         ++position_;  // 跳过左方括号。
         std::vector<JsonValue> items;
         SkipWhitespace();
         if (Consume(']')) {
             out = JsonValue::Array(std::move(items));
+            --depth_;
             return Status::Ok();
         }
         while (true) {
@@ -306,15 +324,21 @@ class JsonParser {
             }
         }
         out = JsonValue::Array(std::move(items));
+        --depth_;
         return Status::Ok();
     }
 
     Status ParseObject(JsonValue& out) {
+        if (++depth_ > kMaxDepth) {
+            --depth_;
+            return Error("JSON 嵌套深度超限");
+        }
         ++position_;  // 跳过左花括号。
         std::map<std::string, JsonValue> members;
         SkipWhitespace();
         if (Consume('}')) {
             out = JsonValue::Object(std::move(members));
+            --depth_;
             return Status::Ok();
         }
         while (true) {
@@ -346,6 +370,7 @@ class JsonParser {
             }
         }
         out = JsonValue::Object(std::move(members));
+        --depth_;
         return Status::Ok();
     }
 
@@ -380,8 +405,51 @@ class JsonParser {
         }
     }
 
+    // 严格校验 UTF-8 字节序列，拒绝过编码、孤立代理码位与超范围码位。
+    static bool IsValidUtf8(const std::string& text) {
+        size_t pos = 0;
+        while (pos < text.size()) {
+            const unsigned char lead = static_cast<unsigned char>(text[pos]);
+            size_t extra = 0;
+            unsigned int codepoint = 0;
+            if (lead < 0x80) {
+                ++pos;
+                continue;
+            }
+            if (lead >= 0xC2 && lead <= 0xDF) {
+                extra = 1;
+                codepoint = lead & 0x1F;
+            } else if (lead >= 0xE0 && lead <= 0xEF) {
+                extra = 2;
+                codepoint = lead & 0x0F;
+            } else if (lead >= 0xF0 && lead <= 0xF4) {
+                extra = 3;
+                codepoint = lead & 0x07;
+            } else {
+                return false;
+            }
+            if (pos + extra >= text.size()) {
+                return false;
+            }
+            for (size_t i = 0; i < extra; ++i) {
+                const unsigned char cont = static_cast<unsigned char>(text[pos + 1 + i]);
+                if ((cont & 0xC0) != 0x80) {
+                    return false;
+                }
+                codepoint = (codepoint << 6) | (cont & 0x3F);
+            }
+            if ((extra == 2 && codepoint < 0x800) || (extra == 3 && codepoint < 0x10000) ||
+                (codepoint >= 0xD800 && codepoint <= 0xDFFF) || codepoint > 0x10FFFF) {
+                return false;
+            }
+            pos += 1 + extra;
+        }
+        return true;
+    }
+
     std::string_view input_;
     size_t position_ = 0;
+    size_t depth_ = 0;
 };
 
 }  // namespace

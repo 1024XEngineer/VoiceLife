@@ -227,6 +227,62 @@ int main() {
         "\"instanceId\":\"i\",\"reminderTriggerId\":\"r\",\"reminderType\":\"weak\",\"content\":{\"title\":\"x\"},"
         "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\",\"actions\":[],"
         "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    // minutes 超过 int 上界 / 动作数超过上限
+    RequireNotificationRejected(
+        "{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\",\"kind\":\"reminder_due\","
+        "\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},\"scheduleId\":\"s\",\"taskId\":\"t\","
+        "\"instanceId\":\"i\",\"reminderTriggerId\":\"r\",\"reminderType\":\"strong\",\"content\":{\"title\":\"x\"},"
+        "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\","
+        "\"actions\":[{\"kind\":\"command\",\"type\":\"snooze\",\"label\":\"x\",\"params\":{\"minutes\":2147483648}}],"
+        "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    {
+        std::string actions;
+        for (int i = 0; i < 17; ++i) {
+            actions += "{\"kind\":\"command\",\"type\":\"acknowledge\",\"label\":\"x\"},";
+        }
+        actions.pop_back();
+        RequireNotificationRejected(
+            "{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\",\"kind\":\"reminder_due\","
+            "\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},\"scheduleId\":\"s\",\"taskId\":\"t\","
+            "\"instanceId\":\"i\",\"reminderTriggerId\":\"r\",\"reminderType\":\"strong\",\"content\":{\"title\":\"x\"}"
+            ","
+            "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\",\"actions\":[" +
+            actions + "],\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    }
+    // 对象复用：二次解析整体替换，失败解析不污染 out
+    NotificationIntent reused;
+    Check(ParseNotificationIntent(
+              ParseDocument("{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\","
+                            "\"kind\":\"reminder_due\",\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},"
+                            "\"scheduleId\":\"s\",\"taskId\":\"t\",\"instanceId\":\"i\",\"reminderTriggerId\":\"r\","
+                            "\"reminderType\":\"weak\",\"content\":{\"title\":\"x\"},"
+                            "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\","
+                            "\"actions\":[],\"occurredAt\":\"2026-01-01T00:00:00Z\"}"),
+              reused)
+                  .ok() &&
+              reused.actions.empty(),
+          "弱提醒首次解析应成功");
+    Check(ParseNotificationIntent(
+              ParseDocument("{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\","
+                            "\"kind\":\"reminder_due\",\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},"
+                            "\"scheduleId\":\"s\",\"taskId\":\"t\",\"instanceId\":\"i\",\"reminderTriggerId\":\"r\","
+                            "\"reminderType\":\"strong\",\"content\":{\"title\":\"x\"},"
+                            "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\","
+                            "\"actions\":[{\"kind\":\"command\",\"type\":\"acknowledge\",\"label\":\"x\"}],"
+                            "\"occurredAt\":\"2026-01-01T00:00:00Z\"}"),
+              reused)
+                  .ok() &&
+              reused.actions.size() == 1,
+          "二次解析强提醒应整体替换而非累积动作");
+    const Status failed_status = ParseNotificationIntent(
+        ParseDocument("{\"schemaVersion\":\"2\",\"businessEventId\":\"e\",\"correlationId\":\"c\","
+                      "\"kind\":\"reminder_due\",\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},"
+                      "\"scheduleId\":\"s\",\"taskId\":\"t\",\"instanceId\":\"i\",\"reminderTriggerId\":\"r\","
+                      "\"reminderType\":\"weak\",\"content\":{\"title\":\"x\"},"
+                      "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\","
+                      "\"actions\":[],\"occurredAt\":\"2026-01-01T00:00:00Z\"}"),
+        reused);
+    Check(!failed_status.ok() && reused.actions.size() == 1, "失败解析不得污染 out 中的上次结果");
     RequireNotificationRejected(
         "{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\",\"kind\":\"reminder_due\","
         "\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},\"scheduleId\":\"s\",\"taskId\":\"t\","

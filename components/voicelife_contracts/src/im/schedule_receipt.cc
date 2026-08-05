@@ -18,6 +18,7 @@ using detail::RequireString;
 }  // namespace
 
 Status ParseScheduleReceiptIntent(const JsonValue& root, ScheduleReceiptIntent& out) {
+    ScheduleReceiptIntent parsed;
     if (!root.IsObject()) {
         return Reject("ScheduleReceiptIntent 必须是对象");
     }
@@ -25,35 +26,39 @@ Status ParseScheduleReceiptIntent(const JsonValue& root, ScheduleReceiptIntent& 
     if (schema_version == nullptr || !schema_version->IsString() || schema_version->string != kDeviceContractVersion) {
         return Reject("schemaVersion 必须等于 1");
     }
-    out.schemaVersion = kDeviceContractVersion;
+    parsed.schemaVersion = kDeviceContractVersion;
 
-    if (const Status status = RequireString(root, "eventId", out.eventId); !status.ok()) {
+    if (const Status status = RequireString(root, "eventId", parsed.eventId); !status.ok()) {
         return status;
     }
-    if (const Status status = RequireString(root, "correlationId", out.correlationId); !status.ok()) {
+    if (const Status status = RequireString(root, "correlationId", parsed.correlationId); !status.ok()) {
         return status;
     }
-    if (const Status status = OptionalString(root, "userId", out.userId); !status.ok()) {
+    if (const Status status = OptionalString(root, "userId", parsed.userId); !status.ok()) {
         return status;
     }
-    if (const Status status = RequireString(root, "deviceId", out.deviceId); !status.ok()) {
+    if (const Status status = RequireString(root, "deviceId", parsed.deviceId); !status.ok()) {
         return status;
     }
     if (const Status status =
-            RequireEnum(root, "operationType", {"created", "updated", "cancelled", "undone"}, out.operationType);
+            RequireEnum(root, "operationType", {"created", "updated", "cancelled", "undone"}, parsed.operationType);
         !status.ok()) {
         return status;
     }
-    if (const Status status = RequireString(root, "scheduleId", out.scheduleId); !status.ok()) {
+    if (const Status status = RequireString(root, "scheduleId", parsed.scheduleId); !status.ok()) {
         return status;
     }
-    if (const Status status = RequireEnum(root, "result", {"succeeded", "failed"}, out.result); !status.ok()) {
+    if (const Status status = RequireEnum(root, "result", {"succeeded", "failed"}, parsed.result); !status.ok()) {
         return status;
     }
-    if (const Status status = RequireString(root, "summary", out.summary); !status.ok()) {
+    if (const Status status = RequireString(root, "summary", parsed.summary); !status.ok()) {
         return status;
     }
-    return RequireIsoDateTime(root, "occurredAt", out.occurredAt);
+    if (const Status status = RequireIsoDateTime(root, "occurredAt", parsed.occurredAt); !status.ok()) {
+        return status;
+    }
+    out = std::move(parsed);
+    return Status::Ok();
 }
 
 }  // namespace voicelife::contracts::im
