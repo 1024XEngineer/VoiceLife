@@ -10,10 +10,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "docs:check": "node scripts/check-public-api-docs.mjs",
+    "docs:check": "node --test scripts/check-public-api-docs.test.mjs && node scripts/check-public-api-docs.mjs",
     "test": "pnpm run build && node test/run-tests.mjs",
     "coverage": "pnpm run build && c8 --all --extension .js --include 'dist/**/*.js' --exclude 'dist/**/*.d.ts' --reporter=lcov --reporter=text --reports-dir coverage node test/run-tests.mjs",
-    "format:check": "prettier --check \"src/**/*.ts\" \"*.{mjs,json,md}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"scripts/*.mjs\" \"*.{mjs,json,md}\"",
     "lint": "eslint src",
     "ci": "pnpm run format:check && pnpm run lint && pnpm run check && pnpm run docs:check && pnpm run test"
   },

@@ -28,9 +28,9 @@ type JsonObject = Record<string, unknown>;
 const ISO_8601 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:Z|[+-](\d{2}):(\d{2}))$/;
 
 /**
- * Parses and validates a device schedule-operation receipt.
- * @param input Untrusted request payload.
- * @returns Normalized receipt intent for the application layer.
+ * 解析并校验设备上报的日程操作回执。
+ * @param input 未受信任的请求载荷。
+ * @returns 供应用层使用的规范化回执意图。
  */
 export function parseScheduleReceiptIntent(input: unknown): ScheduleReceiptIntent {
     const value = objectAt(input, 'body');
@@ -54,9 +54,9 @@ export function parseScheduleReceiptIntent(input: unknown): ScheduleReceiptInten
 }
 
 /**
- * Parses and validates a device notification request.
- * @param input Untrusted request payload.
- * @returns Normalized notification intent for the application layer.
+ * 解析并校验设备发起的通知请求。
+ * @param input 未受信任的请求载荷。
+ * @returns 供应用层使用的规范化通知意图。
  */
 export function parseNotificationIntent(input: unknown): NotificationIntent {
     const value = objectAt(input, 'body');
@@ -107,9 +107,9 @@ export function parseNotificationIntent(input: unknown): NotificationIntent {
 }
 
 /**
- * Parses a device callback reporting reminder-action execution.
- * @param input Untrusted request payload.
- * @returns Normalized reminder-action result.
+ * 解析设备回传的提醒动作执行结果。
+ * @param input 未受信任的请求载荷。
+ * @returns 规范化的提醒动作结果。
  */
 export function parseReminderActionResult(input: unknown): ReminderActionResult {
     const value = objectAt(input, 'body');
@@ -133,9 +133,9 @@ export function parseReminderActionResult(input: unknown): ReminderActionResult 
 }
 
 /**
- * Parses a user action submitted through an action entry point.
- * @param input Untrusted request payload.
- * @returns Validated reminder-action intent.
+ * 解析用户从动作入口提交的提醒操作。
+ * @param input 未受信任的请求载荷。
+ * @returns 经过校验的提醒动作意图。
  */
 export function parseReminderActionIntent(input: unknown): ReminderActionIntent {
     const value = objectAt(input, 'body');
@@ -155,9 +155,9 @@ export function parseReminderActionIntent(input: unknown): ReminderActionIntent 
 }
 
 /**
- * Parses the opaque token submitted by an action UI.
- * @param input Untrusted token payload.
- * @returns Non-empty action token.
+ * 解析动作页面提交的不透明令牌。
+ * @param input 未受信任的令牌载荷。
+ * @returns 非空动作令牌。
  */
 export function parseActionToken(input: unknown): string {
     return stringAt(input, 'token');
