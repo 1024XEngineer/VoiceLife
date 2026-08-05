@@ -9,6 +9,12 @@
 namespace voicelife::mcp {
 namespace {
 
+/**
+ * @brief 判断工具参数值是否符合声明类型。
+ * @param value 待检查的参数值。
+ * @param type 参数声明类型。
+ * @return 类型匹配时返回 true，否则返回 false。
+ */
 bool MatchesType(const ToolValue& value, ToolInputType type) {
     switch (type) {
         case ToolInputType::kBoolean:
@@ -21,8 +27,18 @@ bool MatchesType(const ToolValue& value, ToolInputType type) {
     return false;
 }
 
+/**
+ * @brief 创建不包含输出数据的失败结果。
+ * @param status 失败状态。
+ * @return 工具调用失败结果。
+ */
 ToolResult Failure(Status status) { return {.status = std::move(status), .output = {}}; }
 
+/**
+ * @brief 将业务参数类型转换为 MCP 输入类型。
+ * @param type 业务参数类型。
+ * @return 对应的 MCP 输入类型。
+ */
 ToolInputType ToInputType(PropertyType type) {
     switch (type) {
         case PropertyType::kBoolean:
@@ -98,7 +114,7 @@ std::string McpServer::list_tools_json() const {
         cJSON* properties = cJSON_AddObjectToObject(schema, "properties");
         for (const auto& [name, field] : definition.input_schema.properties) {
             cJSON* property = cJSON_AddObjectToObject(properties, name.c_str());
-            const char* type = field.type == ToolInputType::kInteger ? "integer"
+            const char* type = field.type == ToolInputType::kInteger   ? "integer"
                                : field.type == ToolInputType::kBoolean ? "boolean"
                                                                        : "string";
             cJSON_AddStringToObject(property, "type", type);
@@ -131,7 +147,8 @@ PropertyList PropertyList::with_values(const ToolArguments& arguments) const {
     return result;
 }
 
-Status McpServer::add_tool(std::string name, std::string description, PropertyList properties, PropertyHandler handler) {
+Status McpServer::add_tool(std::string name, std::string description, PropertyList properties,
+                           PropertyHandler handler) {
     if (name.empty() || description.empty() || !handler) {
         return Status::Error(ErrorCode::kInvalidArgument, "工具定义不完整");
     }
@@ -139,14 +156,13 @@ Status McpServer::add_tool(std::string name, std::string description, PropertyLi
         return Status::Error(ErrorCode::kAlreadyExists, "工具已注册：" + name);
     }
     const std::string registered_name = name;
-    tools_.emplace(registered_name,
-                   RegisteredTool{.definition = {.name = std::move(name),
-                                                 .description = std::move(description),
-                                                 .input_schema = properties.to_schema()},
-                                  .handler = [properties = std::move(properties), handler = std::move(handler)](
-                                                 const ToolCall& call) {
-                                      return handler(properties.with_values(call.arguments));
-                                  }});
+    tools_.emplace(registered_name, RegisteredTool{.definition = {.name = std::move(name),
+                                                                  .description = std::move(description),
+                                                                  .input_schema = properties.to_schema()},
+                                                   .handler = [properties = std::move(properties),
+                                                               handler = std::move(handler)](const ToolCall& call) {
+                                                       return handler(properties.with_values(call.arguments));
+                                                   }});
     registration_order_.push_back(registered_name);
     return Status::Ok();
 }
@@ -170,8 +186,8 @@ ToolResult McpServer::call(const ToolCall& call) const {
                 continue;
             }
             if (std::find(registered->second.definition.input_schema.required.begin(),
-                          registered->second.definition.input_schema.required.end(), name) !=
-                registered->second.definition.input_schema.required.end()) {
+                          registered->second.definition.input_schema.required.end(),
+                          name) != registered->second.definition.input_schema.required.end()) {
                 return Failure(Status::Error(ErrorCode::kInvalidArgument, "缺少参数：" + name));
             }
         } else if (!MatchesType(argument->second, field.type)) {

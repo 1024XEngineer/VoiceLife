@@ -16,24 +16,29 @@ using voicelife::test::Check;
 
 namespace {
 
-// @brief 注册一个覆盖全部受支持参数类型的测试工具。
-// @param server 待注册工具的 MCP 服务。
-// @param captured_value 接收回调读取到的整数值。
-// @return 工具注册状态。
+/**
+ * @brief 注册一个覆盖全部受支持参数类型的测试工具。
+ * @param server 待注册工具的 MCP 服务。
+ * @param captured_value 接收回调读取到的整数值。
+ * @return 工具注册状态。
+ */
 Status RegisterTypedTool(McpServer& server, int64_t& captured_value) {
-    return server.add_tool(
-        "self.device.configure", "配置设备",
-        PropertyList({Property("enabled", PropertyType::kBoolean, true),
-                      Property("level", PropertyType::kInteger, 0, 100),
-                      Property("label", PropertyType::kString, std::string("default"))}),
-        [&captured_value](const PropertyList& properties) {
-            captured_value = properties.value<int64_t>("level");
-            return ToolResult{.status = Status::Ok(), .output = {}};
-        });
+    return server.add_tool("self.device.configure", "配置设备",
+                           PropertyList({Property("enabled", PropertyType::kBoolean, true),
+                                         Property("level", PropertyType::kInteger, 0, 100),
+                                         Property("label", PropertyType::kString, std::string("default"))}),
+                           [&captured_value](const PropertyList& properties) {
+                               captured_value = properties.value<int64_t>("level");
+                               return ToolResult{.status = Status::Ok(), .output = {}};
+                           });
 }
 
 }  // namespace
 
+/**
+ * @brief 验证 MCP 工具注册、参数校验、调用和列表序列化能力。
+ * @return 全部断言通过时返回 0。
+ */
 int main() {
     McpServer server;
     Check(server.list_tools().total == 0, "MCP 服务初始不应包含工具");
@@ -57,25 +62,25 @@ int main() {
     Check(defaults.status.ok(), "可选参数缺失时应使用默认值");
 
     Check(server.call({
-              .request_id = "request-3",
-              .name = "self.device.configure",
-              .arguments = {{"level", std::string("42")}},
-          })
-              .status.code == ErrorCode::kInvalidArgument,
+                          .request_id = "request-3",
+                          .name = "self.device.configure",
+                          .arguments = {{"level", std::string("42")}},
+                      })
+                  .status.code == ErrorCode::kInvalidArgument,
           "参数类型不匹配时应拒绝调用");
     Check(server.call({
-              .request_id = "request-4",
-              .name = "self.device.configure",
-              .arguments = {{"level", int64_t{101}}},
-          })
-              .status.code == ErrorCode::kInvalidArgument,
+                          .request_id = "request-4",
+                          .name = "self.device.configure",
+                          .arguments = {{"level", int64_t{101}}},
+                      })
+                  .status.code == ErrorCode::kInvalidArgument,
           "整数参数超出范围时应拒绝调用");
     Check(server.call({
-              .request_id = "request-5",
-              .name = "self.device.configure",
-              .arguments = {{"level", int64_t{10}}, {"unknown", true}},
-          })
-              .status.code == ErrorCode::kInvalidArgument,
+                          .request_id = "request-5",
+                          .name = "self.device.configure",
+                          .arguments = {{"level", int64_t{10}}, {"unknown", true}},
+                      })
+                  .status.code == ErrorCode::kInvalidArgument,
           "未定义参数应被拒绝");
 
     const auto listed = server.list_tools();
