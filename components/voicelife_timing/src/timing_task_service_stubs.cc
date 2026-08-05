@@ -16,10 +16,6 @@ Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const Up
     return NotImplemented<UpdateTimerTaskResult>("UpdateTimerTask");
 }
 
-Result<CancelTimerTaskResult> DefaultTimingTaskService::CancelTimerTask(const CancelTimerTaskCommand&) {
-    return NotImplemented<CancelTimerTaskResult>("CancelTimerTask");
-}
-
 Result<UpsertReminderRulesResult> DefaultTimingTaskService::UpsertReminderRules(const UpsertReminderRulesCommand&) {
     return NotImplemented<UpsertReminderRulesResult>("UpsertReminderRules");
 }
