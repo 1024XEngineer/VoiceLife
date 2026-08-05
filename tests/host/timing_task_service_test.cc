@@ -57,7 +57,12 @@ class LookupFailureStore final : public TimingTaskStorePort {
     }
 
     Result<TimingTask> FindTask(const TimingTaskId&) override {
-        return Result<TimingTask>::Failure(ErrorCode::kInternal, "unexpected find");
+        return Result<TimingTask>::Success({
+            .id = "task-lookup",
+            .schedule_id = "schedule-lookup",
+            .start_at = 1785834000,
+            .next_trigger_at = 1785834000,
+        });
     }
 
     Result<std::vector<ReminderRule>> ListRules(const TimingTaskId&) override {
@@ -243,6 +248,14 @@ int main() {
     });
     Check(lookup_failure.status.code == ErrorCode::kUnavailable, "幂等查询失败时应返回 Store 错误");
 
+    const auto update_lookup_failure = lookup_failure_service.UpdateTimerTask({
+        .task_id = "task-lookup",
+        .schedule_id = "schedule-lookup",
+        .change_scope = ChangeScope::kAll,
+        .start_at = 1785920400,
+    });
+    Check(update_lookup_failure.status.code == ErrorCode::kInternal, "实例查询失败时应返回 Store 错误");
+
     const auto invalid_before_lookup = lookup_failure_service.RegisterTimerTask({
         .request_id = "request-invalid-before-lookup",
         .schedule_id = "",
@@ -300,6 +313,19 @@ int main() {
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(single_registered.ok(), "single 修改用例应先注册周期任务");
+    const auto single_task_before_update = single_store.FindTask(single_registered.value->task_id);
+    Check(single_store
+              .UpdateTaskWithInstances({
+                  .task = *single_task_before_update.value,
+                  .upsert_instances = {TimerInstance{
+                      .id = "instance-single",
+                      .task_id = single_registered.value->task_id,
+                      .planned_at = 1785920000,
+                      .status = TimerInstanceStatus::kPending,
+                  }},
+              })
+              .ok(),
+          "single 修改用例应能预置待覆盖实例");
     const auto single_update = single_service.UpdateTimerTask({
         .task_id = single_registered.value->task_id,
         .schedule_id = "schedule-single",
@@ -322,6 +348,25 @@ int main() {
           "single 修改不应改写其他实例");
     Check(single_instances.ok() && single_instances.value->front().status == TimerInstanceStatus::kModified,
           "single 修改产生的实例应进入 modified 状态");
+
+    const auto single_recurrence_update = single_service.UpdateTimerTask({
+        .task_id = single_registered.value->task_id,
+        .schedule_id = "schedule-single",
+        .change_scope = ChangeScope::kSingle,
+        .start_at = 1785924000,
+        .instance_id = "instance-single-2",
+        .target_occurrence_at = 1785920400,
+        .recurrence = RecurrenceRule{.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(single_recurrence_update.status.code == ErrorCode::kInvalidArgument, "single 修改不应接受新的周期规则");
+
+    const auto schedule_conflict = single_service.UpdateTimerTask({
+        .task_id = single_registered.value->task_id,
+        .schedule_id = "schedule-other",
+        .change_scope = ChangeScope::kAll,
+        .start_at = 1785924000,
+    });
+    Check(schedule_conflict.status.code == ErrorCode::kConflict, "修改任务必须匹配所属日程");
 
     InMemoryTimingTaskStore future_store;
     FixedTimingIdGenerator future_ids;
@@ -428,6 +473,19 @@ int main() {
     });
     Check(missing_future_target.status.code == ErrorCode::kInvalidArgument,
           "future 修改缺少 effective_from 应返回参数错误");
+
+    const auto missing_identity = all_service.UpdateTimerTask({
+        .change_scope = ChangeScope::kAll,
+        .start_at = 1786093200,
+    });
+    Check(missing_identity.status.code == ErrorCode::kInvalidArgument, "修改任务缺少标识时应返回参数错误");
+
+    const auto missing_start = all_service.UpdateTimerTask({
+        .task_id = all_registered.value->task_id,
+        .schedule_id = "schedule-all",
+        .change_scope = ChangeScope::kAll,
+    });
+    Check(missing_start.status.code == ErrorCode::kInvalidArgument, "修改任务缺少开始时间时应返回参数错误");
 
     const auto not_found = all_service.UpdateTimerTask({
         .task_id = "task-missing",
