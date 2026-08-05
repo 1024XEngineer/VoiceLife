@@ -128,23 +128,16 @@ class PropertyList {
     /**
      * @brief 向参数列表追加一个参数声明。
      * @param property 参数声明。
+     * @return 无。
      */
     void add_property(Property property);
     /**
-     * @brief 按名称读取参数声明。
-     * @param name 参数名称。
-     * @return 对应参数声明；不存在时抛出异常。
-     */
-    [[nodiscard]] const Property& operator[](const std::string& name) const;
-    /**
      * @brief 读取已绑定的参数值。
      * @param name 参数名称。
-     * @return 指定类型的参数值。
+     * @return 指定类型的参数值；参数不存在或类型不匹配时为空。
      */
     template <typename T>
-    [[nodiscard]] T value(const std::string& name) const {
-        return std::get<T>(values_.at(name));
-    }
+    [[nodiscard]] std::optional<T> value(const std::string& name) const;
     /**
      * @brief 将业务参数声明转换为 MCP 输入 Schema。
      * @return 输入 Schema。
@@ -172,6 +165,16 @@ class PropertyList {
     std::vector<Property> properties_;
     ToolArguments values_;
 };
+
+template <typename T>
+std::optional<T> PropertyList::value(const std::string& name) const {
+    const auto value = values_.find(name);
+    if (value == values_.end()) {
+        return std::nullopt;
+    }
+    const auto* typed_value = std::get_if<T>(&value->second);
+    return typed_value == nullptr ? std::nullopt : std::optional<T>(*typed_value);
+}
 
 /// 使用已校验参数执行工具业务逻辑的回调。
 using PropertyHandler = std::function<ToolResult(const PropertyList&)>;

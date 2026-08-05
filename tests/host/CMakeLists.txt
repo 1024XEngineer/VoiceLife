@@ -43,9 +43,9 @@ add_voicelife_library(timing voicelife_timing
 target_link_libraries(timing PUBLIC contracts)
 add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_server.cc")
-find_path(CJSON_INCLUDE_DIR cjson/cJSON.h PATHS /usr/local/include /opt/homebrew/include REQUIRED)
+find_path(CJSON_HEADER_DIR cJSON.h PATHS /usr/local/include /opt/homebrew/include PATH_SUFFIXES cjson REQUIRED)
 find_library(CJSON_LIBRARY cjson PATHS /usr/local/lib /opt/homebrew/lib REQUIRED)
-target_include_directories(mcp PUBLIC "${CJSON_INCLUDE_DIR}")
+target_include_directories(mcp PRIVATE "${CJSON_HEADER_DIR}")
 target_link_libraries(mcp PUBLIC contracts "${CJSON_LIBRARY}")
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")

@@ -1,10 +1,10 @@
 #include "voicelife/mcp/mcp_server.h"
 
-#include <stdexcept>
+#include <algorithm>
 #include <unordered_set>
 #include <utility>
 
-#include "cjson/cJSON.h"
+#include "cJSON.h"
 
 namespace voicelife::mcp {
 namespace {
@@ -59,22 +59,9 @@ Property::Property(std::string name, PropertyType type, ToolValue default_value)
     : name_(std::move(name)), type_(type), default_value_(std::move(default_value)) {}
 
 Property::Property(std::string name, PropertyType type, int64_t minimum, int64_t maximum)
-    : name_(std::move(name)), type_(type), minimum_(minimum), maximum_(maximum) {
-    if (type != PropertyType::kInteger || minimum > maximum) {
-        throw std::invalid_argument("整数参数范围无效");
-    }
-}
+    : name_(std::move(name)), type_(type), minimum_(minimum), maximum_(maximum) {}
 
 void PropertyList::add_property(Property property) { properties_.push_back(std::move(property)); }
-
-const Property& PropertyList::operator[](const std::string& name) const {
-    for (const auto& property : properties_) {
-        if (property.name() == name) {
-            return property;
-        }
-    }
-    throw std::out_of_range("工具参数不存在：" + name);
-}
 
 ToolInputSchema PropertyList::to_schema() const {
     ToolInputSchema schema;
@@ -154,6 +141,16 @@ Status McpServer::add_tool(std::string name, std::string description, PropertyLi
     }
     if (tools_.contains(name)) {
         return Status::Error(ErrorCode::kAlreadyExists, "工具已注册：" + name);
+    }
+    for (const auto& property : properties) {
+        const ToolInputType input_type = ToInputType(property.type());
+        if ((property.default_value().has_value() && !MatchesType(*property.default_value(), input_type)) ||
+            ((property.minimum().has_value() || property.maximum().has_value()) &&
+             property.type() != PropertyType::kInteger) ||
+            (property.minimum().has_value() && property.maximum().has_value() &&
+             *property.minimum() > *property.maximum())) {
+            return Status::Error(ErrorCode::kInvalidArgument, "工具参数定义无效：" + property.name());
+        }
     }
     const std::string registered_name = name;
     tools_.emplace(registered_name, RegisteredTool{.definition = {.name = std::move(name),
