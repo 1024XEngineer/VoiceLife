@@ -52,7 +52,6 @@ void RequireScheduleTimeRejected(const std::string& time) {
         time + "\"}";
     RequireScheduleRejected(json);
 }
-
 }  // namespace
 
 int main() {
@@ -252,7 +251,6 @@ int main() {
                   .ok() &&
               with_body.content.body.has_value(),
           "可选 content.body 应被接受");
-
     // snooze minutes 与动作数量必须受设备侧预算约束。
     RequireNotificationRejected(
         "{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\",\"kind\":\"reminder_due\","
@@ -285,7 +283,6 @@ int main() {
             "\"actions\":[" +
             actions + "],\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
     }
-
     // ===== ScheduleReceiptIntent 校验分支 =====
     RequireScheduleRejected("42");
     RequireScheduleRejected(
@@ -367,7 +364,6 @@ int main() {
         "{\"schemaVersion\":\"1\",\"eventId\":\"e\",\"correlationId\":\"c\",\"userId\":\"\",\"deviceId\":\"d\","
         "\"operationType\":\"created\",\"scheduleId\":\"s\",\"result\":\"succeeded\",\"summary\":\"x\","
         "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
-
     // ===== ReminderActionResult 校验分支 =====
     RequireResultRejected("null");
     RequireResultRejected(
@@ -416,7 +412,6 @@ int main() {
                   .ok() &&
               full.errorCode.has_value() && full.details.has_value(),
           "可选 errorCode 与 details 应被接受");
-
     // 输出对象可安全复用：成功时整体替换，失败时保持原值。
     NotificationIntent reused_notification;
     reused_notification.content.body = "旧正文";
@@ -444,7 +439,6 @@ int main() {
                   .ok() &&
               reused_notification.businessEventId == "new-event" && reused_notification.content.title == "新标题",
           "通知解析失败时不应改写已有输出");
-
     ScheduleReceiptIntent reused_receipt;
     Check(ParseScheduleReceiptIntent(ParseDocument(R"json({
                 "schemaVersion":"1","eventId":"with-user","correlationId":"c","userId":"old-user",
@@ -473,7 +467,6 @@ int main() {
               reused_receipt.eventId == "without-user" && !reused_receipt.userId.has_value() &&
               reused_receipt.summary == "无用户",
           "日程回执解析失败时不应改写已有输出");
-
     ReminderActionResult reused_result;
     Check(ParseReminderActionResult(ParseDocument(R"json({
                 "schemaVersion":"1","operationId":"with-options","reminderTriggerId":"r",
