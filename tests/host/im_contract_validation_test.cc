@@ -253,6 +253,39 @@ int main() {
               with_body.content.body.has_value(),
           "可选 content.body 应被接受");
 
+    // snooze minutes 与动作数量必须受设备侧预算约束。
+    RequireNotificationRejected(
+        "{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\",\"kind\":\"reminder_due\","
+        "\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},\"scheduleId\":\"s\",\"taskId\":\"t\","
+        "\"instanceId\":\"i\",\"reminderTriggerId\":\"r\",\"reminderType\":\"strong\","
+        "\"content\":{\"title\":\"x\"},\"plannedAt\":\"2026-01-01T00:00:00Z\","
+        "\"triggerAt\":\"2026-01-01T00:00:00Z\",\"actions\":[{\"kind\":\"command\","
+        "\"type\":\"snooze\",\"label\":\"x\",\"params\":{\"minutes\":2147483648}}],"
+        "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    RequireNotificationRejected(
+        "{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\",\"kind\":\"reminder_due\","
+        "\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},\"scheduleId\":\"s\",\"taskId\":\"t\","
+        "\"instanceId\":\"i\",\"reminderTriggerId\":\"r\",\"reminderType\":\"strong\","
+        "\"content\":{\"title\":\"x\"},\"plannedAt\":\"2026-01-01T00:00:00Z\","
+        "\"triggerAt\":\"2026-01-01T00:00:00Z\",\"actions\":[{\"kind\":\"command\","
+        "\"type\":\"snooze\",\"label\":\"x\",\"params\":{\"minutes\":1441}}],"
+        "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    {
+        std::string actions;
+        for (int i = 0; i < 17; ++i) {
+            if (i != 0) actions += ',';
+            actions += "{\"kind\":\"command\",\"type\":\"acknowledge\",\"label\":\"x\"}";
+        }
+        RequireNotificationRejected(
+            "{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\","
+            "\"kind\":\"reminder_due\",\"recipient\":{\"userId\":\"u\",\"deviceId\":\"d\"},"
+            "\"scheduleId\":\"s\",\"taskId\":\"t\",\"instanceId\":\"i\",\"reminderTriggerId\":\"r\","
+            "\"reminderType\":\"strong\",\"content\":{\"title\":\"x\"},"
+            "\"plannedAt\":\"2026-01-01T00:00:00Z\",\"triggerAt\":\"2026-01-01T00:00:00Z\","
+            "\"actions\":[" +
+            actions + "],\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    }
+
     // ===== ScheduleReceiptIntent 校验分支 =====
     RequireScheduleRejected("42");
     RequireScheduleRejected(
@@ -361,6 +394,10 @@ int main() {
     RequireResultRejected(
         "{\"schemaVersion\":\"1\",\"operationId\":\"o\",\"reminderTriggerId\":\"r\",\"status\":\"expired\","
         "\"occurredAt\":\"2026-01-01T24:00:00Z\"}");
+    RequireResultRejected(
+        "{\"schemaVersion\":\"1\",\"operationId\":\"o\",\"reminderTriggerId\":\"r\","
+        "\"status\":\"failed\",\"details\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"
+        "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
     // 可选字段齐全应合法
     ReminderActionResult full;
     Check(ParseReminderActionResult(

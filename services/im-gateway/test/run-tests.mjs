@@ -179,6 +179,33 @@ async function runContractFixtureTests() {
     "invalid_contract",
     "Action UI accepted a non-positive snooze duration",
   );
+  await expectGatewayError(
+    () =>
+      Promise.resolve(
+        parseReminderActionIntent({
+          token: "fixture-token",
+          action: "snooze",
+          params: { minutes: 1441 },
+        }),
+      ),
+    "invalid_contract",
+    "Action UI accepted a snooze duration above the device limit",
+  );
+  await expectGatewayError(
+    () =>
+      Promise.resolve(
+        parseNotificationIntent({
+          ...strong,
+          actions: Array.from({ length: 17 }, () => ({
+            kind: "command",
+            type: "acknowledge",
+            label: "Acknowledge",
+          })),
+        }),
+      ),
+    "invalid_contract",
+    "NotificationIntent accepted more actions than the device limit",
+  );
 
   const { gateway } = await createBoundGateway();
   const first = await submitFixture(gateway, strong);

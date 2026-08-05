@@ -156,10 +156,48 @@ inline Status OptionalIsoDateTime(const JsonValue& root, const char* key, std::o
     return Status::Ok();
 }
 
+inline bool FitsOptionalJsonBudget(const JsonValue& value, size_t depth, size_t& nodes) {
+    constexpr size_t kMaxDepth = 4;
+    constexpr size_t kMaxNodes = 64;
+    constexpr size_t kMaxContainerItems = 16;
+    constexpr size_t kMaxStringBytes = 1024;
+    if (depth > kMaxDepth || ++nodes > kMaxNodes) {
+        return false;
+    }
+    if (value.kind == JsonValue::Kind::kString) {
+        return value.string.size() <= kMaxStringBytes;
+    }
+    if (value.kind == JsonValue::Kind::kArray) {
+        if (value.array.size() > kMaxContainerItems) {
+            return false;
+        }
+        for (const JsonValue& item : value.array) {
+            if (!FitsOptionalJsonBudget(item, depth + 1, nodes)) {
+                return false;
+            }
+        }
+    }
+    if (value.kind == JsonValue::Kind::kObject) {
+        if (value.object.size() > kMaxContainerItems) {
+            return false;
+        }
+        for (const auto& [item_key, item] : value.object) {
+            if (item_key.size() > kMaxStringBytes || !FitsOptionalJsonBudget(item, depth + 1, nodes)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 inline Status OptionalJsonValue(const JsonValue& root, const char* key, std::optional<JsonValue>& out) {
     const JsonValue* value = root.Get(key);
     if (value == nullptr) {
         return Status::Ok();
+    }
+    size_t nodes = 0;
+    if (!FitsOptionalJsonBudget(*value, 0, nodes)) {
+        return Reject("可选 JSON 字段超出资源预算");
     }
     out = *value;
     return Status::Ok();

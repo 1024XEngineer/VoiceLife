@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <map>
 #include <string>
 #include <string_view>
@@ -63,12 +64,23 @@ struct JsonValue {
     [[nodiscard]] const JsonValue* Get(const std::string& key) const;
 };
 
+/// 设备侧 JSON 解析预算。默认值适用于 IM 契约输入，调用方可在更窄的边界覆盖。
+struct JsonParseOptions {
+    size_t max_bytes = 32 * 1024;
+    size_t max_depth = 32;
+    size_t max_nodes = 512;
+    size_t max_object_members = 64;
+    size_t max_array_items = 32;
+    size_t max_string_bytes = 4096;
+    size_t max_allocator_bytes = 128 * 1024;
+};
+
 /**
  * @brief 把 JSON 文本解析为 DOM。
  * @param input JSON 文本。
  * @param out 解析结果节点。
- * @return 语法或结构非法时返回 kInvalidArgument。
+ * @return 语法或结构非法时返回 kInvalidArgument，资源预算耗尽时返回 kUnavailable。
  */
-Status ParseJson(std::string_view input, JsonValue& out);
+Status ParseJson(std::string_view input, JsonValue& out, const JsonParseOptions& options = {});
 
 }  // namespace voicelife

@@ -5,6 +5,7 @@
 #include "voicelife/contracts/json.h"
 
 using voicelife::ErrorCode;
+using voicelife::JsonParseOptions;
 using voicelife::JsonValue;
 using voicelife::Status;
 using voicelife::test::Check;
@@ -92,5 +93,25 @@ int main() {
     ParseRejected("\"\\udc00\"");
     ParseRejected("\"\\ud800\\u0041\"");
     ParseRejected("\"\\u12\"");
+    ParseRejected(std::string(33 * 1024, 'x'));
+    ParseRejected(std::string(40, '[') + std::string(40, ']'));
+    ParseRejected(std::string("\"") + std::string(4097, 'x') + "\"");
+
+    JsonParseOptions constrained;
+    JsonValue budget_value;
+    constrained.max_array_items = 1;
+    Check(!voicelife::ParseJson("[1,2]", budget_value, constrained).ok(), "数组元素预算必须生效");
+    constrained = {};
+    constrained.max_object_members = 1;
+    Check(!voicelife::ParseJson("{\"a\":1,\"b\":2}", budget_value, constrained).ok(), "对象成员预算必须生效");
+    constrained = {};
+    constrained.max_nodes = 2;
+    Check(!voicelife::ParseJson("[1,2]", budget_value, constrained).ok(), "节点预算必须生效");
+    constrained = {};
+    constrained.max_allocator_bytes = 1;
+    JsonValue preserved = JsonValue::String("preserved");
+    const Status resource_status = voicelife::ParseJson("{}", preserved, constrained);
+    Check(!resource_status.ok() && resource_status.code == ErrorCode::kUnavailable && preserved.string == "preserved",
+          "allocator 预算耗尽应返回资源错误且不改写输出");
     return 0;
 }

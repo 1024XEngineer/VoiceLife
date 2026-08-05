@@ -1,6 +1,7 @@
 #include "voicelife/contracts/im/notification_intent.h"
 
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -12,6 +13,9 @@ namespace {
 
 using detail::Reject;
 using detail::RequireString;
+
+inline constexpr size_t kMaxNotificationActions = 16;
+inline constexpr int kMaxSnoozeMinutes = 24 * 60;
 
 [[nodiscard]] Status ParseRecipient(const JsonValue& root, NotificationRecipient& out) {
     const JsonValue* recipient = root.Get("recipient");
@@ -61,8 +65,10 @@ using detail::RequireString;
         }
         const JsonValue* minutes = params->Get("minutes");
         if (minutes == nullptr || minutes->kind != JsonValue::Kind::kNumber || minutes->number <= 0 ||
-            std::floor(minutes->number) != minutes->number) {
-            return Reject("动作 params.minutes 必须是正整数");
+            std::floor(minutes->number) != minutes->number ||
+            minutes->number > static_cast<double>(std::numeric_limits<int>::max()) ||
+            minutes->number > static_cast<double>(kMaxSnoozeMinutes)) {
+            return Reject("动作 params.minutes 必须是 1 到 1440 的整数");
         }
         out.minutes = static_cast<int>(minutes->number);
     }
@@ -98,6 +104,9 @@ using detail::RequireString;
     }
     if (out.reminderType == "strong" && actions->array.empty()) {
         return Reject("强提醒的 actions 必须包含至少一个动作");
+    }
+    if (actions->array.size() > kMaxNotificationActions) {
+        return Reject("actions 数量超出上限");
     }
     for (const JsonValue& action : actions->array) {
         NotificationAction parsed;
