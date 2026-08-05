@@ -75,7 +75,7 @@ foreach(component_name IN LISTS known_components)
 endforeach()
 
 assert_dependencies(voicelife_contracts PUBLIC)
-assert_dependencies(voicelife_contracts PRIVATE)
+assert_dependencies(voicelife_contracts PRIVATE yyjson)
 assert_dependencies(voicelife_schedule PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_schedule PRIVATE)
 assert_dependencies(voicelife_timing PUBLIC voicelife_contracts)

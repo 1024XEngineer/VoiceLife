@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(voicelife_host_tests LANGUAGES CXX)
+project(voicelife_host_tests LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,6 +21,12 @@ endif()
 
 set(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../..")
 
+add_library(yyjson STATIC "${ROOT_DIR}/third_party/yyjson/yyjson.c")
+target_include_directories(yyjson PUBLIC "${ROOT_DIR}/third_party/yyjson")
+if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(yyjson PRIVATE -w)
+endif()
+
 function(add_voicelife_library target component)
     add_library(${target} STATIC ${ARGN})
     target_include_directories(${target} PUBLIC "${ROOT_DIR}/components/${component}/include")
@@ -32,6 +38,7 @@ add_voicelife_library(contracts voicelife_contracts
     "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_intent.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_receipt.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_result.cc")
+target_link_libraries(contracts PRIVATE yyjson)
 add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_module.cc")
 target_link_libraries(schedule PUBLIC contracts)

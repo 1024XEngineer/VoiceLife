@@ -20,7 +20,8 @@ JsonValue ParseOk(std::string_view input) {
 void ParseRejected(std::string_view input) {
     JsonValue value;
     const Status status = voicelife::ParseJson(input, value);
-    Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, "非法 JSON 应被拒绝");
+    const std::string message = "非法 JSON 应被拒绝: " + std::string(input);
+    Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
 }
 
 }  // namespace
@@ -47,6 +48,9 @@ int main() {
     Check(ParseOk("\"\\ud83d\\ude00\"").string == "\xF0\x9F\x98\x80", "代理对转义");
     Check(ParseOk("\"知道了\"").string == "知道了", "UTF-8 中文原样保留");
     Check(ParseOk("\"a\\/b\"").string == "a/b", "正斜杠转义");
+    const JsonValue embedded_null = ParseOk("\"\\u0000x\"");
+    Check(embedded_null.string.size() == 2 && embedded_null.string[0] == '\0' && embedded_null.string[1] == 'x',
+          "字符串中的 NUL 字符及其后内容必须完整保留");
 
     // 数组
     Check(ParseOk("[1, 2, 3]").array.size() == 3, "数字数组");
@@ -77,6 +81,7 @@ int main() {
     ParseRejected("-");
     ParseRejected("1.");
     ParseRejected("1e");
+    ParseRejected("1e999");
     ParseRejected("tru");
     ParseRejected("nul");
     ParseRejected("{\"a\": 1,}");
