@@ -456,6 +456,12 @@ int main() {
                               .planned_at = 1786006800,
                               .status = TimerInstanceStatus::kPending,
                           },
+                          TimerInstance{
+                              .id = "instance-skipped-after-future-boundary",
+                              .task_id = future_terminal_instance_registered.value->task_id,
+                              .planned_at = 1786093200,
+                              .status = TimerInstanceStatus::kSkipped,
+                          },
                       },
               })
               .ok(),
@@ -478,8 +484,9 @@ int main() {
         future_terminal_instance_store.ListInstances(future_terminal_instance_registered.value->task_id);
     Check(instances_after_future_terminal_instance_cancel.ok() &&
               instances_after_future_terminal_instance_cancel.value->at(0).status == TimerInstanceStatus::kCompleted &&
-              instances_after_future_terminal_instance_cancel.value->at(1).status == TimerInstanceStatus::kSkipped,
-          "future 取消应保留 completed 实例并跳过仍待处理实例");
+              instances_after_future_terminal_instance_cancel.value->at(1).status == TimerInstanceStatus::kSkipped &&
+              instances_after_future_terminal_instance_cancel.value->at(2).status == TimerInstanceStatus::kSkipped,
+          "future 取消应保留终态实例并跳过仍待处理实例");
 
     InMemoryTimingTaskStore all_cancel_store;
     FixedTimingIdGenerator all_cancel_ids;
