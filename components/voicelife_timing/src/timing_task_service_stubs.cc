@@ -20,10 +20,6 @@ Result<CancelTimerTaskResult> DefaultTimingTaskService::CancelTimerTask(const Ca
     return NotImplemented<CancelTimerTaskResult>("CancelTimerTask");
 }
 
-Result<UpsertReminderRulesResult> DefaultTimingTaskService::UpsertReminderRules(const UpsertReminderRulesCommand&) {
-    return NotImplemented<UpsertReminderRulesResult>("UpsertReminderRules");
-}
-
 Result<DeleteReminderRuleResult> DefaultTimingTaskService::DeleteReminderRule(const DeleteReminderRuleCommand&) {
     return NotImplemented<DeleteReminderRuleResult>("DeleteReminderRule");
 }

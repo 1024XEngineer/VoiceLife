@@ -39,6 +39,13 @@ class TimingTaskStorePort {
      * @return 规则列表或存储错误。
      */
     virtual Result<std::vector<ReminderRule>> ListRules(const TimingTaskId& task_id) = 0;
+    /**
+     * @brief 原子创建或更新同一任务的一组提醒规则。
+     * @param task_id 规则所属的定时任务标识。
+     * @param rules 要创建或更新的规则；该操作不修改已物化的提醒触发。
+     * @return 全部规则提交成功或完全不写入的结果；未知任务或跨任务规则标识返回领域错误。
+     */
+    virtual Status UpsertRules(const TimingTaskId& task_id, const std::vector<ReminderRule>& rules) = 0;
 };
 
 /// 提供可替换的当前时间来源。
