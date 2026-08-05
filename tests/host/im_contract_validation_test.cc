@@ -398,6 +398,14 @@ int main() {
         "{\"schemaVersion\":\"1\",\"operationId\":\"o\",\"reminderTriggerId\":\"r\","
         "\"status\":\"failed\",\"details\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"
         "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    RequireResultRejected(
+        "{\"schemaVersion\":\"1\",\"operationId\":\"o\",\"reminderTriggerId\":\"r\","
+        "\"status\":\"failed\",\"details\":\"" +
+        std::string(1025, 'x') + "\",\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
+    RequireResultRejected(
+        "{\"schemaVersion\":\"1\",\"operationId\":\"o\",\"reminderTriggerId\":\"r\","
+        "\"status\":\"failed\",\"details\":[[[[[0]]]]],"
+        "\"occurredAt\":\"2026-01-01T00:00:00Z\"}");
     // 可选字段齐全应合法
     ReminderActionResult full;
     Check(ParseReminderActionResult(

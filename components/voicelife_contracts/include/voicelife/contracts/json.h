@@ -79,6 +79,7 @@ struct JsonParseOptions {
  * @brief 把 JSON 文本解析为 DOM。
  * @param input JSON 文本。
  * @param out 解析结果节点。
+ * @param options 输入和内存资源预算。
  * @return 语法或结构非法时返回 kInvalidArgument，资源预算耗尽时返回 kUnavailable。
  */
 Status ParseJson(std::string_view input, JsonValue& out, const JsonParseOptions& options = {});
