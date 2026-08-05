@@ -73,7 +73,15 @@ import type {
 const DEFAULT_ACTION_WINDOW_MINUTES = 10;
 const DEFAULT_PAIRING_WINDOW_MINUTES = 10;
 
+/** 渠道账号注册、停用、查询与健康检查的默认实现。 */
 export class DefaultChannelAccountApplication implements ChannelAccountApplication {
+    /**
+     * 创建渠道账号应用服务。
+     * @param unitOfWork 事务工作单元。
+     * @param ids 标识生成器。
+     * @param clock 业务时钟。
+     * @param healthPort 渠道健康检查端口。
+     */
     public constructor(
         private readonly unitOfWork: ImUnitOfWork,
         private readonly ids: IdGenerator,
@@ -81,6 +89,7 @@ export class DefaultChannelAccountApplication implements ChannelAccountApplicati
         private readonly healthPort: ChannelHealthPort,
     ) {}
 
+    /** {@inheritDoc ChannelAccountApplication.register} */
     public register(command: RegisterChannelAccountCommand): Promise<ChannelAccount> {
         return this.unitOfWork.transaction(async (tx) => {
             const now = this.clock.now();
@@ -101,6 +110,7 @@ export class DefaultChannelAccountApplication implements ChannelAccountApplicati
         });
     }
 
+    /** {@inheritDoc ChannelAccountApplication.disable} */
     public disable(channelAccountId: ChannelAccountId): Promise<void> {
         return this.unitOfWork.transaction(async (tx) => {
             const account = await tx.channelAccounts.findById(channelAccountId);
@@ -113,10 +123,12 @@ export class DefaultChannelAccountApplication implements ChannelAccountApplicati
         });
     }
 
+    /** {@inheritDoc ChannelAccountApplication.find} */
     public find(channelAccountId: ChannelAccountId): Promise<ChannelAccount | undefined> {
         return this.unitOfWork.transaction((tx) => tx.channelAccounts.findById(channelAccountId));
     }
 
+    /** {@inheritDoc ChannelAccountApplication.health} */
     public async health(channelAccountId: ChannelAccountId): Promise<ChannelHealth> {
         const account = await this.find(channelAccountId);
         if (account === undefined) {
@@ -126,7 +138,16 @@ export class DefaultChannelAccountApplication implements ChannelAccountApplicati
     }
 }
 
+/** 配对会话签发、确认、取消与过期处理的默认实现。 */
 export class DefaultPairingApplication implements PairingApplication {
+    /**
+     * 创建配对应用服务。
+     * @param unitOfWork 事务工作单元。
+     * @param ids 标识生成器。
+     * @param clock 业务时钟。
+     * @param pairingCodes 配对码端口。
+     * @param identityProtector 外部身份保护端口。
+     */
     public constructor(
         private readonly unitOfWork: ImUnitOfWork,
         private readonly ids: IdGenerator,
@@ -135,6 +156,7 @@ export class DefaultPairingApplication implements PairingApplication {
         private readonly identityProtector: ExternalIdentityProtector,
     ) {}
 
+    /** {@inheritDoc PairingApplication.create} */
     public async create(command: CreatePairingSessionCommand): Promise<CreatedPairingSession> {
         const code = await this.pairingCodes.issue();
         const now = this.clock.now();
@@ -152,11 +174,13 @@ export class DefaultPairingApplication implements PairingApplication {
         return { session, displayCode: code.displayCode };
     }
 
+    /** {@inheritDoc PairingApplication.find} */
     public async find(pairingSessionId: PairingSessionId): Promise<PairingSession | undefined> {
         await this.expireDue();
         return this.unitOfWork.transaction((tx) => tx.pairingSessions.findById(pairingSessionId));
     }
 
+    /** {@inheritDoc PairingApplication.confirm} */
     public async confirm(command: ConfirmPairingCommand): Promise<ImBinding> {
         await this.expireDue();
         const codeHash = await this.pairingCodes.hash(command.displayCode);
@@ -220,6 +244,7 @@ export class DefaultPairingApplication implements PairingApplication {
         });
     }
 
+    /** {@inheritDoc PairingApplication.cancel} */
     public cancel(pairingSessionId: PairingSessionId): Promise<void> {
         return this.unitOfWork.transaction(async (tx) => {
             const session = await tx.pairingSessions.findById(pairingSessionId);
@@ -228,6 +253,7 @@ export class DefaultPairingApplication implements PairingApplication {
         });
     }
 
+    /** {@inheritDoc PairingApplication.expireDue} */
     public expireDue(): Promise<number> {
         return this.unitOfWork.transaction(async (tx) => {
             const sessions = await tx.pairingSessions.findExpiredPairingSessions(this.clock.now());
@@ -239,24 +265,34 @@ export class DefaultPairingApplication implements PairingApplication {
     }
 }
 
+/** 外部身份绑定查询、解绑与撤销的默认实现。 */
 export class DefaultBindingApplication implements BindingApplication {
+    /**
+     * 创建绑定应用服务。
+     * @param unitOfWork 事务工作单元。
+     * @param clock 业务时钟。
+     */
     public constructor(
         private readonly unitOfWork: ImUnitOfWork,
         private readonly clock: Clock,
     ) {}
 
+    /** {@inheritDoc BindingApplication.list} */
     public list(userId: UserId): Promise<readonly ImBinding[]> {
         return this.unitOfWork.transaction((tx) => tx.bindings.listActiveByUser(userId));
     }
 
+    /** {@inheritDoc BindingApplication.unbind} */
     public unbind(bindingId: BindingId): Promise<void> {
         return this.changeStatus(bindingId, 'unbound');
     }
 
+    /** {@inheritDoc BindingApplication.revoke} */
     public revoke(bindingId: BindingId): Promise<void> {
         return this.changeStatus(bindingId, 'revoked');
     }
 
+    /** {@inheritDoc BindingApplication.findActiveByExternalIdentity} */
     public findActiveByExternalIdentity(externalIdentityId: ExternalIdentityId): Promise<ImBinding | undefined> {
         return this.unitOfWork.transaction((tx) => tx.bindings.findActiveByIdentity(externalIdentityId));
     }
@@ -277,12 +313,19 @@ export class DefaultBindingApplication implements BindingApplication {
     }
 }
 
+/** 规范化入站事件幂等落库与状态推进的默认实现。 */
 export class DefaultInboundEventApplication implements InboundEventApplication {
+    /**
+     * 创建入站事件应用服务。
+     * @param unitOfWork 事务工作单元。
+     * @param clock 业务时钟。
+     */
     public constructor(
         private readonly unitOfWork: ImUnitOfWork,
         private readonly clock: Clock,
     ) {}
 
+    /** {@inheritDoc InboundEventApplication.recordIfNew} */
     public recordIfNew(event: NormalizedImEvent): Promise<'accepted' | 'duplicate'> {
         return this.unitOfWork.transaction(async (tx) => {
             const duplicate = await tx.inboundEvents.findByExternalEvent(event.channelAccountId, event.externalEventId);
@@ -312,14 +355,17 @@ export class DefaultInboundEventApplication implements InboundEventApplication {
         });
     }
 
+    /** {@inheritDoc InboundEventApplication.markProcessing} */
     public markProcessing(eventId: NormalizedImEvent['id']): Promise<void> {
         return this.updateStatus(eventId, 'processing');
     }
 
+    /** {@inheritDoc InboundEventApplication.markProcessed} */
     public markProcessed(eventId: NormalizedImEvent['id']): Promise<void> {
         return this.updateStatus(eventId, 'processed');
     }
 
+    /** {@inheritDoc InboundEventApplication.markFailed} */
     public markFailed(eventId: NormalizedImEvent['id']): Promise<void> {
         return this.updateStatus(eventId, 'failed');
     }
@@ -338,7 +384,15 @@ export class DefaultInboundEventApplication implements InboundEventApplication {
     }
 }
 
+/** 将平台事件路由至绑定、回执或动作流程的默认实现。 */
 export class DefaultPlatformEventApplication implements PlatformEventApplication {
+    /**
+     * 创建平台事件路由服务。
+     * @param inboundEvents 入站事件状态服务。
+     * @param pairing 配对服务。
+     * @param receipts 回执服务。
+     * @param actionUi 动作入口服务。
+     */
     public constructor(
         private readonly inboundEvents: InboundEventApplication,
         private readonly pairing: PairingApplication,
@@ -346,6 +400,7 @@ export class DefaultPlatformEventApplication implements PlatformEventApplication
         private readonly actionUi: ActionUiApplication,
     ) {}
 
+    /** {@inheritDoc PlatformEventApplication.postEvent} */
     public async postEvent(event: NormalizedImEvent): Promise<void | ReminderActionCommand> {
         if ((await this.inboundEvents.recordIfNew(event)) === 'duplicate') return;
         await this.inboundEvents.markProcessing(event.id);
@@ -359,6 +414,11 @@ export class DefaultPlatformEventApplication implements PlatformEventApplication
         }
     }
 
+    /**
+     * 分发一个已经完成平台归一化的入站事件。
+     * @param event 规范化入站事件。
+     * @returns 动作事件对应的设备命令；其他事件不返回值。
+     */
     private async dispatch(event: NormalizedImEvent): Promise<void | ReminderActionCommand> {
         if (event.type === 'action.triggered') {
             return this.actionUi.execute(
@@ -387,7 +447,15 @@ export class DefaultPlatformEventApplication implements PlatformEventApplication
     }
 }
 
+/** 将设备通知意图转换为幂等投递记录的默认实现。 */
 export class DefaultNotificationApplication implements NotificationApplication {
+    /**
+     * 创建通知受理服务。
+     * @param unitOfWork 事务工作单元。
+     * @param ids 标识生成器。
+     * @param clock 业务时钟。
+     * @param capabilities 渠道能力解析端口。
+     */
     public constructor(
         private readonly unitOfWork: ImUnitOfWork,
         private readonly ids: IdGenerator,
@@ -395,6 +463,7 @@ export class DefaultNotificationApplication implements NotificationApplication {
         private readonly capabilities: ChannelCapabilityResolver,
     ) {}
 
+    /** {@inheritDoc NotificationApplication.submitScheduleReceipt} */
     public submitScheduleReceipt(intent: ScheduleReceiptIntent): Promise<NotificationSubmission> {
         return this.createDeliveries({
             businessEventId: intent.eventId,
@@ -406,6 +475,7 @@ export class DefaultNotificationApplication implements NotificationApplication {
         });
     }
 
+    /** {@inheritDoc NotificationApplication.submitNotification} */
     public submitNotification(intent: NotificationIntent): Promise<NotificationSubmission> {
         return this.createDeliveries({
             businessEventId: intent.businessEventId,
@@ -425,6 +495,11 @@ export class DefaultNotificationApplication implements NotificationApplication {
         });
     }
 
+    /**
+     * 创建通知交付。
+     * @param input 交付输入。
+     * @returns 通知交付。
+     */
     private createDeliveries(input: {
         readonly businessEventId: ScheduleReceiptIntent['eventId'];
         readonly correlationId: ScheduleReceiptIntent['correlationId'];
@@ -528,13 +603,21 @@ export class DefaultNotificationApplication implements NotificationApplication {
     }
 }
 
+/** 投递详情查询与死信重试的默认实现。 */
 export class DefaultDeliveryApplication implements DeliveryApplication {
+    /**
+     * 创建投递查询与恢复服务。
+     * @param unitOfWork 事务工作单元。
+     * @param ids 标识生成器。
+     * @param clock 业务时钟。
+     */
     public constructor(
         private readonly unitOfWork: ImUnitOfWork,
         private readonly ids: IdGenerator,
         private readonly clock: Clock,
     ) {}
 
+    /** {@inheritDoc DeliveryApplication.find} */
     public find(deliveryId: DeliveryId): Promise<DeliveryDetails | undefined> {
         return this.unitOfWork.transaction(async (tx) => {
             const delivery = await tx.deliveries.findById(deliveryId);
@@ -547,6 +630,7 @@ export class DefaultDeliveryApplication implements DeliveryApplication {
         });
     }
 
+    /** {@inheritDoc DeliveryApplication.retryDeadLetter} */
     public retryDeadLetter(deliveryId: DeliveryId): Promise<Delivery> {
         return this.unitOfWork.transaction(async (tx) => {
             const delivery = await tx.deliveries.findById(deliveryId);
@@ -574,7 +658,19 @@ export class DefaultDeliveryApplication implements DeliveryApplication {
     }
 }
 
+/** 消息渲染、发送及发送尝试状态推进的默认实现。 */
 export class DefaultDeliveryDispatchApplication implements DeliveryDispatchApplication {
+    /**
+     * 创建投递调度服务。
+     * @param unitOfWork 事务工作单元。
+     * @param ids 标识生成器。
+     * @param clock 业务时钟。
+     * @param capabilities 渠道能力解析端口。
+     * @param conversations 会话解析端口。
+     * @param renderer 消息渲染端口。
+     * @param channel IM 发送端口。
+     * @param actionUi 动作入口服务。
+     */
     public constructor(
         private readonly unitOfWork: ImUnitOfWork,
         private readonly ids: IdGenerator,
@@ -586,6 +682,7 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
         private readonly actionUi: ActionUiApplication,
     ) {}
 
+    /** {@inheritDoc DeliveryDispatchApplication.dispatch} */
     public async dispatch(deliveryId: DeliveryId): Promise<Delivery> {
         const target = await this.unitOfWork.transaction(async (tx) => {
             const delivery = await tx.deliveries.findById(deliveryId);
@@ -700,7 +797,7 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
         });
     }
 
-    /** Retry workers call this after their configured retry budget is exhausted. */
+    /** {@inheritDoc DeliveryDispatchApplication.markDeadLetter} */
     public markDeadLetter(deliveryId: DeliveryId): Promise<Delivery> {
         return this.unitOfWork.transaction(async (tx) => {
             const delivery = await tx.deliveries.findById(deliveryId);
@@ -724,13 +821,21 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
     }
 }
 
+/** 平台投递回执去重与终态归并的默认实现。 */
 export class DefaultReceiptApplication implements ReceiptApplication {
+    /**
+     * 创建投递回执服务。
+     * @param unitOfWork 事务工作单元。
+     * @param ids 标识生成器。
+     * @param clock 业务时钟。
+     */
     public constructor(
         private readonly unitOfWork: ImUnitOfWork,
         private readonly ids: IdGenerator,
         private readonly clock: Clock,
     ) {}
 
+    /** {@inheritDoc ReceiptApplication.record} */
     public record(receipt: NormalizedDeliveryReceipt): Promise<void> {
         return this.unitOfWork.transaction(async (tx) => {
             if ((await tx.deliveries.findReceiptByDedupeKey(receipt.dedupeKey)) !== undefined) {
@@ -766,7 +871,15 @@ export class DefaultReceiptApplication implements ReceiptApplication {
     }
 }
 
+/** 提醒动作准备、派发、回放和结果处理的默认实现。 */
 export class DefaultActionApplication implements ActionApplication {
+    /**
+     * 创建提醒动作应用服务。
+     * @param unitOfWork 事务工作单元。
+     * @param stream 动作命令流端口。
+     * @param ids 标识生成器。
+     * @param clock 业务时钟。
+     */
     public constructor(
         private readonly unitOfWork: ImUnitOfWork,
         private readonly stream: ActionCommandStreamPort,
@@ -774,6 +887,7 @@ export class DefaultActionApplication implements ActionApplication {
         private readonly clock: Clock,
     ) {}
 
+    /** {@inheritDoc ActionApplication.prepareToken} */
     public prepareToken(deliveryId: DeliveryId): Promise<ActionTokenClaims> {
         return this.unitOfWork.transaction(async (tx) => {
             const delivery = await tx.deliveries.findById(deliveryId);
@@ -795,6 +909,7 @@ export class DefaultActionApplication implements ActionApplication {
         });
     }
 
+    /** {@inheritDoc ActionApplication.inspectPrepared} */
     public inspectPrepared(claims: ActionTokenClaims): Promise<ActionUiView> {
         return this.unitOfWork.transaction(async (tx) => {
             const delivery = await tx.deliveries.findById(claims.deliveryId);
@@ -815,6 +930,7 @@ export class DefaultActionApplication implements ActionApplication {
         });
     }
 
+    /** {@inheritDoc ActionApplication.triggerPrepared} */
     public async triggerPrepared(command: TriggerPreparedActionCommand): Promise<ReminderActionCommand> {
         const actionParams = validateReminderActionParams(command.actionType, command.actionParams);
         const prepared = await this.unitOfWork.transaction(async (tx) => {
@@ -881,6 +997,7 @@ export class DefaultActionApplication implements ActionApplication {
         return prepared.command;
     }
 
+    /** {@inheritDoc ActionApplication.recordResult} */
     public recordResult(commandId: ActionId, deviceId: DeviceId, result: ReminderActionResult): Promise<ImAction> {
         return this.recordResultAndClose(commandId, deviceId, result);
     }
@@ -934,6 +1051,7 @@ export class DefaultActionApplication implements ActionApplication {
         return updated;
     }
 
+    /** {@inheritDoc ActionApplication.expireDue} */
     public async expireDue(): Promise<number> {
         const expired = await this.unitOfWork.transaction(async (tx) => {
             const actions = await tx.actions.findExpiredActions(this.clock.now());
@@ -950,6 +1068,7 @@ export class DefaultActionApplication implements ActionApplication {
         return expired.length;
     }
 
+    /** {@inheritDoc ActionApplication.resolveActionWindow} */
     public resolveActionWindow(deviceId: DeviceId, reminderTriggerId: ReminderTriggerId): Promise<IsoDateTime> {
         return this.unitOfWork.transaction(async (tx) => {
             const delivery = await tx.deliveries.findActiveActionWindow(deviceId, reminderTriggerId, this.clock.now());
@@ -960,6 +1079,7 @@ export class DefaultActionApplication implements ActionApplication {
         });
     }
 
+    /** {@inheritDoc ActionApplication.markProcessing} */
     public markProcessing(actionId: ActionId, deviceId: DeviceId, reminderTriggerId: ReminderTriggerId): Promise<void> {
         return this.unitOfWork.transaction(async (tx) => {
             const action = await tx.actions.findById(actionId);
@@ -987,14 +1107,17 @@ export class DefaultActionApplication implements ActionApplication {
         });
     }
 
+    /** {@inheritDoc ActionApplication.find} */
     public find(actionId: ActionId): Promise<ImAction | undefined> {
         return this.unitOfWork.transaction((tx) => tx.actions.findById(actionId));
     }
 
+    /** {@inheritDoc ActionApplication.findByOperationId} */
     public findByOperationId(operationId: OperationId): Promise<ImAction | undefined> {
         return this.unitOfWork.transaction((tx) => tx.actions.findByOperationId(operationId));
     }
 
+    /** {@inheritDoc ActionApplication.replayPending} */
     public replayPending(
         deviceId: DeviceId,
         reminderTriggerId: ReminderTriggerId,
@@ -1043,17 +1166,26 @@ export class DefaultActionApplication implements ActionApplication {
     }
 }
 
+/** 短期动作令牌签发、展示与执行的默认实现。 */
 export class DefaultActionUiApplication implements ActionUiApplication {
+    /**
+     * 创建动作页面应用服务。
+     * @param tokens 动作令牌端口。
+     * @param actions 提醒动作服务。
+     * @param clock 业务时钟。
+     */
     public constructor(
         private readonly tokens: ActionTokenPort,
         private readonly actions: ActionApplication,
         private readonly clock: Clock,
     ) {}
 
+    /** {@inheritDoc ActionUiApplication.issue} */
     public async issue(deliveryId: DeliveryId): Promise<string> {
         return this.tokens.issue(await this.actions.prepareToken(deliveryId));
     }
 
+    /** {@inheritDoc ActionUiApplication.show} */
     public async show(token: string): Promise<ActionUiView> {
         const claims = await this.tokens.verify(token);
         if (claims.expiresAt <= this.clock.now()) {
@@ -1062,6 +1194,7 @@ export class DefaultActionUiApplication implements ActionUiApplication {
         return this.actions.inspectPrepared(claims);
     }
 
+    /** {@inheritDoc ActionUiApplication.execute} */
     public async execute(
         input: Parameters<ActionUiApplication['execute']>[0],
         context?: Parameters<ActionUiApplication['execute']>[1],
@@ -1077,6 +1210,11 @@ export class DefaultActionUiApplication implements ActionUiApplication {
     }
 }
 
+/**
+ * 将 ImAction 转换为 ReminderActionCommand 的辅助函数。
+ * @param action 要转换的 ImAction 动作。
+ * @returns 转换后的 ReminderActionCommand 命令。
+ */
 function toCommand(action: ImAction): ReminderActionCommand {
     const minutes =
         typeof action.actionParams === 'object' &&
@@ -1100,10 +1238,21 @@ function toCommand(action: ImAction): ReminderActionCommand {
     };
 }
 
+/**
+ * 将 InboundEventType 转换为归一化的入站事件类型。
+ * @param type 要转换的类型。
+ * @returns 归一化的入站事件类型。
+ */
 function toInboundEventType(type: NormalizedImEvent['type']): NormalizedImEvent['type'] {
     return type;
 }
 
+/**
+ * 选择合适的呈现类型。
+ * @param capabilities 通道能力解析器的返回能力。
+ * @param hasActions 是否有动作。
+ * @returns 呈现类型。
+ */
 function choosePresentationType(
     capabilities: Awaited<ReturnType<ChannelCapabilityResolver['resolve']>>,
     hasActions: boolean,
@@ -1115,6 +1264,11 @@ function choosePresentationType(
     return 'text_with_action_ui';
 }
 
+/**
+ * 读取强提醒元数据。
+ * @param payload 元数据的 JSON 值。
+ * @returns 强提醒元数据，不符合结构时返回 undefined。
+ */
 function readStrongReminderMetadata(payload: JsonValue):
     | {
           readonly deviceId: DeviceId;
@@ -1155,6 +1309,12 @@ function readStrongReminderMetadata(payload: JsonValue):
     };
 }
 
+/**
+ * 验证提醒动作参数。
+ * @param action 动作类型。
+ * @param params 动作参数。
+ * @returns 验证后的参数。
+ */
 function validateReminderActionParams(
     action: ReminderActionCommand['action'],
     params: JsonValue | undefined,
@@ -1178,6 +1338,12 @@ function validateReminderActionParams(
     return { minutes: params.minutes };
 }
 
+/**
+ * 推进交付状态。
+ * @param current 当前状态。
+ * @param receipt 接收状态。
+ * @returns 推进后的状态。
+ */
 function advanceDeliveryStatus(current: DeliveryStatus, receipt: NormalizedDeliveryReceipt['stage']): DeliveryStatus {
     if (current === 'delivered') return current;
     if (receipt === 'delivered') return 'delivered';

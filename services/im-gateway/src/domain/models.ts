@@ -21,6 +21,7 @@ import type { NotificationSubmission, ReminderActionKind, ReminderActionResult }
 import type { ImPlatform } from '../contracts/platform-events.js';
 import type { IsoDateTime, JsonValue } from '../shared/types.js';
 
+/** 渠道账号可用的消息与交互能力。 */
 export interface ChannelCapabilities {
     readonly proactiveMessage: boolean;
     readonly nativeAction: boolean;
@@ -29,8 +30,10 @@ export interface ChannelCapabilities {
     readonly presentationTypes: readonly PresentationType[];
 }
 
+/** 渠道可接受的消息呈现形式。 */
 export type PresentationType = 'native_card' | 'template' | 'rich_text' | 'text_with_action_ui';
 
+/** Gateway 管理的租户级 IM 渠道账号。 */
 export interface ChannelAccount {
     readonly id: ChannelAccountId;
     readonly platform: ImPlatform;
@@ -44,6 +47,7 @@ export interface ChannelAccount {
     readonly updatedAt: IsoDateTime;
 }
 
+/** 设备与外部 IM 身份建立绑定前的短期会话。 */
 export interface PairingSession {
     readonly id: PairingSessionId;
     readonly displayCodeHash: string;
@@ -56,6 +60,7 @@ export interface PairingSession {
     readonly confirmedAt?: IsoDateTime;
 }
 
+/** 渠道账号下经过保护的外部用户身份。 */
 export interface ExternalIdentity {
     readonly id: ExternalIdentityId;
     readonly channelAccountId: ChannelAccountId;
@@ -67,6 +72,7 @@ export interface ExternalIdentity {
     readonly updatedAt: IsoDateTime;
 }
 
+/** 向外部身份发送消息时使用的会话引用。 */
 export interface ConversationRef {
     readonly channelAccountId: ChannelAccountId;
     readonly externalIdentityId: ExternalIdentityId;
@@ -74,6 +80,7 @@ export interface ConversationRef {
     readonly externalConversationIdCiphertext: string;
 }
 
+/** VoiceLife 用户或设备与外部 IM 身份的绑定关系。 */
 export interface ImBinding {
     readonly id: BindingId;
     readonly userId: UserId;
@@ -86,6 +93,7 @@ export interface ImBinding {
     readonly revokedAt?: IsoDateTime;
 }
 
+/** 用于入站幂等和处理状态跟踪的事件记录。 */
 export interface InboundEventRecord {
     readonly id: InboundEventId;
     readonly channelAccountId: ChannelAccountId;
@@ -97,9 +105,11 @@ export interface InboundEventRecord {
     readonly receivedAt: IsoDateTime;
 }
 
+/** 消息投递的处理状态。 */
 export type DeliveryStatus =
     'pending' | 'sending' | 'accepted' | 'delivered' | 'retryable_failed' | 'permanent_failed' | 'dead_letter';
 
+/** 从业务事件到外部消息的一次投递。 */
 export interface Delivery {
     readonly id: DeliveryId;
     readonly businessEventId: EventId;
@@ -117,7 +127,7 @@ export interface Delivery {
     readonly updatedAt: IsoDateTime;
 }
 
-/** Request-level idempotency record, including zero-delivery submissions. */
+/** 请求级幂等记录，也覆盖没有产生投递的受理结果。 */
 export interface IntentSubmissionRecord {
     readonly businessEventId: EventId;
     readonly kind: Delivery['kind'];
@@ -126,6 +136,7 @@ export interface IntentSubmissionRecord {
     readonly createdAt: IsoDateTime;
 }
 
+/** 对同一投递执行的一次发送尝试。 */
 export interface DeliveryAttempt {
     readonly id: DeliveryAttemptId;
     readonly deliveryId: DeliveryId;
@@ -139,6 +150,7 @@ export interface DeliveryAttempt {
     readonly completedAt?: IsoDateTime;
 }
 
+/** 外部平台返回的投递终态证据。 */
 export interface DeliveryReceipt {
     readonly id: DeliveryReceiptId;
     readonly deliveryId: DeliveryId;
@@ -151,8 +163,10 @@ export interface DeliveryReceipt {
     readonly receivedAt: IsoDateTime;
 }
 
+/** 用户提醒动作的生命周期状态。 */
 export type ActionStatus = 'pending' | 'dispatched' | 'processing' | 'succeeded' | 'failed' | 'expired';
 
+/** 用户通过通知入口触发的一次提醒动作。 */
 export interface ImAction {
     readonly id: ActionId;
     readonly operationId: OperationId;
@@ -174,7 +188,7 @@ export interface ImAction {
     readonly updatedAt: IsoDateTime;
 }
 
-/** Server-side transactional outbox; this is not a device Local Outbox. */
+/** 服务端事务性发件箱事件，不代表设备侧 Local Outbox。 */
 export interface ImOutboxEvent {
     readonly id: OutboxEventId;
     readonly eventType: string;

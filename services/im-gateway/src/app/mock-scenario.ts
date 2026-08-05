@@ -18,8 +18,8 @@ import { FixedClock } from '../infrastructure/mock-support.js';
 import { createMockImGateway } from './create-im-gateway.js';
 
 /**
- * Executes the minimal notification scenario used by architecture checks.
- * @returns Promise fulfilled after the scenario assertions complete.
+ * 执行架构检查使用的最小通知链路场景。
+ * @returns 场景断言全部完成后兑现的 Promise。
  */
 export async function runMockNotificationScenario(): Promise<void> {
     const deviceId = unsafeId<DeviceId>('device-demo');
