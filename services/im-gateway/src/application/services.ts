@@ -772,7 +772,7 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
                 completedAt: this.clock.now(),
             });
             const updated: Delivery = {
-                ...target.delivery,
+                ...(status === 'accepted' ? withoutLastErrorCode(target.delivery) : target.delivery),
                 status,
                 ...(acceptance.platformMessageId === undefined
                     ? {}
@@ -1336,6 +1336,18 @@ function validateReminderActionParams(
         throw new ImGatewayError('invalid_transition', 'snooze requires a positive integer params.minutes');
     }
     return { minutes: params.minutes };
+}
+
+/**
+ * 返回清除历史错误码后的投递,成功派发后不应残留上次失败的错误码。
+ * @param delivery 原投递。
+ * @returns 无 lastErrorCode 的投递。
+ */
+function withoutLastErrorCode(delivery: Delivery): Delivery {
+    if (delivery.lastErrorCode === undefined) return delivery;
+    const cleared = { ...delivery };
+    delete cleared.lastErrorCode;
+    return cleared;
 }
 
 /**

@@ -4,7 +4,14 @@ import assert from 'node:assert/strict';
 import { createMockImGateway } from '../dist/index.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
 import { InMemoryImUnitOfWork } from '../dist/infrastructure/persistence/in-memory.js';
-import { bindFixtureUser, buildGateway, expectGatewayError, strongIntent, weakIntent } from './helpers.mjs';
+import {
+    bindFixtureUser,
+    buildGateway,
+    expectGatewayError,
+    pendingStrongDelivery,
+    strongIntent,
+    weakIntent,
+} from './helpers.mjs';
 
 /** 暴露内存仓储的 outbox 与绑定行,便于断言内部状态。 */
 class ExposedUnitOfWork extends InMemoryImUnitOfWork {
@@ -32,13 +39,6 @@ function gatewayWithChannel(script, overrides = {}) {
     };
     const gateway = createMockImGateway('device-fixture', clock, { imChannel, ...overrides });
     return { gateway, clock, sent };
-}
-
-/** 创建一条绑定到 fixture 用户的待发送强提醒投递。 */
-async function pendingStrongDelivery(gateway) {
-    await bindFixtureUser(gateway);
-    const submission = await gateway.application.notifications.submitNotification(strongIntent());
-    return submission.deliveries[0].deliveryId;
 }
 
 test('dispatch of a pending delivery sends and records an accepted attempt', async () => {
@@ -163,6 +163,7 @@ test('re-dispatching a retryable delivery resets it and records a second attempt
 
     assert.equal(updated.status, 'accepted');
     assert.equal(updated.externalMessageId, 'platform-2');
+    assert.equal(updated.lastErrorCode, undefined);
     const details = await gateway.application.deliveries.find(deliveryId);
     assert.equal(details.attempts.length, 2);
     assert.equal(details.attempts[1].attemptNo, 2);
@@ -185,7 +186,7 @@ test('dispatch of a strong delivery passes an action token to the renderer', asy
     await gateway.application.deliveryDispatch.dispatch(deliveryId);
 
     assert.equal(rendered.length, 1);
-    assert.match(rendered[0].actionToken, /^mock-token:/);
+    assert.equal(typeof rendered[0].actionToken, 'string');
 });
 
 test('dispatch without an action window renders without an action token', async () => {

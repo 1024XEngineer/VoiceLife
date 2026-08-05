@@ -122,23 +122,16 @@ export function scheduleReceiptIntent(overrides = {}) {
     };
 }
 
+/** 注册渠道、绑定用户并提交一条强提醒,返回首个投递标识。 */
+export async function pendingStrongDelivery(gateway) {
+    await bindFixtureUser(gateway);
+    const submission = await gateway.application.notifications.submitNotification(strongIntent());
+    return submission.deliveries[0].deliveryId;
+}
+
 /** 构造返回固定能力集合的渠道能力解析器。 */
 export function fixedCapabilities(caps) {
     return {
         resolve: async () => caps,
-    };
-}
-
-/** 记录全部出站发送的渠道 Port。 */
-export function recordingChannel() {
-    const sent = [];
-    return {
-        sent,
-        port: {
-            send: async (message) => {
-                sent.push(message);
-                return { accepted: true, platformMessageId: `platform-${sent.length}` };
-            },
-        },
     };
 }
