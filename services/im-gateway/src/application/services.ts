@@ -637,7 +637,7 @@ export class DefaultDeliveryApplication implements DeliveryApplication {
             if (delivery === undefined) {
                 throw new ImGatewayError('delivery_not_found', 'Delivery was not found');
             }
-            if (delivery.status !== 'dead_letter' && delivery.status !== 'permanent_failed') {
+            if (delivery.status !== 'dead_letter') {
                 throw new ImGatewayError('invalid_transition', 'Only dead-letter deliveries can be retried manually');
             }
             const now = this.clock.now();
