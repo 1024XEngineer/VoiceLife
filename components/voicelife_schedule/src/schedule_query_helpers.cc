@@ -15,9 +15,8 @@ namespace {
  */
 std::string NormalizeKeywordText(std::string_view value) {
     std::string normalized(value);
-    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
-    });
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
     return normalized;
 }
 

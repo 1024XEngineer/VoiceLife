@@ -58,6 +58,10 @@ void CheckStatusAndPagination(const ScheduleService& service) {
 
 /** @brief 验证非法查询参数会返回明确错误。 @param service 日程服务。 @return 无。 */
 void CheckValidation(const ScheduleService& service) {
+    QueryScheduleCommand invalid_id;
+    invalid_id.schedule_id = 0;
+    Check(service.query_schedule(invalid_id).status.code == ErrorCode::kInvalidArgument, "零日程 ID 应被拒绝");
+
     QueryScheduleCommand invalid_range;
     invalid_range.start_from = At(20);
     invalid_range.start_to = At(10);
@@ -67,9 +71,24 @@ void CheckValidation(const ScheduleService& service) {
     invalid_limit.limit = 51;
     Check(service.query_schedule(invalid_limit).status.code == ErrorCode::kInvalidArgument, "超过最大返回条数应被拒绝");
 
+    invalid_limit.limit = 0;
+    Check(service.query_schedule(invalid_limit).status.code == ErrorCode::kInvalidArgument, "零返回条数应被拒绝");
+
     QueryScheduleCommand invalid_offset;
     invalid_offset.offset = -1;
     Check(!service.query_schedule(invalid_offset).error.empty(), "负分页偏移量应返回错误信息");
+}
+
+/** @brief 验证关键词的大小写归一化和空加号词处理。 @param service 日程服务。 @return 无。 */
+void CheckKeywordNormalization(const ScheduleService& service) {
+    QueryScheduleCommand case_insensitive;
+    case_insensitive.keyword = "数据库 +连接";
+    case_insensitive.status = ScheduleStatusFilter::kAll;
+    Check(service.query_schedule(case_insensitive).total == 2, "多个关键词应同时匹配事件标题");
+
+    QueryScheduleCommand empty_required_token;
+    empty_required_token.keyword = "+   ";
+    Check(service.query_schedule(empty_required_token).total == 2, "空加号词不应过滤有效日程");
 }
 
 }  // namespace
@@ -80,5 +99,6 @@ int main() {
     CheckCombinedFilters(service);
     CheckStatusAndPagination(service);
     CheckValidation(service);
+    CheckKeywordNormalization(service);
     return 0;
 }
