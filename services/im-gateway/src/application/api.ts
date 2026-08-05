@@ -176,7 +176,7 @@ export interface DeliveryDetails {
     readonly receipts: readonly DeliveryReceipt[];
 }
 
-/** 查询投递详情并恢复死信的应用服务。 */
+/** 查询投递详情并恢复死信或永久失败投递的应用服务。 */
 export interface DeliveryApplication {
     /**
      * 查询一次投递及其全部尝试和回执。
@@ -185,7 +185,7 @@ export interface DeliveryApplication {
      */
     find(deliveryId: DeliveryId): Promise<DeliveryDetails | undefined>;
     /**
-     * 将死信投递恢复为可再次发送状态。
+     * 将死信或永久失败投递恢复为可再次发送状态。
      * @param deliveryId 投递标识。
      * @returns 更新后的投递。
      */

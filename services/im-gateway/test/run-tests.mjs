@@ -297,4 +297,4 @@ async function runFailureStateTests() {
 await runMockNotificationScenario();
 await runContractFixtureTests();
 await runFailureStateTests();
-console.log('IM Gateway Issue #95 contract and review regression tests passed');
+console.log('IM Gateway Issue #65/#95 contract and review regression tests passed');

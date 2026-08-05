@@ -85,16 +85,21 @@ test('retrying a dead-letter delivery restores it to pending and requests a retr
     assert.equal(events[0].availableAt, clock.now());
 });
 
-test('retrying a permanent_failed delivery is rejected', async () => {
-    const { gateway } = gatewayWithChannel([{ accepted: false, retryable: false, errorCode: 'blocked' }]);
+test('retrying a permanent_failed delivery restores it to pending and requests a retry', async () => {
+    const uow = new ExposedUnitOfWork();
+    const { gateway, clock } = gatewayWithChannel([{ accepted: false, retryable: false, errorCode: 'blocked' }], {
+        unitOfWork: uow,
+    });
     const deliveryId = await pendingStrongDelivery(gateway);
     await gateway.application.deliveryDispatch.dispatch(deliveryId);
 
-    await expectGatewayError(
-        () => gateway.application.deliveries.retryDeadLetter(deliveryId),
-        'invalid_transition',
-        'Retrying a permanent_failed delivery was not rejected',
-    );
+    const pending = await gateway.application.deliveries.retryDeadLetter(deliveryId);
+
+    assert.equal(pending.status, 'pending');
+    const events = uow.outboxEvents().filter((event) => event.eventType === 'im.delivery.retry-requested');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].aggregateId, deliveryId);
+    assert.equal(events[0].availableAt, clock.now());
 });
 
 test('retrying a pending delivery is rejected', async () => {

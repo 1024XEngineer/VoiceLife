@@ -88,7 +88,43 @@ test('channel with only action UI selects text_with_action_ui for strong reminde
     assert.equal(details.delivery.presentationType, 'text_with_action_ui');
 });
 
-test('channel with only rich text selects rich_text', async () => {
+test('weak reminder on a rich-text channel selects rich_text', async () => {
+    const { gateway } = buildGateway({
+        channelCapabilities: fixedCapabilities({
+            proactiveMessage: true,
+            nativeAction: false,
+            actionUi: false,
+            deliveryReceipt: false,
+            presentationTypes: ['rich_text'],
+        }),
+    });
+    await bindFixtureUser(gateway);
+
+    const submission = await gateway.application.notifications.submitNotification(weakIntent());
+    const details = await gateway.application.deliveries.find(submission.deliveries[0].deliveryId);
+
+    assert.equal(details.delivery.presentationType, 'rich_text');
+});
+
+test('strong reminder prefers rich text with H5 over plain text with H5', async () => {
+    const { gateway } = buildGateway({
+        channelCapabilities: fixedCapabilities({
+            proactiveMessage: true,
+            nativeAction: false,
+            actionUi: true,
+            deliveryReceipt: false,
+            presentationTypes: ['rich_text', 'text_with_action_ui'],
+        }),
+    });
+    await bindFixtureUser(gateway);
+
+    const submission = await gateway.application.notifications.submitNotification(strongIntent());
+    const details = await gateway.application.deliveries.find(submission.deliveries[0].deliveryId);
+
+    assert.equal(details.delivery.presentationType, 'rich_text');
+});
+
+test('strong reminder without a native or H5 action entry produces no delivery', async () => {
     const { gateway } = buildGateway({
         channelCapabilities: fixedCapabilities({
             proactiveMessage: true,
@@ -101,9 +137,25 @@ test('channel with only rich text selects rich_text', async () => {
     await bindFixtureUser(gateway);
 
     const submission = await gateway.application.notifications.submitNotification(strongIntent());
-    const details = await gateway.application.deliveries.find(submission.deliveries[0].deliveryId);
 
-    assert.equal(details.delivery.presentationType, 'rich_text');
+    assert.equal(submission.deliveries.length, 0);
+});
+
+test('channel without proactive messaging produces no delivery', async () => {
+    const { gateway } = buildGateway({
+        channelCapabilities: fixedCapabilities({
+            proactiveMessage: false,
+            nativeAction: true,
+            actionUi: true,
+            deliveryReceipt: true,
+            presentationTypes: ['native_card', 'template', 'rich_text', 'text_with_action_ui'],
+        }),
+    });
+    await bindFixtureUser(gateway);
+
+    const submission = await gateway.application.notifications.submitNotification(strongIntent());
+
+    assert.equal(submission.deliveries.length, 0);
 });
 
 test('notification with no binding produces no delivery', async () => {
@@ -217,4 +269,29 @@ test('schedule receipt without userId resolves bindings by device', async () => 
     const submission = await gateway.application.notifications.submitScheduleReceipt(intent);
 
     assert.equal(submission.deliveries.length, 1);
+});
+
+test('identical schedule receipt replay returns the original submission', async () => {
+    const { gateway } = buildGateway();
+    await bindFixtureUser(gateway);
+
+    const first = await gateway.application.notifications.submitScheduleReceipt(scheduleReceiptIntent());
+    const replay = await gateway.application.notifications.submitScheduleReceipt(scheduleReceiptIntent());
+
+    assert.equal(replay.deliveries[0].deliveryId, first.deliveries[0].deliveryId);
+});
+
+test('conflicting schedule receipt replay is rejected', async () => {
+    const { gateway } = buildGateway();
+    await bindFixtureUser(gateway);
+    await gateway.application.notifications.submitScheduleReceipt(scheduleReceiptIntent());
+
+    await expectGatewayError(
+        () =>
+            gateway.application.notifications.submitScheduleReceipt(
+                scheduleReceiptIntent({ summary: 'different result summary' }),
+            ),
+        'idempotency_conflict',
+        'A conflicting schedule receipt replay was accepted',
+    );
 });

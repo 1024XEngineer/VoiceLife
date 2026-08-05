@@ -191,7 +191,7 @@ export class DefaultPairingApplication implements PairingApplication {
                 throw new ImGatewayError('binding_not_found', 'Pairing session is invalid');
             }
             const account = await tx.channelAccounts.findById(command.channelAccountId);
-            if (account === undefined) {
+            if (account === undefined || account.status !== 'active') {
                 throw new ImGatewayError('binding_not_found', 'Channel account was not found');
             }
             if (session.allowedPlatforms !== undefined && !session.allowedPlatforms.includes(account.platform)) {
@@ -553,6 +553,7 @@ export class DefaultNotificationApplication implements NotificationApplication {
                 if (account === undefined || account.status !== 'active') continue;
                 const capability = await this.capabilities.resolve(account);
                 const presentationType = choosePresentationType(capability, input.actionStream !== undefined);
+                if (presentationType === undefined) continue;
                 const delivery: Delivery = {
                     id: this.ids.nextDeliveryId(),
                     businessEventId: input.businessEventId,
@@ -637,8 +638,11 @@ export class DefaultDeliveryApplication implements DeliveryApplication {
             if (delivery === undefined) {
                 throw new ImGatewayError('delivery_not_found', 'Delivery was not found');
             }
-            if (delivery.status !== 'dead_letter') {
-                throw new ImGatewayError('invalid_transition', 'Only dead-letter deliveries can be retried manually');
+            if (delivery.status !== 'dead_letter' && delivery.status !== 'permanent_failed') {
+                throw new ImGatewayError(
+                    'invalid_transition',
+                    'Only dead-letter or permanently failed deliveries can be retried manually',
+                );
             }
             const now = this.clock.now();
             const pending: Delivery = { ...delivery, status: 'pending', updatedAt: now };
@@ -1200,6 +1204,9 @@ export class DefaultActionUiApplication implements ActionUiApplication {
         context?: Parameters<ActionUiApplication['execute']>[1],
     ): Promise<ReminderActionCommand> {
         const claims = await this.tokens.verify(input.token);
+        if (claims.expiresAt <= this.clock.now()) {
+            throw new ImGatewayError('action_expired', 'Action UI token has expired');
+        }
         return this.actions.triggerPrepared({
             claims,
             actionType: input.action,
@@ -1251,17 +1258,21 @@ function toInboundEventType(type: NormalizedImEvent['type']): NormalizedImEvent[
  * 选择合适的呈现类型。
  * @param capabilities 通道能力解析器的返回能力。
  * @param hasActions 是否有动作。
- * @returns 呈现类型。
+ * @returns 首选呈现类型；渠道无法主动发送或无法承载动作时返回 undefined。
  */
 function choosePresentationType(
     capabilities: Awaited<ReturnType<ChannelCapabilityResolver['resolve']>>,
     hasActions: boolean,
-): PresentationType {
-    if (hasActions && capabilities.nativeAction) return 'native_card';
+): PresentationType | undefined {
+    if (!capabilities.proactiveMessage) return undefined;
+    if (hasActions && capabilities.nativeAction && capabilities.presentationTypes.includes('native_card')) {
+        return 'native_card';
+    }
+    if (hasActions && !capabilities.actionUi) return undefined;
     if (capabilities.presentationTypes.includes('template')) return 'template';
-    if (hasActions && capabilities.actionUi) return 'text_with_action_ui';
     if (capabilities.presentationTypes.includes('rich_text')) return 'rich_text';
-    return 'text_with_action_ui';
+    if (capabilities.presentationTypes.includes('text_with_action_ui')) return 'text_with_action_ui';
+    return undefined;
 }
 
 /**

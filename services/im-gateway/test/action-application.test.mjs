@@ -151,6 +151,22 @@ test('triggering a prepared acknowledge publishes a well-formed command', async 
     const found = await gateway.application.actions.find(command.commandId);
     assert.equal(found.status, 'dispatched');
     assert.equal(found.actionType, 'acknowledge');
+    assert.equal((await gateway.application.actions.findByOperationId(command.operationId)).id, command.commandId);
+});
+
+test('resolveActionWindow accepts only the matching active strong-reminder window', async () => {
+    const { gateway, clock } = buildGateway();
+    await pendingStrongDelivery(gateway);
+
+    assert.equal(
+        await gateway.application.actions.resolveActionWindow('device-fixture', 'trigger-fixture'),
+        clock.addMinutes(clock.now(), 10),
+    );
+    const error = await expectRejected(
+        () => gateway.application.actions.resolveActionWindow('device-fixture', 'trigger-other'),
+        'A non-existent action window was resolved',
+    );
+    assert.equal(error.code, 'action_expired');
 });
 
 test('triggering the same token twice is idempotent and dispatches once', async () => {
@@ -163,6 +179,38 @@ test('triggering the same token twice is idempotent and dispatches once', async 
     assert.equal(first.commandId, second.commandId);
     assert.equal(stream.commands.length, 1);
     assert.equal(stream.commands[0].commandId, first.commandId);
+});
+
+test('Last-Event-ID does not acknowledge an unconfirmed action command', async () => {
+    const { gateway } = actionGateway();
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+
+    const replay = await gateway.application.actions.replayPending(
+        command.deviceId,
+        command.reminderTriggerId,
+        command.commandId,
+    );
+
+    assert.equal(replay.length, 1);
+    assert.equal(replay[0].commandId, command.commandId);
+    assert.equal(replay[0].operationId, command.operationId);
+});
+
+test('markProcessing validates command scope and is idempotent once processing', async () => {
+    const { gateway } = actionGateway();
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+
+    await gateway.application.actions.markProcessing(command.commandId, command.deviceId, command.reminderTriggerId);
+    await gateway.application.actions.markProcessing(command.commandId, command.deviceId, command.reminderTriggerId);
+    assert.equal((await gateway.application.actions.find(command.commandId)).status, 'processing');
+
+    const error = await expectRejected(
+        () => gateway.application.actions.markProcessing(command.commandId, 'device-other', command.reminderTriggerId),
+        'A command entered processing for the wrong device',
+    );
+    assert.equal(error.code, 'invalid_transition');
 });
 
 test('reusing a token for a different action type is rejected', async () => {
@@ -278,6 +326,23 @@ test('a result that does not match the command scope is rejected', async () => {
         'A result with the wrong operation was not rejected',
     );
     assert.equal(wrongOperation.code, 'invalid_transition');
+});
+
+test('a result for an unknown command is rejected', async () => {
+    const { gateway, clock } = actionGateway();
+
+    const error = await expectRejected(
+        () =>
+            gateway.application.actions.recordResult('action-missing', 'device-fixture', {
+                schemaVersion: '1',
+                operationId: 'operation-missing',
+                reminderTriggerId: 'trigger-fixture',
+                status: 'failed',
+                occurredAt: clock.now(),
+            }),
+        'A result for an unknown command was accepted',
+    );
+    assert.equal(error.code, 'action_not_found');
 });
 
 test('a terminal action result cannot be overwritten', async () => {
