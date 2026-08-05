@@ -320,7 +320,7 @@ int main() {
                   .upsert_instances = {TimerInstance{
                       .id = "instance-single",
                       .task_id = single_registered.value->task_id,
-                      .planned_at = 1785920000,
+                      .planned_at = 1785920400,
                       .status = TimerInstanceStatus::kPending,
                   }},
               })
@@ -348,6 +348,39 @@ int main() {
           "single 修改不应改写其他实例");
     Check(single_instances.ok() && single_instances.value->front().status == TimerInstanceStatus::kModified,
           "single 修改产生的实例应进入 modified 状态");
+
+    const auto mismatched_single_target = single_service.UpdateTimerTask({
+        .task_id = single_registered.value->task_id,
+        .schedule_id = "schedule-single",
+        .change_scope = ChangeScope::kSingle,
+        .start_at = 1786006800,
+        .instance_id = "instance-single",
+        .target_occurrence_at = 1786003200,
+    });
+    Check(mismatched_single_target.status.code == ErrorCode::kConflict,
+          "single 修改不应将已有实例重定向到其他 occurrence");
+
+    Check(single_store
+              .UpdateTaskWithInstances({
+                  .task = *single_task.value,
+                  .upsert_instances = {TimerInstance{
+                      .id = "instance-completed",
+                      .task_id = single_registered.value->task_id,
+                      .planned_at = 1786003200,
+                      .status = TimerInstanceStatus::kCompleted,
+                  }},
+              })
+              .ok(),
+          "single 修改用例应能预置终态实例");
+    const auto completed_single_target = single_service.UpdateTimerTask({
+        .task_id = single_registered.value->task_id,
+        .schedule_id = "schedule-single",
+        .change_scope = ChangeScope::kSingle,
+        .start_at = 1786006800,
+        .instance_id = "instance-completed",
+        .target_occurrence_at = 1786003200,
+    });
+    Check(completed_single_target.status.code == ErrorCode::kConflict, "single 修改不应重新打开已完成 occurrence");
 
     const auto single_recurrence_update = single_service.UpdateTimerTask({
         .task_id = single_registered.value->task_id,
@@ -421,6 +454,8 @@ int main() {
           "future 修改后边界前实例仍应存在");
     Check(future_instances.ok() && future_instances.value->front().planned_at == 1785834000,
           "future 修改不应改变生效边界之前的 occurrence");
+    Check(future_instances.ok() && future_instances.value->at(1).status == TimerInstanceStatus::kSkipped,
+          "future 修改应作废生效边界及之后的旧 occurrence");
 
     InMemoryTimingTaskStore all_store;
     FixedTimingIdGenerator all_ids;
@@ -433,6 +468,19 @@ int main() {
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(all_registered.ok(), "all 修改用例应先注册周期任务");
+    const auto all_task_before_update = all_store.FindTask(all_registered.value->task_id);
+    Check(all_store
+              .UpdateTaskWithInstances({
+                  .task = *all_task_before_update.value,
+                  .upsert_instances = {TimerInstance{
+                      .id = "instance-all",
+                      .task_id = all_registered.value->task_id,
+                      .planned_at = 1785920400,
+                      .status = TimerInstanceStatus::kPending,
+                  }},
+              })
+              .ok(),
+          "all 修改用例应能预置旧 occurrence");
     const auto all_update = all_service.UpdateTimerTask({
         .task_id = all_registered.value->task_id,
         .schedule_id = "schedule-all",
@@ -441,12 +489,27 @@ int main() {
         .recurrence = RecurrenceRule{.frequency = RecurrenceFrequency::kMonth, .by_month_days = {5}},
     });
     Check(all_update.ok(), "all 修改应成功");
+    Check(all_update.value->affected_instance_count == 1, "all 修改应统计被作废的已物化实例");
     Check(all_update.value->next_trigger_at == 1786093200, "all 修改应返回重算后的下一次触发时间");
     const auto all_task = all_store.FindTask(all_registered.value->task_id);
     Check(all_task.ok() && all_task.value->start_at == 1786093200, "all 修改应更新任务周期锚点");
     Check(all_task.ok() && all_task.value->next_trigger_at == 1786093200, "all 修改应让任务下一次触发时间与新锚点一致");
     Check(all_task.ok() && all_task.value->recurrence.frequency == RecurrenceFrequency::kMonth,
           "all 修改应保存新的任务规则");
+    const auto all_instances = all_store.ListInstances(all_registered.value->task_id);
+    Check(all_instances.ok() && all_instances.value->front().status == TimerInstanceStatus::kSkipped,
+          "all 修改应作废旧 occurrence");
+
+    auto terminated_task = *all_task.value;
+    terminated_task.status = TimingTaskStatus::kTerminated;
+    Check(all_store.UpdateTaskWithInstances({.task = terminated_task}).ok(), "测试应能预置已终止任务");
+    const auto terminated_update = all_service.UpdateTimerTask({
+        .task_id = all_registered.value->task_id,
+        .schedule_id = "schedule-all",
+        .change_scope = ChangeScope::kAll,
+        .start_at = 1786179600,
+    });
+    Check(terminated_update.status.code == ErrorCode::kConflict, "已终止任务不应再次修改");
 
     const auto illegal_scope = all_service.UpdateTimerTask({
         .task_id = all_registered.value->task_id,
@@ -505,6 +568,19 @@ int main() {
         .time_zone = "Asia/Shanghai",
     });
     Check(failing_registered.ok(), "失败路径用例应先注册任务");
+    const auto failing_task_before_update = failing_store.FindTask(failing_registered.value->task_id);
+    Check(failing_store
+              .UpdateTaskWithInstances({
+                  .task = *failing_task_before_update.value,
+                  .upsert_instances = {TimerInstance{
+                      .id = "instance-failing",
+                      .task_id = failing_registered.value->task_id,
+                      .planned_at = 1785920400,
+                      .status = TimerInstanceStatus::kPending,
+                  }},
+              })
+              .ok(),
+          "失败路径用例应能预置旧 occurrence");
     failing_store.FailNextUpdate(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
     const auto failing_update = failing_service.UpdateTimerTask({
         .task_id = failing_registered.value->task_id,
@@ -517,6 +593,10 @@ int main() {
     Check(unchanged_after_failure.ok() && unchanged_after_failure.value->start_at == 1785834000,
           "Store 写入失败后任务不应半更新");
     const auto instances_after_failure = failing_store.ListInstances(failing_registered.value->task_id);
-    Check(instances_after_failure.ok() && instances_after_failure.value->empty(), "Store 写入失败后实例覆盖不应残留");
+    Check(instances_after_failure.ok() && instances_after_failure.value->size() == 1,
+          "Store 写入失败后不应新增或删除实例");
+    Check(
+        instances_after_failure.ok() && instances_after_failure.value->front().status == TimerInstanceStatus::kPending,
+        "Store 写入失败后旧 occurrence 不应被半更新");
     return 0;
 }

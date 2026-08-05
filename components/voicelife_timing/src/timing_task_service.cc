@@ -1,5 +1,6 @@
 #include "voicelife/timing/timing_task_service.h"
 
+#include <limits>
 #include <utility>
 
 #include "voicelife/timing/timing_task.h"
@@ -112,19 +113,46 @@ Status ValidateUpdateCommand(const UpdateTimerTaskCommand& command) {
     return Status::Ok();
 }
 
-int CountInstancesFrom(const std::vector<TimerInstance>& instances, int64_t boundary) {
-    int count = 0;
+std::vector<TimerInstance> SkipMutableInstancesFrom(const std::vector<TimerInstance>& instances, int64_t boundary,
+                                                    int64_t now) {
+    std::vector<TimerInstance> skipped_instances;
     for (const auto& instance : instances) {
-        if (instance.planned_at >= boundary) {
-            ++count;
+        if (instance.planned_at < boundary || !CanTransition(instance.status, TimerInstanceStatus::kSkipped)) {
+            continue;
         }
+
+        TimerInstance skipped = instance;
+        skipped.status = TimerInstanceStatus::kSkipped;
+        skipped.last_action_at = now;
+        skipped.updated_at = now;
+        skipped_instances.push_back(std::move(skipped));
     }
-    return count;
+    return skipped_instances;
 }
 
-TimerInstance BuildSingleOverride(const UpdateTimerTaskCommand& command, const TimingTask& task,
-                                  const std::vector<TimerInstance>& instances, int64_t now) {
-    TimerInstance instance{
+Result<TimerInstance> BuildSingleOverride(const UpdateTimerTaskCommand& command, const TimingTask& task,
+                                          const std::vector<TimerInstance>& instances, int64_t now) {
+    for (const auto& existing : instances) {
+        if (existing.id == command.instance_id) {
+            if (existing.planned_at != command.target_occurrence_at) {
+                return Result<TimerInstance>::Failure(ErrorCode::kConflict, "目标实例不属于指定 occurrence");
+            }
+            if (existing.status != TimerInstanceStatus::kModified &&
+                !CanTransition(existing.status, TimerInstanceStatus::kModified)) {
+                return Result<TimerInstance>::Failure(ErrorCode::kConflict, "目标 occurrence 已不可修改");
+            }
+
+            TimerInstance instance = existing;
+            instance.planned_at = command.target_occurrence_at;
+            instance.status = TimerInstanceStatus::kModified;
+            instance.override_fields.start_at = command.start_at;
+            instance.last_action_at = now;
+            instance.updated_at = now;
+            return Result<TimerInstance>::Success(std::move(instance));
+        }
+    }
+
+    return Result<TimerInstance>::Success({
         .id = command.instance_id,
         .task_id = task.id,
         .planned_at = command.target_occurrence_at,
@@ -133,20 +161,7 @@ TimerInstance BuildSingleOverride(const UpdateTimerTaskCommand& command, const T
         .last_action_at = now,
         .created_at = now,
         .updated_at = now,
-    };
-
-    for (const auto& existing : instances) {
-        if (existing.id == command.instance_id) {
-            instance = existing;
-            instance.planned_at = command.target_occurrence_at;
-            instance.status = TimerInstanceStatus::kModified;
-            instance.override_fields.start_at = command.start_at;
-            instance.last_action_at = now;
-            instance.updated_at = now;
-            break;
-        }
-    }
-    return instance;
+    });
 }
 
 }  // namespace
@@ -243,6 +258,9 @@ Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const Up
     if (existing_task.value->schedule_id != command.schedule_id) {
         return Result<UpdateTimerTaskResult>::Failure(ErrorCode::kConflict, "任务不属于指定日程");
     }
+    if (existing_task.value->status != TimingTaskStatus::kActive || existing_task.value->deleted_at != 0) {
+        return Result<UpdateTimerTaskResult>::Failure(ErrorCode::kConflict, "任务已终止或删除，不能修改");
+    }
 
     const auto existing_instances = store_.ListInstances(command.task_id);
     if (!existing_instances.ok()) {
@@ -259,11 +277,14 @@ Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const Up
 
     switch (command.change_scope) {
         case ChangeScope::kSingle: {
-            TimerInstance instance = BuildSingleOverride(command, updated_task, *existing_instances.value, now);
-            instance_id = instance.id;
-            override_fields = instance.override_fields;
+            auto instance = BuildSingleOverride(command, updated_task, *existing_instances.value, now);
+            if (!instance.ok()) {
+                return Result<UpdateTimerTaskResult>::Failure(instance.status.code, instance.status.message);
+            }
+            instance_id = instance.value->id;
+            override_fields = instance.value->override_fields;
             affected_instance_count = 1;
-            upsert_instances.push_back(std::move(instance));
+            upsert_instances.push_back(std::move(*instance.value));
             break;
         }
         case ChangeScope::kFuture:
@@ -273,7 +294,8 @@ Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const Up
             if (command.recurrence.has_value()) {
                 updated_task.recurrence = *command.recurrence;
             }
-            affected_instance_count = CountInstancesFrom(*existing_instances.value, command.effective_from);
+            upsert_instances = SkipMutableInstancesFrom(*existing_instances.value, command.effective_from, now);
+            affected_instance_count = static_cast<int>(upsert_instances.size());
             break;
         case ChangeScope::kAll:
             updated_task.start_at = command.start_at;
@@ -282,7 +304,9 @@ Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const Up
             if (command.recurrence.has_value()) {
                 updated_task.recurrence = *command.recurrence;
             }
-            affected_instance_count = static_cast<int>(existing_instances.value->size());
+            upsert_instances =
+                SkipMutableInstancesFrom(*existing_instances.value, std::numeric_limits<int64_t>::min(), now);
+            affected_instance_count = static_cast<int>(upsert_instances.size());
             break;
     }
 

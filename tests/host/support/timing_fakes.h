@@ -68,7 +68,8 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         std::unordered_set<std::string> incoming_instance_ids;
         for (const auto& instance : update.upsert_instances) {
             if (instance.id.empty() || instance.task_id != update.task.id ||
-                !incoming_instance_ids.insert(instance.id).second) {
+                !incoming_instance_ids.insert(instance.id).second ||
+                (instances_.contains(instance.id) && instances_.at(instance.id).task_id != update.task.id)) {
                 return Status::Error(ErrorCode::kConflict, "invalid timer instance");
             }
         }
@@ -103,7 +104,7 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
     Result<std::vector<timing::TimerInstance>> ListInstances(const timing::TimingTaskId& task_id) override {
         std::vector<timing::TimerInstance> result;
         for (const auto& [_, instance] : instances_) {
-            if (instance.task_id == task_id) {
+            if (instance.task_id == task_id && instance.deleted_at == 0) {
                 result.push_back(instance);
             }
         }

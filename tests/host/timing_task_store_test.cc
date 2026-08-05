@@ -74,6 +74,42 @@ int main() {
               *stored_instances.value->front().override_fields.start_at == 1785920400,
           "实例覆盖应保存新的开始时间");
 
+    const TimingTask second_task{
+        .id = "task-2",
+        .schedule_id = "schedule-2",
+        .request_id = "request-2",
+        .start_at = 1785834000,
+        .next_trigger_at = 1785834000,
+    };
+    const ReminderRule second_rule{
+        .id = "rule-2",
+        .task_id = "task-2",
+    };
+    Check(store.RegisterTaskWithRules(second_task, {second_rule}).ok(), "第二个任务应保存成功");
+    const auto cross_task_instance = store.UpdateTaskWithInstances({
+        .task = second_task,
+        .upsert_instances = {TimerInstance{
+            .id = "instance-1",
+            .task_id = "task-2",
+            .planned_at = 1785834000,
+        }},
+    });
+    Check(cross_task_instance.code == ErrorCode::kConflict, "已有实例不应转移到其他任务");
+    const auto first_instances_after_conflict = store.ListInstances("task-1");
+    Check(first_instances_after_conflict.ok() && first_instances_after_conflict.value->size() == 1,
+          "实例归属冲突后原任务实例不应被覆盖");
+
+    const TimerInstance deleted_instance{
+        .id = "instance-deleted",
+        .task_id = "task-1",
+        .planned_at = 1786006800,
+        .deleted_at = 1785741000,
+    };
+    Check(store.UpdateTaskWithInstances({.task = updated_task, .upsert_instances = {deleted_instance}}).ok(),
+          "测试应能保存软删除实例");
+    const auto active_instances = store.ListInstances("task-1");
+    Check(active_instances.ok() && active_instances.value->size() == 1, "查询实例默认不应返回软删除记录");
+
     auto rejected_task = updated_task;
     rejected_task.next_trigger_at = 1786006800;
     const TimerInstance wrong_owner_instance{
