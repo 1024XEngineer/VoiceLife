@@ -401,6 +401,86 @@ int main() {
               instances_after_future_cancel.value->at(2).status == TimerInstanceStatus::kSkipped,
           "future 取消应跳过边界及之后 occurrence");
 
+    InMemoryTimingTaskStore invalid_future_boundary_store;
+    FixedTimingIdGenerator invalid_future_boundary_ids;
+    DefaultTimingTaskService invalid_future_boundary_service(invalid_future_boundary_store, clock,
+                                                             invalid_future_boundary_ids);
+    const auto invalid_future_boundary_registered = invalid_future_boundary_service.RegisterTimerTask({
+        .request_id = "request-invalid-future-boundary",
+        .schedule_id = "schedule-invalid-future-boundary",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(invalid_future_boundary_registered.ok(), "非法 future 边界用例应先注册周期任务");
+    const auto invalid_future_boundary = invalid_future_boundary_service.CancelTimerTask({
+        .task_id = invalid_future_boundary_registered.value->task_id,
+        .schedule_id = "schedule-invalid-future-boundary",
+        .change_scope = ChangeScope::kFuture,
+        .effective_from = 1785833999,
+    });
+    Check(invalid_future_boundary.status.code == ErrorCode::kInvalidArgument,
+          "早于任务开始时间的 future 边界应返回参数错误");
+
+    InMemoryTimingTaskStore future_terminal_instance_store;
+    FixedTimingIdGenerator future_terminal_instance_ids;
+    DefaultTimingTaskService future_terminal_instance_service(future_terminal_instance_store, clock,
+                                                              future_terminal_instance_ids);
+    const auto future_terminal_instance_registered = future_terminal_instance_service.RegisterTimerTask({
+        .request_id = "request-future-terminal-instance",
+        .schedule_id = "schedule-future-terminal-instance",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(future_terminal_instance_registered.ok(), "终态实例 future 取消用例应先注册周期任务");
+    const auto future_terminal_instance_task =
+        future_terminal_instance_store.FindTask(future_terminal_instance_registered.value->task_id);
+    Check(future_terminal_instance_task.ok(), "终态实例 future 取消用例应能读回任务");
+    TimingTask task_with_future_next_trigger = *future_terminal_instance_task.value;
+    task_with_future_next_trigger.next_trigger_at = 1785920400;
+    Check(future_terminal_instance_store
+              .UpdateTaskWithInstances({
+                  .task = task_with_future_next_trigger,
+                  .upsert_instances =
+                      {
+                          TimerInstance{
+                              .id = "instance-completed-at-future-boundary",
+                              .task_id = future_terminal_instance_registered.value->task_id,
+                              .planned_at = 1785920400,
+                              .status = TimerInstanceStatus::kCompleted,
+                          },
+                          TimerInstance{
+                              .id = "instance-pending-after-future-boundary",
+                              .task_id = future_terminal_instance_registered.value->task_id,
+                              .planned_at = 1786006800,
+                              .status = TimerInstanceStatus::kPending,
+                          },
+                      },
+              })
+              .ok(),
+          "终态实例 future 取消用例应能预置任务与实例");
+    const auto future_terminal_instance_cancel = future_terminal_instance_service.CancelTimerTask({
+        .task_id = future_terminal_instance_registered.value->task_id,
+        .schedule_id = "schedule-future-terminal-instance",
+        .change_scope = ChangeScope::kFuture,
+        .effective_from = 1785920400,
+    });
+    Check(future_terminal_instance_cancel.ok(), "终态实例不应阻断 future 取消");
+    Check(future_terminal_instance_cancel.value->affected_instance_count == 1,
+          "future 取消只应统计实际转为 skipped 的实例");
+    const auto task_after_future_terminal_instance_cancel =
+        future_terminal_instance_store.FindTask(future_terminal_instance_registered.value->task_id);
+    Check(task_after_future_terminal_instance_cancel.ok() &&
+              task_after_future_terminal_instance_cancel.value->next_trigger_at == 0,
+          "future 取消应清除位于取消边界的下一次触发");
+    const auto instances_after_future_terminal_instance_cancel =
+        future_terminal_instance_store.ListInstances(future_terminal_instance_registered.value->task_id);
+    Check(instances_after_future_terminal_instance_cancel.ok() &&
+              instances_after_future_terminal_instance_cancel.value->at(0).status == TimerInstanceStatus::kCompleted &&
+              instances_after_future_terminal_instance_cancel.value->at(1).status == TimerInstanceStatus::kSkipped,
+          "future 取消应保留 completed 实例并跳过仍待处理实例");
+
     InMemoryTimingTaskStore all_cancel_store;
     FixedTimingIdGenerator all_cancel_ids;
     DefaultTimingTaskService all_cancel_service(all_cancel_store, clock, all_cancel_ids);

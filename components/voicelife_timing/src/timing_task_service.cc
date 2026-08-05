@@ -199,6 +199,9 @@ Result<CancelTimerTaskResult> DefaultTimingTaskService::CancelTimerTask(const Ca
     if (existing_task.value->status == TimingTaskStatus::kTerminated) {
         return Result<CancelTimerTaskResult>::Failure(ErrorCode::kConflict, "任务已终止");
     }
+    if (command.change_scope == ChangeScope::kFuture && command.effective_from < existing_task.value->start_at) {
+        return Result<CancelTimerTaskResult>::Failure(ErrorCode::kInvalidArgument, "future 取消边界早于任务开始时间");
+    }
 
     const auto existing_instances = store_.ListInstances(command.task_id);
     if (!existing_instances.ok()) {
@@ -239,11 +242,18 @@ Result<CancelTimerTaskResult> DefaultTimingTaskService::CancelTimerTask(const Ca
                 return Result<CancelTimerTaskResult>::Failure(ErrorCode::kConflict, "任务已设置未来取消边界");
             }
             updated_task.effective_until = command.effective_from - 1;
+            if (updated_task.next_trigger_at >= command.effective_from) {
+                updated_task.next_trigger_at = 0;
+            }
             for (const auto& instance : *existing_instances.value) {
                 if (instance.planned_at < command.effective_from) {
                     continue;
                 }
                 if (!CanTransition(instance.status, TimerInstanceStatus::kSkipped)) {
+                    if (instance.status == TimerInstanceStatus::kCompleted ||
+                        instance.status == TimerInstanceStatus::kSkipped) {
+                        continue;
+                    }
                     return Result<CancelTimerTaskResult>::Failure(ErrorCode::kConflict, "未来 occurrence 不能取消");
                 }
                 TimerInstance cancelled_instance = instance;
