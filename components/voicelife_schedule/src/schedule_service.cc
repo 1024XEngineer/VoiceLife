@@ -7,53 +7,12 @@
 #include "schedule_create_helpers.h"
 #include "schedule_mock_data.h"
 #include "schedule_time_rules.h"
+#include "schedule_update_helpers.h"
 
 namespace voicelife::schedule {
 namespace {
 
 constexpr std::size_t kMaximumEventLength = 100;
-
-/**
- * @brief 创建修改日程的参数错误结果。
- * @param error 错误说明。
- * @return 不包含日程和冲突的失败结果。
- */
-UpdateScheduleResult InvalidUpdateScheduleResult(std::string error) {
-    return {
-        .status = Status::Error(ErrorCode::kInvalidArgument, error),
-        .message = {},
-        .schedule = std::nullopt,
-        .conflicts = {},
-        .error = std::move(error),
-    };
-}
-
-/**
- * @brief 判断状态是否属于日程模块支持的状态。
- * @param status 要校验的日程状态。
- * @return 状态为进行中、已取消或已完成时返回 true。
- */
-bool IsSupportedScheduleStatus(ScheduleStatus status) {
-    switch (status) {
-        case ScheduleStatus::kActive:
-        case ScheduleStatus::kCancelled:
-        case ScheduleStatus::kComplete:
-            return true;
-    }
-    return false;
-}
-
-/**
- * @brief 将可清空的修改值应用到目标字段。
- * @tparam T 字段实际保存的数据类型。
- * @param update 外层表示是否修改、内层表示新值的修改数据。
- * @param target 要更新的日程字段。
- * @return 无返回值。
- */
-template <typename T>
-void ApplyNullableUpdate(const NullableScheduleUpdate<T>& update, std::optional<T>& target) {
-    if (update.has_value()) target = *update;
-}
 
 }  // namespace
 
@@ -127,6 +86,7 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
 UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleCommand& command) {
     if (command.schedule_id <= 0) return InvalidUpdateScheduleResult("日程 ID 必须大于零");
 
+    // 根据调用方预先确认的 ID 查询目标日程；数据库接入前暂由固定模拟数据提供。
     std::vector<Schedule> schedules = LoadMockSchedules();
     auto target = schedules.end();
     for (auto current = schedules.begin(); current != schedules.end(); ++current) {
@@ -151,6 +111,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
                             command.reminder_id.has_value() || command.status.has_value();
     if (!has_update) return InvalidUpdateScheduleResult("至少需要提供一个要修改的字段");
 
+    // 在原日程副本上合并本次提供的字段，未提供的字段保持不变，显式空值用于清空字段。
     Schedule updated = *target;
     if (command.event.has_value()) {
         updated.event = TrimScheduleText(*command.event);
@@ -169,6 +130,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
         updated.status = *command.status;
     }
 
+    // 字段合并完成后校验完整日程，避免单独校验增量字段时遗漏原有值之间的约束。
     if (!updated.start_time.has_value() && updated.end_time.has_value()) {
         return InvalidUpdateScheduleResult("日程提供结束时间时必须同时提供开始时间");
     }
@@ -176,6 +138,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
         return InvalidUpdateScheduleResult("日程结束时间必须晚于开始时间");
     }
 
+    // 仅有效且具有开始时间的日程参与冲突检测，并排除正在修改的日程自身。
     std::vector<Schedule> conflicts;
     if (updated.status == ScheduleStatus::kActive && updated.start_time.has_value()) {
         for (const Schedule& existing : schedules) {
@@ -201,6 +164,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
 
     // TODO(#134): 在数据库适配器中以原子操作持久化日程变更；冲突返回分支不得执行写入。
 
+    // 忽略冲突时仍返回冲突列表，便于调用方在修改成功后向用户说明潜在影响。
     return {
         .status = Status::Ok(),
         .message = conflicts.empty() ? "日程修改成功" : "日程修改成功，已忽略时间冲突",

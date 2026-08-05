@@ -32,7 +32,8 @@ add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_create_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_mock_data.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_service.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_time_rules.cc")
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_time_rules.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_update_helpers.cc")
 target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule PUBLIC contracts)
 add_voicelife_library(timing voicelife_timing

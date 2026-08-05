@@ -4,6 +4,7 @@ idf_component_register(
         "src/schedule_mock_data.cc"
         "src/schedule_service.cc"
         "src/schedule_time_rules.cc"
+        "src/schedule_update_helpers.cc"
     INCLUDE_DIRS "include"
     REQUIRES voicelife_contracts
 )
