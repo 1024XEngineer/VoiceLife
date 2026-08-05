@@ -97,6 +97,17 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
             }
             next_rules.insert_or_assign(rule.id, rule);
         }
+
+        int active_on_time_strong_count = 0;
+        for (const auto& [_, rule] : next_rules) {
+            if (rule.task_id == task_id && rule.status == timing::ReminderRuleStatus::kActive &&
+                rule.type == timing::ReminderType::kStrong && rule.offset_minutes == 0) {
+                ++active_on_time_strong_count;
+            }
+        }
+        if (active_on_time_strong_count > 1) {
+            return Status::Error(ErrorCode::kConflict, "multiple active on-time strong rules");
+        }
         rules_ = std::move(next_rules);
         return Status::Ok();
     }

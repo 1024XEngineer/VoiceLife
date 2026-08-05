@@ -43,7 +43,8 @@ class TimingTaskStorePort {
      * @brief 原子创建或更新同一任务的一组提醒规则。
      * @param task_id 规则所属的定时任务标识。
      * @param rules 要创建或更新的规则；该操作不修改已物化的提醒触发。
-     * @return 全部规则提交成功或完全不写入的结果；未知任务或跨任务规则标识返回领域错误。
+     * @return 全部规则提交成功或完全不写入的结果；实现必须在同一原子边界内保证每个任务至多一条 active
+     *         准点强提醒规则，未知任务、跨任务规则标识或规则冲突返回领域错误。
      */
     virtual Status UpsertRules(const TimingTaskId& task_id, const std::vector<ReminderRule>& rules) = 0;
 };
