@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1",
+  "businessEventId": "event-weak-fixture",
+  "correlationId": "correlation-weak-fixture",
+  "kind": "reminder_due",
+  "recipient": {
+    "userId": "user-fixture",
+    "deviceId": "device-fixture"
+  },
+  "scheduleId": "schedule-fixture",
+  "taskId": "task-weak-fixture",
+  "instanceId": "instance-weak-fixture",
+  "reminderTriggerId": "trigger-weak-fixture",
+  "reminderType": "weak",
+  "content": {
+    "title": "Weak fixture reminder"
+  },
+  "plannedAt": "2026-08-03T00:00:00.000Z",
+  "triggerAt": "2026-08-03T00:00:00.000Z",
+  "actions": [],
+  "occurredAt": "2026-08-03T00:00:00.000Z"
+}

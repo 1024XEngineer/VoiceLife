@@ -1,0 +1,28 @@
+{
+  "name": "@voicelife/im-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.17.1",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "docs:check": "node scripts/check-public-api-docs.mjs",
+    "test": "pnpm run build && node test/run-tests.mjs",
+    "coverage": "pnpm run build && c8 --all --extension .js --include 'dist/**/*.js' --exclude 'dist/**/*.d.ts' --reporter=lcov --reporter=text --reports-dir coverage node test/run-tests.mjs",
+    "format:check": "prettier --check \"src/**/*.ts\" \"*.{mjs,json,md}\"",
+    "lint": "eslint src",
+    "ci": "pnpm run format:check && pnpm run lint && pnpm run check && pnpm run docs:check && pnpm run test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "c8": "^12.0.0",
+    "eslint": "^10.8.0",
+    "prettier": "^3.5.3",
+    "typescript-eslint": "^8.46.0",
+    "typescript": "^6.0.3"
+  }
+}

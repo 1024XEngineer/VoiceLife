@@ -5,8 +5,18 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(VOICELIFE_ENABLE_COVERAGE "Instrument host tests for gcov coverage reports" OFF)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Werror -Wpedantic -Wmissing-field-initializers)
+endif()
+
+if(VOICELIFE_ENABLE_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        message(FATAL_ERROR "VOICELIFE_ENABLE_COVERAGE currently requires GCC/gcov")
+    endif()
+    add_compile_options(-O0 -g --coverage)
+    add_link_options(--coverage)
 endif()
 
 set(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../..")
@@ -19,31 +29,30 @@ endfunction()
 add_voicelife_library(contracts voicelife_contracts
     "${ROOT_DIR}/components/voicelife_contracts/src/status.cc")
 add_voicelife_library(schedule voicelife_schedule
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_policy.cc")
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_create_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_mock_data.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_service.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_time_rules.cc")
+target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule PUBLIC contracts)
 add_voicelife_library(timing voicelife_timing
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc")
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_stubs.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_state.cc")
 target_link_libraries(timing PUBLIC contracts)
-add_voicelife_library(application voicelife_application
-    "${ROOT_DIR}/components/voicelife_application/src/calendar_application.cc")
-target_link_libraries(application PUBLIC contracts schedule timing)
 add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_server.cc")
 find_path(CJSON_INCLUDE_DIR cjson/cJSON.h PATHS /usr/local/include /opt/homebrew/include REQUIRED)
 find_library(CJSON_LIBRARY cjson PATHS /usr/local/lib /opt/homebrew/lib REQUIRED)
 target_include_directories(mcp PUBLIC "${CJSON_INCLUDE_DIR}")
-target_link_libraries(mcp PUBLIC contracts application "${CJSON_LIBRARY}")
+target_link_libraries(mcp PUBLIC contracts "${CJSON_LIBRARY}")
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
 target_link_libraries(voice PUBLIC contracts)
-add_voicelife_library(im voicelife_im
-    "${ROOT_DIR}/components/voicelife_im/src/im_gateway_adapter.cc")
-target_link_libraries(im PUBLIC contracts application)
-add_voicelife_library(platform voicelife_platform
-    "${ROOT_DIR}/components/voicelife_platform/src/in_memory_calendar_store.cc"
-    "${ROOT_DIR}/components/voicelife_platform/src/sequential_id_generator.cc"
-    "${ROOT_DIR}/components/voicelife_platform/src/system_clock.cc")
-target_link_libraries(platform PUBLIC contracts application)
+add_voicelife_library(storage_sqlite voicelife_storage_sqlite
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/storage_protocol.cc")
+target_link_libraries(storage_sqlite PUBLIC contracts)
 
 enable_testing()
 
@@ -54,20 +63,48 @@ function(add_voicelife_test target labels)
     set_tests_properties(${target} PROPERTIES LABELS "${labels}")
 endfunction()
 
-add_voicelife_test(schedule_policy_test "unit;schedule" schedule_policy_test.cc)
-target_link_libraries(schedule_policy_test PRIVATE schedule)
+add_voicelife_test(schedule_contract_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_contract_test.cc")
+target_link_libraries(schedule_contract_test PRIVATE schedule)
+
+add_voicelife_test(schedule_create_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_create_test.cc")
+target_link_libraries(schedule_create_test PRIVATE schedule)
+
+add_voicelife_test(status_test "unit;contracts" status_test.cc)
+target_link_libraries(status_test PRIVATE contracts)
 
 add_voicelife_test(timing_policy_test "unit;timing" timing_policy_test.cc)
 target_link_libraries(timing_policy_test PRIVATE timing)
 
-add_voicelife_test(calendar_application_test "unit;application" calendar_application_test.cc)
-target_link_libraries(calendar_application_test PRIVATE application)
+add_voicelife_test(timing_task_types_test "unit;timing" timing_task_types_test.cc)
+target_include_directories(timing_task_types_test PRIVATE "${ROOT_DIR}/components/voicelife_timing/include")
+
+add_voicelife_test(timing_task_state_test "unit;timing" timing_task_state_test.cc)
+target_link_libraries(timing_task_state_test PRIVATE timing)
+
+add_voicelife_test(timing_task_service_test "unit;timing" timing_task_service_test.cc)
+target_link_libraries(timing_task_service_test PRIVATE timing)
+
+add_voicelife_test(timing_task_store_test "unit;timing" timing_task_store_test.cc)
+target_link_libraries(timing_task_store_test PRIVATE timing)
+
+add_voicelife_test(timing_task_service_contract_test "unit;timing" timing_task_service_contract_test.cc)
+target_link_libraries(timing_task_service_contract_test PRIVATE timing)
+
+add_voicelife_test(mcp_server_test "unit;mcp"
+    "${ROOT_DIR}/components/voicelife_mcp/test/mcp_server_test.cc")
+target_link_libraries(mcp_server_test PRIVATE mcp)
 
 add_voicelife_test(voice_session_coordinator_test "unit;voice" voice_session_coordinator_test.cc)
 target_link_libraries(voice_session_coordinator_test PRIVATE voice)
 
-add_voicelife_test(im_gateway_adapter_test "unit;im" im_gateway_adapter_test.cc)
-target_link_libraries(im_gateway_adapter_test PRIVATE im)
+add_voicelife_test(im_gateway_contract_test "unit;im" im_gateway_contract_test.cc)
+target_compile_definitions(im_gateway_contract_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
 
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
-target_link_libraries(runtime_smoke_test PRIVATE mcp voice im platform)
+target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
+
+add_voicelife_test(storage_protocol_contract_test "unit;storage;contract"
+    storage_protocol_contract_test.cc)
+target_link_libraries(storage_protocol_contract_test PRIVATE storage_sqlite)

@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /services/im-gateway
+    schedule:
+      interval: weekly
+    groups:
+      im-gateway-development:
+        dependency-type: development
+    # typescript-eslint 8.66 尚不支持 TS 7 原生编译器，升级会破坏 lint/check 链路
+    # 支持情况追踪：https://github.com/typescript-eslint/typescript-eslint/issues/10940
+    # 支持后删除此 ignore 即可放行升级
+    ignore:
+      - dependency-name: "typescript"
+        versions:
+          - ">=7.0.0"

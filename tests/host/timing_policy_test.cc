@@ -3,6 +3,7 @@
 
 using voicelife::ErrorCode;
 using voicelife::test::Check;
+using voicelife::timing::RecurrenceFrequency;
 using voicelife::timing::RegisterTimingTaskCommand;
 using voicelife::timing::TimingPolicy;
 
@@ -18,6 +19,7 @@ int main() {
     Check(created.ok(), "合法定时任务应注册成功");
     Check(created.value->schedule_id == "schedule-1", "定时任务应关联日程");
     Check(created.value->created_at == 1785740000, "定时任务应使用注入的当前时间");
+    Check(created.value->recurrence.frequency == RecurrenceFrequency::kNone, "旧注册入口创建的任务默认应为一次性任务");
 
     auto invalid = valid;
     invalid.schedule_id.clear();

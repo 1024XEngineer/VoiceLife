@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1",
+  "businessEventId": "event-invalid-enum",
+  "correlationId": "correlation-invalid-enum",
+  "kind": "reminder_due",
+  "recipient": {
+    "userId": "user-fixture",
+    "deviceId": "device-fixture"
+  },
+  "scheduleId": "schedule-fixture",
+  "taskId": "task-fixture",
+  "instanceId": "instance-fixture",
+  "reminderTriggerId": "trigger-fixture",
+  "reminderType": "urgent",
+  "content": {
+    "title": "Invalid enum"
+  },
+  "plannedAt": "2026-08-03T00:00:00.000Z",
+  "triggerAt": "2026-08-03T00:00:00.000Z",
+  "actions": [],
+  "occurredAt": "2026-08-03T00:00:00.000Z"
+}

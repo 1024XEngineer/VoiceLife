@@ -9,7 +9,7 @@
 3. 从最新 `main` 创建短分支，命名为 `dev/<issue>-<short-name>`，例如 `dev/91-tdd-architecture`。仓库不维护长期共享的裸 `dev` 分支。
 4. 先写失败测试并记录 RED 原因，再补最小实现使其 GREEN；重构期间保持测试通过。
 5. 小步提交。每个提交只表达一个可回退的意图，并保持可编译。
-6. 本地运行 `./scripts/run_checks.sh`；设备相关改动还要运行对应 Profile 构建和真机检查。
+6. 本地运行 `./scripts/run_pre_submit_checks.sh`；设备相关改动还要运行对应 Profile 构建和真机检查。
 7. PR 使用中文写结论、TDD 记录、验证和风险，关联 Issue，等待 CI 与 Review 通过后合并。
 
 `main` 始终保持可构建、可回退。只有多个任务确实需要联合验证时，才临时建立 `integration/<milestone>-<topic>`；联调结束后通过一个 PR 合回 `main` 并删除该分支，不能把它变成第二条长期主线。
@@ -36,8 +36,8 @@ git push -u fork HEAD
 # GREEN / REFACTOR：反复运行同一个测试
 ./scripts/run_host_tests.sh -R schedule_policy_test
 
-# 提交前跑完整门禁
-./scripts/run_checks.sh
+# 提交前跑完整门禁（格式、规模、主机、架构、固件配置和 IM Gateway）
+./scripts/run_pre_submit_checks.sh
 ```
 
 领域规则、Application 和协议映射优先在主机测试完成。真实 Codec、网络重连、掉电恢复等硬件行为使用 ESP-IDF Unity 测试与真机证据，不能用主机 mock 冒充设备通过。
@@ -56,9 +56,22 @@ git push -u fork HEAD
 ## 常用检查
 
 ```bash
+# 只检查 C/C++、Python 格式与静态规则（需 clang-format 和 ruff）
+./scripts/check_format.sh
+
+# 公共 C++ API 文档、主机测试、架构边界、固件配置与 Python 测试
 ./scripts/run_checks.sh
+
+# IM Gateway 的格式、Lint、类型与测试
+pnpm install --dir services/im-gateway --frozen-lockfile
+pnpm --dir services/im-gateway run ci
+
+# 覆盖率：CI 使用 GCC/gcovr 与 c8 上传到 Codecov
+# 本机生成 C++ 覆盖率需要 GCC 和 gcovr
 python3 scripts/firmware.py build esp32s3-dev
 ```
+
+公共 C++ API 位于 `components/**/include`。类型和枚举使用简洁的 `///` Doxygen 注释；公开函数必须使用 `/** ... */`，包含 `@brief`，并为每个参数添加 `@param`、为每个非 `void` 返回值添加 `@return`。注释应说明职责和签名无法表达的语义（例如错误、所有权、时间单位或并发约束），不要为私有实现添加重复代码的注释。
 
 提交前可手动检查描述：
 
@@ -67,3 +80,5 @@ python3 scripts/check_commit_message.py --file .git/COMMIT_EDITMSG
 ```
 
 提交格式、允许使用的 Gitmoji 和完整示例见 [提交描述规范](./docs/engineering/commit-convention.md)。
+
+格式、注释、代码规模、工作流安全和 CI 任务的完整解释见 [CI 与提交前质量门禁](./docs/engineering/ci-quality-gates.md)。

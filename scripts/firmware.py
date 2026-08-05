@@ -10,12 +10,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import re
 import subprocess
 import sys
 import zipfile
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ROOT / "config" / "profiles"
@@ -126,15 +125,17 @@ def build(profile_id: str) -> Path:
     build_dir.mkdir(parents=True, exist_ok=True)
     defaults = build_dir / "sdkconfig.profile.defaults"
     defaults.write_text("\n".join(profile["sdkconfig"]) + "\n", encoding="utf-8")
-    run([
-        "idf.py",
-        "-B",
-        str(build_dir),
-        f"-DSDKCONFIG={build_dir / 'sdkconfig'}",
-        f"-DSDKCONFIG_DEFAULTS={ROOT / 'sdkconfig.defaults'};{defaults}",
-        f"-DIDF_TARGET={profile['target']}",
-        "build",
-    ])
+    run(
+        [
+            "idf.py",
+            "-B",
+            str(build_dir),
+            f"-DSDKCONFIG={build_dir / 'sdkconfig'}",
+            f"-DSDKCONFIG_DEFAULTS={ROOT / 'sdkconfig.defaults'};{defaults}",
+            f"-DIDF_TARGET={profile['target']}",
+            "build",
+        ]
+    )
     return build_dir
 
 

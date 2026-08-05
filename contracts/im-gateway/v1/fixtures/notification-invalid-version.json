@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "999",
+  "businessEventId": "event-invalid-version",
+  "correlationId": "correlation-invalid-version",
+  "kind": "reminder_due",
+  "recipient": {
+    "userId": "user-fixture",
+    "deviceId": "device-fixture"
+  },
+  "scheduleId": "schedule-fixture",
+  "taskId": "task-fixture",
+  "instanceId": "instance-fixture",
+  "reminderTriggerId": "trigger-fixture",
+  "reminderType": "weak",
+  "content": {
+    "title": "Invalid version"
+  },
+  "plannedAt": "2026-08-03T00:00:00.000Z",
+  "triggerAt": "2026-08-03T00:00:00.000Z",
+  "actions": [],
+  "occurredAt": "2026-08-03T00:00:00.000Z"
+}
