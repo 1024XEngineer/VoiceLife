@@ -15,9 +15,7 @@ using detail::RequireEnum;
 using detail::RequireIsoDateTime;
 using detail::RequireString;
 
-}  // namespace
-
-Status ParseScheduleReceiptIntent(const JsonValue& root, ScheduleReceiptIntent& out) {
+[[nodiscard]] Status ParseScheduleReceiptIntentValue(const JsonValue& root, ScheduleReceiptIntent& out) {
     if (!root.IsObject()) {
         return Reject("ScheduleReceiptIntent 必须是对象");
     }
@@ -54,6 +52,17 @@ Status ParseScheduleReceiptIntent(const JsonValue& root, ScheduleReceiptIntent& 
         return status;
     }
     return RequireIsoDateTime(root, "occurredAt", out.occurredAt);
+}
+
+}  // namespace
+
+Status ParseScheduleReceiptIntent(const JsonValue& root, ScheduleReceiptIntent& out) {
+    ScheduleReceiptIntent parsed;
+    if (const Status status = ParseScheduleReceiptIntentValue(root, parsed); !status.ok()) {
+        return status;
+    }
+    out = std::move(parsed);
+    return Status::Ok();
 }
 
 }  // namespace voicelife::contracts::im

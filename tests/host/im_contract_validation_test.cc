@@ -371,5 +371,91 @@ int main() {
                   .ok() &&
               full.errorCode.has_value() && full.details.has_value(),
           "可选 errorCode 与 details 应被接受");
+
+    // 输出对象可安全复用：成功时整体替换，失败时保持原值。
+    NotificationIntent reused_notification;
+    reused_notification.content.body = "旧正文";
+    reused_notification.actions.push_back({"command", "acknowledge", "旧动作", std::nullopt});
+    Check(ParseNotificationIntent(ParseDocument(R"json({
+                "schemaVersion":"1","businessEventId":"new-event","correlationId":"new-correlation",
+                "kind":"reminder_due","recipient":{"userId":"new-user","deviceId":"new-device"},
+                "scheduleId":"new-schedule","taskId":"new-task","instanceId":"new-instance",
+                "reminderTriggerId":"new-trigger","reminderType":"weak","content":{"title":"新标题"},
+                "plannedAt":"2026-01-01T00:00:00Z","triggerAt":"2026-01-01T00:00:00Z","actions":[],
+                "occurredAt":"2026-01-01T00:00:00Z"
+              })json"),
+                                  reused_notification)
+                  .ok() &&
+              reused_notification.actions.empty() && !reused_notification.content.body.has_value(),
+          "复用通知输出时应清除旧 actions 与可选 body");
+    Check(!ParseNotificationIntent(ParseDocument(R"json({
+                 "schemaVersion":"1","businessEventId":"invalid-event","correlationId":"invalid-correlation",
+                 "kind":"reminder_due","recipient":{"userId":"u","deviceId":"d"},"scheduleId":"s",
+                 "taskId":"t","instanceId":"i","reminderTriggerId":"r","reminderType":"weak",
+                 "content":{"title":"非法通知"},"plannedAt":"2026-01-01T00:00:00Z",
+                 "triggerAt":"2026-01-01T00:00:00Z","actions":[],"occurredAt":"bad"
+               })json"),
+                                   reused_notification)
+                  .ok() &&
+              reused_notification.businessEventId == "new-event" && reused_notification.content.title == "新标题",
+          "通知解析失败时不应改写已有输出");
+
+    ScheduleReceiptIntent reused_receipt;
+    Check(ParseScheduleReceiptIntent(ParseDocument(R"json({
+                "schemaVersion":"1","eventId":"with-user","correlationId":"c","userId":"old-user",
+                "deviceId":"d","operationType":"created","scheduleId":"s","result":"succeeded",
+                "summary":"有用户","occurredAt":"2026-01-01T00:00:00Z"
+              })json"),
+                                     reused_receipt)
+              .ok(),
+          "带 userId 的日程回执应解析成功");
+    Check(ParseScheduleReceiptIntent(ParseDocument(R"json({
+                "schemaVersion":"1","eventId":"without-user","correlationId":"c2","deviceId":"d2",
+                "operationType":"updated","scheduleId":"s2","result":"failed","summary":"无用户",
+                "occurredAt":"2026-01-02T00:00:00Z"
+              })json"),
+                                     reused_receipt)
+                  .ok() &&
+              !reused_receipt.userId.has_value() && reused_receipt.eventId == "without-user",
+          "复用日程回执输出时应清除旧 userId");
+    Check(!ParseScheduleReceiptIntent(ParseDocument(R"json({
+                 "schemaVersion":"1","eventId":"invalid-event","correlationId":"invalid-correlation",
+                 "userId":"invalid-user","deviceId":"invalid-device","operationType":"created",
+                 "scheduleId":"invalid-schedule","result":"succeeded","summary":"非法回执","occurredAt":"bad"
+               })json"),
+                                      reused_receipt)
+                  .ok() &&
+              reused_receipt.eventId == "without-user" && !reused_receipt.userId.has_value() &&
+              reused_receipt.summary == "无用户",
+          "日程回执解析失败时不应改写已有输出");
+
+    ReminderActionResult reused_result;
+    Check(ParseReminderActionResult(ParseDocument(R"json({
+                "schemaVersion":"1","operationId":"with-options","reminderTriggerId":"r",
+                "status":"retryable_failed","nextTriggerAt":"2026-01-02T00:00:00Z","errorCode":"retry",
+                "details":{"attempt":1},"occurredAt":"2026-01-01T00:00:00Z"
+              })json"),
+                                    reused_result)
+              .ok(),
+          "带可选字段的动作结果应解析成功");
+    Check(ParseReminderActionResult(ParseDocument(R"json({
+                "schemaVersion":"1","operationId":"without-options","reminderTriggerId":"r2",
+                "status":"succeeded","occurredAt":"2026-01-02T00:00:00Z"
+              })json"),
+                                    reused_result)
+                  .ok() &&
+              !reused_result.nextTriggerAt.has_value() && !reused_result.errorCode.has_value() &&
+              !reused_result.details.has_value(),
+          "复用动作结果输出时应清除所有旧可选字段");
+    Check(!ParseReminderActionResult(ParseDocument(R"json({
+                 "schemaVersion":"1","operationId":"invalid-operation","reminderTriggerId":"invalid-trigger",
+                 "status":"failed","errorCode":"invalid-error","details":{"changed":true},
+                 "occurredAt":"bad"
+               })json"),
+                                     reused_result)
+                  .ok() &&
+              reused_result.operationId == "without-options" && !reused_result.errorCode.has_value() &&
+              !reused_result.details.has_value(),
+          "动作结果解析失败时不应改写已有输出");
     return 0;
 }

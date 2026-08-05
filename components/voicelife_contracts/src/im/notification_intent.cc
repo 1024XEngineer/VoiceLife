@@ -72,9 +72,7 @@ using detail::RequireString;
     return Status::Ok();
 }
 
-}  // namespace
-
-Status ParseNotificationIntent(const JsonValue& root, NotificationIntent& out) {
+[[nodiscard]] Status ParseNotificationIntentValue(const JsonValue& root, NotificationIntent& out) {
     if (!root.IsObject()) {
         return Reject("NotificationIntent 必须是对象");
     }
@@ -146,6 +144,17 @@ Status ParseNotificationIntent(const JsonValue& root, NotificationIntent& out) {
         return status;
     }
     return detail::RequireIsoDateTime(root, "occurredAt", out.occurredAt);
+}
+
+}  // namespace
+
+Status ParseNotificationIntent(const JsonValue& root, NotificationIntent& out) {
+    NotificationIntent parsed;
+    if (const Status status = ParseNotificationIntentValue(root, parsed); !status.ok()) {
+        return status;
+    }
+    out = std::move(parsed);
+    return Status::Ok();
 }
 
 }  // namespace voicelife::contracts::im

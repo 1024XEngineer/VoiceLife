@@ -17,9 +17,7 @@ using detail::RequireEnum;
 using detail::RequireIsoDateTime;
 using detail::RequireString;
 
-}  // namespace
-
-Status ParseReminderActionResult(const JsonValue& root, ReminderActionResult& out) {
+[[nodiscard]] Status ParseReminderActionResultValue(const JsonValue& root, ReminderActionResult& out) {
     if (!root.IsObject()) {
         return Reject("ReminderActionResult 必须是对象");
     }
@@ -50,6 +48,17 @@ Status ParseReminderActionResult(const JsonValue& root, ReminderActionResult& ou
         return status;
     }
     return RequireIsoDateTime(root, "occurredAt", out.occurredAt);
+}
+
+}  // namespace
+
+Status ParseReminderActionResult(const JsonValue& root, ReminderActionResult& out) {
+    ReminderActionResult parsed;
+    if (const Status status = ParseReminderActionResultValue(root, parsed); !status.ok()) {
+        return status;
+    }
+    out = std::move(parsed);
+    return Status::Ok();
 }
 
 }  // namespace voicelife::contracts::im
