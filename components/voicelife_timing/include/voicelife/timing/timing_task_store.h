@@ -9,6 +9,12 @@
 
 namespace voicelife::timing {
 
+/// 表示一次定时任务修改需要原子提交的事实。
+struct TimingTaskUpdateWrite {
+    TimingTask task{};
+    std::vector<TimerInstance> upsert_instances{};
+};
+
 /// 持久化定时任务的边界。
 class TimingTaskStorePort {
    public:
@@ -28,6 +34,12 @@ class TimingTaskStorePort {
      */
     virtual Result<TimingTask> FindTaskByRequestId(const std::string& request_id) = 0;
     /**
+     * @brief 原子提交任务字段和 occurrence 覆盖字段。
+     * @param update 要保存的任务和实例变更。
+     * @return 全部提交成功或完全不写入的结果；目标不存在、实例归属错误或存储失败返回领域错误。
+     */
+    virtual Status UpdateTaskWithInstances(const TimingTaskUpdateWrite& update) = 0;
+    /**
      * @brief 按标识查询任务。
      * @param task_id 定时任务标识。
      * @return 找到的任务或不存在错误。
@@ -39,6 +51,12 @@ class TimingTaskStorePort {
      * @return 规则列表或存储错误。
      */
     virtual Result<std::vector<ReminderRule>> ListRules(const TimingTaskId& task_id) = 0;
+    /**
+     * @brief 查询任务已物化的 occurrence 实例。
+     * @param task_id 定时任务标识。
+     * @return 实例列表或存储错误。
+     */
+    virtual Result<std::vector<TimerInstance>> ListInstances(const TimingTaskId& task_id) = 0;
 };
 
 /// 提供可替换的当前时间来源。

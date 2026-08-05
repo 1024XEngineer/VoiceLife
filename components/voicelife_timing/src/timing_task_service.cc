@@ -35,6 +35,16 @@ Result<RegisterTimerTaskResult> RegistrationResult(const TimingTask& task) {
     });
 }
 
+bool IsSupportedChangeScope(ChangeScope scope) {
+    switch (scope) {
+        case ChangeScope::kSingle:
+        case ChangeScope::kFuture:
+        case ChangeScope::kAll:
+            return true;
+    }
+    return false;
+}
+
 Status ValidateRecurrence(const RecurrenceRule& recurrence) {
     const bool has_weekdays = !recurrence.by_weekdays.empty();
     const bool has_month_days = !recurrence.by_month_days.empty();
@@ -65,6 +75,78 @@ Status ValidateRecurrence(const RecurrenceRule& recurrence) {
             break;
     }
     return Status::Ok();
+}
+
+Status ValidateUpdateCommand(const UpdateTimerTaskCommand& command) {
+    if (command.task_id.empty() || command.schedule_id.empty()) {
+        return Status::Error(ErrorCode::kInvalidArgument, "修改任务缺少 task_id 或 schedule_id");
+    }
+    if (!IsSupportedChangeScope(command.change_scope)) {
+        return Status::Error(ErrorCode::kInvalidArgument, "不支持的修改范围");
+    }
+    if (command.start_at <= 0) {
+        return Status::Error(ErrorCode::kInvalidArgument, "修改任务缺少新的开始时间");
+    }
+
+    switch (command.change_scope) {
+        case ChangeScope::kSingle:
+            if (command.instance_id.empty() || command.target_occurrence_at <= 0) {
+                return Status::Error(ErrorCode::kInvalidArgument, "single 修改缺少目标 occurrence");
+            }
+            if (command.recurrence.has_value()) {
+                return Status::Error(ErrorCode::kInvalidArgument, "single 修改不能改变任务周期规则");
+            }
+            break;
+        case ChangeScope::kFuture:
+            if (command.effective_from <= 0) {
+                return Status::Error(ErrorCode::kInvalidArgument, "future 修改缺少 effective_from");
+            }
+            break;
+        case ChangeScope::kAll:
+            break;
+    }
+
+    if (command.recurrence.has_value()) {
+        return ValidateRecurrence(*command.recurrence);
+    }
+    return Status::Ok();
+}
+
+int CountInstancesFrom(const std::vector<TimerInstance>& instances, int64_t boundary) {
+    int count = 0;
+    for (const auto& instance : instances) {
+        if (instance.planned_at >= boundary) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+TimerInstance BuildSingleOverride(const UpdateTimerTaskCommand& command, const TimingTask& task,
+                                  const std::vector<TimerInstance>& instances, int64_t now) {
+    TimerInstance instance{
+        .id = command.instance_id,
+        .task_id = task.id,
+        .planned_at = command.target_occurrence_at,
+        .status = TimerInstanceStatus::kModified,
+        .override_fields = {.start_at = command.start_at},
+        .last_action_at = now,
+        .created_at = now,
+        .updated_at = now,
+    };
+
+    for (const auto& existing : instances) {
+        if (existing.id == command.instance_id) {
+            instance = existing;
+            instance.planned_at = command.target_occurrence_at;
+            instance.status = TimerInstanceStatus::kModified;
+            instance.override_fields.start_at = command.start_at;
+            instance.last_action_at = now;
+            instance.updated_at = now;
+            break;
+        }
+    }
+    return instance;
 }
 
 }  // namespace
@@ -146,6 +228,80 @@ Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(cons
     }
 
     return RegistrationResult(*task.value);
+}
+
+Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const UpdateTimerTaskCommand& command) {
+    const Status validation = ValidateUpdateCommand(command);
+    if (!validation.ok()) {
+        return Result<UpdateTimerTaskResult>::Failure(validation.code, validation.message);
+    }
+
+    const auto existing_task = store_.FindTask(command.task_id);
+    if (!existing_task.ok()) {
+        return Result<UpdateTimerTaskResult>::Failure(existing_task.status.code, existing_task.status.message);
+    }
+    if (existing_task.value->schedule_id != command.schedule_id) {
+        return Result<UpdateTimerTaskResult>::Failure(ErrorCode::kConflict, "任务不属于指定日程");
+    }
+
+    const auto existing_instances = store_.ListInstances(command.task_id);
+    if (!existing_instances.ok()) {
+        return Result<UpdateTimerTaskResult>::Failure(existing_instances.status.code,
+                                                      existing_instances.status.message);
+    }
+
+    TimingTask updated_task = *existing_task.value;
+    std::vector<TimerInstance> upsert_instances;
+    std::string instance_id;
+    InstanceOverrides override_fields;
+    int affected_instance_count = 0;
+    const int64_t now = clock_.Now();
+
+    switch (command.change_scope) {
+        case ChangeScope::kSingle: {
+            TimerInstance instance = BuildSingleOverride(command, updated_task, *existing_instances.value, now);
+            instance_id = instance.id;
+            override_fields = instance.override_fields;
+            affected_instance_count = 1;
+            upsert_instances.push_back(std::move(instance));
+            break;
+        }
+        case ChangeScope::kFuture:
+            updated_task.start_at = command.start_at;
+            updated_task.next_trigger_at = command.start_at;
+            updated_task.updated_at = now;
+            if (command.recurrence.has_value()) {
+                updated_task.recurrence = *command.recurrence;
+            }
+            affected_instance_count = CountInstancesFrom(*existing_instances.value, command.effective_from);
+            break;
+        case ChangeScope::kAll:
+            updated_task.start_at = command.start_at;
+            updated_task.next_trigger_at = command.start_at;
+            updated_task.updated_at = now;
+            if (command.recurrence.has_value()) {
+                updated_task.recurrence = *command.recurrence;
+            }
+            affected_instance_count = static_cast<int>(existing_instances.value->size());
+            break;
+    }
+
+    const Status saved = store_.UpdateTaskWithInstances({
+        .task = updated_task,
+        .upsert_instances = std::move(upsert_instances),
+    });
+    if (!saved.ok()) {
+        return Result<UpdateTimerTaskResult>::Failure(saved.code, saved.message);
+    }
+
+    return Result<UpdateTimerTaskResult>::Success({
+        .task_id = updated_task.id,
+        .status = updated_task.status,
+        .next_trigger_at = updated_task.next_trigger_at,
+        .instance_id = std::move(instance_id),
+        .override_fields = override_fields,
+        .affected_instance_count = affected_instance_count,
+    });
 }
 
 }  // namespace voicelife::timing
