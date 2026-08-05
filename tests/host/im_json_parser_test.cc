@@ -90,5 +90,12 @@ int main() {
     ParseRejected("\"a\nb\"");
     ParseRejected(std::string(70, '[') + std::string(70, ']'));
     ParseRejected("\"\xFF\"");
+    // 加固：数字溢出与 UTF-8 各非法形态
+    ParseRejected("1e999");
+    ParseRejected("\"\xE2\"");
+    ParseRejected("\"\xE2\x28\"");
+    ParseRejected("\"\xE0\x80\x80\"");
+    ParseRejected("\"\xED\xA0\x80\"");
+    ParseRejected("\"\xF4\x90\x80\x80\"");
     return 0;
 }
