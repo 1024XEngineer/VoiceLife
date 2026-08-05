@@ -76,6 +76,7 @@ async function runContractFixtureTests() {
     const replay = await readFixture('notification-strong-replay.json');
     const weak = await readFixture('notification-weak.json');
     const conflict = await readFixture('notification-conflict.json');
+    const actionResult = await readFixture('reminder-action-result.json');
 
     assert(
         parseScheduleReceiptIntent(scheduleReceipt).scheduleId === 'schedule-fixture',
@@ -96,6 +97,35 @@ async function runContractFixtureTests() {
         const invalidFixture = await readFixture(name);
         await expectGatewayError(
             () => Promise.resolve(parseNotificationIntent(invalidFixture)),
+            'invalid_contract',
+            `${name} was accepted by the runtime parser`,
+        );
+    }
+
+    for (const name of [
+        'schedule-receipt-invalid-version.json',
+        'schedule-receipt-invalid-enum.json',
+        'schedule-receipt-invalid-time.json',
+    ]) {
+        const invalidScheduleReceipt = await readFixture(name);
+        await expectGatewayError(
+            () => Promise.resolve(parseScheduleReceiptIntent(invalidScheduleReceipt)),
+            'invalid_contract',
+            `${name} was accepted by the runtime parser`,
+        );
+    }
+
+    const parsedActionResult = parseReminderActionResult(actionResult);
+    assert(
+        parsedActionResult.status === 'succeeded' &&
+            parsedActionResult.operationId === 'operation-fixture' &&
+            parsedActionResult.nextTriggerAt === '2026-08-03T00:10:00.000Z',
+        'ReminderActionResult fixture did not preserve the execution result',
+    );
+    for (const name of ['reminder-action-result-invalid-status.json', 'reminder-action-result-invalid-time.json']) {
+        const invalidActionResult = await readFixture(name);
+        await expectGatewayError(
+            () => Promise.resolve(parseReminderActionResult(invalidActionResult)),
             'invalid_contract',
             `${name} was accepted by the runtime parser`,
         );
@@ -140,6 +170,33 @@ async function runContractFixtureTests() {
             ),
         'invalid_contract',
         'Action UI accepted a non-positive snooze duration',
+    );
+    await expectGatewayError(
+        () =>
+            Promise.resolve(
+                parseReminderActionIntent({
+                    token: 'fixture-token',
+                    action: 'snooze',
+                    params: { minutes: 1441 },
+                }),
+            ),
+        'invalid_contract',
+        'Action UI accepted a snooze duration above the device limit',
+    );
+    await expectGatewayError(
+        () =>
+            Promise.resolve(
+                parseNotificationIntent({
+                    ...strong,
+                    actions: Array.from({ length: 17 }, () => ({
+                        kind: 'command',
+                        type: 'acknowledge',
+                        label: 'Acknowledge',
+                    })),
+                }),
+            ),
+        'invalid_contract',
+        'NotificationIntent accepted more actions than the device limit',
     );
 
     const { gateway } = await createBoundGateway();

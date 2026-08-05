@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1",
+  "eventId": "event-invalid-time",
+  "correlationId": "correlation-invalid-time",
+  "userId": "user-fixture",
+  "deviceId": "device-fixture",
+  "operationType": "created",
+  "scheduleId": "schedule-fixture",
+  "result": "succeeded",
+  "summary": "非法时间",
+  "occurredAt": "not-a-time"
+}
