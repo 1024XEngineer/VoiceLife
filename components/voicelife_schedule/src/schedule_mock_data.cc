@@ -10,9 +10,9 @@ DateTime At(int64_t unix_seconds) { return DateTime{std::chrono::seconds{unix_se
 
 }  // namespace
 
-std::vector<Schedule> LoadMockSchedulesForCreate() {
-    // TODO(#134): 伪代码：database.query_active_schedules(command.start_time, command.end_time)。
-    // 数据库适配器可用后，改为查询可能冲突或临近的有效日程，并删除这些固定模拟数据。
+std::vector<Schedule> LoadMockSchedules() {
+    // TODO(#134): 伪代码：database.query_schedules(query_conditions)。
+    // 数据库适配器可用后，改为按查询条件读取日程，并删除这些固定模拟数据。
     return {
         Schedule{
             .id = 1001,
