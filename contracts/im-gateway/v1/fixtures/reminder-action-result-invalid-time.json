@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1",
+  "operationId": "operation-invalid-time",
+  "reminderTriggerId": "trigger-fixture",
+  "status": "succeeded",
+  "occurredAt": "not-a-time"
+}

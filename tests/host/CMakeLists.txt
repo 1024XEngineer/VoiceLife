@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(voicelife_host_tests LANGUAGES CXX)
+project(voicelife_host_tests LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,13 +21,24 @@ endif()
 
 set(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../..")
 
+add_library(yyjson STATIC "${ROOT_DIR}/third_party/yyjson/yyjson.c")
+target_include_directories(yyjson PUBLIC "${ROOT_DIR}/third_party/yyjson")
+if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(yyjson PRIVATE -w)
+endif()
+
 function(add_voicelife_library target component)
     add_library(${target} STATIC ${ARGN})
     target_include_directories(${target} PUBLIC "${ROOT_DIR}/components/${component}/include")
 endfunction()
 
 add_voicelife_library(contracts voicelife_contracts
-    "${ROOT_DIR}/components/voicelife_contracts/src/status.cc")
+    "${ROOT_DIR}/components/voicelife_contracts/src/status.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/json.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_intent.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_receipt.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_result.cc")
+target_link_libraries(contracts PRIVATE yyjson)
 add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_create_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_mock_data.cc"
@@ -97,6 +108,16 @@ target_link_libraries(voice_session_coordinator_test PRIVATE voice)
 
 add_voicelife_test(im_gateway_contract_test "unit;im" im_gateway_contract_test.cc)
 target_compile_definitions(im_gateway_contract_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
+
+add_voicelife_test(im_contract_parser_test "unit;im" im_contract_parser_test.cc)
+target_link_libraries(im_contract_parser_test PRIVATE contracts)
+target_compile_definitions(im_contract_parser_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
+
+add_voicelife_test(im_json_parser_test "unit;im" im_json_parser_test.cc)
+target_link_libraries(im_json_parser_test PRIVATE contracts)
+
+add_voicelife_test(im_contract_validation_test "unit;im" im_contract_validation_test.cc)
+target_link_libraries(im_contract_validation_test PRIVATE contracts)
 
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
