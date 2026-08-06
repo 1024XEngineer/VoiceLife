@@ -26,6 +26,11 @@ target_include_directories(yyjson PUBLIC "${ROOT_DIR}/third_party/yyjson")
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(yyjson PRIVATE -w)
 endif()
+# Portable cJSON for host tests. ESP-IDF uses its own built-in json component.
+add_library(cjson STATIC "${ROOT_DIR}/third_party/cjson/cJSON.c")
+target_include_directories(cjson PUBLIC "${ROOT_DIR}/third_party/cjson")
+set_target_properties(cjson PROPERTIES LINKER_LANGUAGE C)
+>>>>>>> 0b032e3 (♻️ refactor(voice): LinxJsonCodec 从字符串扫描替换为 cJSON 结构化解析)
 
 function(add_voicelife_library target component)
     add_library(${target} STATIC ${ARGN})
@@ -71,7 +76,10 @@ target_link_libraries(voice PUBLIC contracts)
 add_voicelife_library(linx voicelife_linx
     "${ROOT_DIR}/components/voicelife_linx/src/linx_json_codec.cc"
     "${ROOT_DIR}/components/voicelife_linx/src/linx_speech_provider.cc")
-target_link_libraries(linx PUBLIC voice)
+target_link_libraries(linx PUBLIC voice cjson)
+add_voicelife_library(linx_esp voicelife_linx_esp
+    "${ROOT_DIR}/components/voicelife_linx_esp/src/websocket_fragment_assembler.cc")
+target_link_libraries(linx_esp PUBLIC contracts linx)
 add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/storage_protocol.cc")
 target_link_libraries(storage_sqlite PUBLIC contracts)
