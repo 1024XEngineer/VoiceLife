@@ -112,6 +112,8 @@ DeleteScheduleResult ScheduleService::delete_schedule(const DeleteScheduleComman
         .deleted = true,
         .error = {},
     };
+}
+
 QueryScheduleResult ScheduleService::query_schedule(const QueryScheduleCommand& command) const {
     const Status validation = ValidateQueryScheduleCommand(command);
     if (!validation.ok()) {

@@ -14,6 +14,12 @@ namespace voicelife::schedule {
 std::vector<Schedule> LoadMockSchedulesForCreate();
 
 /**
+ * @brief 返回查询日程时使用的模拟数据。
+ * @return 包含有效、已完成和已取消日程的固定数据；数据库接入后删除该模拟入口。
+ */
+std::vector<Schedule> LoadMockSchedulesForQuery();
+
+/**
  * @brief 在模拟存储中将指定日程标记为已取消。
  * @param schedule_id 要取消的日程 ID。
  * @return 成功时返回保留全部原字段的已取消日程；不存在或已取消时返回失败。
