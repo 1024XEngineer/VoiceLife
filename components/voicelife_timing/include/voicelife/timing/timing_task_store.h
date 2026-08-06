@@ -9,7 +9,7 @@
 
 namespace voicelife::timing {
 
-/// 表示一次定时任务修改需要原子提交的事实。
+/// 表示一次定时任务修改需要原子提交的任务字段和 occurrence 变更。
 struct TimingTaskUpdateWrite {
     TimingTask task{};
     std::vector<TimerInstance> upsert_instances{};
@@ -34,8 +34,8 @@ class TimingTaskStorePort {
      */
     virtual Result<TimingTask> FindTaskByRequestId(const std::string& request_id) = 0;
     /**
-     * @brief 原子提交任务字段和 occurrence 覆盖字段。
-     * @param update 要保存的任务和实例变更。
+     * @brief 原子提交任务字段和 occurrence 覆盖或状态变更。
+     * @param update 要保存的任务和实例变更；更新范围内的旧实例可标记为 skipped。
      * @return 全部提交成功或完全不写入的结果；目标不存在、实例归属错误或存储失败返回领域错误。
      */
     virtual Status UpdateTaskWithInstances(const TimingTaskUpdateWrite& update) = 0;

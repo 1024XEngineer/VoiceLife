@@ -12,10 +12,6 @@ Result<T> NotImplemented(const char* operation) {
 
 }  // namespace
 
-Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const UpdateTimerTaskCommand&) {
-    return NotImplemented<UpdateTimerTaskResult>("UpdateTimerTask");
-}
-
 Result<UpsertReminderRulesResult> DefaultTimingTaskService::UpsertReminderRules(const UpsertReminderRulesCommand&) {
     return NotImplemented<UpsertReminderRulesResult>("UpsertReminderRules");
 }
