@@ -1,7 +1,6 @@
 #pragma once
 
 #include <deque>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -17,7 +16,8 @@ namespace voicelife::im {
 ///
 /// Open 建立 GET /v1/devices/{deviceId}/reminder-actions/stream 连接，携带
 /// Authorization 与 Last-Event-ID 请求头；Next 阻塞读取 SSE 帧并把 reminder.action
-/// 载荷解析为动作命令；连接关闭或读取失败时返回 nullopt。析构时自动关闭连接。
+/// 载荷解析为动作命令，以 StreamRead 区分命令、正常结束、网络错误与协议错误；
+/// 连接中断或坏帧时自动关闭连接。析构时自动关闭连接。
 class EspActionStreamTransport : public ImActionCommandStream {
    public:
     /**
@@ -29,7 +29,7 @@ class EspActionStreamTransport : public ImActionCommandStream {
     EspActionStreamTransport(std::string base_url, ImCredentialProvider& credentials, std::string reminder_trigger_id);
     ~EspActionStreamTransport() override { CloseConnection(); }
     bool Open(const std::string& last_event_id) override;
-    std::optional<contracts::im::ReminderActionCommand> Next() override;
+    StreamRead Next() override;
     void Close() override;
 
    private:
