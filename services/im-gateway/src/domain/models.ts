@@ -123,6 +123,10 @@ export interface Delivery {
     readonly externalMessageId?: string;
     readonly expiresAt?: IsoDateTime;
     readonly lastErrorCode?: string;
+    /** 派发领取时间；凭 lease 过期后允许其他 worker 重领（崩溃恢复）。 */
+    readonly claimedAt?: IsoDateTime;
+    /** 派发所有权令牌：仅持牌 worker 的写回可生效，隔离过期 worker 的迟到覆盖。 */
+    readonly claimToken?: string;
     readonly createdAt: IsoDateTime;
     readonly updatedAt: IsoDateTime;
 }
