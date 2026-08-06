@@ -193,6 +193,36 @@ void TestMalformedSubmissionBodyHasNoWindow() {
     Check(!window.has_value(), "畸形受理结果不得提取出动作窗口");
 }
 
+void TestExecutedCachePrunedAfterWindowExpiry() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeExecutor executor;
+    executor.result = MakeResult();
+    FakeClock clock;
+    ImReportingChannel reporting(transport, credentials);
+    ImActionChannel channel(reporting, credentials, executor, clock);
+
+    FakeStream first_stream;
+    first_stream.commands.push_back(MakeCommand("command-1", "operation-1"));
+    channel.Run(first_stream, MakeWindow());
+    Check(executor.calls.size() == 1, "首窗 op-1 应执行一次并缓存");
+
+    // 同一 reminderTriggerId 的新窗口，但旧窗口已过期：过期缓存必须清理，
+    // op-1 视为新动作重新执行，而非复用旧窗口结果。
+    clock.now = "2026-08-03T00:12:00.000Z";
+    ActionWindow second = MakeWindow();
+    second.expiresAt = "2026-08-03T00:20:00.000Z";
+    ReminderActionCommand second_command = MakeCommand("command-2", "operation-1");
+    second_command.expiresAt = "2026-08-03T00:18:00.000Z";
+    FakeStream second_stream;
+    second_stream.commands.push_back(second_command);
+    const ActionRunResult second_result = channel.Run(second_stream, second);
+
+    Check(second_result.status == ActionRunStatus::kFinished, "新窗口应正常结束");
+    Check(executor.calls.size() == 2, "旧窗口过期缓存必须被清理，op-1 重新执行");
+    Check(transport.requests.size() == 2, "新旧窗口都应回传结果");
+}
+
 }  // namespace
 
 int main() {
@@ -206,5 +236,6 @@ int main() {
     TestStrongSubmissionBodyYieldsActionWindow();
     TestWeakSubmissionBodyHasNoWindow();
     TestMalformedSubmissionBodyHasNoWindow();
+    TestExecutedCachePrunedAfterWindowExpiry();
     return 0;
 }

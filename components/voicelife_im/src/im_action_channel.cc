@@ -176,9 +176,19 @@ ActionRunResult ImActionChannel::Run(ImActionCommandStream& stream, const Action
     ActionRunResult result;
     // 窗口在 expiresAt 时刻起失效，now == expiresAt 即视为过期，不得建流。
     const int64_t window_expires_ms = EpochMillisOrExpired(window.expiresAt);
-    if (NowEpochMillis(clock_.NowIso()) >= window_expires_ms) {
+    const int64_t now_ms = NowEpochMillis(clock_.NowIso());
+    if (now_ms >= window_expires_ms) {
         result.status = ActionRunStatus::kWindowExpired;
         return result;
+    }
+    // 清理已过期窗口的执行结果缓存：窗口关闭后同 trigger 的新窗口应重新执行，
+    // 且避免设备长期运行后缓存无界增长。
+    for (auto it = executed_.begin(); it != executed_.end();) {
+        if (it->second.window_expires_ms <= now_ms) {
+            it = executed_.erase(it);
+        } else {
+            ++it;
+        }
     }
 
     bool has_unconfirmed = false;
@@ -235,7 +245,7 @@ void ImActionChannel::HandleCommand(const ReminderActionCommand& command, const 
     const auto cached = executed_.find(cache_key);
     if (cached != executed_.end()) {
         const ReportResult report =
-            reporting_.SubmitReminderActionResult(cached->second, command.deviceId, command.commandId);
+            reporting_.SubmitReminderActionResult(cached->second.result, command.deviceId, command.commandId);
         Settle(report, command, window.reminderTriggerId, result, has_unconfirmed);
         return;
     }
@@ -250,7 +260,7 @@ void ImActionChannel::HandleCommand(const ReminderActionCommand& command, const 
         has_unconfirmed = true;
         return;
     }
-    executed_[cache_key] = outcome;
+    executed_[cache_key] = CachedExecution{EpochMillisOrExpired(window.expiresAt), outcome};
     ++result.executed;
     const ReportResult report = reporting_.SubmitReminderActionResult(outcome, command.deviceId, command.commandId);
     Settle(report, command, window.reminderTriggerId, result, has_unconfirmed);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
@@ -74,6 +75,12 @@ class ImActionChannel {
     ActionRunResult Run(ImActionCommandStream& stream, const ActionWindow& window);
 
    private:
+    /// 单条已执行结果缓存：随窗口截止毫秒一起记录，窗口过期后由 Run 清理，
+    /// 避免设备长期运行后堆积。
+    struct CachedExecution {
+        int64_t window_expires_ms;
+        contracts::im::ReminderActionResult result;
+    };
     /// 处理单条命令：校验归属、有效期并执行去重与回传。
     void HandleCommand(const contracts::im::ReminderActionCommand& command, const ActionWindow& window,
                        ActionRunResult& result, bool& has_unconfirmed);
@@ -88,8 +95,9 @@ class ImActionChannel {
     /// 上次已确认的 commandId 游标（按提醒触发分区，避免窗口间串扰），
     /// 作为重连时 Last-Event-ID。
     std::map<std::string, std::string> cursors_;
-    /// {提醒触发, operationId} -> 已执行结果缓存，保证同窗重复命令只执行一次。
-    std::map<std::string, contracts::im::ReminderActionResult> executed_;
+    /// {提醒触发, operationId} -> 已执行结果缓存，保证同窗重复命令只执行一次；
+    /// 缓存随窗口截止过期，避免长期运行后无界增长。
+    std::map<std::string, CachedExecution> executed_;
 };
 
 /// 从网关通知受理结果响应体中提取动作窗口。
