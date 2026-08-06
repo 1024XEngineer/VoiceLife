@@ -5,6 +5,8 @@
 
 #include "voicelife/im/im_action_channel.h"
 
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -42,6 +44,15 @@ constexpr const char* kDeviceId = "device-fixture";
 constexpr const char* kToken = "device-token";
 constexpr const char* kNow = "2026-08-03T00:01:00.000Z";
 constexpr const char* kWindowExpires = "2026-08-03T00:10:00.000Z";
+
+/// 读取共享受理结果 fixture，保证强/弱窗口语义与网关 TS 契约一致。
+std::string ReadFixture(const char* name) {
+    std::ifstream input(std::string(VOICELIFE_SOURCE_DIR) + "/contracts/im-gateway/v1/fixtures/" + name);
+    Check(input.good(), "共享 IM fixture 必须存在");
+    std::ostringstream content;
+    content << input.rdbuf();
+    return content.str();
+}
 
 /// 记录请求并可控返回结果的假传输。
 class FakeTransport : public ImTransport {
@@ -352,6 +363,28 @@ void TestDuplicateOperationIdWithinRunExecutesOnce() {
           "重复命令回传必须复用相同 operationId 幂等键");
 }
 
+void TestStrongSubmissionBodyYieldsActionWindow() {
+    const std::optional<ActionWindow> window =
+        voicelife::im::ExtractActionWindow(ReadFixture("notification-submission.json"));
+
+    Check(window.has_value(), "强提醒受理结果必须提取出动作窗口");
+    Check(window->reminderTriggerId == "trigger-fixture" && window->expiresAt == kWindowExpires,
+          "动作窗口必须与强提醒受理结果的 actionStream 一致");
+}
+
+void TestWeakSubmissionBodyHasNoWindow() {
+    const std::optional<ActionWindow> window =
+        voicelife::im::ExtractActionWindow(ReadFixture("notification-submission-weak.json"));
+
+    Check(!window.has_value(), "弱提醒受理结果不得提取出动作窗口");
+}
+
+void TestMalformedSubmissionBodyHasNoWindow() {
+    const std::optional<ActionWindow> window = voicelife::im::ExtractActionWindow("{not-json");
+
+    Check(!window.has_value(), "畸形受理结果不得提取出动作窗口");
+}
+
 }  // namespace
 
 int main() {
@@ -362,5 +395,8 @@ int main() {
     TestWrongDeviceIdDroppedLocally();
     TestMismatchedTriggerDroppedLocally();
     TestDuplicateOperationIdWithinRunExecutesOnce();
+    TestStrongSubmissionBodyYieldsActionWindow();
+    TestWeakSubmissionBodyHasNoWindow();
+    TestMalformedSubmissionBodyHasNoWindow();
     return 0;
 }

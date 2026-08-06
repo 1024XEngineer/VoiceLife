@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <optional>
 #include <string>
 
 #include "voicelife/contracts/im/reminder_action_command.h"
@@ -84,5 +85,11 @@ class ImActionChannel {
     /// operationId -> 已执行结果缓存，保证重复命令只执行一次。
     std::map<std::string, contracts::im::ReminderActionResult> executed_;
 };
+
+/// 从网关通知受理结果响应体中提取动作窗口。
+///
+/// 强提醒受理结果携带 actionStream 时返回对应窗口，调用方据此建立动作流；
+/// 弱提醒（无 actionStream）或响应体无法解析时返回空，调用方不得建流。
+std::optional<ActionWindow> ExtractActionWindow(const std::string& submission_body);
 
 }  // namespace voicelife::im

@@ -45,6 +45,8 @@ struct ImHttpResponse {
     ImTransportStatus status = ImTransportStatus::kNetworkFailure;
     /// 服务端返回的 HTTP 状态码，网络失败时为 0。
     int status_code = 0;
+    /// 服务端响应体，网络失败或空响应时为空字符串。
+    std::string body;
     /// 面向人的失败说明。
     std::string message;
 };

@@ -6,10 +6,13 @@
 
 #include "im_wire.h"
 #include "voicelife/contracts/im/im_contracts.h"
+#include "voicelife/contracts/im/notification_submission.h"
+#include "voicelife/contracts/json.h"
 
 namespace voicelife::im {
 namespace {
 
+using contracts::im::NotificationSubmission;
 using contracts::im::ReminderActionCommand;
 using contracts::im::ReminderActionResult;
 
@@ -20,6 +23,19 @@ bool LaterThan(const std::string& left, const std::string& right) { return left 
 bool IsExpired(const std::string& expires_at, const std::string& now) { return expires_at <= now; }
 
 }  // namespace
+
+std::optional<ActionWindow> ExtractActionWindow(const std::string& submission_body) {
+    voicelife::JsonValue root;
+    NotificationSubmission submission;
+    if (!voicelife::ParseJson(submission_body, root).ok() || !ParseNotificationSubmission(root, submission).ok() ||
+        !submission.actionStream.has_value()) {
+        return std::nullopt;
+    }
+    ActionWindow window;
+    window.reminderTriggerId = submission.actionStream->reminderTriggerId;
+    window.expiresAt = submission.actionStream->expiresAt;
+    return window;
+}
 
 ImActionChannel::ImActionChannel(ImReportingChannel& reporting, ImCredentialProvider& credentials,
                                  ImActionExecutor& executor, ImClock& clock)

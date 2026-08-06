@@ -41,7 +41,7 @@ ImReportingChannel::ImReportingChannel(ImTransport& transport, ImCredentialProvi
 ReportResult ImReportingChannel::SubmitScheduleReceipt(const contracts::im::ScheduleReceiptIntent& intent) {
     const std::string body = SerializeScheduleReceiptIntent(intent);
     if (!ValidatesAsScheduleReceipt(body)) {
-        return {ReportStatus::kRejected, "发送前契约校验失败"};
+        return {ReportStatus::kRejected, "发送前契约校验失败", ""};
     }
     return Submit(kScheduleReceiptPath, intent.eventId, intent.deviceId, body);
 }
@@ -49,7 +49,7 @@ ReportResult ImReportingChannel::SubmitScheduleReceipt(const contracts::im::Sche
 ReportResult ImReportingChannel::SubmitNotification(const contracts::im::NotificationIntent& intent) {
     const std::string body = SerializeNotificationIntent(intent);
     if (!ValidatesAsNotification(body)) {
-        return {ReportStatus::kRejected, "发送前契约校验失败"};
+        return {ReportStatus::kRejected, "发送前契约校验失败", ""};
     }
     return Submit(kNotificationPath, intent.businessEventId, intent.recipient.deviceId, body);
 }
@@ -59,7 +59,7 @@ ReportResult ImReportingChannel::SubmitReminderActionResult(const contracts::im:
                                                             const std::string& command_id) {
     const std::string body = SerializeReminderActionResult(result);
     if (!ValidatesAsActionResult(body)) {
-        return {ReportStatus::kRejected, "发送前契约校验失败"};
+        return {ReportStatus::kRejected, "发送前契约校验失败", ""};
     }
     const std::string path = kReminderActionResultPrefix + device_id + kReminderActionResultSuffix + command_id +
                              kReminderActionResultResultSuffix;
@@ -71,13 +71,13 @@ ReportResult ImReportingChannel::Submit(const std::string& path, const std::stri
     const std::string token = credentials_.DeviceToken();
     const std::string device_id = credentials_.DeviceId();
     if (token.empty()) {
-        return {ReportStatus::kCredentialRejected, "设备凭据未配置"};
+        return {ReportStatus::kCredentialRejected, "设备凭据未配置", ""};
     }
     if (idempotency_key.empty()) {
-        return {ReportStatus::kRejected, "幂等键不能为空"};
+        return {ReportStatus::kRejected, "幂等键不能为空", ""};
     }
     if (device_id.empty() || device_id != intent_device_id) {
-        return {ReportStatus::kCredentialRejected, "deviceId 与意图不一致"};
+        return {ReportStatus::kCredentialRejected, "deviceId 与意图不一致", ""};
     }
 
     ImHttpRequest request;
@@ -89,25 +89,32 @@ ReportResult ImReportingChannel::Submit(const std::string& path, const std::stri
                        {"Idempotency-Key", idempotency_key}};
 
     const ImHttpResponse response = transport_.Post(request);
+    ReportResult result;
     switch (response.status) {
         case ImTransportStatus::kSuccess:
-            return {ReportStatus::kSubmitted, response.message};
+            result = {ReportStatus::kSubmitted, response.message, response.body};
+            break;
         case ImTransportStatus::kCredentialRejected:
-            return {ReportStatus::kCredentialRejected, response.message};
+            result = {ReportStatus::kCredentialRejected, response.message, response.body};
+            break;
         case ImTransportStatus::kNetworkFailure:
-            return {ReportStatus::kRetryable, response.message};
+            result = {ReportStatus::kRetryable, response.message, response.body};
+            break;
         case ImTransportStatus::kInvalidConfig:
-            return {ReportStatus::kRejected, response.message};
+            result = {ReportStatus::kRejected, response.message, response.body};
+            break;
         case ImTransportStatus::kHttpError: {
             // 仅超时、限流与服务端 5xx 可重试；其余 4xx/3xx 为明确拒绝。
             const int code = response.status_code;
             if (code == 408 || code == 429 || code >= 500) {
-                return {ReportStatus::kRetryable, response.message};
+                result = {ReportStatus::kRetryable, response.message, response.body};
+            } else {
+                result = {ReportStatus::kRejected, response.message, response.body};
             }
-            return {ReportStatus::kRejected, response.message};
+            break;
         }
     }
-    return {ReportStatus::kRetryable, "未知传输结果"};
+    return result;
 }
 
 }  // namespace voicelife::im

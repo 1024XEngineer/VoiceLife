@@ -17,8 +17,8 @@ struct ReminderActionCommand {
     std::string deviceId;
     std::string actorBindingId;
     std::string reminderTriggerId;
-    std::string action;              ///< "acknowledge" 或 "snooze"。
-    std::optional<int> minutes;      ///< snooze 动作必需的推迟分钟数（params.minutes）。
+    std::string action;          ///< "acknowledge" 或 "snooze"。
+    std::optional<int> minutes;  ///< snooze 动作必需的推迟分钟数（params.minutes）。
     std::string occurredAt;
     std::string expiresAt;
 };

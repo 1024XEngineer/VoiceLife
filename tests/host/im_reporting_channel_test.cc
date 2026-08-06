@@ -54,6 +54,7 @@ class FakeTransport : public ImTransport {
     std::vector<ImHttpRequest> requests;
     ImTransportStatus next_status = ImTransportStatus::kSuccess;
     int next_status_code = 200;
+    std::string next_body;
 
     ImHttpResponse Post(const ImHttpRequest& request) override {
         requests.push_back(request);
@@ -61,6 +62,7 @@ class FakeTransport : public ImTransport {
         response.status = next_status;
         response.status_code = next_status_code;
         response.message = "fake";
+        response.body = next_body;
         return response;
     }
 };
@@ -175,6 +177,19 @@ void TestNotificationSuccess() {
     Check(request.path.find("/v1/notification-intents") == std::string::npos,
           "不得再使用旧的 notification-intents 路径");
     CheckBodyRoundTrips(request, intent);
+}
+
+void TestSubmitNotificationSurfacesResponseBody() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    const std::string submission = ReadFixture("notification-submission.json");
+    transport.next_body = submission;
+    ImReportingChannel channel(transport, credentials);
+
+    const ReportResult result = channel.SubmitNotification(MakeNotification());
+
+    Check(result.status == ReportStatus::kSubmitted, "受理成功状态必须保留");
+    Check(result.response_body == submission, "网关受理结果响应体必须原样透传");
 }
 
 void TestMissingCredentialIsLocal() {
@@ -312,6 +327,7 @@ void TestGatewayUrlScheme() {
 int main() {
     TestScheduleReceiptSuccess();
     TestNotificationSuccess();
+    TestSubmitNotificationSurfacesResponseBody();
     TestMissingCredentialIsLocal();
     TestDeviceIdMismatchIsLocal();
     TestCredentialRejectedByServer();

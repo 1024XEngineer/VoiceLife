@@ -28,6 +28,8 @@ struct ReportResult {
     ReportStatus status = ReportStatus::kRetryable;
     /// 面向人的结果说明。
     std::string message;
+    /// 网关响应体（例如通知受理结果），提交成功且服务端有响应时透传。
+    std::string response_body;
 };
 
 /// 平台无关的 IM Gateway 上报通道。
