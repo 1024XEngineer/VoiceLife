@@ -49,7 +49,8 @@ add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_mock_data.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_query_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_service.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_time_rules.cc")
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_time_rules.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_update_helpers.cc")
 target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule PUBLIC contracts)
 add_voicelife_library(timing voicelife_timing
@@ -92,6 +93,10 @@ target_link_libraries(schedule_query_test PRIVATE schedule)
 add_voicelife_test(schedule_delete_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_delete_test.cc")
 target_link_libraries(schedule_delete_test PRIVATE schedule)
+
+add_voicelife_test(schedule_update_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_update_test.cc")
+target_link_libraries(schedule_update_test PRIVATE schedule)
 
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
 target_link_libraries(status_test PRIVATE contracts)

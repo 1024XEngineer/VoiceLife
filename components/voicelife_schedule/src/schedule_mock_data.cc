@@ -41,6 +41,11 @@ std::vector<Schedule>& MockSchedules() {
 
 }  // namespace
 
+std::vector<Schedule> LoadMockSchedules() {
+    // 兼容修改日程接口使用的旧入口；数据来自同一份共享模拟存储。
+    return MockSchedules();
+}
+
 std::vector<Schedule> LoadMockSchedulesForCreate() {
     // TODO(#134): 伪代码：database.query_active_schedules(command.start_time, command.end_time)。
     // 数据库适配器可用后，改为查询可能冲突或临近的有效日程，并删除这些固定模拟数据。

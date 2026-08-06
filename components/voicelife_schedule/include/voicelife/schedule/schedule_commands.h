@@ -7,6 +7,13 @@
 
 namespace voicelife::schedule {
 
+/**
+ * @brief 可清空字段的修改值；外层无值表示不修改，内层无值表示清空。
+ * @tparam T 字段实际保存的数据类型。
+ */
+template <typename T>
+using NullableScheduleUpdate = std::optional<std::optional<T>>;
+
 /// 创建日程所需的数据。
 struct CreateScheduleCommand {
     std::string event;
@@ -22,15 +29,16 @@ struct DeleteScheduleCommand {
     ScheduleId schedule_id = 0;
 };
 
-/// 修改日程所需的数据；未提供的可选字段保持原值。
+/// 修改日程所需的数据；未提供的字段保持原值，可清空字段通过双层 optional 表达。
 struct UpdateScheduleCommand {
     ScheduleId schedule_id = 0;
     std::optional<std::string> event;
-    std::optional<DateTime> start_time;
-    std::optional<DateTime> end_time;
-    std::optional<std::string> location;
-    std::optional<std::string> notes;
-    std::optional<ReminderId> reminder_id;
+    NullableScheduleUpdate<DateTime> start_time;
+    NullableScheduleUpdate<DateTime> end_time;
+    NullableScheduleUpdate<std::string> location;
+    NullableScheduleUpdate<std::string> notes;
+    NullableScheduleUpdate<ReminderId> reminder_id;
+    std::optional<ScheduleStatus> status;
     bool ignore_conflict = false;
 };
 

@@ -17,7 +17,11 @@ using ReminderId = int64_t;
 using DateTime = std::chrono::time_point<std::chrono::system_clock, std::chrono::seconds>;
 
 /// 日程持久化状态。
-enum class ScheduleStatus { kActive = 1, kCancelled = 2, kCompleted = 3 };
+enum class ScheduleStatus {
+    kActive = 1,
+    kCancelled = 2,
+    kCompleted = 3,
+};
 
 /// 日程查询使用的状态筛选条件。
 enum class ScheduleStatusFilter { kAll, kActive, kCancelled, kCompleted };
