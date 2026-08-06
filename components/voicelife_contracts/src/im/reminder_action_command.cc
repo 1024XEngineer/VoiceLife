@@ -63,6 +63,9 @@ inline constexpr int kMaxSnoozeMinutes = 24 * 60;
         }
         out.minutes = static_cast<int>(minutes->number);
     }
+    if (out.action == "acknowledge" && params != nullptr) {
+        return Reject("acknowledge 命令不得携带 params");
+    }
     if (out.action == "snooze" && !out.minutes.has_value()) {
         return Reject("snooze 命令必须携带 minutes");
     }

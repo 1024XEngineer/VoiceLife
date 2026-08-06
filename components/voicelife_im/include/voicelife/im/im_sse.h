@@ -36,6 +36,8 @@ class SseDecoder {
     static bool ParseBlock(const std::string& block, SseFrame& frame);
 
     std::string buffer_;
+    /// 上次喂入以 CR 结尾、其后的 LF 尚未折叠时置位，用于抑制跨喂入的虚假空行。
+    bool trailing_cr_ = false;
 };
 
 }  // namespace voicelife::im

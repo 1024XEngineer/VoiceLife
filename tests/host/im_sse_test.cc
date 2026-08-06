@@ -85,6 +85,17 @@ void TestCrlfLineEndings() {
     Check(frames[0].id == "command-1" && frames[0].event == "reminder.action", "CRLF 字段必须被解析");
 }
 
+void TestCrlfSplitAcrossFeeds() {
+    SseDecoder decoder;
+    std::vector<SseFrame> frames;
+    // \r 落在本次喂入末尾、\n 落在下次喂入开头时，不得把两处拼成虚假的空行边界。
+    decoder.Feed("id: command-1\r", frames);
+    Check(frames.empty(), "未完结行不得产出事件");
+    decoder.Feed("\nevent: reminder.action\ndata: {}\n\n", frames);
+    Check(frames.size() == 1, "CRLF 跨喂入切分必须解析为单个完整帧");
+    Check(frames[0].id == "command-1" && frames[0].event == "reminder.action", "跨喂入 CRLF 字段必须完整解析");
+}
+
 void TestDataFieldsJoinWithNewline() {
     SseDecoder decoder;
     std::vector<SseFrame> frames;
@@ -134,6 +145,7 @@ int main() {
     TestFrameSplitAcrossFeeds();
     TestHeartbeatCommentIgnored();
     TestCrlfLineEndings();
+    TestCrlfSplitAcrossFeeds();
     TestDataFieldsJoinWithNewline();
     TestResetClearsPartialFrame();
     TestCommandDataRoundTripsThroughContract();

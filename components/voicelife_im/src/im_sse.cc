@@ -20,15 +20,23 @@ std::string Trim(std::string value) {
 
 void SseDecoder::Feed(std::string_view bytes, std::vector<SseFrame>& frames) {
     // 归一化 CRLF 与孤立 CR 为 LF，保证按 '\n' 解析行；\r\n 必须折叠为单个 '\n'，
-    // 否则帧会被空行判定提前切开。
+    // 否则帧会被空行判定提前切开。\r 可能落在本次喂入末尾而 \n 落在下次喂入开头，
+    // 用 trailing_cr_ 记住待折叠的 CR，避免两处拼出虚假的空行边界。
     for (size_t i = 0; i < bytes.size(); ++i) {
         if (bytes[i] == '\r') {
             buffer_.push_back('\n');
+            trailing_cr_ = true;
             if (i + 1 < bytes.size() && bytes[i + 1] == '\n') {
                 ++i;
+                trailing_cr_ = false;
             }
             continue;
         }
+        if (bytes[i] == '\n' && trailing_cr_) {
+            trailing_cr_ = false;
+            continue;
+        }
+        trailing_cr_ = false;
         buffer_.push_back(bytes[i]);
     }
 
@@ -47,7 +55,10 @@ void SseDecoder::Feed(std::string_view bytes, std::vector<SseFrame>& frames) {
     }
 }
 
-void SseDecoder::Reset() { buffer_.clear(); }
+void SseDecoder::Reset() {
+    buffer_.clear();
+    trailing_cr_ = false;
+}
 
 bool SseDecoder::ParseBlock(const std::string& block, SseFrame& frame) {
     std::string data;

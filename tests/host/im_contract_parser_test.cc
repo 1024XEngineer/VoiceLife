@@ -185,6 +185,23 @@ int main() {
     RequireCommandRejected("reminder-action-command-invalid-action.json", "非法动作类型命令必须被 C++ 拒绝");
     RequireCommandRejected("reminder-action-command-invalid-time.json", "非法时间命令必须被 C++ 拒绝");
     RequireCommandRejected("reminder-action-command-missing-field.json", "缺字段命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-acknowledge-params.json",
+                           "acknowledge 命令携带 params 必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-not-object.json", "非对象命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-version.json", "非法版本命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-missing-operation.json", "缺 operationId 命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-missing-correlation.json", "缺 correlationId 命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-missing-device.json", "缺 deviceId 命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-missing-binding.json", "缺 actorBindingId 命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-missing-trigger.json", "缺 reminderTriggerId 命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-params-type.json", "params 非对象命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-params-minutes.json",
+                           "params 缺 minutes 命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-params-fraction.json",
+                           "params 非整数分钟命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-params-overflow.json",
+                           "params 超上限分钟命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-occurred-at.json", "非法发生时间命令必须被 C++ 拒绝");
 
     // 通知受理结果：强提醒携带 actionStream 窗口，弱提醒不携带
     NotificationSubmission strong_submission;
@@ -212,5 +229,20 @@ int main() {
     RequireSubmissionRejected("notification-submission-invalid-status.json", "非法状态受理结果必须被 C++ 拒绝");
     RequireSubmissionRejected("notification-submission-invalid-time.json", "非法时间受理结果必须被 C++ 拒绝");
     RequireSubmissionRejected("notification-submission-missing-field.json", "缺字段受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-not-object.json", "非对象受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-deliveries.json",
+                              "deliveries 非数组受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-delivery-shape.json",
+                              "交付行非对象受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-delivery-id.json",
+                              "交付行缺 deliveryId 受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-delivery-binding.json",
+                              "交付行缺 bindingId 受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-delivery-status.json",
+                              "交付行非法状态受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-actionstream-shape.json",
+                              "actionStream 非对象受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-actionstream-field.json",
+                              "actionStream 缺 reminderTriggerId 受理结果必须被 C++ 拒绝");
     return 0;
 }
