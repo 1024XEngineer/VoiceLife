@@ -52,6 +52,13 @@ class TimingTaskStorePort {
      */
     virtual Result<std::vector<ReminderRule>> ListRules(const TimingTaskId& task_id) = 0;
     /**
+     * @brief 原子关闭提醒规则并取消尚未发生的触发。
+     * @param reminder_rule_id 要关闭的规则标识。
+     * @param now 当前 Unix 秒级时间戳；不早于此时间的 pending trigger 视为未来触发。
+     * @return 受影响的未来 trigger 数量；规则不存在返回 not found，已关闭或关联错误返回冲突。
+     */
+    virtual Result<int> DisableReminderRule(const std::string& reminder_rule_id, int64_t now) = 0;
+    /**
      * @brief 原子创建或更新同一任务的一组提醒规则。
      * @param task_id 规则所属的定时任务标识。
      * @param rules 要创建或更新的规则；该操作不修改已物化的提醒触发。
