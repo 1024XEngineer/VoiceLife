@@ -267,7 +267,20 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
                 return;
             }
             voice::VoiceAudioFormats formats{.capture = config_.audio, .playback = config_.audio};
-            if (inbound.audio_params.has_value()) {
+            if (!inbound.audio_params.has_value()) {
+                Emit(Event(voice::VoiceEventKind::kError,
+                           "Linx hello 缺少 audio_params，无法确认音频格式协商"));
+                {
+                    std::lock_guard<std::mutex> lock(hello_mutex_);
+                    hello_received_ = true;
+                    hello_status_ =
+                        Status::Error(ErrorCode::kInvalidArgument,
+                                      "Linx hello 缺少 audio_params，无法确认音频格式协商");
+                }
+                hello_cv_.notify_all();
+                return;
+            }
+            {
                 const LinxAudioParams& negotiated = *inbound.audio_params;
                 if (negotiated.codec != config_.audio.codec) {
                     Emit(Event(voice::VoiceEventKind::kError, "Linx hello 改变音频编码，但当前未配置转码策略"));

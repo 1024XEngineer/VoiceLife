@@ -341,8 +341,12 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
          << ",\"bit_depth\":" << static_cast<unsigned>(config.audio.bits_per_sample)
          << ",\"endianness\":\"little\",\"frame_duration\":" << config.audio.frame_duration_ms;
     if (is_pcm) {
+        // play_buffer_duration derives from the frame duration so that
+        // a format change (e.g. 60 ms frames) scales the buffer accordingly.
+        const uint32_t play_buffer_ms = config.audio.frame_duration_ms * 50U;
         json << ",\"frame_size\":" << frame_size
-             << ",\"sample_format\":\"signed_int16\",\"play_buffer_duration\":1000";
+             << ",\"sample_format\":\"signed_int16\",\"play_buffer_duration\":"
+             << play_buffer_ms;
     }
     json << "}}";
     return Result<std::string>::Success(json.str());
