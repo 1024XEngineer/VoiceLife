@@ -72,24 +72,17 @@ class Runtime final {
                  "PCA9557=%d I2S_READY=%d I2S_STARTED=%d bus_write=%u bus_read=%u "
                  "pcm_samples=%u nonzero=%u changed=%u saturated=%u saturation_ppm=%llu "
                  "peak=%u mean_square=%llu signal=%d replay=%u min_heap=%u",
-                 profile.id.c_str(), report.codec_control_required, report.i2c_bus_ready,
-                 report.es8311_ack, report.es7210_ack, report.pca9557_ack,
-                 report.i2s_channels_ready, report.i2s_channels_started,
-                 static_cast<unsigned>(report.bytes_written),
-                 static_cast<unsigned>(report.bytes_read),
-                 static_cast<unsigned>(report.capture_samples),
-                 static_cast<unsigned>(report.nonzero_samples),
-                 static_cast<unsigned>(report.changed_samples),
-                 static_cast<unsigned>(report.saturated_samples),
-                 static_cast<unsigned long long>(report.saturation_ratio_ppm()),
-                 static_cast<unsigned>(report.peak_abs),
-                 static_cast<unsigned long long>(report.mean_square()),
-                 report.capture_signal_detected(),
+                 profile.id.c_str(), report.codec_control_required, report.i2c_bus_ready, report.es8311_ack,
+                 report.es7210_ack, report.pca9557_ack, report.i2s_channels_ready, report.i2s_channels_started,
+                 static_cast<unsigned>(report.bytes_written), static_cast<unsigned>(report.bytes_read),
+                 static_cast<unsigned>(report.capture_samples), static_cast<unsigned>(report.nonzero_samples),
+                 static_cast<unsigned>(report.changed_samples), static_cast<unsigned>(report.saturated_samples),
+                 static_cast<unsigned long long>(report.saturation_ratio_ppm()), static_cast<unsigned>(report.peak_abs),
+                 static_cast<unsigned long long>(report.mean_square()), report.capture_signal_detected(),
                  static_cast<unsigned>(report.replay_bytes_written),
                  static_cast<unsigned>(report.minimum_free_heap_bytes));
         if (!report.hardware_ready()) {
-            return Status::Error(ErrorCode::kUnavailable,
-                                 "音频探针硬件未就绪，Codec ACK 或 I2S 状态不完整");
+            return Status::Error(ErrorCode::kUnavailable, "音频探针硬件未就绪，Codec ACK 或 I2S 状态不完整");
         }
         if (!report.capture_signal_detected()) {
             return Status::Error(ErrorCode::kUnavailable, "音频探针未检测到可变化的 PCM 输入");
