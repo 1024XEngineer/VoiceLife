@@ -9,40 +9,69 @@
 
 namespace voicelife::audio_esp {
 
+/** @brief 音频端口选项。 */
 struct AudioPortOptions {
+    /** @brief I/O 超时毫秒数。 */
     uint32_t io_timeout_ms = 100;
+    /** @brief 输入队列深度。 */
     std::size_t input_queue_depth = 4;
+    /** @brief 输出队列深度。 */
     std::size_t output_queue_depth = 4;
 };
 
+/** @brief 音频端口统计。 */
 struct AudioPortStats {
+    /** @brief 采集帧数。 */
     std::size_t captured_frames = 0;
+    /** @brief 丢弃的输入帧数。 */
     std::size_t dropped_input_frames = 0;
+    /** @brief 播放帧数。 */
     std::size_t played_frames = 0;
+    /** @brief 拒绝的输出帧数。 */
     std::size_t rejected_output_frames = 0;
+    /** @brief 短读次数。 */
     std::size_t short_reads = 0;
+    /** @brief 短写次数。 */
     std::size_t short_writes = 0;
+    /** @brief 输入队列高水位。 */
     std::size_t input_high_watermark = 0;
+    /** @brief 输出队列高水位。 */
     std::size_t output_high_watermark = 0;
+    /** @brief 最小空闲堆字节数。 */
     std::size_t minimum_free_heap_bytes = 0;
 };
 
-// Owns one profile-driven RX/TX pair and exposes two platform-neutral Ports.
-// The shared owner is important for full-duplex Codec profiles: both channels
-// must be initialized and released as one hardware resource.
+/**
+ * @brief 持有 Profile 驱动的 RX/TX 通道对，并暴露两个平台无关 Port。
+ *
+ * 共享所有者对全双工 Codec Profile 很重要：两个通道必须作为一个
+ * 硬件资源统一初始化和释放。
+ */
 class Esp32s3PcmAudioPorts final {
    public:
+    /**
+     * @brief 构造音频端口。
+     * @param profile 音频板 Profile。
+     * @param options 端口选项。
+     */
     Esp32s3PcmAudioPorts(AudioBoardProfile profile, AudioPortOptions options = {});
+    /** @brief 析构音频端口。 */
     ~Esp32s3PcmAudioPorts();
 
+    /** @brief 禁止拷贝构造。 */
     Esp32s3PcmAudioPorts(const Esp32s3PcmAudioPorts&) = delete;
+    /** @brief 禁止拷贝赋值。 */
     Esp32s3PcmAudioPorts& operator=(const Esp32s3PcmAudioPorts&) = delete;
 
+    /** @brief 采集输入端口。 @return 平台无关 AudioInputPort 引用。 */
     [[nodiscard]] voice::AudioInputPort& input();
+    /** @brief 播放输出端口。 @return 平台无关 AudioOutputPort 引用。 */
     [[nodiscard]] voice::AudioOutputPort& output();
+    /** @brief 端口统计。 @return 统计值。 */
     [[nodiscard]] AudioPortStats stats() const;
 
    private:
+    /** @brief Pimpl 实现。 */
     class Impl;
     std::unique_ptr<Impl> impl_;
 };
