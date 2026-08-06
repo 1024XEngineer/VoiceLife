@@ -63,10 +63,43 @@ bool ReadJsonString(std::string_view text, std::size_t position, std::string& va
                 value.push_back('\t');
                 break;
             default:
-                // The ESP implementation will use cJSON for full unicode
-                // handling. Rejecting \u escapes here keeps this portable
-                // fixture codec deterministic instead of corrupting text.
-                return false;
+                // \uXXXX Unicode escape.  Parse four hex digits and emit
+                // UTF-8.  Surrogate pairs (\uD800–\uDFFF) are rejected;
+                // full UTF-16 support waits for the cJSON replacement.
+                if (escaped != 'u' || position + 4 > text.size()) {
+                    return false;
+                }
+                {
+                    uint16_t codepoint = 0;
+                    for (int i = 0; i < 4; ++i) {
+                        const char hex = text[position++];
+                        codepoint <<= 4;
+                        if (hex >= '0' && hex <= '9') {
+                            codepoint |= static_cast<uint16_t>(hex - '0');
+                        } else if (hex >= 'a' && hex <= 'f') {
+                            codepoint |= static_cast<uint16_t>(hex - 'a' + 10);
+                        } else if (hex >= 'A' && hex <= 'F') {
+                            codepoint |= static_cast<uint16_t>(hex - 'A' + 10);
+                        } else {
+                            return false;
+                        }
+                    }
+                    if (codepoint >= 0xD800 && codepoint <= 0xDFFF) {
+                        return false;  // surrogate pair, not yet supported
+                    }
+                    // Encode codepoint as UTF-8.
+                    if (codepoint < 0x80) {
+                        value.push_back(static_cast<char>(codepoint));
+                    } else if (codepoint < 0x800) {
+                        value.push_back(static_cast<char>(0xC0 | (codepoint >> 6)));
+                        value.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                    } else {
+                        value.push_back(static_cast<char>(0xE0 | (codepoint >> 12)));
+                        value.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+                        value.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                    }
+                }
+                break;
         }
     }
     return false;
@@ -78,6 +111,19 @@ bool FindField(std::string_view object, std::string_view key, std::size_t& value
         if (object[position] != '"') {
             ++position;
             continue;
+        }
+        // Verify this is an object key: the character before the opening
+        // quote (skipping whitespace) must be '{' or ','.
+        if (position > 0) {
+            std::size_t before = position - 1;
+            while (before > 0 && (object[before] == ' ' || object[before] == '\t' ||
+                                  object[before] == '\n' || object[before] == '\r')) {
+                --before;
+            }
+            if (object[before] != '{' && object[before] != ',') {
+                ++position;
+                continue;
+            }
         }
         std::string candidate;
         std::size_t after_key = 0;

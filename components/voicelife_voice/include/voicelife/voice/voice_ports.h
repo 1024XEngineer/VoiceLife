@@ -109,6 +109,9 @@ class SpeechProviderAdapter {
 
 using SpeechProviderFactory = std::function<std::unique_ptr<SpeechProviderAdapter>()>;
 
+// Provider 工厂注册表。固定容量，无动态卸载。
+// 所有 Register() 调用必须在多任务调度启动前完成；
+// 运行时只允许 Create() 只读查询。不提供内部互斥锁。
 class SpeechProviderRegistry {
    public:
     static constexpr std::size_t kMaxProviders = 16;
