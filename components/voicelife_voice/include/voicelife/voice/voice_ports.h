@@ -25,6 +25,7 @@ using AudioFrameSink = std::function<Status(AudioFrame)>;
 /// Abstraction for a hardware audio capture device (I2S microphone, AFE pipeline, etc.).
 class AudioInputPort {
    public:
+    /// Virtual destructor.
     virtual ~AudioInputPort() = default;
 
     /// Set the callback that receives captured audio frames from this port.
@@ -46,6 +47,7 @@ class AudioInputPort {
 /// Abstraction for a hardware audio playback device (I2S speaker, DAC, etc.).
 class AudioOutputPort {
    public:
+    /// Virtual destructor.
     virtual ~AudioOutputPort() = default;
 
     /// Open the playback device with the negotiated downlink audio format.
@@ -64,6 +66,7 @@ class AudioOutputPort {
 /// Low-level transport port for a voice session (WebSocket, TCP, etc.).
 class VoiceTransportPort {
    public:
+    /// Virtual destructor.
     virtual ~VoiceTransportPort() = default;
 
     /// Establish the transport connection and register event/text/audio callbacks.
@@ -82,14 +85,18 @@ class VoiceTransportPort {
 /// Legacy lifecycle port retained during migration. New code should use SpeechProviderAdapter.
 class SpeechProviderPort {
    public:
+    /// Virtual destructor.
     virtual ~SpeechProviderPort() = default;
+    /// Establish connection.
     virtual Status Connect() = 0;
+    /// Tear down connection.
     virtual void Disconnect() = 0;
 };
 
 /// Encoding/decoding strategy for a specific audio codec (PCM, Opus, etc.).
 class CodecStrategy {
    public:
+    /// Virtual destructor.
     virtual ~CodecStrategy() = default;
 
     /// The codec this strategy handles.
@@ -105,23 +112,31 @@ class CodecStrategy {
 /// Maps provider-specific ASR events into the stable VoiceEvent vocabulary.
 class ASRAdapter {
    public:
+    /// Virtual destructor.
     virtual ~ASRAdapter() = default;
+    /// Forward an ASR event.
     virtual Status OnEvent(const VoiceEvent& event) = 0;
 };
 
 /// Maps provider-specific TTS events into the stable VoiceEvent vocabulary.
 class TTSAdapter {
    public:
+    /// Virtual destructor.
     virtual ~TTSAdapter() = default;
+    /// Speak the given text.
     virtual Status Speak(std::string_view text) = 0;
+    /// Forward a TTS event.
     virtual Status OnEvent(const VoiceEvent& event) = 0;
 };
 
 /// Adapter for real-time streaming protocols that need explicit begin/interrupt signalling.
 class RealtimeAdapter {
    public:
+    /// Virtual destructor.
     virtual ~RealtimeAdapter() = default;
+    /// Begin a realtime session.
     virtual Status Begin(VoiceMode mode) = 0;
+    /// Interrupt the current operation.
     virtual Status Interrupt() = 0;
 };
 
@@ -188,8 +203,8 @@ class SpeechProviderRegistry {
     Status Register(std::string provider_id, CapabilityProfile profile, SpeechProviderFactory factory);
 
     /// Create a provider instance matching the given id and required capabilities.
-    Result<std::unique_ptr<SpeechProviderAdapter>> Create(
-        std::string_view provider_id, const std::vector<std::string>& required_capabilities) const;
+    Result<std::unique_ptr<SpeechProviderAdapter>> Create(std::string_view provider_id,
+                                                          const std::vector<std::string>& required_capabilities) const;
 
    private:
     SpeechProviderRegistry() = default;
