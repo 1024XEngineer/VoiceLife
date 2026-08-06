@@ -62,6 +62,26 @@ test('dispatch of a pending delivery sends and records an accepted attempt', asy
     assert.equal(sent.length, 1);
 });
 
+test('concurrent dispatch of the same delivery sends exactly once', async () => {
+    const { gateway, sent } = gatewayWithChannel([{ accepted: true, platformMessageId: 'platform-1' }]);
+    const deliveryId = await pendingStrongDelivery(gateway);
+
+    const results = await Promise.allSettled([
+        gateway.application.deliveryDispatch.dispatch(deliveryId),
+        gateway.application.deliveryDispatch.dispatch(deliveryId),
+    ]);
+
+    assert.equal(sent.length, 1);
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    assert.equal(fulfilled.length, 1);
+    assert.equal(fulfilled[0].value.status, 'accepted');
+    assert.equal(rejected.length, 1);
+    assert.match(rejected[0].reason.message, /Only pending or retryable deliveries can be dispatched/);
+    const details = await gateway.application.deliveries.find(deliveryId);
+    assert.equal(details.attempts.length, 1);
+});
+
 test('dispatch of an unknown delivery is rejected', async () => {
     const { gateway } = buildGateway();
 
@@ -197,6 +217,45 @@ test('a channel send exception is treated as a retryable failure', async () => {
 
     assert.equal(updated.status, 'retryable_failed');
     assert.equal(updated.lastErrorCode, 'channel_send_exception');
+});
+
+test('a pre-send failure becomes retryable_failed with one retry outbox, then recovers', async () => {
+    const clock = new FixedClock();
+    const uow = new ExposedUnitOfWork();
+    let failRender = true;
+    const gateway = createMockImGateway('device-fixture', clock, {
+        unitOfWork: uow,
+        deliveryRenderer: {
+            render: async () => {
+                if (failRender) throw new Error('render boom');
+                return { ok: true };
+            },
+        },
+    });
+    const deliveryId = await pendingStrongDelivery(gateway);
+
+    const failed = await gateway.application.deliveryDispatch.dispatch(deliveryId);
+
+    assert.equal(failed.status, 'retryable_failed');
+    assert.equal(failed.lastErrorCode, 'pre_send_exception');
+    assert.equal(failed.claimedAt, undefined);
+    assert.equal(failed.claimToken, undefined);
+    const failedDetails = await gateway.application.deliveries.find(deliveryId);
+    assert.equal(failedDetails.attempts.length, 1);
+    assert.equal(failedDetails.attempts[0].status, 'retryable_failed');
+    assert.equal(failedDetails.attempts[0].errorCode, 'pre_send_exception');
+    const retries = uow.outboxEvents().filter((event) => event.eventType === 'im.delivery.retry-scheduled');
+    assert.equal(retries.length, 1);
+
+    // 修好渲染器后重派发：retryable_failed 可重领并成功
+    failRender = false;
+    const recovered = await gateway.application.deliveryDispatch.dispatch(deliveryId);
+
+    assert.equal(recovered.status, 'accepted');
+    assert.equal(recovered.lastErrorCode, undefined);
+    const recoveredDetails = await gateway.application.deliveries.find(deliveryId);
+    assert.equal(recoveredDetails.attempts.length, 2);
+    assert.equal(recoveredDetails.attempts[1].status, 'accepted');
 });
 
 test('re-dispatching a retryable delivery resets it and records a second attempt', async () => {

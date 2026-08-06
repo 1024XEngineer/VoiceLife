@@ -1,6 +1,7 @@
 #pragma once
 
 #include "voicelife/contracts/tool.h"
+#include "voicelife/voice/voice_ports.h"
 
 namespace voicelife::voice {
 
@@ -18,18 +19,7 @@ class AudioDevicePort {
     virtual void Close() = 0;
 };
 
-/// 连接语音识别或语音服务的提供方边界。
-class SpeechProviderPort {
-   public:
-    /** @brief 允许通过接口类型释放端口。 */
-    virtual ~SpeechProviderPort() = default;
-    /** @brief 为会话连接语音服务。 @return 连接结果。 */
-    virtual Status Connect() = 0;
-    /** @brief 会话结束后断开语音服务。 */
-    virtual void Disconnect() = 0;
-};
-
-/// 供语音编排使用的工具分发边界。
+/** 定义语音协调器调用工具网关的端口。 */
 class ToolGatewayPort {
    public:
     /** @brief 允许通过接口类型释放端口。 */

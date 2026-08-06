@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(voicelife_host_tests LANGUAGES C CXX)
 
+find_package(Threads REQUIRED)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -26,6 +28,10 @@ target_include_directories(yyjson PUBLIC "${ROOT_DIR}/third_party/yyjson")
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(yyjson PRIVATE -w)
 endif()
+# Portable cJSON for host tests. ESP-IDF uses its own built-in json component.
+add_library(cjson STATIC "${ROOT_DIR}/third_party/cjson/cJSON.c")
+target_include_directories(cjson PUBLIC "${ROOT_DIR}/third_party/cjson")
+set_target_properties(cjson PROPERTIES LINKER_LANGUAGE C)
 
 function(add_voicelife_library target component)
     add_library(${target} STATIC ${ARGN})
@@ -47,16 +53,21 @@ target_link_libraries(im PUBLIC contracts)
 add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_create_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_mock_data.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_operation_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_operation_mock_data.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_operation_query_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_query_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_service.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_time_rules.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_undo_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_update_helpers.cc")
 target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
-target_link_libraries(schedule PUBLIC contracts)
+target_link_libraries(schedule PUBLIC contracts Threads::Threads)
 add_voicelife_library(timing voicelife_timing
     "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_calendar.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_delete_reminder_rule.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_reminder_rules.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_stubs.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_state.cc")
@@ -65,11 +76,25 @@ add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_tool_gateway.cc")
 target_link_libraries(mcp PUBLIC contracts)
 add_voicelife_library(voice voicelife_voice
+    "${ROOT_DIR}/components/voicelife_voice/src/audio_frame_queue.cc"
+    "${ROOT_DIR}/components/voicelife_voice/src/voice_provider_registry.cc"
+    "${ROOT_DIR}/components/voicelife_voice/src/voice_session.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
 target_link_libraries(voice PUBLIC contracts)
+add_voicelife_library(linx voicelife_linx
+    "${ROOT_DIR}/components/voicelife_linx/src/linx_json_codec.cc"
+    "${ROOT_DIR}/components/voicelife_linx/src/linx_speech_provider.cc")
+target_link_libraries(linx PUBLIC voice cjson)
+add_voicelife_library(linx_esp voicelife_linx_esp
+    "${ROOT_DIR}/components/voicelife_linx_esp/src/websocket_fragment_assembler.cc")
+target_link_libraries(linx_esp PUBLIC contracts linx)
 add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/storage_protocol.cc")
 target_link_libraries(storage_sqlite PUBLIC contracts)
+add_voicelife_library(audio_esp voicelife_audio_esp
+    "${ROOT_DIR}/components/voicelife_audio_esp/src/audio_board_profile.cc"
+    "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_audio_probe.cc")
+target_link_libraries(audio_esp PUBLIC contracts voice)
 
 enable_testing()
 
@@ -100,6 +125,24 @@ add_voicelife_test(schedule_update_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_update_test.cc")
 target_link_libraries(schedule_update_test PRIVATE schedule)
 
+add_voicelife_test(schedule_operation_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_operation_test.cc")
+target_include_directories(schedule_operation_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_schedule/src")
+target_link_libraries(schedule_operation_test PRIVATE schedule)
+
+add_voicelife_test(schedule_recent_operation_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_recent_operation_test.cc")
+target_include_directories(schedule_recent_operation_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_schedule/src")
+target_link_libraries(schedule_recent_operation_test PRIVATE schedule)
+
+add_voicelife_test(schedule_undo_operation_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_undo_operation_test.cc")
+target_include_directories(schedule_undo_operation_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_schedule/src")
+target_link_libraries(schedule_undo_operation_test PRIVATE schedule)
+
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
 target_link_libraries(status_test PRIVATE contracts)
 
@@ -115,6 +158,9 @@ target_link_libraries(timing_task_state_test PRIVATE timing)
 add_voicelife_test(timing_task_service_test "unit;timing" timing_task_service_test.cc)
 target_link_libraries(timing_task_service_test PRIVATE timing)
 
+add_voicelife_test(timing_task_calendar_test "unit;timing" timing_task_calendar_test.cc)
+target_link_libraries(timing_task_calendar_test PRIVATE timing)
+
 add_voicelife_test(timing_task_store_test "unit;timing" timing_task_store_test.cc)
 target_link_libraries(timing_task_store_test PRIVATE timing)
 
@@ -127,6 +173,23 @@ target_link_libraries(mcp_tool_gateway_test PRIVATE mcp)
 add_voicelife_test(voice_session_coordinator_test "unit;voice" voice_session_coordinator_test.cc)
 target_link_libraries(voice_session_coordinator_test PRIVATE voice)
 
+add_voicelife_test(voice_session_contract_test "unit;voice;contract" voice_session_contract_test.cc)
+target_link_libraries(voice_session_contract_test PRIVATE voice)
+
+add_voicelife_test(audio_frame_queue_contract_test "unit;voice;audio;contract"
+    audio_frame_queue_contract_test.cc)
+target_link_libraries(audio_frame_queue_contract_test PRIVATE voice)
+
+add_voicelife_test(linx_provider_contract_test "unit;voice;linx;contract" linx_provider_contract_test.cc)
+target_link_libraries(linx_provider_contract_test PRIVATE linx)
+
+add_voicelife_test(linx_esp_transport_contract_test "unit;voice;linx;esp;contract"
+    linx_esp_transport_contract_test.cc)
+target_link_libraries(linx_esp_transport_contract_test PRIVATE linx_esp)
+
+add_voicelife_test(audio_board_profile_contract_test "unit;voice;audio;esp;contract"
+    audio_board_profile_contract_test.cc)
+target_link_libraries(audio_board_profile_contract_test PRIVATE audio_esp)
 add_voicelife_test(im_gateway_contract_test "unit;im" im_gateway_contract_test.cc)
 target_compile_definitions(im_gateway_contract_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
 

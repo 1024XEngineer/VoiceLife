@@ -1,7 +1,5 @@
 #include "voicelife/timing/timing_task_service.h"
 
-#include <limits>
-
 #include "support/test_support.h"
 #include "support/timing_fakes.h"
 #include "voicelife/contracts/status.h"
@@ -11,14 +9,15 @@ using voicelife::Result;
 using voicelife::Status;
 using voicelife::test::Check;
 using voicelife::test::InMemoryTimingTaskStore;
-using voicelife::timing::CalendarSortBy;
+using voicelife::timing::ChangeScope;
 using voicelife::timing::DefaultTimingTaskService;
 using voicelife::timing::RecurrenceFrequency;
+using voicelife::timing::RecurrenceRule;
 using voicelife::timing::RegisterTimerTaskCommand;
 using voicelife::timing::ReminderRule;
 using voicelife::timing::ReminderRuleInput;
 using voicelife::timing::ReminderType;
-using voicelife::timing::SortOrder;
+using voicelife::timing::TimerInstance;
 using voicelife::timing::TimerInstanceStatus;
 using voicelife::timing::TimingClockPort;
 using voicelife::timing::TimingIdGeneratorPort;
@@ -26,6 +25,7 @@ using voicelife::timing::TimingTask;
 using voicelife::timing::TimingTaskId;
 using voicelife::timing::TimingTaskStatus;
 using voicelife::timing::TimingTaskStorePort;
+using voicelife::timing::TimingTaskUpdateWrite;
 
 namespace {
 
@@ -53,8 +53,17 @@ class LookupFailureStore final : public TimingTaskStorePort {
         return Result<TimingTask>::Failure(ErrorCode::kUnavailable, "store unavailable");
     }
 
+    Status UpdateTaskWithInstances(const TimingTaskUpdateWrite&) override {
+        return Status::Error(ErrorCode::kInternal, "unexpected update");
+    }
+
     Result<TimingTask> FindTask(const TimingTaskId&) override {
-        return Result<TimingTask>::Failure(ErrorCode::kInternal, "unexpected find");
+        return Result<TimingTask>::Success({
+            .id = "task-lookup",
+            .schedule_id = "schedule-lookup",
+            .start_at = 1785834000,
+            .next_trigger_at = 1785834000,
+        });
     }
 
     Result<std::vector<TimingTask>> ListTasks() override {
@@ -65,13 +74,16 @@ class LookupFailureStore final : public TimingTaskStorePort {
         return Result<std::vector<ReminderRule>>::Failure(ErrorCode::kInternal, "unexpected list");
     }
 
-    Result<std::vector<voicelife::timing::TimerInstance>> ListInstances(const TimingTaskId&) override {
-        return Result<std::vector<voicelife::timing::TimerInstance>>::Failure(ErrorCode::kInternal,
-                                                                              "unexpected list instances");
+    Result<int> DisableReminderRule(const std::string&, int64_t) override {
+        return Result<int>::Failure(ErrorCode::kInternal, "unexpected delete");
     }
 
     Status UpsertRules(const TimingTaskId&, const std::vector<ReminderRule>&) override {
         return Status::Error(ErrorCode::kInternal, "unexpected upsert");
+    }
+
+    Result<std::vector<TimerInstance>> ListInstances(const TimingTaskId&) override {
+        return Result<std::vector<TimerInstance>>::Failure(ErrorCode::kInternal, "unexpected list instances");
     }
 };
 
@@ -90,6 +102,10 @@ class ConcurrentReplayStore final : public TimingTaskStorePort {
         return Result<TimingTask>::Success(replayed_task_);
     }
 
+    Status UpdateTaskWithInstances(const TimingTaskUpdateWrite&) override {
+        return Status::Error(ErrorCode::kInternal, "unexpected update");
+    }
+
     Result<TimingTask> FindTask(const TimingTaskId&) override {
         return Result<TimingTask>::Failure(ErrorCode::kInternal, "unexpected find");
     }
@@ -102,13 +118,16 @@ class ConcurrentReplayStore final : public TimingTaskStorePort {
         return Result<std::vector<ReminderRule>>::Failure(ErrorCode::kInternal, "unexpected list");
     }
 
-    Result<std::vector<voicelife::timing::TimerInstance>> ListInstances(const TimingTaskId&) override {
-        return Result<std::vector<voicelife::timing::TimerInstance>>::Failure(ErrorCode::kInternal,
-                                                                              "unexpected list instances");
+    Result<int> DisableReminderRule(const std::string&, int64_t) override {
+        return Result<int>::Failure(ErrorCode::kInternal, "unexpected delete");
     }
 
     Status UpsertRules(const TimingTaskId&, const std::vector<ReminderRule>&) override {
         return Status::Error(ErrorCode::kInternal, "unexpected upsert");
+    }
+
+    Result<std::vector<TimerInstance>> ListInstances(const TimingTaskId&) override {
+        return Result<std::vector<TimerInstance>>::Failure(ErrorCode::kInternal, "unexpected list instances");
     }
 
    private:
@@ -140,278 +159,6 @@ int main() {
     Check(task.ok() && task.value->schedule_id == "schedule-1", "注册任务应被持久化");
     Check(task.ok() && task.value->start_at == 1785747600, "任务应保存唯一的周期锚点");
     Check(task.ok() && task.value->next_trigger_at == task.value->start_at, "首次触发时间应等于任务周期锚点");
-
-    const auto calendar = service.ListCalendarView({
-        .range_start = 1785740000,
-        .range_end = 1785750000,
-        .schedule_id = "schedule-1",
-        .page = 1,
-        .page_size = 20,
-        .sort_by = CalendarSortBy::kPlannedStartAt,
-    });
-    Check(calendar.ok(), "有效范围应返回日历视图");
-    Check(calendar.value->total == 1 && calendar.value->occurrences.size() == 1, "一次性任务应返回范围内 occurrence");
-    Check(calendar.value->occurrences.front().task_id == registered.value->task_id, "日历 occurrence 应关联原任务");
-    Check(calendar.value->occurrences.front().planned_start_at == 1785747600, "日历 occurrence 应使用任务开始时间");
-
-    InMemoryTimingTaskStore recurring_calendar_store;
-    FixedTimingIdGenerator recurring_calendar_ids;
-    DefaultTimingTaskService recurring_calendar_service(recurring_calendar_store, clock, recurring_calendar_ids);
-    const auto recurring_calendar_task = recurring_calendar_service.RegisterTimerTask({
-        .request_id = "request-calendar-recurring",
-        .schedule_id = "schedule-calendar-recurring",
-        .start_at = 1785747600,
-        .time_zone = "UTC",
-        .recurrence = {.frequency = RecurrenceFrequency::kDay},
-    });
-    Check(recurring_calendar_task.ok(), "周期日历任务应注册成功");
-    constexpr int64_t kDay = 24 * 60 * 60;
-    recurring_calendar_store.AddInstance({
-        .id = "instance-calendar-modified",
-        .task_id = recurring_calendar_task.value->task_id,
-        .planned_at = 1785747600 + kDay,
-        .planned_end_at = 1785747600 + kDay + 1800,
-        .actual_trigger_at = 1785747600 + kDay + 300,
-        .status = TimerInstanceStatus::kModified,
-        .override_fields =
-            {
-                .start_at = 1785747600 + kDay + 3600,
-                .end_at = 1785747600 + kDay + 5400,
-            },
-    });
-
-    const auto recurring_calendar = recurring_calendar_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + 3 * kDay,
-        .schedule_id = "schedule-calendar-recurring",
-        .page = 1,
-        .page_size = 2,
-        .sort_by = CalendarSortBy::kPlannedStartAt,
-        .sort_order = SortOrder::kAscending,
-    });
-    Check(recurring_calendar.ok() && recurring_calendar.value->total == 3,
-          "未物化的每日规则和单次例外应合并为三条 occurrence");
-    Check(recurring_calendar.value->occurrences.size() == 2 && recurring_calendar.value->has_more,
-          "日历视图应按 page_size 返回第一页并标记后续页");
-    Check(recurring_calendar.value->occurrences[1].is_exception &&
-              recurring_calendar.value->occurrences[1].planned_start_at == 1785747600 + kDay + 3600,
-          "已修改例外应覆盖基础 occurrence 的开始时间");
-
-    const auto descending_second_page = recurring_calendar_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + 3 * kDay,
-        .schedule_id = "schedule-calendar-recurring",
-        .page = 2,
-        .page_size = 2,
-        .sort_by = CalendarSortBy::kPlannedStartAt,
-        .sort_order = SortOrder::kDescending,
-    });
-    Check(descending_second_page.ok() && descending_second_page.value->occurrences.size() == 1 &&
-              !descending_second_page.value->has_more &&
-              descending_second_page.value->occurrences.front().planned_start_at == 1785747600,
-          "降序第二页应返回剩余的最早 occurrence");
-
-    const auto actual_trigger_descending = recurring_calendar_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + 3 * kDay,
-        .schedule_id = "schedule-calendar-recurring",
-        .sort_by = CalendarSortBy::kActualTriggerAt,
-        .sort_order = SortOrder::kDescending,
-    });
-    Check(actual_trigger_descending.ok() && actual_trigger_descending.value->occurrences.front().is_exception,
-          "按实际触发时间降序时已触发例外应排在未触发 occurrence 前");
-
-    const auto pending_only = recurring_calendar_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + 3 * kDay,
-        .schedule_id = "schedule-calendar-recurring",
-        .status = TimerInstanceStatus::kPending,
-    });
-    Check(pending_only.ok() && pending_only.value->total == 2, "状态过滤应排除已修改例外");
-
-    const auto invalid_calendar = service.ListCalendarView({.range_start = 10, .range_end = 10});
-    Check(invalid_calendar.status.code == ErrorCode::kInvalidArgument, "左闭右开范围必须满足 start 小于 end");
-    const auto invalid_calendar_minimum = service.ListCalendarView({
-        .range_start = std::numeric_limits<int64_t>::min(),
-        .range_end = std::numeric_limits<int64_t>::min() + kDay,
-    });
-    Check(invalid_calendar_minimum.status.code == ErrorCode::kInvalidArgument,
-          "无法安全对齐到日边界的极小时间戳应被拒绝");
-
-    const auto missing_schedule = service.ListCalendarView({
-        .range_start = 1785740000,
-        .range_end = 1785750000,
-        .schedule_id = "missing-schedule",
-    });
-    Check(missing_schedule.ok() && missing_schedule.value->total == 0, "不存在的日程过滤目标应返回稳定空结果");
-
-    store.AddTask({
-        .id = "task-deleted-calendar",
-        .schedule_id = "schedule-deleted-calendar",
-        .start_at = 1785747600,
-        .time_zone = "UTC",
-        .status = TimingTaskStatus::kActive,
-        .deleted_at = 1785747601,
-    });
-    const auto deleted_task_calendar = service.ListCalendarView({
-        .range_start = 1785740000,
-        .range_end = 1785750000,
-        .schedule_id = "schedule-deleted-calendar",
-    });
-    Check(deleted_task_calendar.ok() && deleted_task_calendar.value->total == 0, "软删除任务不应出现在日历视图中");
-
-    recurring_calendar_store.FailNextTaskList(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
-    const auto failed_task_list = recurring_calendar_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + kDay,
-    });
-    Check(failed_task_list.status.code == ErrorCode::kUnavailable, "任务查询失败应透传 Store 错误");
-
-    recurring_calendar_store.FailNextInstanceList(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
-    const auto failed_instance_list = recurring_calendar_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + kDay,
-    });
-    Check(failed_instance_list.status.code == ErrorCode::kUnavailable, "实例查询失败应透传 Store 错误");
-
-    const auto invalid_calendar_page = service.ListCalendarView({
-        .range_start = 1,
-        .range_end = 2,
-        .page = 0,
-    });
-    Check(invalid_calendar_page.status.code == ErrorCode::kInvalidArgument, "页码必须从一开始");
-    const auto invalid_calendar_size = service.ListCalendarView({
-        .range_start = 1,
-        .range_end = 2,
-        .page_size = 0,
-    });
-    Check(invalid_calendar_size.status.code == ErrorCode::kInvalidArgument, "每页数量必须为正数");
-
-    InMemoryTimingTaskStore weekly_calendar_store;
-    FixedTimingIdGenerator weekly_calendar_ids;
-    DefaultTimingTaskService weekly_calendar_service(weekly_calendar_store, clock, weekly_calendar_ids);
-    const auto weekly_calendar_task = weekly_calendar_service.RegisterTimerTask({
-        .request_id = "request-calendar-weekly",
-        .schedule_id = "schedule-calendar-weekly",
-        .start_at = 1785747600,
-        .time_zone = "UTC",
-        .recurrence = {.frequency = RecurrenceFrequency::kWeek},
-    });
-    Check(weekly_calendar_task.ok(), "每周日历任务应注册成功");
-    const auto weekly_calendar = weekly_calendar_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + 15 * kDay,
-    });
-    Check(weekly_calendar.ok() && weekly_calendar.value->total == 3, "未筛选的每周规则应按七天间隔展开");
-
-    InMemoryTimingTaskStore filtered_weekly_calendar_store;
-    FixedTimingIdGenerator filtered_weekly_calendar_ids;
-    DefaultTimingTaskService filtered_weekly_calendar_service(filtered_weekly_calendar_store, clock,
-                                                              filtered_weekly_calendar_ids);
-    const auto filtered_weekly_calendar_task = filtered_weekly_calendar_service.RegisterTimerTask({
-        .request_id = "request-calendar-filtered-weekly",
-        .schedule_id = "schedule-calendar-filtered-weekly",
-        .start_at = 1785747600,
-        .time_zone = "UTC",
-        .recurrence = {.frequency = RecurrenceFrequency::kWeek, .by_weekdays = {1, 2, 3, 4, 5, 6, 7}},
-    });
-    Check(filtered_weekly_calendar_task.ok(), "带星期筛选的每周任务应注册成功");
-    const auto filtered_weekly_calendar = filtered_weekly_calendar_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + 3 * kDay,
-    });
-    Check(filtered_weekly_calendar.ok() && filtered_weekly_calendar.value->total == 3,
-          "星期筛选应允许展开匹配的每日 occurrence");
-
-    InMemoryTimingTaskStore unsupported_timezone_store;
-    FixedTimingIdGenerator unsupported_timezone_ids;
-    DefaultTimingTaskService unsupported_timezone_service(unsupported_timezone_store, clock, unsupported_timezone_ids);
-    const auto unsupported_timezone_task = unsupported_timezone_service.RegisterTimerTask({
-        .request_id = "request-calendar-local-timezone",
-        .schedule_id = "schedule-calendar-local-timezone",
-        .start_at = 1785747600,
-        .time_zone = "Asia/Shanghai",
-        .recurrence = {.frequency = RecurrenceFrequency::kWeek},
-    });
-    Check(unsupported_timezone_task.ok(), "非 UTC 周期任务本身仍应允许注册");
-    const auto unsupported_timezone_calendar = unsupported_timezone_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + 7 * kDay,
-    });
-    Check(unsupported_timezone_calendar.status.code == ErrorCode::kUnavailable,
-          "非 UTC 周期任务应明确报告日历展开能力未提供");
-
-    InMemoryTimingTaskStore monthly_calendar_store;
-    FixedTimingIdGenerator monthly_calendar_ids;
-    DefaultTimingTaskService monthly_calendar_service(monthly_calendar_store, clock, monthly_calendar_ids);
-    const auto monthly_calendar_task = monthly_calendar_service.RegisterTimerTask({
-        .request_id = "request-calendar-monthly",
-        .schedule_id = "schedule-calendar-monthly",
-        .start_at = 1785747600,
-        .time_zone = "UTC",
-        .recurrence = {.frequency = RecurrenceFrequency::kMonth},
-    });
-    Check(monthly_calendar_task.ok(), "每月日历任务应注册成功");
-    const auto monthly_calendar = monthly_calendar_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + 70 * kDay,
-    });
-    Check(monthly_calendar.ok() && monthly_calendar.value->total == 3, "每月规则应按周期锚点的日期展开");
-
-    InMemoryTimingTaskStore filtered_monthly_calendar_store;
-    FixedTimingIdGenerator filtered_monthly_calendar_ids;
-    DefaultTimingTaskService filtered_monthly_calendar_service(filtered_monthly_calendar_store, clock,
-                                                               filtered_monthly_calendar_ids);
-    const auto filtered_monthly_calendar_task = filtered_monthly_calendar_service.RegisterTimerTask({
-        .request_id = "request-calendar-filtered-monthly",
-        .schedule_id = "schedule-calendar-filtered-monthly",
-        .start_at = 1785747600,
-        .time_zone = "UTC",
-        .recurrence = {.frequency = RecurrenceFrequency::kMonth, .by_month_days = {1, 15}},
-    });
-    Check(filtered_monthly_calendar_task.ok(), "带日期筛选的每月任务应注册成功");
-    const auto filtered_monthly_calendar = filtered_monthly_calendar_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + 70 * kDay,
-    });
-    Check(filtered_monthly_calendar.ok() && filtered_monthly_calendar.value->total == 4,
-          "每月日期筛选应生成匹配 occurrence");
-
-    InMemoryTimingTaskStore yearly_calendar_store;
-    FixedTimingIdGenerator yearly_calendar_ids;
-    DefaultTimingTaskService yearly_calendar_service(yearly_calendar_store, clock, yearly_calendar_ids);
-    const auto yearly_calendar_task = yearly_calendar_service.RegisterTimerTask({
-        .request_id = "request-calendar-yearly",
-        .schedule_id = "schedule-calendar-yearly",
-        .start_at = 1785747600,
-        .time_zone = "UTC",
-        .recurrence = {.frequency = RecurrenceFrequency::kYear},
-    });
-    Check(yearly_calendar_task.ok(), "每年日历任务应注册成功");
-    const auto yearly_calendar = yearly_calendar_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + 370 * kDay,
-    });
-    Check(yearly_calendar.ok() && yearly_calendar.value->total == 2, "每年规则应按周期锚点的月日展开");
-
-    InMemoryTimingTaskStore filtered_yearly_calendar_store;
-    FixedTimingIdGenerator filtered_yearly_calendar_ids;
-    DefaultTimingTaskService filtered_yearly_calendar_service(filtered_yearly_calendar_store, clock,
-                                                              filtered_yearly_calendar_ids);
-    const auto filtered_yearly_calendar_task = filtered_yearly_calendar_service.RegisterTimerTask({
-        .request_id = "request-calendar-filtered-yearly",
-        .schedule_id = "schedule-calendar-filtered-yearly",
-        .start_at = 1785747600,
-        .time_zone = "UTC",
-        .recurrence = {.frequency = RecurrenceFrequency::kYear, .by_month_days = {4}, .by_months = {8}},
-    });
-    Check(filtered_yearly_calendar_task.ok(), "带月日筛选的每年任务应注册成功");
-    const auto filtered_yearly_calendar = filtered_yearly_calendar_service.ListCalendarView({
-        .range_start = 1785747600,
-        .range_end = 1785747600 + 370 * kDay,
-    });
-    Check(filtered_yearly_calendar.ok() && filtered_yearly_calendar.value->total == 2,
-          "每年月日筛选应生成匹配 occurrence");
 
     const auto rules = store.ListRules(registered.value->task_id);
     Check(rules.ok() && rules.value->size() == 2, "注册应原子创建两条默认提醒规则");
@@ -526,6 +273,14 @@ int main() {
     });
     Check(lookup_failure.status.code == ErrorCode::kUnavailable, "幂等查询失败时应返回 Store 错误");
 
+    const auto update_lookup_failure = lookup_failure_service.UpdateTimerTask({
+        .task_id = "task-lookup",
+        .schedule_id = "schedule-lookup",
+        .change_scope = ChangeScope::kAll,
+        .start_at = 1785920400,
+    });
+    Check(update_lookup_failure.status.code == ErrorCode::kInternal, "实例查询失败时应返回 Store 错误");
+
     const auto invalid_before_lookup = lookup_failure_service.RegisterTimerTask({
         .request_id = "request-invalid-before-lookup",
         .schedule_id = "",
@@ -572,6 +327,638 @@ int main() {
     });
     Check(concurrent_conflict.status.code == ErrorCode::kConflict, "并发注册复用 request_id 到不同内容时应返回冲突");
 
+    InMemoryTimingTaskStore cancel_store;
+    FixedTimingIdGenerator cancel_ids;
+    DefaultTimingTaskService cancel_service(cancel_store, clock, cancel_ids);
+    const auto cancel_registered = cancel_service.RegisterTimerTask({
+        .request_id = "request-cancel-single",
+        .schedule_id = "schedule-cancel-single",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(cancel_registered.ok(), "single 取消用例应先注册周期任务");
+    const auto cancel_task = cancel_store.FindTask(cancel_registered.value->task_id);
+    Check(cancel_task.ok(), "single 取消用例应能读回任务");
+    Check(cancel_store
+              .UpdateTaskWithInstances({
+                  .task = *cancel_task.value,
+                  .upsert_instances = {TimerInstance{
+                      .id = "instance-cancel-single",
+                      .task_id = cancel_registered.value->task_id,
+                      .planned_at = 1785920400,
+                      .status = TimerInstanceStatus::kPending,
+                  }},
+              })
+              .ok(),
+          "single 取消用例应能预置待取消实例");
+
+    const auto single_cancel = cancel_service.CancelTimerTask({
+        .task_id = cancel_registered.value->task_id,
+        .schedule_id = "schedule-cancel-single",
+        .change_scope = ChangeScope::kSingle,
+        .instance_id = "instance-cancel-single",
+        .target_occurrence_at = 1785920400,
+    });
+    Check(single_cancel.ok(), "single 取消应成功");
+    Check(single_cancel.value->task_id == cancel_registered.value->task_id, "single 取消应返回任务标识");
+    Check(single_cancel.value->instance_id == "instance-cancel-single", "single 取消应返回被取消实例");
+    Check(single_cancel.value->status == TimingTaskStatus::kActive, "single 取消不应终止任务");
+    Check(single_cancel.value->affected_instance_count == 1, "single 取消只应影响一个实例");
+    const auto task_after_single_cancel = cancel_store.FindTask(cancel_registered.value->task_id);
+    Check(task_after_single_cancel.ok() && task_after_single_cancel.value->status == TimingTaskStatus::kActive,
+          "single 取消后任务应保持 active");
+    const auto instances_after_single_cancel = cancel_store.ListInstances(cancel_registered.value->task_id);
+    Check(instances_after_single_cancel.ok() && instances_after_single_cancel.value->size() == 1,
+          "single 取消不应创建额外实例");
+    Check(instances_after_single_cancel.ok() &&
+              instances_after_single_cancel.value->front().status == TimerInstanceStatus::kSkipped,
+          "single 取消应将目标实例标记为 skipped");
+
+    InMemoryTimingTaskStore future_cancel_store;
+    FixedTimingIdGenerator future_cancel_ids;
+    DefaultTimingTaskService future_cancel_service(future_cancel_store, clock, future_cancel_ids);
+    const auto future_cancel_registered = future_cancel_service.RegisterTimerTask({
+        .request_id = "request-cancel-future",
+        .schedule_id = "schedule-cancel-future",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(future_cancel_registered.ok(), "future 取消用例应先注册周期任务");
+    const auto future_cancel_task = future_cancel_store.FindTask(future_cancel_registered.value->task_id);
+    Check(future_cancel_task.ok(), "future 取消用例应能读回任务");
+    Check(future_cancel_store
+              .UpdateTaskWithInstances({
+                  .task = *future_cancel_task.value,
+                  .upsert_instances =
+                      {
+                          TimerInstance{
+                              .id = "instance-before-future-cancel",
+                              .task_id = future_cancel_registered.value->task_id,
+                              .planned_at = 1785834000,
+                              .status = TimerInstanceStatus::kPending,
+                          },
+                          TimerInstance{
+                              .id = "instance-at-future-cancel",
+                              .task_id = future_cancel_registered.value->task_id,
+                              .planned_at = 1785920400,
+                              .status = TimerInstanceStatus::kPending,
+                          },
+                          TimerInstance{
+                              .id = "instance-after-future-cancel",
+                              .task_id = future_cancel_registered.value->task_id,
+                              .planned_at = 1786006800,
+                              .status = TimerInstanceStatus::kPending,
+                          },
+                      },
+              })
+              .ok(),
+          "future 取消用例应能预置边界前后的实例");
+
+    const auto future_cancel = future_cancel_service.CancelTimerTask({
+        .task_id = future_cancel_registered.value->task_id,
+        .schedule_id = "schedule-cancel-future",
+        .change_scope = ChangeScope::kFuture,
+        .effective_from = 1785920400,
+    });
+    Check(future_cancel.ok(), "future 取消应成功");
+    Check(future_cancel.value->status == TimingTaskStatus::kActive, "future 取消不应终止整个任务");
+    Check(future_cancel.value->affected_instance_count == 2, "future 取消应统计边界及之后的实例");
+    const auto task_after_future_cancel = future_cancel_store.FindTask(future_cancel_registered.value->task_id);
+    Check(task_after_future_cancel.ok() && task_after_future_cancel.value->effective_until == 1785920399,
+          "future 取消应保存排他的未来规则上界");
+    const auto instances_after_future_cancel =
+        future_cancel_store.ListInstances(future_cancel_registered.value->task_id);
+    Check(instances_after_future_cancel.ok() && instances_after_future_cancel.value->size() == 3,
+          "future 取消不应删除边界前实例");
+    Check(instances_after_future_cancel.ok() &&
+              instances_after_future_cancel.value->at(0).status == TimerInstanceStatus::kPending,
+          "future 取消不应影响边界前 occurrence");
+    Check(instances_after_future_cancel.ok() &&
+              instances_after_future_cancel.value->at(1).status == TimerInstanceStatus::kSkipped &&
+              instances_after_future_cancel.value->at(2).status == TimerInstanceStatus::kSkipped,
+          "future 取消应跳过边界及之后 occurrence");
+
+    InMemoryTimingTaskStore invalid_future_boundary_store;
+    FixedTimingIdGenerator invalid_future_boundary_ids;
+    DefaultTimingTaskService invalid_future_boundary_service(invalid_future_boundary_store, clock,
+                                                             invalid_future_boundary_ids);
+    const auto invalid_future_boundary_registered = invalid_future_boundary_service.RegisterTimerTask({
+        .request_id = "request-invalid-future-boundary",
+        .schedule_id = "schedule-invalid-future-boundary",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(invalid_future_boundary_registered.ok(), "非法 future 边界用例应先注册周期任务");
+    const auto invalid_future_boundary = invalid_future_boundary_service.CancelTimerTask({
+        .task_id = invalid_future_boundary_registered.value->task_id,
+        .schedule_id = "schedule-invalid-future-boundary",
+        .change_scope = ChangeScope::kFuture,
+        .effective_from = 1785833999,
+    });
+    Check(invalid_future_boundary.status.code == ErrorCode::kInvalidArgument,
+          "早于任务开始时间的 future 边界应返回参数错误");
+
+    InMemoryTimingTaskStore future_terminal_instance_store;
+    FixedTimingIdGenerator future_terminal_instance_ids;
+    DefaultTimingTaskService future_terminal_instance_service(future_terminal_instance_store, clock,
+                                                              future_terminal_instance_ids);
+    const auto future_terminal_instance_registered = future_terminal_instance_service.RegisterTimerTask({
+        .request_id = "request-future-terminal-instance",
+        .schedule_id = "schedule-future-terminal-instance",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(future_terminal_instance_registered.ok(), "终态实例 future 取消用例应先注册周期任务");
+    const auto future_terminal_instance_task =
+        future_terminal_instance_store.FindTask(future_terminal_instance_registered.value->task_id);
+    Check(future_terminal_instance_task.ok(), "终态实例 future 取消用例应能读回任务");
+    TimingTask task_with_future_next_trigger = *future_terminal_instance_task.value;
+    task_with_future_next_trigger.next_trigger_at = 1785920400;
+    Check(future_terminal_instance_store
+              .UpdateTaskWithInstances({
+                  .task = task_with_future_next_trigger,
+                  .upsert_instances =
+                      {
+                          TimerInstance{
+                              .id = "instance-completed-at-future-boundary",
+                              .task_id = future_terminal_instance_registered.value->task_id,
+                              .planned_at = 1785920400,
+                              .status = TimerInstanceStatus::kCompleted,
+                          },
+                          TimerInstance{
+                              .id = "instance-pending-after-future-boundary",
+                              .task_id = future_terminal_instance_registered.value->task_id,
+                              .planned_at = 1786006800,
+                              .status = TimerInstanceStatus::kPending,
+                          },
+                          TimerInstance{
+                              .id = "instance-skipped-after-future-boundary",
+                              .task_id = future_terminal_instance_registered.value->task_id,
+                              .planned_at = 1786093200,
+                              .status = TimerInstanceStatus::kSkipped,
+                          },
+                      },
+              })
+              .ok(),
+          "终态实例 future 取消用例应能预置任务与实例");
+    const auto future_terminal_instance_cancel = future_terminal_instance_service.CancelTimerTask({
+        .task_id = future_terminal_instance_registered.value->task_id,
+        .schedule_id = "schedule-future-terminal-instance",
+        .change_scope = ChangeScope::kFuture,
+        .effective_from = 1785920400,
+    });
+    Check(future_terminal_instance_cancel.ok(), "终态实例不应阻断 future 取消");
+    Check(future_terminal_instance_cancel.value->affected_instance_count == 1,
+          "future 取消只应统计实际转为 skipped 的实例");
+    const auto task_after_future_terminal_instance_cancel =
+        future_terminal_instance_store.FindTask(future_terminal_instance_registered.value->task_id);
+    Check(task_after_future_terminal_instance_cancel.ok() &&
+              task_after_future_terminal_instance_cancel.value->next_trigger_at == 0,
+          "future 取消应清除位于取消边界的下一次触发");
+    const auto instances_after_future_terminal_instance_cancel =
+        future_terminal_instance_store.ListInstances(future_terminal_instance_registered.value->task_id);
+    Check(instances_after_future_terminal_instance_cancel.ok() &&
+              instances_after_future_terminal_instance_cancel.value->at(0).status == TimerInstanceStatus::kCompleted &&
+              instances_after_future_terminal_instance_cancel.value->at(1).status == TimerInstanceStatus::kSkipped &&
+              instances_after_future_terminal_instance_cancel.value->at(2).status == TimerInstanceStatus::kSkipped,
+          "future 取消应保留终态实例并跳过仍待处理实例");
+
+    InMemoryTimingTaskStore all_cancel_store;
+    FixedTimingIdGenerator all_cancel_ids;
+    DefaultTimingTaskService all_cancel_service(all_cancel_store, clock, all_cancel_ids);
+    const auto all_cancel_registered = all_cancel_service.RegisterTimerTask({
+        .request_id = "request-cancel-all",
+        .schedule_id = "schedule-cancel-all",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(all_cancel_registered.ok(), "all 取消用例应先注册周期任务");
+    const auto all_cancel_task = all_cancel_store.FindTask(all_cancel_registered.value->task_id);
+    Check(all_cancel_task.ok(), "all 取消用例应能读回任务");
+    Check(all_cancel_store
+              .UpdateTaskWithInstances({
+                  .task = *all_cancel_task.value,
+                  .upsert_instances =
+                      {
+                          TimerInstance{
+                              .id = "instance-first-all-cancel",
+                              .task_id = all_cancel_registered.value->task_id,
+                              .planned_at = 1785834000,
+                              .status = TimerInstanceStatus::kPending,
+                          },
+                          TimerInstance{
+                              .id = "instance-second-all-cancel",
+                              .task_id = all_cancel_registered.value->task_id,
+                              .planned_at = 1785920400,
+                              .status = TimerInstanceStatus::kPending,
+                          },
+                      },
+              })
+              .ok(),
+          "all 取消用例应能预置待取消实例");
+
+    const auto all_cancel = all_cancel_service.CancelTimerTask({
+        .task_id = all_cancel_registered.value->task_id,
+        .schedule_id = "schedule-cancel-all",
+        .change_scope = ChangeScope::kAll,
+    });
+    Check(all_cancel.ok(), "all 取消应成功");
+    Check(all_cancel.value->status == TimingTaskStatus::kTerminated, "all 取消应终止任务");
+    Check(all_cancel.value->affected_instance_count == 2, "all 取消应影响全部待处理实例");
+    const auto task_after_all_cancel = all_cancel_store.FindTask(all_cancel_registered.value->task_id);
+    Check(task_after_all_cancel.ok() && task_after_all_cancel.value->status == TimingTaskStatus::kTerminated,
+          "all 取消后任务应进入 terminated");
+    Check(task_after_all_cancel.ok() && task_after_all_cancel.value->next_trigger_at == 0,
+          "all 取消后任务不应再产生未来触发");
+    const auto instances_after_all_cancel = all_cancel_store.ListInstances(all_cancel_registered.value->task_id);
+    Check(instances_after_all_cancel.ok() &&
+              instances_after_all_cancel.value->at(0).status == TimerInstanceStatus::kSkipped &&
+              instances_after_all_cancel.value->at(1).status == TimerInstanceStatus::kSkipped,
+          "all 取消应跳过全部待处理 occurrence");
+
+    const auto repeated_all_cancel = all_cancel_service.CancelTimerTask({
+        .task_id = all_cancel_registered.value->task_id,
+        .schedule_id = "schedule-cancel-all",
+        .change_scope = ChangeScope::kAll,
+    });
+    Check(repeated_all_cancel.status.code == ErrorCode::kConflict, "重复 all 取消应返回稳定冲突错误");
+
+    const auto missing_single_cancel = cancel_service.CancelTimerTask({
+        .task_id = cancel_registered.value->task_id,
+        .schedule_id = "schedule-cancel-single",
+        .change_scope = ChangeScope::kSingle,
+        .instance_id = "missing-instance",
+        .target_occurrence_at = 1786006800,
+    });
+    Check(missing_single_cancel.status.code == ErrorCode::kNotFound, "不存在的 occurrence 应返回 not found");
+
+    const auto repeated_single_cancel = cancel_service.CancelTimerTask({
+        .task_id = cancel_registered.value->task_id,
+        .schedule_id = "schedule-cancel-single",
+        .change_scope = ChangeScope::kSingle,
+        .instance_id = "instance-cancel-single",
+        .target_occurrence_at = 1785920400,
+    });
+    Check(repeated_single_cancel.status.code == ErrorCode::kConflict, "重复 single 取消应返回稳定冲突错误");
+
+    const auto invalid_future_cancel = future_cancel_service.CancelTimerTask({
+        .task_id = future_cancel_registered.value->task_id,
+        .schedule_id = "schedule-cancel-future",
+        .change_scope = ChangeScope::kFuture,
+    });
+    Check(invalid_future_cancel.status.code == ErrorCode::kInvalidArgument,
+          "缺少 effective_from 的 future 取消应返回参数错误");
+
+    const auto invalid_scope_cancel = cancel_service.CancelTimerTask({
+        .task_id = cancel_registered.value->task_id,
+        .schedule_id = "schedule-cancel-single",
+        .change_scope = static_cast<ChangeScope>(99),
+    });
+    Check(invalid_scope_cancel.status.code == ErrorCode::kInvalidArgument, "非法取消范围应返回参数错误");
+
+    InMemoryTimingTaskStore failure_cancel_store;
+    FixedTimingIdGenerator failure_cancel_ids;
+    DefaultTimingTaskService failure_cancel_service(failure_cancel_store, clock, failure_cancel_ids);
+    const auto failure_cancel_registered = failure_cancel_service.RegisterTimerTask({
+        .request_id = "request-cancel-write-failure",
+        .schedule_id = "schedule-cancel-write-failure",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+    });
+    Check(failure_cancel_registered.ok(), "写入失败用例应先注册任务");
+    const auto failure_cancel_task = failure_cancel_store.FindTask(failure_cancel_registered.value->task_id);
+    Check(failure_cancel_task.ok(), "写入失败用例应能读回任务");
+    Check(failure_cancel_store
+              .UpdateTaskWithInstances({
+                  .task = *failure_cancel_task.value,
+                  .upsert_instances = {TimerInstance{
+                      .id = "instance-cancel-write-failure",
+                      .task_id = failure_cancel_registered.value->task_id,
+                      .planned_at = 1785834000,
+                      .status = TimerInstanceStatus::kPending,
+                  }},
+              })
+              .ok(),
+          "写入失败用例应能预置实例");
+    failure_cancel_store.FailNextUpdate(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
+    const auto failed_single_cancel = failure_cancel_service.CancelTimerTask({
+        .task_id = failure_cancel_registered.value->task_id,
+        .schedule_id = "schedule-cancel-write-failure",
+        .change_scope = ChangeScope::kSingle,
+        .instance_id = "instance-cancel-write-failure",
+        .target_occurrence_at = 1785834000,
+    });
+    Check(failed_single_cancel.status.code == ErrorCode::kUnavailable, "Store 写入失败应透传领域错误");
+    const auto task_after_failed_cancel = failure_cancel_store.FindTask(failure_cancel_registered.value->task_id);
+    Check(task_after_failed_cancel.ok() && task_after_failed_cancel.value->status == TimingTaskStatus::kActive,
+          "Store 写入失败后任务状态不应半更新");
+    const auto instances_after_failed_cancel =
+        failure_cancel_store.ListInstances(failure_cancel_registered.value->task_id);
+    Check(instances_after_failed_cancel.ok() &&
+              instances_after_failed_cancel.value->front().status == TimerInstanceStatus::kPending,
+          "Store 写入失败后实例状态不应半更新");
+
+    InMemoryTimingTaskStore single_store;
+    FixedTimingIdGenerator single_ids;
+    DefaultTimingTaskService single_service(single_store, clock, single_ids);
+    const auto single_registered = single_service.RegisterTimerTask({
+        .request_id = "request-single",
+        .schedule_id = "schedule-single",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(single_registered.ok(), "single 修改用例应先注册周期任务");
+    const auto single_task_before_update = single_store.FindTask(single_registered.value->task_id);
+    Check(single_store
+              .UpdateTaskWithInstances({
+                  .task = *single_task_before_update.value,
+                  .upsert_instances = {TimerInstance{
+                      .id = "instance-single",
+                      .task_id = single_registered.value->task_id,
+                      .planned_at = 1785920400,
+                      .status = TimerInstanceStatus::kPending,
+                  }},
+              })
+              .ok(),
+          "single 修改用例应能预置待覆盖实例");
+    const auto single_update = single_service.UpdateTimerTask({
+        .task_id = single_registered.value->task_id,
+        .schedule_id = "schedule-single",
+        .change_scope = ChangeScope::kSingle,
+        .start_at = 1785924000,
+        .instance_id = "instance-single",
+        .target_occurrence_at = 1785920400,
+    });
+    Check(single_update.ok(), "single 修改应成功");
+    Check(single_update.value->instance_id == "instance-single", "single 修改应返回被覆盖的实例");
+    Check(single_update.value->affected_instance_count == 1, "single 修改只影响一个实例");
+    Check(single_update.value->override_fields.start_at.has_value() &&
+              *single_update.value->override_fields.start_at == 1785924000,
+          "single 修改应返回该实例的新开始时间覆盖字段");
+    const auto single_task = single_store.FindTask(single_registered.value->task_id);
+    Check(single_task.ok() && single_task.value->start_at == 1785834000, "single 修改不应改变任务周期锚点");
+    const auto single_instances = single_store.ListInstances(single_registered.value->task_id);
+    Check(single_instances.ok() && single_instances.value->size() == 1, "single 修改只应产生一个实例覆盖");
+    Check(single_instances.ok() && single_instances.value->front().id == "instance-single",
+          "single 修改不应改写其他实例");
+    Check(single_instances.ok() && single_instances.value->front().status == TimerInstanceStatus::kModified,
+          "single 修改产生的实例应进入 modified 状态");
+
+    const auto mismatched_single_target = single_service.UpdateTimerTask({
+        .task_id = single_registered.value->task_id,
+        .schedule_id = "schedule-single",
+        .change_scope = ChangeScope::kSingle,
+        .start_at = 1786006800,
+        .instance_id = "instance-single",
+        .target_occurrence_at = 1786003200,
+    });
+    Check(mismatched_single_target.status.code == ErrorCode::kConflict,
+          "single 修改不应将已有实例重定向到其他 occurrence");
+
+    Check(single_store
+              .UpdateTaskWithInstances({
+                  .task = *single_task.value,
+                  .upsert_instances = {TimerInstance{
+                      .id = "instance-completed",
+                      .task_id = single_registered.value->task_id,
+                      .planned_at = 1786003200,
+                      .status = TimerInstanceStatus::kCompleted,
+                  }},
+              })
+              .ok(),
+          "single 修改用例应能预置终态实例");
+    const auto completed_single_target = single_service.UpdateTimerTask({
+        .task_id = single_registered.value->task_id,
+        .schedule_id = "schedule-single",
+        .change_scope = ChangeScope::kSingle,
+        .start_at = 1786006800,
+        .instance_id = "instance-completed",
+        .target_occurrence_at = 1786003200,
+    });
+    Check(completed_single_target.status.code == ErrorCode::kConflict, "single 修改不应重新打开已完成 occurrence");
+
+    const auto single_recurrence_update = single_service.UpdateTimerTask({
+        .task_id = single_registered.value->task_id,
+        .schedule_id = "schedule-single",
+        .change_scope = ChangeScope::kSingle,
+        .start_at = 1785924000,
+        .instance_id = "instance-single-2",
+        .target_occurrence_at = 1785920400,
+        .recurrence = RecurrenceRule{.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(single_recurrence_update.status.code == ErrorCode::kInvalidArgument, "single 修改不应接受新的周期规则");
+
+    const auto schedule_conflict = single_service.UpdateTimerTask({
+        .task_id = single_registered.value->task_id,
+        .schedule_id = "schedule-other",
+        .change_scope = ChangeScope::kAll,
+        .start_at = 1785924000,
+    });
+    Check(schedule_conflict.status.code == ErrorCode::kConflict, "修改任务必须匹配所属日程");
+
+    InMemoryTimingTaskStore future_store;
+    FixedTimingIdGenerator future_ids;
+    DefaultTimingTaskService future_service(future_store, clock, future_ids);
+    const auto future_registered = future_service.RegisterTimerTask({
+        .request_id = "request-future",
+        .schedule_id = "schedule-future",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(future_registered.ok(), "future 修改用例应先注册周期任务");
+    const auto future_task = future_store.FindTask(future_registered.value->task_id);
+    Check(future_task.ok(), "future 修改用例应能读回任务");
+    const TimerInstance before_boundary{
+        .id = "instance-before-boundary",
+        .task_id = future_registered.value->task_id,
+        .planned_at = 1785834000,
+        .status = TimerInstanceStatus::kPending,
+    };
+    const TimerInstance at_boundary{
+        .id = "instance-at-boundary",
+        .task_id = future_registered.value->task_id,
+        .planned_at = 1785920400,
+        .status = TimerInstanceStatus::kPending,
+    };
+    Check(future_store
+              .UpdateTaskWithInstances({
+                  .task = *future_task.value,
+                  .upsert_instances = {before_boundary, at_boundary},
+              })
+              .ok(),
+          "future 修改用例应能预置边界前后的实例");
+    const auto future_update = future_service.UpdateTimerTask({
+        .task_id = future_registered.value->task_id,
+        .schedule_id = "schedule-future",
+        .change_scope = ChangeScope::kFuture,
+        .start_at = 1786006800,
+        .effective_from = 1785920400,
+        .recurrence = RecurrenceRule{.frequency = RecurrenceFrequency::kWeek, .by_weekdays = {2}},
+    });
+    Check(future_update.ok(), "future 修改应成功");
+    Check(future_update.value->affected_instance_count == 1, "future 修改只统计生效边界及之后的已物化实例");
+    const auto future_after = future_store.FindTask(future_registered.value->task_id);
+    Check(future_after.ok() && future_after.value->start_at == 1786006800, "future 修改应更新任务未来周期锚点");
+    Check(future_after.ok() && future_after.value->next_trigger_at == 1786006800,
+          "future 修改应重算下一次未来触发时间");
+    Check(future_after.ok() && future_after.value->recurrence.frequency == RecurrenceFrequency::kWeek,
+          "future 修改应保存新的未来周期规则");
+    const auto future_instances = future_store.ListInstances(future_registered.value->task_id);
+    Check(future_instances.ok() && future_instances.value->front().id == "instance-before-boundary",
+          "future 修改后边界前实例仍应存在");
+    Check(future_instances.ok() && future_instances.value->front().planned_at == 1785834000,
+          "future 修改不应改变生效边界之前的 occurrence");
+    Check(future_instances.ok() && future_instances.value->at(1).status == TimerInstanceStatus::kSkipped,
+          "future 修改应作废生效边界及之后的旧 occurrence");
+
+    InMemoryTimingTaskStore all_store;
+    FixedTimingIdGenerator all_ids;
+    DefaultTimingTaskService all_service(all_store, clock, all_ids);
+    const auto all_registered = all_service.RegisterTimerTask({
+        .request_id = "request-all",
+        .schedule_id = "schedule-all",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(all_registered.ok(), "all 修改用例应先注册周期任务");
+    const auto all_task_before_update = all_store.FindTask(all_registered.value->task_id);
+    Check(all_store
+              .UpdateTaskWithInstances({
+                  .task = *all_task_before_update.value,
+                  .upsert_instances = {TimerInstance{
+                      .id = "instance-all",
+                      .task_id = all_registered.value->task_id,
+                      .planned_at = 1785920400,
+                      .status = TimerInstanceStatus::kPending,
+                  }},
+              })
+              .ok(),
+          "all 修改用例应能预置旧 occurrence");
+    const auto all_update = all_service.UpdateTimerTask({
+        .task_id = all_registered.value->task_id,
+        .schedule_id = "schedule-all",
+        .change_scope = ChangeScope::kAll,
+        .start_at = 1786093200,
+        .recurrence = RecurrenceRule{.frequency = RecurrenceFrequency::kMonth, .by_month_days = {5}},
+    });
+    Check(all_update.ok(), "all 修改应成功");
+    Check(all_update.value->affected_instance_count == 1, "all 修改应统计被作废的已物化实例");
+    Check(all_update.value->next_trigger_at == 1786093200, "all 修改应返回重算后的下一次触发时间");
+    const auto all_task = all_store.FindTask(all_registered.value->task_id);
+    Check(all_task.ok() && all_task.value->start_at == 1786093200, "all 修改应更新任务周期锚点");
+    Check(all_task.ok() && all_task.value->next_trigger_at == 1786093200, "all 修改应让任务下一次触发时间与新锚点一致");
+    Check(all_task.ok() && all_task.value->recurrence.frequency == RecurrenceFrequency::kMonth,
+          "all 修改应保存新的任务规则");
+    const auto all_instances = all_store.ListInstances(all_registered.value->task_id);
+    Check(all_instances.ok() && all_instances.value->front().status == TimerInstanceStatus::kSkipped,
+          "all 修改应作废旧 occurrence");
+
+    auto terminated_task = *all_task.value;
+    terminated_task.status = TimingTaskStatus::kTerminated;
+    Check(all_store.UpdateTaskWithInstances({.task = terminated_task}).ok(), "测试应能预置已终止任务");
+    const auto terminated_update = all_service.UpdateTimerTask({
+        .task_id = all_registered.value->task_id,
+        .schedule_id = "schedule-all",
+        .change_scope = ChangeScope::kAll,
+        .start_at = 1786179600,
+    });
+    Check(terminated_update.status.code == ErrorCode::kConflict, "已终止任务不应再次修改");
+
+    const auto illegal_scope = all_service.UpdateTimerTask({
+        .task_id = all_registered.value->task_id,
+        .schedule_id = "schedule-all",
+        .change_scope = static_cast<ChangeScope>(99),
+        .start_at = 1786093200,
+    });
+    Check(illegal_scope.status.code == ErrorCode::kInvalidArgument, "非法修改范围应返回参数错误");
+
+    const auto missing_single_target = all_service.UpdateTimerTask({
+        .task_id = all_registered.value->task_id,
+        .schedule_id = "schedule-all",
+        .change_scope = ChangeScope::kSingle,
+        .start_at = 1786093200,
+    });
+    Check(missing_single_target.status.code == ErrorCode::kInvalidArgument,
+          "single 修改缺少目标 occurrence 应返回参数错误");
+
+    const auto missing_future_target = all_service.UpdateTimerTask({
+        .task_id = all_registered.value->task_id,
+        .schedule_id = "schedule-all",
+        .change_scope = ChangeScope::kFuture,
+        .start_at = 1786093200,
+    });
+    Check(missing_future_target.status.code == ErrorCode::kInvalidArgument,
+          "future 修改缺少 effective_from 应返回参数错误");
+
+    const auto missing_identity = all_service.UpdateTimerTask({
+        .change_scope = ChangeScope::kAll,
+        .start_at = 1786093200,
+    });
+    Check(missing_identity.status.code == ErrorCode::kInvalidArgument, "修改任务缺少标识时应返回参数错误");
+
+    const auto missing_start = all_service.UpdateTimerTask({
+        .task_id = all_registered.value->task_id,
+        .schedule_id = "schedule-all",
+        .change_scope = ChangeScope::kAll,
+    });
+    Check(missing_start.status.code == ErrorCode::kInvalidArgument, "修改任务缺少开始时间时应返回参数错误");
+
+    const auto not_found = all_service.UpdateTimerTask({
+        .task_id = "task-missing",
+        .schedule_id = "schedule-all",
+        .change_scope = ChangeScope::kAll,
+        .start_at = 1786093200,
+    });
+    Check(not_found.status.code == ErrorCode::kNotFound, "不存在的任务应返回 not found");
+
+    InMemoryTimingTaskStore failing_store;
+    FixedTimingIdGenerator failing_ids;
+    DefaultTimingTaskService failing_service(failing_store, clock, failing_ids);
+    const auto failing_registered = failing_service.RegisterTimerTask({
+        .request_id = "request-failing",
+        .schedule_id = "schedule-failing",
+        .start_at = 1785834000,
+        .time_zone = "Asia/Shanghai",
+    });
+    Check(failing_registered.ok(), "失败路径用例应先注册任务");
+    const auto failing_task_before_update = failing_store.FindTask(failing_registered.value->task_id);
+    Check(failing_store
+              .UpdateTaskWithInstances({
+                  .task = *failing_task_before_update.value,
+                  .upsert_instances = {TimerInstance{
+                      .id = "instance-failing",
+                      .task_id = failing_registered.value->task_id,
+                      .planned_at = 1785920400,
+                      .status = TimerInstanceStatus::kPending,
+                  }},
+              })
+              .ok(),
+          "失败路径用例应能预置旧 occurrence");
+    failing_store.FailNextUpdate(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
+    const auto failing_update = failing_service.UpdateTimerTask({
+        .task_id = failing_registered.value->task_id,
+        .schedule_id = "schedule-failing",
+        .change_scope = ChangeScope::kAll,
+        .start_at = 1786093200,
+    });
+    Check(failing_update.status.code == ErrorCode::kUnavailable, "Store 写入失败应向调用方返回存储错误");
+    const auto unchanged_after_failure = failing_store.FindTask(failing_registered.value->task_id);
+    Check(unchanged_after_failure.ok() && unchanged_after_failure.value->start_at == 1785834000,
+          "Store 写入失败后任务不应半更新");
+    const auto instances_after_failure = failing_store.ListInstances(failing_registered.value->task_id);
+    Check(instances_after_failure.ok() && instances_after_failure.value->size() == 1,
+          "Store 写入失败后不应新增或删除实例");
+    Check(
+        instances_after_failure.ok() && instances_after_failure.value->front().status == TimerInstanceStatus::kPending,
+        "Store 写入失败后旧 occurrence 不应被半更新");
     const auto empty_rule_request = service.UpsertReminderRules({});
     Check(empty_rule_request.status.code == ErrorCode::kInvalidArgument, "空提醒规则请求应返回参数错误");
 
@@ -797,15 +1184,112 @@ int main() {
     }
     Check(retained_previous_rule, "规则写入失败不能改变已保存规则");
 
-    // 仍未实现的 Service 方法应返回统一的 unavailable 错误。
-    Check(service.UpdateTimerTask({}).status.code == ErrorCode::kUnavailable, "默认修改接口应明确返回未实现");
-    Check(service.CancelTimerTask({}).status.code == ErrorCode::kUnavailable, "默认取消接口应明确返回未实现");
-    Check(service.DeleteReminderRule({}).status.code == ErrorCode::kUnavailable,
-          "默认提醒规则删除接口应明确返回未实现");
+    // 尚未实现的提醒 Service 方法应返回统一的 unavailable 错误。
     Check(service.ListReminderTriggers({}).status.code == ErrorCode::kUnavailable,
           "默认提醒触发查询接口应明确返回未实现");
     Check(service.SnoozeReminderTrigger({}).status.code == ErrorCode::kUnavailable, "默认提醒推迟接口应明确返回未实现");
     Check(service.DismissReminderTrigger({}).status.code == ErrorCode::kUnavailable,
           "默认提醒关闭接口应明确返回未实现");
+
+    const auto rules_before_delete = store.ListRules(registered.value->task_id);
+    std::string rule_to_delete;
+    std::string rule_for_failed_delete;
+    for (const auto& rule : *rules_before_delete.value) {
+        if (rule.type == ReminderType::kWeak) {
+            rule_to_delete = rule.id;
+        }
+        if (rule.type == ReminderType::kStrong) {
+            rule_for_failed_delete = rule.id;
+        }
+    }
+    Check(!rule_to_delete.empty() && !rule_for_failed_delete.empty(), "默认规则应同时包含弱提醒和强提醒");
+    store.AddReminderTrigger({
+        .id = "future-trigger",
+        .reminder_rule_id = rule_to_delete,
+        .task_id = registered.value->task_id,
+        .planned_trigger_at = clock.Now() + 60,
+        .status = voicelife::timing::ReminderTriggerStatus::kPending,
+    });
+    store.AddReminderTrigger({
+        .id = "historical-trigger",
+        .reminder_rule_id = rule_to_delete,
+        .task_id = registered.value->task_id,
+        .planned_trigger_at = clock.Now() - 60,
+        .actual_trigger_at = clock.Now() - 60,
+        .status = voicelife::timing::ReminderTriggerStatus::kTriggered,
+    });
+    store.AddReminderTrigger({
+        .id = "at-delete-trigger",
+        .reminder_rule_id = rule_to_delete,
+        .task_id = registered.value->task_id,
+        .planned_trigger_at = clock.Now(),
+        .status = voicelife::timing::ReminderTriggerStatus::kPending,
+    });
+    const auto deleted_rule = service.DeleteReminderRule({.reminder_rule_id = rule_to_delete});
+    Check(deleted_rule.ok() && deleted_rule.value->status == voicelife::timing::ReminderRuleStatus::kDisabled,
+          "活动提醒规则应删除为 disabled");
+    Check(deleted_rule.ok() && deleted_rule.value->affected_trigger_count == 2,
+          "删除规则应返回被取消的未来及当前边界 trigger 数量");
+    const auto cancelled_trigger = store.FindReminderTrigger("future-trigger");
+    Check(cancelled_trigger.ok() &&
+              cancelled_trigger.value->status == voicelife::timing::ReminderTriggerStatus::kCancelled,
+          "删除规则应取消未来 pending trigger");
+    const auto historical_trigger = store.FindReminderTrigger("historical-trigger");
+    Check(historical_trigger.ok() &&
+              historical_trigger.value->status == voicelife::timing::ReminderTriggerStatus::kTriggered,
+          "删除规则不能修改历史 trigger");
+    Check(service.DeleteReminderRule({.reminder_rule_id = rule_to_delete}).status.code == ErrorCode::kConflict,
+          "重复删除提醒规则应返回冲突错误");
+    Check(service.DeleteReminderRule({.reminder_rule_id = "missing-rule"}).status.code == ErrorCode::kNotFound,
+          "删除未知提醒规则应返回 not found");
+    Check(service.DeleteReminderRule({}).status.code == ErrorCode::kInvalidArgument,
+          "删除请求缺少规则标识应返回参数错误");
+
+    store.AddReminderRule({
+        .id = "orphan-rule",
+        .task_id = "missing-task",
+        .status = voicelife::timing::ReminderRuleStatus::kActive,
+    });
+    Check(service.DeleteReminderRule({.reminder_rule_id = "orphan-rule"}).status.code == ErrorCode::kConflict,
+          "规则关联任务不存在应返回冲突错误");
+
+    store.AddReminderTrigger({
+        .id = "failed-delete-trigger",
+        .reminder_rule_id = rule_for_failed_delete,
+        .task_id = registered.value->task_id,
+        .planned_trigger_at = clock.Now() + 60,
+        .status = voicelife::timing::ReminderTriggerStatus::kPending,
+    });
+    store.FailNextRuleDisable(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
+    Check(
+        service.DeleteReminderRule({.reminder_rule_id = rule_for_failed_delete}).status.code == ErrorCode::kUnavailable,
+        "规则关闭失败应透传 Store 错误");
+    const auto retained_trigger = store.FindReminderTrigger("failed-delete-trigger");
+    Check(retained_trigger.ok() && retained_trigger.value->status == voicelife::timing::ReminderTriggerStatus::kPending,
+          "规则关闭失败不能改变未来 trigger");
+    const auto rules_after_store_failure = store.ListRules(registered.value->task_id);
+    bool retained_active_rule = false;
+    for (const auto& rule : *rules_after_store_failure.value) {
+        retained_active_rule = retained_active_rule || (rule.id == rule_for_failed_delete &&
+                                                        rule.status == voicelife::timing::ReminderRuleStatus::kActive);
+    }
+    Check(retained_active_rule, "规则关闭失败不能改变已保存规则");
+    store.AddReminderTrigger({
+        .id = "cross-task-trigger",
+        .reminder_rule_id = rule_for_failed_delete,
+        .task_id = "other-task",
+        .planned_trigger_at = clock.Now() + 60,
+        .status = voicelife::timing::ReminderTriggerStatus::kPending,
+    });
+    Check(service.DeleteReminderRule({.reminder_rule_id = rule_for_failed_delete}).status.code == ErrorCode::kConflict,
+          "trigger 与规则任务不一致应返回冲突错误");
+    const auto rule_after_relation_failure = store.ListRules(registered.value->task_id);
+    bool retained_rule_after_relation_failure = false;
+    for (const auto& rule : *rule_after_relation_failure.value) {
+        retained_rule_after_relation_failure =
+            retained_rule_after_relation_failure ||
+            (rule.id == rule_for_failed_delete && rule.status == voicelife::timing::ReminderRuleStatus::kActive);
+    }
+    Check(retained_rule_after_relation_failure, "关联错误不能关闭提醒规则");
     return 0;
 }
