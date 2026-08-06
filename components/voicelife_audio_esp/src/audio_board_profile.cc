@@ -2,15 +2,13 @@
 
 #include <algorithm>
 #include <array>
-#include <vector>
 #include <utility>
+#include <vector>
 
 namespace voicelife::audio_esp {
 namespace {
 
-Status Invalid(std::string message) {
-    return Status::Error(ErrorCode::kInvalidArgument, std::move(message));
-}
+Status Invalid(std::string message) { return Status::Error(ErrorCode::kInvalidArgument, std::move(message)); }
 
 bool ValidGpio(int gpio) { return gpio >= 0 && gpio <= 48; }
 
@@ -39,8 +37,7 @@ Status ValidateEndpoint(const I2sEndpointProfile& endpoint) {
     if (endpoint.wire_bits_per_sample != 16 && endpoint.wire_bits_per_sample != 32) {
         return Invalid("I2S wire sample 只支持 16-bit 或 32-bit");
     }
-    if ((endpoint.wire_bits_per_sample == 16 && endpoint.pcm_shift_bits != 0) ||
-        endpoint.pcm_shift_bits > 16) {
+    if ((endpoint.wire_bits_per_sample == 16 && endpoint.pcm_shift_bits != 0) || endpoint.pcm_shift_bits > 16) {
         return Invalid("I2S PCM 对齐位数与 wire sample 不匹配");
     }
     return Status::Ok();
@@ -81,8 +78,7 @@ Status AudioBoardProfile::Validate() const {
             capture_i2s.wire_bits_per_sample != playback_i2s.wire_bits_per_sample) {
             return Invalid("外部 Codec 双工端点必须共享 I2S port、时钟与 wire sample");
         }
-        pins = {capture_i2s.mclk, capture_i2s.bclk, capture_i2s.ws, capture_i2s.data,
-                playback_i2s.data};
+        pins = {capture_i2s.mclk, capture_i2s.bclk, capture_i2s.ws, capture_i2s.data, playback_i2s.data};
     } else {
         if (codec_control.has_value()) {
             return Invalid("纯 I2S simplex 拓扑不能携带外部 Codec 控制配置");
@@ -90,26 +86,23 @@ Status AudioBoardProfile::Validate() const {
         if (input_reference) {
             return Invalid("纯 I2S simplex Profile 不能声明未接线的 playback reference");
         }
-        pins = {capture_i2s.mclk, capture_i2s.bclk, capture_i2s.ws, capture_i2s.data,
+        pins = {capture_i2s.mclk,  capture_i2s.bclk,  capture_i2s.ws,  capture_i2s.data,
                 playback_i2s.mclk, playback_i2s.bclk, playback_i2s.ws, playback_i2s.data};
     }
 
     if (codec_control.has_value()) {
         const auto& control = *codec_control;
-        if (control.i2c_port > 1 || !ValidGpio(control.i2c.sda) ||
-            !ValidGpio(control.i2c.scl) || control.i2c.sda == control.i2c.scl) {
+        if (control.i2c_port > 1 || !ValidGpio(control.i2c.sda) || !ValidGpio(control.i2c.scl) ||
+            control.i2c.sda == control.i2c.scl) {
             return Invalid("外部 Codec I2C 配置无效");
         }
-        if (control.addresses.es8311_8bit == 0 ||
-            (control.addresses.es8311_8bit & 1U) != 0) {
+        if (control.addresses.es8311_8bit == 0 || (control.addresses.es8311_8bit & 1U) != 0) {
             return Invalid("ES8311 必须使用合法的 8-bit 偶数 I2C 地址");
         }
-        if (control.addresses.es7210_8bit == 0 ||
-            (control.addresses.es7210_8bit & 1U) != 0) {
+        if (control.addresses.es7210_8bit == 0 || (control.addresses.es7210_8bit & 1U) != 0) {
             return Invalid("ES7210 必须使用合法的 8-bit 偶数 I2C 地址");
         }
-        if (control.addresses.pca9557_7bit == 0 ||
-            control.addresses.pca9557_7bit >= 0x80) {
+        if (control.addresses.pca9557_7bit == 0 || control.addresses.pca9557_7bit >= 0x80) {
             return Invalid("PCA9557 必须使用合法的 7-bit I2C 地址");
         }
         pins.push_back(control.i2c.sda);
