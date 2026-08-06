@@ -15,6 +15,7 @@ using voicelife::timing::RecurrenceFrequency;
 using voicelife::timing::RecurrenceRule;
 using voicelife::timing::RegisterTimerTaskCommand;
 using voicelife::timing::ReminderRule;
+using voicelife::timing::ReminderRuleInput;
 using voicelife::timing::ReminderType;
 using voicelife::timing::TimerInstance;
 using voicelife::timing::TimerInstanceStatus;
@@ -69,6 +70,10 @@ class LookupFailureStore final : public TimingTaskStorePort {
         return Result<std::vector<ReminderRule>>::Failure(ErrorCode::kInternal, "unexpected list");
     }
 
+    Status UpsertRules(const TimingTaskId&, const std::vector<ReminderRule>&) override {
+        return Status::Error(ErrorCode::kInternal, "unexpected upsert");
+    }
+
     Result<std::vector<TimerInstance>> ListInstances(const TimingTaskId&) override {
         return Result<std::vector<TimerInstance>>::Failure(ErrorCode::kInternal, "unexpected list instances");
     }
@@ -99,6 +104,10 @@ class ConcurrentReplayStore final : public TimingTaskStorePort {
 
     Result<std::vector<ReminderRule>> ListRules(const TimingTaskId&) override {
         return Result<std::vector<ReminderRule>>::Failure(ErrorCode::kInternal, "unexpected list");
+    }
+
+    Status UpsertRules(const TimingTaskId&, const std::vector<ReminderRule>&) override {
+        return Status::Error(ErrorCode::kInternal, "unexpected upsert");
     }
 
     Result<std::vector<TimerInstance>> ListInstances(const TimingTaskId&) override {
@@ -934,9 +943,232 @@ int main() {
     Check(
         instances_after_failure.ok() && instances_after_failure.value->front().status == TimerInstanceStatus::kPending,
         "Store 写入失败后旧 occurrence 不应被半更新");
+    const auto empty_rule_request = service.UpsertReminderRules({});
+    Check(empty_rule_request.status.code == ErrorCode::kInvalidArgument, "空提醒规则请求应返回参数错误");
+
+    const auto wrong_schedule = service.UpsertReminderRules({
+        .task_id = registered.value->task_id,
+        .schedule_id = "other-schedule",
+        .rules =
+            {
+                ReminderRuleInput{
+                    .type = ReminderType::kWeak,
+                    .offset_minutes = -30,
+                    .channel = "voice",
+                },
+            },
+    });
+    Check(wrong_schedule.status.code == ErrorCode::kConflict, "任务不属于指定日程应返回冲突错误");
+
+    const auto upserted_rules = service.UpsertReminderRules({
+        .task_id = registered.value->task_id,
+        .schedule_id = "schedule-1",
+        .rules =
+            {
+                ReminderRuleInput{
+                    .type = ReminderType::kWeak,
+                    .offset_minutes = -30,
+                    .channel = "voice",
+                },
+                ReminderRuleInput{
+                    .type = ReminderType::kStrong,
+                    .offset_minutes = -5,
+                    .max_snooze_count = 2,
+                    .snooze_interval_minutes = 5,
+                    .channel = "voice",
+                },
+            },
+    });
+    Check(upserted_rules.ok(), "合法 weak/strong 规则应创建成功");
+    Check(upserted_rules.value->reminder_rules.size() == 4, "创建规则后应返回任务的完整规则列表");
+    std::string created_weak_rule_id;
+    std::string created_strong_rule_id;
+    for (const auto& rule : upserted_rules.value->reminder_rules) {
+        if (rule.type == ReminderType::kWeak && rule.offset_minutes == -30) {
+            created_weak_rule_id = rule.id;
+        }
+        if (rule.type == ReminderType::kStrong && rule.offset_minutes == -5) {
+            created_strong_rule_id = rule.id;
+        }
+    }
+    Check(!created_weak_rule_id.empty(), "新弱提醒规则应获得服务端标识");
+    Check(!created_strong_rule_id.empty() && created_strong_rule_id != created_weak_rule_id,
+          "每条新规则应获得不同的稳定标识");
+
+    const auto updated_rule = service.UpsertReminderRules({
+        .task_id = registered.value->task_id,
+        .schedule_id = "schedule-1",
+        .rules =
+            {
+                ReminderRuleInput{
+                    .reminder_rule_id = created_weak_rule_id,
+                    .type = ReminderType::kWeak,
+                    .offset_minutes = -20,
+                    .channel = "voice",
+                },
+            },
+    });
+    Check(updated_rule.ok(), "已有提醒规则应更新成功");
+    Check(updated_rule.value->reminder_rules.size() == 4, "更新已有规则不能创建重复规则");
+    bool has_updated_rule = false;
+    for (const auto& rule : updated_rule.value->reminder_rules) {
+        has_updated_rule = has_updated_rule || (rule.id == created_weak_rule_id && rule.offset_minutes == -20);
+    }
+    Check(has_updated_rule, "更新已有规则应保留原规则标识");
+
+    const auto duplicate_rule_update = service.UpsertReminderRules({
+        .task_id = registered.value->task_id,
+        .schedule_id = "schedule-1",
+        .rules =
+            {
+                ReminderRuleInput{
+                    .reminder_rule_id = created_weak_rule_id,
+                    .type = ReminderType::kWeak,
+                    .offset_minutes = -20,
+                    .channel = "voice",
+                },
+                ReminderRuleInput{
+                    .reminder_rule_id = created_weak_rule_id,
+                    .type = ReminderType::kWeak,
+                    .offset_minutes = -25,
+                    .channel = "voice",
+                },
+            },
+    });
+    Check(duplicate_rule_update.status.code == ErrorCode::kConflict, "同一请求重复规则标识应返回冲突错误");
+
+    store.FailNextRuleList(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
+    const auto list_failure = service.UpsertReminderRules({
+        .task_id = registered.value->task_id,
+        .schedule_id = "schedule-1",
+        .rules =
+            {
+                ReminderRuleInput{
+                    .type = ReminderType::kWeak,
+                    .offset_minutes = -15,
+                    .channel = "voice",
+                },
+            },
+    });
+    Check(list_failure.status.code == ErrorCode::kUnavailable, "规则读取失败应透传 Store 错误");
+
+    const auto future_offset = service.UpsertReminderRules({
+        .task_id = registered.value->task_id,
+        .schedule_id = "schedule-1",
+        .rules =
+            {
+                ReminderRuleInput{
+                    .type = ReminderType::kWeak,
+                    .offset_minutes = 1,
+                    .channel = "voice",
+                },
+            },
+    });
+    Check(future_offset.status.code == ErrorCode::kInvalidArgument, "提醒规则不能晚于任务开始时间触发");
+
+    const auto weak_snooze = service.UpsertReminderRules({
+        .task_id = registered.value->task_id,
+        .schedule_id = "schedule-1",
+        .rules =
+            {
+                ReminderRuleInput{
+                    .type = ReminderType::kWeak,
+                    .offset_minutes = -15,
+                    .max_snooze_count = 1,
+                    .snooze_interval_minutes = 5,
+                    .channel = "voice",
+                },
+            },
+    });
+    Check(weak_snooze.status.code == ErrorCode::kInvalidArgument, "弱提醒配置 snooze 应返回参数错误");
+
+    const auto invalid_strong_snooze = service.UpsertReminderRules({
+        .task_id = registered.value->task_id,
+        .schedule_id = "schedule-1",
+        .rules =
+            {
+                ReminderRuleInput{
+                    .type = ReminderType::kStrong,
+                    .offset_minutes = -15,
+                    .max_snooze_count = 0,
+                    .snooze_interval_minutes = 5,
+                    .channel = "voice",
+                },
+            },
+    });
+    Check(invalid_strong_snooze.status.code == ErrorCode::kInvalidArgument, "强提醒必须配置正数 snooze 次数和间隔");
+
+    const auto duplicate_on_time_strong = service.UpsertReminderRules({
+        .task_id = registered.value->task_id,
+        .schedule_id = "schedule-1",
+        .rules =
+            {
+                ReminderRuleInput{
+                    .type = ReminderType::kStrong,
+                    .offset_minutes = 0,
+                    .max_snooze_count = 3,
+                    .snooze_interval_minutes = 5,
+                    .channel = "voice",
+                },
+            },
+    });
+    Check(duplicate_on_time_strong.status.code == ErrorCode::kConflict, "同一任务的第二条准点强提醒应返回冲突错误");
+    const auto rules_after_conflict = store.ListRules(registered.value->task_id);
+    Check(rules_after_conflict.ok() && rules_after_conflict.value->size() == 4, "规则冲突后不能留下部分创建结果");
+
+    const auto unknown_task = service.UpsertReminderRules({
+        .task_id = "missing-task",
+        .schedule_id = "missing-schedule",
+        .rules =
+            {
+                ReminderRuleInput{
+                    .type = ReminderType::kWeak,
+                    .offset_minutes = -15,
+                    .channel = "voice",
+                },
+            },
+    });
+    Check(unknown_task.status.code == ErrorCode::kNotFound, "未知任务应返回 not found");
+
+    const auto unknown_rule = service.UpsertReminderRules({
+        .task_id = registered.value->task_id,
+        .schedule_id = "schedule-1",
+        .rules =
+            {
+                ReminderRuleInput{
+                    .reminder_rule_id = "missing-rule",
+                    .type = ReminderType::kWeak,
+                    .offset_minutes = -15,
+                    .channel = "voice",
+                },
+            },
+    });
+    Check(unknown_rule.status.code == ErrorCode::kNotFound, "未知规则应返回 not found");
+
+    store.FailNextRuleUpsert(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
+    const auto failed_update = service.UpsertReminderRules({
+        .task_id = registered.value->task_id,
+        .schedule_id = "schedule-1",
+        .rules =
+            {
+                ReminderRuleInput{
+                    .reminder_rule_id = created_weak_rule_id,
+                    .type = ReminderType::kWeak,
+                    .offset_minutes = -10,
+                    .channel = "voice",
+                },
+            },
+    });
+    Check(failed_update.status.code == ErrorCode::kUnavailable, "规则写入失败应透传 Store 错误");
+    const auto rules_after_failed_update = store.ListRules(registered.value->task_id);
+    bool retained_previous_rule = false;
+    for (const auto& rule : *rules_after_failed_update.value) {
+        retained_previous_rule =
+            retained_previous_rule || (rule.id == created_weak_rule_id && rule.offset_minutes == -20);
+    }
+    Check(retained_previous_rule, "规则写入失败不能改变已保存规则");
+
     // 默认实现尚未接入持久化端口时，所有扩展用例都应返回统一的 unavailable 错误。
-    Check(service.UpsertReminderRules({}).status.code == ErrorCode::kUnavailable,
-          "默认提醒规则写入接口应明确返回未实现");
     Check(service.DeleteReminderRule({}).status.code == ErrorCode::kUnavailable,
           "默认提醒规则删除接口应明确返回未实现");
     Check(service.ListCalendarView({}).status.code == ErrorCode::kUnavailable, "默认日历查询接口应明确返回未实现");

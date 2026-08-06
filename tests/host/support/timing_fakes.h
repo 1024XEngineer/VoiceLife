@@ -90,6 +90,11 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
     }
 
     Result<std::vector<timing::ReminderRule>> ListRules(const timing::TimingTaskId& task_id) override {
+        if (!next_rule_list_failure_.ok()) {
+            Status failure = std::move(next_rule_list_failure_);
+            next_rule_list_failure_ = Status::Ok();
+            return Result<std::vector<timing::ReminderRule>>::Failure(failure.code, failure.message);
+        }
         std::vector<timing::ReminderRule> result;
         for (const auto& [_, rule] : rules_) {
             if (rule.task_id == task_id) {
@@ -100,6 +105,45 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
                   [](const auto& left, const auto& right) { return left.offset_minutes < right.offset_minutes; });
         return Result<std::vector<timing::ReminderRule>>::Success(std::move(result));
     }
+
+    Status UpsertRules(const timing::TimingTaskId& task_id, const std::vector<timing::ReminderRule>& rules) override {
+        if (!tasks_.contains(task_id)) {
+            return Status::Error(ErrorCode::kNotFound, "task not found");
+        }
+        if (!next_rule_upsert_failure_.ok()) {
+            Status failure = std::move(next_rule_upsert_failure_);
+            next_rule_upsert_failure_ = Status::Ok();
+            return failure;
+        }
+
+        auto next_rules = rules_;
+        std::unordered_set<std::string> incoming_rule_ids;
+        for (const auto& rule : rules) {
+            const auto existing = next_rules.find(rule.id);
+            if (rule.id.empty() || rule.task_id != task_id || !incoming_rule_ids.insert(rule.id).second ||
+                (existing != next_rules.end() && existing->second.task_id != task_id)) {
+                return Status::Error(ErrorCode::kConflict, "invalid reminder rule");
+            }
+            next_rules.insert_or_assign(rule.id, rule);
+        }
+
+        int active_on_time_strong_count = 0;
+        for (const auto& [_, rule] : next_rules) {
+            if (rule.task_id == task_id && rule.status == timing::ReminderRuleStatus::kActive &&
+                rule.type == timing::ReminderType::kStrong && rule.offset_minutes == 0) {
+                ++active_on_time_strong_count;
+            }
+        }
+        if (active_on_time_strong_count > 1) {
+            return Status::Error(ErrorCode::kConflict, "multiple active on-time strong rules");
+        }
+        rules_ = std::move(next_rules);
+        return Status::Ok();
+    }
+
+    void FailNextRuleUpsert(Status failure) { next_rule_upsert_failure_ = std::move(failure); }
+
+    void FailNextRuleList(Status failure) { next_rule_list_failure_ = std::move(failure); }
 
     Result<std::vector<timing::TimerInstance>> ListInstances(const timing::TimingTaskId& task_id) override {
         std::vector<timing::TimerInstance> result;
@@ -119,6 +163,8 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
 
    private:
     std::optional<Status> next_update_failure_{};
+    Status next_rule_list_failure_ = Status::Ok();
+    Status next_rule_upsert_failure_ = Status::Ok();
     std::unordered_map<timing::TimingTaskId, timing::TimingTask> tasks_;
     std::unordered_map<std::string, timing::ReminderRule> rules_;
     std::unordered_map<std::string, timing::TimerInstance> instances_;
