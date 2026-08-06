@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1",
+  "eventId": "event-invalid-enum",
+  "correlationId": "correlation-invalid-enum",
+  "userId": "user-fixture",
+  "deviceId": "device-fixture",
+  "operationType": "rescheduled",
+  "scheduleId": "schedule-fixture",
+  "result": "succeeded",
+  "summary": "非法枚举",
+  "occurredAt": "2026-08-03T00:00:00.000Z"
+}

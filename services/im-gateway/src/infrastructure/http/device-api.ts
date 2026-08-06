@@ -1,13 +1,13 @@
 import type { ActionId, DeviceId, PairingSessionId, ReminderTriggerId } from '../../contracts/ids.js';
-import type { NotificationSubmission, ReminderActionCommand } from '../../contracts/device-gateway.js';
+import type { NotificationSubmission, ReminderActionCommand, ReminderType } from '../../contracts/device-gateway.js';
 import {
+    parseCreatePairingSessionRequest,
     parseNotificationIntent,
     parseReminderActionResult,
     parseScheduleReceiptIntent,
 } from '../../contracts/device-gateway-parser.js';
 import type {
     ActionApplication,
-    CreatePairingSessionCommand,
     CreatedPairingSession,
     NotificationApplication,
     PairingApplication,
@@ -80,10 +80,11 @@ export class DeviceIntentController {
      */
     public async postPairingSession(input: {
         readonly authorization: string;
-        readonly body: CreatePairingSessionCommand;
+        readonly body: unknown;
     }): Promise<CreatedPairingSession> {
-        await this.authenticateDevice(input.authorization, input.body.deviceId);
-        return this.pairing.create(input.body);
+        const body = parseCreatePairingSessionRequest(input.body);
+        await this.authenticateDevice(input.authorization, body.deviceId);
+        return this.pairing.create(body);
     }
 
     /**
@@ -189,11 +190,14 @@ export class ReminderActionStreamController {
     public async connect(input: {
         readonly authorization: string;
         readonly deviceId: DeviceId;
-        readonly reminderType: 'strong';
+        readonly reminderType: ReminderType;
         readonly reminderTriggerId: ReminderTriggerId;
         readonly lastEventId?: ActionId;
         readonly signal?: AbortSignal;
     }): Promise<AsyncIterable<ReminderActionSseEvent>> {
+        if (input.reminderType !== 'strong') {
+            throw new ImGatewayError('invalid_contract', 'Only strong reminders can establish an action stream');
+        }
         const principal = await this.authentication.authenticate(input.authorization);
         if (principal.deviceId !== input.deviceId) {
             throw new ImGatewayError('invalid_transition', 'Device token is not bound to the requested deviceId');
