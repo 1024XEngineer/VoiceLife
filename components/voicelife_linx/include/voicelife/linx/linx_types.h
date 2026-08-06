@@ -100,7 +100,11 @@ class LinxTransportPort {
      * @return 关闭结果。
      */
     virtual Status Close() = 0;
-    virtual void SetGeneration(uint64_t) {}
+    /**
+     * @brief 设置异步回调使用的会话代次。
+     * @param generation 当前会话代次。
+     */
+    virtual void SetGeneration(uint64_t generation) { (void)generation; }
 };
 
 /** 定义 Linx 控制消息与领域语义之间的编解码端口。 */

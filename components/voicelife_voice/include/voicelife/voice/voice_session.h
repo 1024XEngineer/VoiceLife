@@ -26,15 +26,9 @@ class VoiceSession {
      * @return 启动结果。
      */
     Status Start(const VoiceSessionConfig& config);
-    /**
-     * @brief 开始采集音频。
-     * @return 开始结果。
-     */
+    /** @brief 开始采集音频。 @return 开始结果。 */
     Status BeginCapture();
-    /**
-     * @brief 结束采集音频。
-     * @return 结束结果。
-     */
+    /** @brief 结束采集音频。 @return 结束结果。 */
     Status EndCapture();
     /**
      * @brief 提交一帧来自输入端口的音频。
@@ -54,19 +48,16 @@ class VoiceSession {
      * @return 请求结果。
      */
     Status Speak(std::string_view text);
-    /**
-     * @brief 中断当前会话并推进会话代次。
-     * @return 中断结果。
-     */
+    /** @brief 中断当前会话并推进会话代次。 @return 中断结果。 */
     Status Interrupt();
-    /**
-     * @brief 停止会话并关闭所有音频资源。
-     * @return 停止结果。
-     */
+    /** @brief 停止会话并关闭所有音频资源。 @return 停止结果。 */
     Status Stop();
 
+    /** @brief 返回当前会话状态。 @return 会话状态。 */
     [[nodiscard]] VoiceSessionState state() const;
+    /** @brief 返回当前会话代次。 @return 会话代次。 */
     [[nodiscard]] uint64_t generation() const;
+    /** @brief 返回当前会话配置快照。 @return 会话配置。 */
     [[nodiscard]] VoiceSessionConfig config() const;
 
    private:
