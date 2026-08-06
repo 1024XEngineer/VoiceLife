@@ -204,11 +204,18 @@ ActionRunResult ImActionChannel::Run(ImActionCommandStream& stream, const Action
             result.status = ActionRunStatus::kWindowExpired;
             return result;
         }
-        const std::optional<ReminderActionCommand> next = stream.Next();
-        if (!next.has_value()) {
+        const StreamRead read = stream.Next();
+        if (read.status == StreamReadStatus::kEndOfStream) {
+            // 服务端正常关闭连接：结果全部确认时正常结束。
             break;
         }
-        HandleCommand(*next, window, result, has_unconfirmed);
+        if (read.status == StreamReadStatus::kNetworkError || read.status == StreamReadStatus::kProtocolError) {
+            // 连接中断或协议错误：结果可能未确认，必须按可重连处理，调用方
+            // 据此重连并重放未确认命令，不得误报正常结束。
+            has_unconfirmed = true;
+            break;
+        }
+        HandleCommand(read.command, window, result, has_unconfirmed);
     }
     stream.Close();
 

@@ -1,11 +1,28 @@
 #pragma once
 
-#include <optional>
 #include <string>
 
 #include "voicelife/contracts/im/reminder_action_command.h"
 
 namespace voicelife::im {
+
+/// 动作流单次读取的结果分类。
+enum class StreamReadStatus {
+    /// 读取到一条动作命令。
+    kCommand,
+    /// 服务端正常关闭连接，无更多命令。
+    kEndOfStream,
+    /// 网络/TLS 中断，应重连重放未确认命令。
+    kNetworkError,
+    /// 协议错误（坏帧、单帧超限），连接已关闭，按可重连处理。
+    kProtocolError,
+};
+
+/// 一次读取的返回：携带状态，命令仅在 kCommand 时有意义。
+struct StreamRead {
+    StreamReadStatus status = StreamReadStatus::kEndOfStream;
+    contracts::im::ReminderActionCommand command;
+};
 
 /// 网关动作命令流（SSE）端口。一次实例代表一条连接的生命周期。
 ///
@@ -24,9 +41,10 @@ class ImActionCommandStream {
     virtual bool Open(const std::string& last_event_id) = 0;
     /**
      * @brief 拉取下一条动作命令。
-     * @return 命令；连接结束或中断时返回 nullopt。
+     * @return 携带读取状态的 StreamRead；网络中断与协议错误与正常
+     *         流结束区分，调用方据此决定是否重连。
      */
-    virtual std::optional<contracts::im::ReminderActionCommand> Next() = 0;
+    virtual StreamRead Next() = 0;
     /** @brief 关闭当前连接，释放流侧资源。 */
     virtual void Close() = 0;
 };

@@ -38,6 +38,8 @@ using voicelife::im::ImHttpResponse;
 using voicelife::im::ImReportingChannel;
 using voicelife::im::ImTransport;
 using voicelife::im::ImTransportStatus;
+using voicelife::im::StreamRead;
+using voicelife::im::StreamReadStatus;
 
 constexpr const char* kDeviceId = "device-fixture";
 constexpr const char* kToken = "device-token";
@@ -114,18 +116,20 @@ class FakeStream : public ImActionCommandStream {
     std::vector<std::string> open_cursors;
     bool open_result = true;
     int close_count = 0;
+    /// 命令耗尽后的终结状态：默认正常结束，测试可改为 kNetworkError/kProtocolError。
+    StreamReadStatus terminal = StreamReadStatus::kEndOfStream;
 
     bool Open(const std::string& last_event_id) override {
         open_cursors.push_back(last_event_id);
         return open_result;
     }
-    std::optional<ReminderActionCommand> Next() override {
+    StreamRead Next() override {
         if (commands.empty()) {
-            return std::nullopt;
+            return {terminal, {}};
         }
         ReminderActionCommand command = commands.front();
         commands.erase(commands.begin());
-        return command;
+        return {StreamReadStatus::kCommand, command};
     }
     void Close() override { close_count++; }
 };

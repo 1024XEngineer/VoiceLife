@@ -223,6 +223,64 @@ void TestExecutedCachePrunedAfterWindowExpiry() {
     Check(transport.requests.size() == 2, "新旧窗口都应回传结果");
 }
 
+void TestMidStreamNetworkErrorReturnsDisconnected() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeExecutor executor;
+    executor.result = MakeResult();
+    FakeClock clock;
+    ImReportingChannel reporting(transport, credentials);
+    ImActionChannel channel(reporting, credentials, executor, clock);
+
+    // 已执行一条命令后连接中断（TCP/TLS 断线）：必须归类为可重连，调用方
+    // 据此重连并重放未确认命令，不得误报正常结束。
+    FakeStream stream;
+    stream.commands.push_back(MakeCommand("command-1", "operation-1"));
+    stream.terminal = StreamReadStatus::kNetworkError;
+    const ActionRunResult result = channel.Run(stream, MakeWindow());
+
+    Check(result.status == ActionRunStatus::kDisconnected, "已执行命令后的网络中断必须归类为可重连");
+    Check(executor.calls.size() == 1, "中断前命令仍应执行一次");
+    Check(transport.requests.size() == 1, "中断前命令仍应回传一次");
+}
+
+void TestProtocolErrorReturnsDisconnected() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeExecutor executor;
+    executor.result = MakeResult();
+    FakeClock clock;
+    ImReportingChannel reporting(transport, credentials);
+    ImActionChannel channel(reporting, credentials, executor, clock);
+
+    // 坏帧等协议错误：连接已关闭，按可重连处理，不得误报正常结束。
+    FakeStream stream;
+    stream.commands.push_back(MakeCommand("command-1", "operation-1"));
+    stream.terminal = StreamReadStatus::kProtocolError;
+    const ActionRunResult result = channel.Run(stream, MakeWindow());
+
+    Check(result.status == ActionRunStatus::kDisconnected, "协议错误必须归类为可重连");
+    Check(executor.calls.size() == 1, "协议错误前命令仍应执行一次");
+}
+
+void TestCleanStreamEndReturnsFinished() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeExecutor executor;
+    executor.result = MakeResult();
+    FakeClock clock;
+    ImReportingChannel reporting(transport, credentials);
+    ImActionChannel channel(reporting, credentials, executor, clock);
+
+    // 服务端正常关闭连接且全部命令已确认：必须正常结束。
+    FakeStream stream;
+    stream.commands.push_back(MakeCommand("command-1", "operation-1"));
+    const ActionRunResult result = channel.Run(stream, MakeWindow());
+
+    Check(result.status == ActionRunStatus::kFinished, "服务端正常关闭且已确认必须正常结束");
+    Check(executor.calls.size() == 1 && transport.requests.size() == 1, "命令应执行并回传一次");
+}
+
 }  // namespace
 
 int main() {
@@ -237,5 +295,8 @@ int main() {
     TestWeakSubmissionBodyHasNoWindow();
     TestMalformedSubmissionBodyHasNoWindow();
     TestExecutedCachePrunedAfterWindowExpiry();
+    TestMidStreamNetworkErrorReturnsDisconnected();
+    TestProtocolErrorReturnsDisconnected();
+    TestCleanStreamEndReturnsFinished();
     return 0;
 }

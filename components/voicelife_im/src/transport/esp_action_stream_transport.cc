@@ -89,9 +89,9 @@ bool EspActionStreamTransport::Open(const std::string& last_event_id) {
     return true;
 }
 
-std::optional<contracts::im::ReminderActionCommand> EspActionStreamTransport::Next() {
+StreamRead EspActionStreamTransport::Next() {
     if (!open_ || client_ == nullptr) {
-        return std::nullopt;
+        return {StreamReadStatus::kNetworkError, {}};
     }
     while (true) {
         // 优先消费上次读取已解码但未取走的帧。
@@ -99,32 +99,43 @@ std::optional<contracts::im::ReminderActionCommand> EspActionStreamTransport::Ne
             SseFrame frame = std::move(pending_.front());
             pending_.pop_front();
             if (frame.event != kActionEventType) {
+                // 心跳等非动作事件：跳过，不属于协议错误。
                 continue;
             }
             voicelife::JsonValue root;
             if (!voicelife::ParseJson(frame.data, root).ok()) {
+                // 动作事件载荷损坏属于协议错误：关闭连接，交由调用方按可重连处理。
                 ESP_LOGW(kTag, "动作命令载荷不是合法 JSON");
-                continue;
+                CloseConnection();
+                return {StreamReadStatus::kProtocolError, {}};
             }
             contracts::im::ReminderActionCommand command;
             if (!ParseReminderActionCommand(root, command).ok()) {
                 ESP_LOGW(kTag, "动作命令载荷未通过契约校验");
-                continue;
+                CloseConnection();
+                return {StreamReadStatus::kProtocolError, {}};
             }
             // 帧 id 必须与命令 commandId 一致，防止网关错序或串帧。
             if (command.commandId != frame.id) {
                 ESP_LOGW(kTag, "动作命令 frame.id 与 commandId 不一致");
-                continue;
+                CloseConnection();
+                return {StreamReadStatus::kProtocolError, {}};
             }
-            return command;
+            return {StreamReadStatus::kCommand, command};
         }
         char buffer[kSseReadBufferSize];
         const int n = esp_http_client_read(client_, buffer, sizeof(buffer));
-        if (n <= 0) {
-            // 服务端关闭连接或读取失败，流结束。
-            ESP_LOGW(kTag, "动作流读取结束（%d）", n);
+        if (n < 0) {
+            // 读取返回负数为网络/TLS 错误，与正常流结束区分，调用方应重连。
+            ESP_LOGW(kTag, "动作流读取网络错误（%d）", n);
             CloseConnection();
-            return std::nullopt;
+            return {StreamReadStatus::kNetworkError, {}};
+        }
+        if (n == 0) {
+            // 服务端正常关闭连接，流结束。
+            ESP_LOGW(kTag, "动作流正常结束");
+            CloseConnection();
+            return {StreamReadStatus::kEndOfStream, {}};
         }
         // 解码器输出固定为 vector；解码后整体移交 deque，保持待消费队列 O(1) 出队。
         std::vector<SseFrame> frames;
@@ -136,7 +147,7 @@ std::optional<contracts::im::ReminderActionCommand> EspActionStreamTransport::Ne
         if (decoder_.Overflowed()) {
             ESP_LOGE(kTag, "动作流单帧超过上限，中止连接");
             CloseConnection();
-            return std::nullopt;
+            return {StreamReadStatus::kProtocolError, {}};
         }
     }
 }
