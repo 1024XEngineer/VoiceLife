@@ -33,6 +33,7 @@ comment:
 
 ignore:
   - "tests/**"
+  - "third_party/**"
   - "services/im-gateway/test/**"
   - "main/**"
   - "components/voicelife_timing/src/timing_task_service_stubs.cc"
