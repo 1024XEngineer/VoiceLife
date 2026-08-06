@@ -144,6 +144,7 @@ class RealtimeAdapter {
 /// wraps a transport, codec, and protocol logic behind this single interface.
 class SpeechProviderAdapter {
    public:
+    /// Virtual destructor.
     virtual ~SpeechProviderAdapter() = default;
 
     /// Optional during migration. Providers with downlink audio call this sink for
@@ -208,6 +209,7 @@ class SpeechProviderRegistry {
 
    private:
     SpeechProviderRegistry() = default;
+    /// Registered provider entry.
     struct Entry {
         std::string provider_id;
         CapabilityProfile profile;
