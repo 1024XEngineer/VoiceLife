@@ -267,5 +267,19 @@ int main() {
         .time_zone = "Asia/Shanghai",
     });
     Check(concurrent_conflict.status.code == ErrorCode::kConflict, "并发注册复用 request_id 到不同内容时应返回冲突");
+
+    // 默认实现尚未接入持久化端口时，所有扩展用例都应返回统一的 unavailable 错误。
+    Check(service.UpdateTimerTask({}).status.code == ErrorCode::kUnavailable, "默认修改接口应明确返回未实现");
+    Check(service.CancelTimerTask({}).status.code == ErrorCode::kUnavailable, "默认取消接口应明确返回未实现");
+    Check(service.UpsertReminderRules({}).status.code == ErrorCode::kUnavailable,
+          "默认提醒规则写入接口应明确返回未实现");
+    Check(service.DeleteReminderRule({}).status.code == ErrorCode::kUnavailable,
+          "默认提醒规则删除接口应明确返回未实现");
+    Check(service.ListCalendarView({}).status.code == ErrorCode::kUnavailable, "默认日历查询接口应明确返回未实现");
+    Check(service.ListReminderTriggers({}).status.code == ErrorCode::kUnavailable,
+          "默认提醒触发查询接口应明确返回未实现");
+    Check(service.SnoozeReminderTrigger({}).status.code == ErrorCode::kUnavailable, "默认提醒推迟接口应明确返回未实现");
+    Check(service.DismissReminderTrigger({}).status.code == ErrorCode::kUnavailable,
+          "默认提醒关闭接口应明确返回未实现");
     return 0;
 }

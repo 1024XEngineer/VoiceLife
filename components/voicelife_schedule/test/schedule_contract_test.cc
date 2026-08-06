@@ -4,6 +4,7 @@
 using voicelife::schedule::CreateScheduleCommand;
 using voicelife::schedule::QueryScheduleCommand;
 using voicelife::schedule::ScheduleStatus;
+using voicelife::schedule::ScheduleStatusFilter;
 using voicelife::schedule::UpdateScheduleCommand;
 using voicelife::test::Check;
 
@@ -15,9 +16,14 @@ int main() {
     const UpdateScheduleCommand update;
     Check(!update.location.has_value() && !update.status.has_value() && !update.ignore_conflict,
           "修改日程命令默认不修改可选字段且不忽略冲突");
-    Check(ScheduleStatus::kComplete != ScheduleStatus::kCancelled, "已完成状态应是独立的日程状态");
+    Check(ScheduleStatus::kCompleted != ScheduleStatus::kCancelled &&
+              ScheduleStatus::kComplete == ScheduleStatus::kCompleted,
+          "已完成状态应是独立的日程状态并兼容旧命名");
 
     const QueryScheduleCommand query;
     Check(query.limit == 10 && query.offset == 0, "查询日程命令应提供默认分页参数");
+    Check(query.status == ScheduleStatusFilter::kActive, "查询日程命令应默认筛选有效状态");
+    Check(static_cast<int>(ScheduleStatus::kCancelled) == 2 && static_cast<int>(ScheduleStatus::kCompleted) == 3,
+          "新增完成状态不应改变已取消状态的持久化值");
     return 0;
 }
