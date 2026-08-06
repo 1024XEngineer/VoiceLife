@@ -1,4 +1,4 @@
-import type { SqlExecutor } from './repositories.js';
+import type { SqlExecutor } from './sql.js';
 
 /** IM Gateway 持久化表清单，按外键依赖顺序排列，供清空与诊断使用。 */
 export const IM_TABLES = [

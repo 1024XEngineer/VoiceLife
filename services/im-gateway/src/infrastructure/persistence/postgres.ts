@@ -1,7 +1,8 @@
 import { Pool } from 'pg';
 import type { ImUnitOfWork, ImUnitOfWorkContext } from '../../ports/repositories.js';
 import type { DbRow } from './postgres/mappers.js';
-import { PostgresUnitOfWorkContext, type SqlExecutor } from './postgres/repositories.js';
+import type { SqlExecutor } from './postgres/sql.js';
+import { PostgresUnitOfWorkContext } from './postgres/unit-of-work.js';
 import { applySchema, IM_TABLES } from './postgres/schema.js';
 
 /** 可执行参数化 SQL 的 pg 查询接口。 */
