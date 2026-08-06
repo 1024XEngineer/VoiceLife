@@ -66,6 +66,10 @@ class LookupFailureStore final : public TimingTaskStorePort {
         });
     }
 
+    Result<std::vector<TimingTask>> ListTasks() override {
+        return Result<std::vector<TimingTask>>::Failure(ErrorCode::kInternal, "unexpected list tasks");
+    }
+
     Result<std::vector<ReminderRule>> ListRules(const TimingTaskId&) override {
         return Result<std::vector<ReminderRule>>::Failure(ErrorCode::kInternal, "unexpected list");
     }
@@ -104,6 +108,10 @@ class ConcurrentReplayStore final : public TimingTaskStorePort {
 
     Result<TimingTask> FindTask(const TimingTaskId&) override {
         return Result<TimingTask>::Failure(ErrorCode::kInternal, "unexpected find");
+    }
+
+    Result<std::vector<TimingTask>> ListTasks() override {
+        return Result<std::vector<TimingTask>>::Failure(ErrorCode::kInternal, "unexpected list tasks");
     }
 
     Result<std::vector<ReminderRule>> ListRules(const TimingTaskId&) override {
@@ -1176,8 +1184,7 @@ int main() {
     }
     Check(retained_previous_rule, "规则写入失败不能改变已保存规则");
 
-    // 尚未实现的 Service 方法应返回统一的 unavailable 错误。
-    Check(service.ListCalendarView({}).status.code == ErrorCode::kUnavailable, "默认日历查询接口应明确返回未实现");
+    // 尚未实现的提醒 Service 方法应返回统一的 unavailable 错误。
     Check(service.ListReminderTriggers({}).status.code == ErrorCode::kUnavailable,
           "默认提醒触发查询接口应明确返回未实现");
     Check(service.SnoozeReminderTrigger({}).status.code == ErrorCode::kUnavailable, "默认提醒推迟接口应明确返回未实现");

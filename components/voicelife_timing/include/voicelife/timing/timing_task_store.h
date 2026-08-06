@@ -46,6 +46,11 @@ class TimingTaskStorePort {
      */
     virtual Result<TimingTask> FindTask(const TimingTaskId& task_id) = 0;
     /**
+     * @brief 查询全部定时任务。
+     * @return 任务列表或存储错误；日历服务负责按日程和生命周期过滤。
+     */
+    virtual Result<std::vector<TimingTask>> ListTasks() = 0;
+    /**
      * @brief 查询任务当前的提醒规则。
      * @param task_id 定时任务标识。
      * @return 规则列表或存储错误。
@@ -68,7 +73,7 @@ class TimingTaskStorePort {
     /**
      * @brief 查询任务已物化的 occurrence 实例。
      * @param task_id 定时任务标识。
-     * @return 实例列表或存储错误。
+     * @return 包含软删除记录的实例列表或存储错误；日历服务负责决定它们是否用户可见。
      */
     virtual Result<std::vector<TimerInstance>> ListInstances(const TimingTaskId& task_id) = 0;
 };

@@ -89,6 +89,21 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         return Result<timing::TimingTask>::Success(found->second);
     }
 
+    Result<std::vector<timing::TimingTask>> ListTasks() override {
+        if (!next_task_list_failure_.ok()) {
+            Status failure = std::move(next_task_list_failure_);
+            next_task_list_failure_ = Status::Ok();
+            return Result<std::vector<timing::TimingTask>>::Failure(failure.code, failure.message);
+        }
+        std::vector<timing::TimingTask> result;
+        result.reserve(tasks_.size());
+        for (const auto& [_, task] : tasks_) {
+            result.push_back(task);
+        }
+        std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) { return left.id < right.id; });
+        return Result<std::vector<timing::TimingTask>>::Success(std::move(result));
+    }
+
     Result<std::vector<timing::ReminderRule>> ListRules(const timing::TimingTaskId& task_id) override {
         if (!next_rule_list_failure_.ok()) {
             Status failure = std::move(next_rule_list_failure_);
@@ -157,6 +172,14 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         triggers_.insert_or_assign(trigger.id, std::move(trigger));
     }
 
+    void AddInstance(timing::TimerInstance instance) { instances_.insert_or_assign(instance.id, std::move(instance)); }
+
+    void AddTask(timing::TimingTask task) { tasks_.insert_or_assign(task.id, std::move(task)); }
+
+    void FailNextTaskList(Status failure) { next_task_list_failure_ = std::move(failure); }
+
+    void FailNextInstanceList(Status failure) { next_instance_list_failure_ = std::move(failure); }
+
     Result<timing::ReminderTrigger> FindReminderTrigger(const std::string& trigger_id) const {
         const auto found = triggers_.find(trigger_id);
         if (found == triggers_.end()) {
@@ -205,9 +228,14 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
     void FailNextRuleList(Status failure) { next_rule_list_failure_ = std::move(failure); }
 
     Result<std::vector<timing::TimerInstance>> ListInstances(const timing::TimingTaskId& task_id) override {
+        if (!next_instance_list_failure_.ok()) {
+            Status failure = std::move(next_instance_list_failure_);
+            next_instance_list_failure_ = Status::Ok();
+            return Result<std::vector<timing::TimerInstance>>::Failure(failure.code, failure.message);
+        }
         std::vector<timing::TimerInstance> result;
         for (const auto& [_, instance] : instances_) {
-            if (instance.task_id == task_id && instance.deleted_at == 0) {
+            if (instance.task_id == task_id) {
                 result.push_back(instance);
             }
         }
@@ -229,6 +257,8 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
     std::unordered_map<std::string, timing::ReminderTrigger> triggers_;
     Status next_rule_disable_failure_ = Status::Ok();
     std::unordered_map<std::string, timing::TimerInstance> instances_;
+    Status next_task_list_failure_ = Status::Ok();
+    Status next_instance_list_failure_ = Status::Ok();
 };
 
 }  // namespace voicelife::test
