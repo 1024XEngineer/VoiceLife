@@ -24,10 +24,6 @@ Result<DeleteReminderRuleResult> DefaultTimingTaskService::DeleteReminderRule(co
     return NotImplemented<DeleteReminderRuleResult>("DeleteReminderRule");
 }
 
-Result<CalendarView> DefaultTimingTaskService::ListCalendarView(const CalendarViewQuery&) {
-    return NotImplemented<CalendarView>("ListCalendarView");
-}
-
 Result<ReminderTriggerPage> DefaultTimingTaskService::ListReminderTriggers(const ReminderTriggerQuery&) {
     return NotImplemented<ReminderTriggerPage>("ListReminderTriggers");
 }

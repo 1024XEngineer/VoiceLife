@@ -9,12 +9,15 @@ using voicelife::Result;
 using voicelife::Status;
 using voicelife::test::Check;
 using voicelife::test::InMemoryTimingTaskStore;
+using voicelife::timing::CalendarSortBy;
 using voicelife::timing::DefaultTimingTaskService;
 using voicelife::timing::RecurrenceFrequency;
 using voicelife::timing::RegisterTimerTaskCommand;
 using voicelife::timing::ReminderRule;
 using voicelife::timing::ReminderRuleInput;
 using voicelife::timing::ReminderType;
+using voicelife::timing::SortOrder;
+using voicelife::timing::TimerInstanceStatus;
 using voicelife::timing::TimingClockPort;
 using voicelife::timing::TimingIdGeneratorPort;
 using voicelife::timing::TimingTask;
@@ -52,8 +55,17 @@ class LookupFailureStore final : public TimingTaskStorePort {
         return Result<TimingTask>::Failure(ErrorCode::kInternal, "unexpected find");
     }
 
+    Result<std::vector<TimingTask>> ListTasks() override {
+        return Result<std::vector<TimingTask>>::Failure(ErrorCode::kInternal, "unexpected list tasks");
+    }
+
     Result<std::vector<ReminderRule>> ListRules(const TimingTaskId&) override {
         return Result<std::vector<ReminderRule>>::Failure(ErrorCode::kInternal, "unexpected list");
+    }
+
+    Result<std::vector<voicelife::timing::TimerInstance>> ListInstances(const TimingTaskId&) override {
+        return Result<std::vector<voicelife::timing::TimerInstance>>::Failure(ErrorCode::kInternal,
+                                                                              "unexpected list instances");
     }
 
     Status UpsertRules(const TimingTaskId&, const std::vector<ReminderRule>&) override {
@@ -80,8 +92,17 @@ class ConcurrentReplayStore final : public TimingTaskStorePort {
         return Result<TimingTask>::Failure(ErrorCode::kInternal, "unexpected find");
     }
 
+    Result<std::vector<TimingTask>> ListTasks() override {
+        return Result<std::vector<TimingTask>>::Failure(ErrorCode::kInternal, "unexpected list tasks");
+    }
+
     Result<std::vector<ReminderRule>> ListRules(const TimingTaskId&) override {
         return Result<std::vector<ReminderRule>>::Failure(ErrorCode::kInternal, "unexpected list");
+    }
+
+    Result<std::vector<voicelife::timing::TimerInstance>> ListInstances(const TimingTaskId&) override {
+        return Result<std::vector<voicelife::timing::TimerInstance>>::Failure(ErrorCode::kInternal,
+                                                                              "unexpected list instances");
     }
 
     Status UpsertRules(const TimingTaskId&, const std::vector<ReminderRule>&) override {
@@ -117,6 +138,79 @@ int main() {
     Check(task.ok() && task.value->schedule_id == "schedule-1", "注册任务应被持久化");
     Check(task.ok() && task.value->start_at == 1785747600, "任务应保存唯一的周期锚点");
     Check(task.ok() && task.value->next_trigger_at == task.value->start_at, "首次触发时间应等于任务周期锚点");
+
+    const auto calendar = service.ListCalendarView({
+        .range_start = 1785740000,
+        .range_end = 1785750000,
+        .schedule_id = "schedule-1",
+        .page = 1,
+        .page_size = 20,
+        .sort_by = CalendarSortBy::kPlannedStartAt,
+    });
+    Check(calendar.ok(), "有效范围应返回日历视图");
+    Check(calendar.value->total == 1 && calendar.value->occurrences.size() == 1, "一次性任务应返回范围内 occurrence");
+    Check(calendar.value->occurrences.front().task_id == registered.value->task_id, "日历 occurrence 应关联原任务");
+    Check(calendar.value->occurrences.front().planned_start_at == 1785747600, "日历 occurrence 应使用任务开始时间");
+
+    InMemoryTimingTaskStore recurring_calendar_store;
+    FixedTimingIdGenerator recurring_calendar_ids;
+    DefaultTimingTaskService recurring_calendar_service(recurring_calendar_store, clock, recurring_calendar_ids);
+    const auto recurring_calendar_task = recurring_calendar_service.RegisterTimerTask({
+        .request_id = "request-calendar-recurring",
+        .schedule_id = "schedule-calendar-recurring",
+        .start_at = 1785747600,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+    });
+    Check(recurring_calendar_task.ok(), "周期日历任务应注册成功");
+    constexpr int64_t kDay = 24 * 60 * 60;
+    recurring_calendar_store.AddInstance({
+        .id = "instance-calendar-modified",
+        .task_id = recurring_calendar_task.value->task_id,
+        .planned_at = 1785747600 + kDay,
+        .planned_end_at = 1785747600 + kDay + 1800,
+        .status = TimerInstanceStatus::kModified,
+        .override_fields =
+            {
+                .start_at = 1785747600 + kDay + 3600,
+                .end_at = 1785747600 + kDay + 5400,
+            },
+    });
+
+    const auto recurring_calendar = recurring_calendar_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + 3 * kDay,
+        .schedule_id = "schedule-calendar-recurring",
+        .page = 1,
+        .page_size = 2,
+        .sort_by = CalendarSortBy::kPlannedStartAt,
+        .sort_order = SortOrder::kAscending,
+    });
+    Check(recurring_calendar.ok() && recurring_calendar.value->total == 3,
+          "未物化的每日规则和单次例外应合并为三条 occurrence");
+    Check(recurring_calendar.value->occurrences.size() == 2 && recurring_calendar.value->has_more,
+          "日历视图应按 page_size 返回第一页并标记后续页");
+    Check(recurring_calendar.value->occurrences[1].is_exception &&
+              recurring_calendar.value->occurrences[1].planned_start_at == 1785747600 + kDay + 3600,
+          "已修改例外应覆盖基础 occurrence 的开始时间");
+
+    const auto pending_only = recurring_calendar_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + 3 * kDay,
+        .schedule_id = "schedule-calendar-recurring",
+        .status = TimerInstanceStatus::kPending,
+    });
+    Check(pending_only.ok() && pending_only.value->total == 2, "状态过滤应排除已修改例外");
+
+    const auto invalid_calendar = service.ListCalendarView({.range_start = 10, .range_end = 10});
+    Check(invalid_calendar.status.code == ErrorCode::kInvalidArgument, "左闭右开范围必须满足 start 小于 end");
+
+    const auto missing_schedule = service.ListCalendarView({
+        .range_start = 1785740000,
+        .range_end = 1785750000,
+        .schedule_id = "missing-schedule",
+    });
+    Check(missing_schedule.ok() && missing_schedule.value->total == 0, "不存在的日程过滤目标应返回稳定空结果");
 
     const auto rules = store.ListRules(registered.value->task_id);
     Check(rules.ok() && rules.value->size() == 2, "注册应原子创建两条默认提醒规则");

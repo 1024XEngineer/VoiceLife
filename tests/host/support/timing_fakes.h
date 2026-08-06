@@ -60,6 +60,16 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         return Result<timing::TimingTask>::Success(found->second);
     }
 
+    Result<std::vector<timing::TimingTask>> ListTasks() override {
+        std::vector<timing::TimingTask> result;
+        result.reserve(tasks_.size());
+        for (const auto& [_, task] : tasks_) {
+            result.push_back(task);
+        }
+        std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) { return left.id < right.id; });
+        return Result<std::vector<timing::TimingTask>>::Success(std::move(result));
+    }
+
     Result<std::vector<timing::ReminderRule>> ListRules(const timing::TimingTaskId& task_id) override {
         if (!next_rule_list_failure_.ok()) {
             Status failure = std::move(next_rule_list_failure_);
@@ -76,6 +86,21 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
                   [](const auto& left, const auto& right) { return left.offset_minutes < right.offset_minutes; });
         return Result<std::vector<timing::ReminderRule>>::Success(std::move(result));
     }
+
+    Result<std::vector<timing::TimerInstance>> ListInstances(const timing::TimingTaskId& task_id) override {
+        std::vector<timing::TimerInstance> result;
+        for (const auto& [_, instance] : instances_) {
+            if (instance.task_id == task_id) {
+                result.push_back(instance);
+            }
+        }
+        std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
+            return left.planned_at != right.planned_at ? left.planned_at < right.planned_at : left.id < right.id;
+        });
+        return Result<std::vector<timing::TimerInstance>>::Success(std::move(result));
+    }
+
+    void AddInstance(timing::TimerInstance instance) { instances_.insert_or_assign(instance.id, std::move(instance)); }
 
     Status UpsertRules(const timing::TimingTaskId& task_id, const std::vector<timing::ReminderRule>& rules) override {
         if (!tasks_.contains(task_id)) {
@@ -119,6 +144,7 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
    private:
     std::unordered_map<timing::TimingTaskId, timing::TimingTask> tasks_;
     std::unordered_map<std::string, timing::ReminderRule> rules_;
+    std::unordered_map<std::string, timing::TimerInstance> instances_;
     Status next_rule_list_failure_ = Status::Ok();
     Status next_rule_upsert_failure_ = Status::Ok();
 };
