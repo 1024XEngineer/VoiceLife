@@ -15,6 +15,8 @@ using voicelife::timing::RecurrenceFrequency;
 using voicelife::timing::RegisterTimerTaskCommand;
 using voicelife::timing::ReminderRule;
 using voicelife::timing::ReminderRuleInput;
+using voicelife::timing::ReminderTrigger;
+using voicelife::timing::ReminderTriggerStatus;
 using voicelife::timing::ReminderType;
 using voicelife::timing::SortOrder;
 using voicelife::timing::TimerInstanceStatus;
@@ -55,6 +57,10 @@ class LookupFailureStore final : public TimingTaskStorePort {
         return Result<TimingTask>::Failure(ErrorCode::kInternal, "unexpected find");
     }
 
+    Result<voicelife::timing::TimerInstance> FindInstance(const std::string&) override {
+        return Result<voicelife::timing::TimerInstance>::Failure(ErrorCode::kInternal, "unexpected find instance");
+    }
+
     Result<std::vector<TimingTask>> ListTasks() override {
         return Result<std::vector<TimingTask>>::Failure(ErrorCode::kInternal, "unexpected list tasks");
     }
@@ -66,6 +72,10 @@ class LookupFailureStore final : public TimingTaskStorePort {
     Result<std::vector<voicelife::timing::TimerInstance>> ListInstances(const TimingTaskId&) override {
         return Result<std::vector<voicelife::timing::TimerInstance>>::Failure(ErrorCode::kInternal,
                                                                               "unexpected list instances");
+    }
+
+    Result<std::vector<ReminderTrigger>> ListTriggers() override {
+        return Result<std::vector<ReminderTrigger>>::Failure(ErrorCode::kInternal, "unexpected list triggers");
     }
 
     Status UpsertRules(const TimingTaskId&, const std::vector<ReminderRule>&) override {
@@ -92,6 +102,10 @@ class ConcurrentReplayStore final : public TimingTaskStorePort {
         return Result<TimingTask>::Failure(ErrorCode::kInternal, "unexpected find");
     }
 
+    Result<voicelife::timing::TimerInstance> FindInstance(const std::string&) override {
+        return Result<voicelife::timing::TimerInstance>::Failure(ErrorCode::kInternal, "unexpected find instance");
+    }
+
     Result<std::vector<TimingTask>> ListTasks() override {
         return Result<std::vector<TimingTask>>::Failure(ErrorCode::kInternal, "unexpected list tasks");
     }
@@ -103,6 +117,10 @@ class ConcurrentReplayStore final : public TimingTaskStorePort {
     Result<std::vector<voicelife::timing::TimerInstance>> ListInstances(const TimingTaskId&) override {
         return Result<std::vector<voicelife::timing::TimerInstance>>::Failure(ErrorCode::kInternal,
                                                                               "unexpected list instances");
+    }
+
+    Result<std::vector<ReminderTrigger>> ListTriggers() override {
+        return Result<std::vector<ReminderTrigger>>::Failure(ErrorCode::kInternal, "unexpected list triggers");
     }
 
     Status UpsertRules(const TimingTaskId&, const std::vector<ReminderRule>&) override {
@@ -211,6 +229,38 @@ int main() {
         .schedule_id = "missing-schedule",
     });
     Check(missing_schedule.ok() && missing_schedule.value->total == 0, "不存在的日程过滤目标应返回稳定空结果");
+
+    store.AddTrigger({
+        .id = "trigger-in-range",
+        .reminder_rule_id = "rule-weak",
+        .task_id = registered.value->task_id,
+        .instance_id = "instance-1",
+        .type = ReminderType::kWeak,
+        .planned_trigger_at = 1785747000,
+        .actual_trigger_at = 1785747600,
+        .status = ReminderTriggerStatus::kTriggered,
+        .created_at = 1785746900,
+    });
+    store.AddTrigger({
+        .id = "trigger-at-range-end",
+        .reminder_rule_id = "rule-strong",
+        .task_id = registered.value->task_id,
+        .instance_id = "instance-1",
+        .type = ReminderType::kStrong,
+        .planned_trigger_at = 1785748200,
+        .actual_trigger_at = 1785748200,
+        .status = ReminderTriggerStatus::kPending,
+        .created_at = 1785748100,
+    });
+    const auto triggers_in_range = service.ListReminderTriggers({
+        .task_id = registered.value->task_id,
+        .range_start = 1785747600,
+        .range_end = 1785748200,
+    });
+    Check(triggers_in_range.ok() && triggers_in_range.value->total == 1,
+          "任务与左闭右开实际触发时间范围应筛选已物化提醒触发");
+    Check(triggers_in_range.ok() && triggers_in_range.value->reminder_triggers.front().id == "trigger-in-range",
+          "范围终点上的提醒触发不应出现在查询结果中");
 
     recurring_calendar_store.FailNextTaskList(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
     const auto failed_task_list = recurring_calendar_service.ListCalendarView({
@@ -749,13 +799,13 @@ int main() {
     }
     Check(retained_previous_rule, "规则写入失败不能改变已保存规则");
 
-    // 仍未实现的 Service 方法应返回统一的 unavailable 错误。
+    // 尚未实现的 Service 方法应返回统一的 unavailable 错误。
     Check(service.UpdateTimerTask({}).status.code == ErrorCode::kUnavailable, "默认修改接口应明确返回未实现");
     Check(service.CancelTimerTask({}).status.code == ErrorCode::kUnavailable, "默认取消接口应明确返回未实现");
     Check(service.DeleteReminderRule({}).status.code == ErrorCode::kUnavailable,
           "默认提醒规则删除接口应明确返回未实现");
-    Check(service.ListReminderTriggers({}).status.code == ErrorCode::kUnavailable,
-          "默认提醒触发查询接口应明确返回未实现");
+    Check(service.ListReminderTriggers({}).status.code == ErrorCode::kInvalidArgument,
+          "没有任何过滤条件的提醒触发查询应返回参数错误");
     Check(service.SnoozeReminderTrigger({}).status.code == ErrorCode::kUnavailable, "默认提醒推迟接口应明确返回未实现");
     Check(service.DismissReminderTrigger({}).status.code == ErrorCode::kUnavailable,
           "默认提醒关闭接口应明确返回未实现");

@@ -60,6 +60,14 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         return Result<timing::TimingTask>::Success(found->second);
     }
 
+    Result<timing::TimerInstance> FindInstance(const std::string& instance_id) override {
+        const auto found = instances_.find(instance_id);
+        if (found == instances_.end() || found->second.deleted_at != 0) {
+            return Result<timing::TimerInstance>::Failure(ErrorCode::kNotFound, "instance not found");
+        }
+        return Result<timing::TimerInstance>::Success(found->second);
+    }
+
     Result<std::vector<timing::TimingTask>> ListTasks() override {
         if (!next_task_list_failure_.ok()) {
             Status failure = std::move(next_task_list_failure_);
@@ -110,13 +118,34 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         return Result<std::vector<timing::TimerInstance>>::Success(std::move(result));
     }
 
+    Result<std::vector<timing::ReminderTrigger>> ListTriggers() override {
+        if (!next_trigger_list_failure_.ok()) {
+            Status failure = std::move(next_trigger_list_failure_);
+            next_trigger_list_failure_ = Status::Ok();
+            return Result<std::vector<timing::ReminderTrigger>>::Failure(failure.code, failure.message);
+        }
+        std::vector<timing::ReminderTrigger> result;
+        result.reserve(triggers_.size());
+        for (const auto& [_, trigger] : triggers_) {
+            if (trigger.deleted_at == 0) {
+                result.push_back(trigger);
+            }
+        }
+        std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) { return left.id < right.id; });
+        return Result<std::vector<timing::ReminderTrigger>>::Success(std::move(result));
+    }
+
     void AddInstance(timing::TimerInstance instance) { instances_.insert_or_assign(instance.id, std::move(instance)); }
+
+    void AddTrigger(timing::ReminderTrigger trigger) { triggers_.insert_or_assign(trigger.id, std::move(trigger)); }
 
     void AddTask(timing::TimingTask task) { tasks_.insert_or_assign(task.id, std::move(task)); }
 
     void FailNextTaskList(Status failure) { next_task_list_failure_ = std::move(failure); }
 
     void FailNextInstanceList(Status failure) { next_instance_list_failure_ = std::move(failure); }
+
+    void FailNextTriggerList(Status failure) { next_trigger_list_failure_ = std::move(failure); }
 
     Status UpsertRules(const timing::TimingTaskId& task_id, const std::vector<timing::ReminderRule>& rules) override {
         if (!tasks_.contains(task_id)) {
@@ -161,8 +190,10 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
     std::unordered_map<timing::TimingTaskId, timing::TimingTask> tasks_;
     std::unordered_map<std::string, timing::ReminderRule> rules_;
     std::unordered_map<std::string, timing::TimerInstance> instances_;
+    std::unordered_map<std::string, timing::ReminderTrigger> triggers_;
     Status next_task_list_failure_ = Status::Ok();
     Status next_instance_list_failure_ = Status::Ok();
+    Status next_trigger_list_failure_ = Status::Ok();
     Status next_rule_list_failure_ = Status::Ok();
     Status next_rule_upsert_failure_ = Status::Ok();
 };

@@ -57,6 +57,7 @@ add_voicelife_library(timing voicelife_timing
     "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_calendar.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_reminder_triggers.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_reminder_rules.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_stubs.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_state.cc")
@@ -114,6 +115,9 @@ target_link_libraries(timing_task_state_test PRIVATE timing)
 
 add_voicelife_test(timing_task_service_test "unit;timing" timing_task_service_test.cc)
 target_link_libraries(timing_task_service_test PRIVATE timing)
+
+add_voicelife_test(timing_task_service_reminder_triggers_test "unit;timing" timing_task_service_reminder_triggers_test.cc)
+target_link_libraries(timing_task_service_reminder_triggers_test PRIVATE timing)
 
 add_voicelife_test(timing_task_store_test "unit;timing" timing_task_store_test.cc)
 target_link_libraries(timing_task_store_test PRIVATE timing)

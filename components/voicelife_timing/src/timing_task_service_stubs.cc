@@ -24,10 +24,6 @@ Result<DeleteReminderRuleResult> DefaultTimingTaskService::DeleteReminderRule(co
     return NotImplemented<DeleteReminderRuleResult>("DeleteReminderRule");
 }
 
-Result<ReminderTriggerPage> DefaultTimingTaskService::ListReminderTriggers(const ReminderTriggerQuery&) {
-    return NotImplemented<ReminderTriggerPage>("ListReminderTriggers");
-}
-
 Result<ReminderTrigger> DefaultTimingTaskService::SnoozeReminderTrigger(const SnoozeReminderTriggerCommand&) {
     return NotImplemented<ReminderTrigger>("SnoozeReminderTrigger");
 }

@@ -157,7 +157,7 @@ struct CalendarView {
     bool has_more = false;
 };
 
-/// 提供提醒触发的过滤、时间范围和分页条件。
+/// 提供提醒触发的过滤、实际触发时间范围和分页条件；至少提供一项过滤，时间范围须成对出现且按左闭右开语义过滤。
 struct ReminderTriggerQuery {
     TimingTaskId task_id{};
     std::string instance_id{};
