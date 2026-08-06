@@ -3,6 +3,8 @@
 // 网络失败本地事实不变、提交意图使用事件 ID 幂等。
 // 本文件先于实现存在，据此 pin 公共 API 形状与契约行为。
 
+#include "voicelife/im/im_reporting_channel.h"
+
 #include <fstream>
 #include <optional>
 #include <sstream>
@@ -15,7 +17,6 @@
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/im/im_credentials.h"
-#include "voicelife/im/im_reporting_channel.h"
 #include "voicelife/im/im_transport.h"
 
 using voicelife::contracts::im::NotificationAction;
@@ -158,7 +159,8 @@ void TestNotificationSuccess() {
     Check(request.method == "POST", "提交必须使用 POST");
     Check(HeaderValue(request, "Authorization") == "Bearer " + std::string(kToken), "必须携带设备令牌");
     Check(HeaderValue(request, "Idempotency-Key") == intent.businessEventId, "幂等键必须等于业务事件 ID");
-    Check(request.path.find("/v1/notification-intents") == std::string::npos, "不得再使用旧的 notification-intents 路径");
+    Check(request.path.find("/v1/notification-intents") == std::string::npos,
+          "不得再使用旧的 notification-intents 路径");
     CheckBodyRoundTrips(request, intent);
 }
 
@@ -213,8 +215,7 @@ void TestNetworkFailureKeepsFactsAndAllowsIdempotentRetry() {
     const ReportResult retry = channel.SubmitNotification(original);
     Check(retry.status == ReportStatus::kRetryable, "重试后网络仍失败保持可重试");
     Check(transport.requests.size() == 2, "相同事件 ID 允许重试");
-    Check(HeaderValue(transport.requests[1], "Idempotency-Key") == original.businessEventId,
-          "重试必须复用相同幂等键");
+    Check(HeaderValue(transport.requests[1], "Idempotency-Key") == original.businessEventId, "重试必须复用相同幂等键");
     Check(transport.requests[1].body == transport.requests[0].body, "重试必须携带相同请求体");
     Check(original.businessEventId == "event-fixture" && original.recipient.deviceId == kDeviceId &&
               !original.actions.empty(),
