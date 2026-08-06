@@ -132,11 +132,12 @@ void CheckInvalidArguments(ScheduleService& service) {
 }
 
 /**
- * @brief 验证模拟存储只保留最近十条操作记录。
+ * @brief 验证模拟存储不会按记录条数裁剪操作。
  * @param service 被测试的日程服务。
  * @return 无返回值；断言失败时终止测试。
  */
-void CheckOperationRetention(ScheduleService& service) {
+void CheckOperationStorageHasNoCountLimit(ScheduleService& service) {
+    const std::size_t original_count = LoadMockScheduleOperations().size();
     OperationRecord latest;
     for (int index = 0; index < 11; ++index) {
         RecordScheduleOperationCommand command{
@@ -151,10 +152,10 @@ void CheckOperationRetention(ScheduleService& service) {
     }
 
     const auto operations = LoadMockScheduleOperations();
-    Check(operations.size() == 10, "模拟操作存储应只保留最近十条记录");
+    Check(operations.size() == original_count + 11, "模拟操作存储不应限制记录条数");
     Check(operations.back().id == latest.id && operations.back().schedule_id == latest.schedule_id,
           "模拟操作存储应保留最新记录");
-    Check(operations.front().schedule_id == 4001, "超过容量时应淘汰最早的操作记录");
+    Check(operations[original_count].schedule_id == 4000, "超过十条时不应淘汰最早的操作记录");
 }
 
 }  // namespace
@@ -168,6 +169,6 @@ int main() {
     CheckSuccessfulRecord(service);
     CheckPreviousStateRules(service);
     CheckInvalidArguments(service);
-    CheckOperationRetention(service);
+    CheckOperationStorageHasNoCountLimit(service);
     return 0;
 }

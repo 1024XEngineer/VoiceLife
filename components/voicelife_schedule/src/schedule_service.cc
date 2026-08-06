@@ -9,6 +9,7 @@
 #include "schedule_mock_data.h"
 #include "schedule_operation_helpers.h"
 #include "schedule_operation_mock_data.h"
+#include "schedule_operation_query_helpers.h"
 #include "schedule_query_helpers.h"
 #include "schedule_time_rules.h"
 #include "schedule_update_helpers.h"
@@ -267,6 +268,18 @@ RecordScheduleOperationResult ScheduleService::record_schedule_operation(
     return {
         .status = Status::Ok(),
         .operation = recorded.value,
+        .error = {},
+    };
+}
+
+QueryRecentScheduleOperationResult ScheduleService::query_recent_schedule_operation() const {
+    const DateTime now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
+
+    // TODO(#121)：真实存储接入用户上下文后，由存储层按当前用户和十五分钟时间窗口查询。
+    std::vector<OperationRecord> operations = FilterRecentScheduleOperations(LoadMockScheduleOperations(), now);
+    return {
+        .status = Status::Ok(),
+        .operations = std::move(operations),
         .error = {},
     };
 }

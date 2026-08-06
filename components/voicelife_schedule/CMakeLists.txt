@@ -5,6 +5,7 @@ idf_component_register(
         "src/schedule_query_helpers.cc"
         "src/schedule_operation_helpers.cc"
         "src/schedule_operation_mock_data.cc"
+        "src/schedule_operation_query_helpers.cc"
         "src/schedule_service.cc"
         "src/schedule_time_rules.cc"
         "src/schedule_update_helpers.cc"

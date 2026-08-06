@@ -44,8 +44,8 @@ class ScheduleService {
     RecordScheduleOperationResult record_schedule_operation(const RecordScheduleOperationCommand& command);
 
     /**
-     * @brief 查询最近十条可撤销的操作。
-     * @return 最近的可撤销操作。
+     * @brief 查询当前时间往前十五分钟内的可撤销操作。
+     * @return 按操作时间倒序排列的可撤销操作。
      */
     QueryRecentScheduleOperationResult query_recent_schedule_operation() const;
 

@@ -1,18 +1,15 @@
 #include "schedule_operation_mock_data.h"
 
 #include <chrono>
-#include <cstddef>
 #include <deque>
 
 namespace voicelife::schedule {
 namespace {
 
-constexpr std::size_t kMaximumOperationRecordCount = 10;
-
 /** @brief 返回当前秒级系统时间。 @return 当前日程时间。 */
 DateTime Now() { return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()); }
 
-/** @brief 返回进程内有界的操作记录集合。 @return 可变的操作记录集合。 */
+/** @brief 返回进程内的操作记录集合。 @return 可变的操作记录集合。 */
 std::deque<OperationRecord>& MockOperations() {
     static std::deque<OperationRecord> operations;
     return operations;
@@ -27,13 +24,12 @@ OperationId& NextOperationId() {
 }  // namespace
 
 Result<OperationRecord> AppendMockScheduleOperation(OperationRecord operation) {
-    // TODO：真实存储接入后，替换为 OperationRecord Store 的原子 INSERT，并由存储层裁剪历史记录。
+    // TODO(#121)：真实存储接入后，替换为 OperationRecord Store 的原子 INSERT。
     operation.id = NextOperationId()++;
     operation.operated_at = Now();
 
     auto& operations = MockOperations();
     operations.push_back(std::move(operation));
-    if (operations.size() > kMaximumOperationRecordCount) operations.pop_front();
     return Result<OperationRecord>::Success(operations.back());
 }
 
