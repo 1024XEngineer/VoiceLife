@@ -275,13 +275,11 @@ void ImActionChannel::HandleCommand(const ReminderActionCommand& command, const 
 
 void ImActionChannel::Settle(const ReportResult& report, const ReminderActionCommand& command,
                              const std::string& trigger_id, ActionRunResult& result, bool& has_unconfirmed) {
-    // 仅当网关给出明确终态响应（受理或业务拒绝）才推进确认游标；
-    // 可重试与凭据被拒均视为未确认，网关需在重连后重放该命令。
-    if (report.status == ReportStatus::kSubmitted || report.status == ReportStatus::kRejected) {
+    // 仅网关明确受理结果（kSubmitted）才推进确认游标；可重试、凭据被拒与
+    // 明确拒绝均非业务 ACK，网关需在重连后重放该命令。
+    if (report.status == ReportStatus::kSubmitted) {
         cursors_[trigger_id] = command.commandId;
-        if (report.status == ReportStatus::kSubmitted) {
-            ++result.confirmed;
-        }
+        ++result.confirmed;
         return;
     }
     has_unconfirmed = true;

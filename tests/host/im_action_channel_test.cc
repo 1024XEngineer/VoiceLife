@@ -328,6 +328,35 @@ void TestCredentialRejectedDoesNotAdvanceCursor() {
           "凭据被拒不得推进确认游标，网关应重放该命令");
 }
 
+void TestServerRejectionDoesNotAdvanceCursor() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeExecutor executor;
+    executor.result = MakeResult();
+    FakeClock clock;
+    ImReportingChannel reporting(transport, credentials);
+    ImActionChannel channel(reporting, credentials, executor, clock);
+
+    // 网关对结果明确 4xx 拒绝：只有服务端受理才是业务 ACK，明确拒绝不得推进
+    // 确认游标，网关需在重连后重放该命令。
+    transport.next_status = ImTransportStatus::kHttpError;
+    transport.next_status_code = 400;
+    FakeStream first;
+    first.commands.push_back(MakeCommand("command-1", "operation-1"));
+    const ActionRunResult first_result = channel.Run(first, MakeWindow());
+
+    Check(first_result.status == ActionRunStatus::kDisconnected, "网关拒绝结果必须归类为未确认可重连");
+    Check(executor.calls.size() == 1, "命令应执行一次");
+    Check(transport.requests.size() == 1, "结果应提交一次");
+
+    transport.next_status = ImTransportStatus::kSuccess;
+    FakeStream replay;
+    replay.commands.push_back(MakeCommand("command-1", "operation-1"));
+    channel.Run(replay, MakeWindow());
+    Check(replay.open_cursors.size() == 1 && replay.open_cursors[0].empty(),
+          "网关拒绝不得推进确认游标，重连应重放该命令");
+}
+
 void TestWrongDeviceIncrementsDropped() {
     FakeTransport transport;
     FakeCredentials credentials;
@@ -364,6 +393,7 @@ int main() {
     TestDuplicateOperationIdWithinRunExecutesOnce();
     TestInvalidExecutorResultFaults();
     TestCredentialRejectedDoesNotAdvanceCursor();
+    TestServerRejectionDoesNotAdvanceCursor();
     TestWrongDeviceIncrementsDropped();
     return 0;
 }
