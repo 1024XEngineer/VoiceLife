@@ -37,7 +37,8 @@ add_voicelife_library(contracts voicelife_contracts
     "${ROOT_DIR}/components/voicelife_contracts/src/json.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_intent.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_receipt.cc"
-    "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_result.cc")
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_result.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_command.cc")
 target_link_libraries(contracts PRIVATE yyjson)
 add_voicelife_library(im voicelife_im
     "${ROOT_DIR}/components/voicelife_im/src/im_reporting_channel.cc"

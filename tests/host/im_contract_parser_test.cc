@@ -4,6 +4,7 @@
 
 #include "support/test_support.h"
 #include "voicelife/contracts/im/notification_intent.h"
+#include "voicelife/contracts/im/reminder_action_command.h"
 #include "voicelife/contracts/im/reminder_action_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/contracts/json.h"
@@ -14,8 +15,10 @@ using voicelife::Status;
 using voicelife::contracts::im::kDeviceContractVersion;
 using voicelife::contracts::im::NotificationIntent;
 using voicelife::contracts::im::ParseNotificationIntent;
+using voicelife::contracts::im::ParseReminderActionCommand;
 using voicelife::contracts::im::ParseReminderActionResult;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
+using voicelife::contracts::im::ReminderActionCommand;
 using voicelife::contracts::im::ReminderActionResult;
 using voicelife::contracts::im::ScheduleReceiptIntent;
 using voicelife::test::Check;
@@ -69,6 +72,20 @@ void RequireScheduleReceiptRejected(const char* name, const char* message) {
 void RequireActionResultRejected(const char* name, const char* message) {
     ReminderActionResult intent;
     const Status status = ParseActionResultFixture(name, intent);
+    Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
+}
+
+Status ParseCommandFixture(const char* name, ReminderActionCommand& out) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) {
+        return json_status;
+    }
+    return ParseReminderActionCommand(root, out);
+}
+
+void RequireCommandRejected(const char* name, const char* message) {
+    ReminderActionCommand command;
+    const Status status = ParseCommandFixture(name, command);
     Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
 }
 
@@ -131,5 +148,26 @@ int main() {
     // 非法动作结果 fixture：与 TS 一致的拒绝语义
     RequireActionResultRejected("reminder-action-result-invalid-status.json", "非法状态动作结果必须被 C++ 拒绝");
     RequireActionResultRejected("reminder-action-result-invalid-time.json", "非法时间动作结果必须被 C++ 拒绝");
+
+    // 动作命令：字段与 TS ReminderActionCommand 一致
+    ReminderActionCommand command;
+    Check(ParseCommandFixture("reminder-action-command.json", command).ok(),
+          "共享动作命令 fixture 必须被 C++ 解析");
+    Check(command.schemaVersion == kDeviceContractVersion, "动作命令必须共享设备契约版本");
+    Check(command.commandId == "command-fixture" && command.operationId == "operation-fixture",
+          "动作命令的命令/操作标识必须被保留");
+    Check(command.correlationId == "correlation-fixture" && command.deviceId == "device-fixture",
+          "动作命令的关联/设备标识必须被保留");
+    Check(command.actorBindingId == "binding-fixture" && command.reminderTriggerId == "trigger-fixture",
+          "动作命令的绑定/触发标识必须被保留");
+    Check(command.action == "snooze" && command.minutes.has_value() && *command.minutes == 10,
+          "动作类型与推迟分钟数必须与 TS 语义一致");
+    Check(command.occurredAt == "2026-08-03T00:00:00.000Z" && command.expiresAt == "2026-08-03T00:05:00.000Z",
+          "动作命令时间字段必须被保留");
+
+    // 非法动作命令 fixture：与 TS 一致的拒绝语义
+    RequireCommandRejected("reminder-action-command-invalid-action.json", "非法动作类型命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-time.json", "非法时间命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-missing-field.json", "缺字段命令必须被 C++ 拒绝");
     return 0;
 }
