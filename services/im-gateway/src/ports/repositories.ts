@@ -203,6 +203,18 @@ export interface DeliveryRepository {
      */
     save(delivery: Delivery): Promise<void>;
     /**
+     * 按业务键幂等创建投递；同键已存在时保留首条并返回其标识。
+     * @param delivery 待创建的投递。
+     * @returns 数据库中该业务键对应的权威投递标识。
+     */
+    createIfAbsent(delivery: Delivery): Promise<DeliveryId>;
+    /**
+     * 原子领取投递用于派发：仅当状态为 pending 或 retryable_failed 时置为 sending。
+     * @param deliveryId 投递标识。
+     * @returns 领取后的投递，未被领取时返回 undefined。
+     */
+    claimForDispatch(deliveryId: DeliveryId): Promise<Delivery | undefined>;
+    /**
      * 查询指定序号的发送尝试。
      * @param deliveryId 投递标识。
      * @param attemptNo 尝试序号。

@@ -1,4 +1,13 @@
-import type { SqlExecutor } from './sql.js';
+import { queryOne, type SqlExecutor } from './sql.js';
+
+/** 当前 schema 版本号；低于该版本的库会在 migrate() 时整体升级。 */
+export const SCHEMA_VERSION = 1;
+
+/** 迁移版本表：version 行与对应 DDL 在同一事务内写入，保证原子可见。 */
+const SCHEMA_MIGRATIONS_TABLE = 'im_schema_migrations';
+
+/** 跨实例串行迁移的会话级咨询锁键，必须为稳定常量，避免并发迁移交错执行。 */
+const MIGRATION_LOCK_KEY = 727271001288;
 
 /** IM Gateway 持久化表清单，按外键依赖顺序排列，供清空与诊断使用。 */
 export const IM_TABLES = [
@@ -178,12 +187,42 @@ const MIGRATION_STATEMENTS: readonly string[] = [
 ];
 
 /**
- * 幂等应用 IM Gateway 表结构与索引。
- * @param executor 可执行参数化 SQL 的连接池或事务客户端。
+ * 以版本管理方式应用 IM Gateway 表结构与索引。
+ *
+ * 使用会话级咨询锁串行化跨实例迁移，并在单笔事务内应用全部 DDL 与版本行：
+ * 中途失败会整体回滚，不会残留半套 schema；版本行仅在 DDL 全部成功后可见。
+ * @param executor 专用连接客户端，保证锁在会话内持有、跨事务不释放。
  * @returns 迁移完成后兑现的 Promise。
  */
 export async function applySchema(executor: SqlExecutor): Promise<void> {
-    for (const statement of MIGRATION_STATEMENTS) {
-        await executor.query(statement);
+    await executor.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
+    try {
+        // 版本表引导：先于业务 DDL 事务创建，用于读取当前版本。
+        await executor.query(
+            `CREATE TABLE IF NOT EXISTS ${SCHEMA_MIGRATIONS_TABLE} (
+                version integer PRIMARY KEY,
+                applied_at timestamptz NOT NULL DEFAULT now()
+            )`,
+        );
+        const current = await queryOne(
+            executor,
+            `SELECT COALESCE(MAX(version), 0) AS version FROM ${SCHEMA_MIGRATIONS_TABLE}`,
+            [],
+        );
+        const currentVersion = (current?.version as number | undefined) ?? 0;
+        if (currentVersion >= SCHEMA_VERSION) return;
+        await executor.query('BEGIN');
+        try {
+            for (const statement of MIGRATION_STATEMENTS) {
+                await executor.query(statement);
+            }
+            await executor.query(`INSERT INTO ${SCHEMA_MIGRATIONS_TABLE} (version) VALUES ($1)`, [SCHEMA_VERSION]);
+            await executor.query('COMMIT');
+        } catch (error) {
+            await executor.query('ROLLBACK');
+            throw error;
+        }
+    } finally {
+        await executor.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]);
     }
 }

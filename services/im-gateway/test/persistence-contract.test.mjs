@@ -1,9 +1,10 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createMockImGateway } from '../dist/index.js';
+import { createMockImGateway, createPostgresImGateway, mockImGatewayPorts } from '../dist/index.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
 import { PostgresImUnitOfWork } from '../dist/infrastructure/persistence/postgres.js';
+import { IM_TABLES, SCHEMA_VERSION } from '../dist/infrastructure/persistence/postgres/schema.js';
 import { bindFixtureUser, strongIntent } from './helpers.mjs';
 import {
     action,
@@ -142,26 +143,57 @@ describe(
             );
         });
 
-        await test('a concurrent saveReceipt with a new id converges on the dedupe_key', async () => {
-            await withUow(
-                () => makePostgresUow(),
-                async (uow) => {
-                    await uow.transaction(async (ctx) => {
-                        await ctx.deliveries.save(delivery());
-                        await ctx.deliveries.saveReceipt(receipt('receipt-1'));
-                    });
-                    // 模拟平台 webhook 重复投递：不同 id + 相同 dedupe_key，应收敛而非报唯一约束冲突
-                    await uow.transaction((ctx) =>
-                        ctx.deliveries.saveReceipt(
-                            receipt('receipt-other', { externalEventId: 'platform-receipt-other' }),
-                        ),
-                    );
-                    const found = await uow.transaction((ctx) => ctx.deliveries.findReceiptByDedupeKey('dedupe-1'));
-                    assert.equal(found.id, 'receipt-other');
-                    const count = await uow.runRaw('SELECT COUNT(*)::int AS n FROM im_delivery_receipts');
-                    assert.equal(count[0].n, 1);
-                },
-            );
+        await test('concurrent saveReceipt on the same dedupe_key preserves the first receipt without error', async () => {
+            const [first, second] = await Promise.all([makePostgresUow(), makePostgresUow()]);
+            try {
+                await first.transaction((ctx) => ctx.deliveries.save(delivery()));
+                await Promise.all([
+                    first.transaction((ctx) => ctx.deliveries.saveReceipt(receipt('receipt-a'))),
+                    second.transaction((ctx) =>
+                        ctx.deliveries.saveReceipt(receipt('receipt-b', { detail: { deliveredAt: T2 } })),
+                    ),
+                ]);
+                const found = await first.transaction((ctx) => ctx.deliveries.findReceiptByDedupeKey('dedupe-1'));
+                assert.notEqual(found, undefined);
+                const count = await first.runRaw('SELECT COUNT(*)::int AS n FROM im_delivery_receipts');
+                assert.equal(count[0].n, 1);
+            } finally {
+                await Promise.all([first.close(), second.close()]);
+            }
+        });
+
+        await test('concurrent createIfAbsent on the same business key returns the same delivery id', async () => {
+            const [first, second] = await Promise.all([makePostgresUow(), makePostgresUow()]);
+            try {
+                await first.transaction((ctx) => ctx.deliveries.save(delivery()));
+                const [idA, idB] = await Promise.all([
+                    first.transaction((ctx) => ctx.deliveries.createIfAbsent(delivery('delivery-a'))),
+                    second.transaction((ctx) => ctx.deliveries.createIfAbsent(delivery('delivery-b'))),
+                ]);
+                assert.equal(idA, idB);
+                const count = await first.runRaw('SELECT COUNT(*)::int AS n FROM im_deliveries');
+                assert.equal(count[0].n, 1);
+            } finally {
+                await Promise.all([first.close(), second.close()]);
+            }
+        });
+
+        await test('concurrent claimForDispatch yields exactly one winner', async () => {
+            const [first, second] = await Promise.all([makePostgresUow(), makePostgresUow()]);
+            try {
+                await first.transaction((ctx) => ctx.deliveries.save(delivery()));
+                const results = await Promise.all([
+                    first.transaction((ctx) => ctx.deliveries.claimForDispatch('delivery-1')),
+                    second.transaction((ctx) => ctx.deliveries.claimForDispatch('delivery-1')),
+                ]);
+                const winners = results.filter((result) => result !== undefined);
+                assert.equal(winners.length, 1);
+                assert.equal(winners[0].status, 'sending');
+                const after = await first.transaction((ctx) => ctx.deliveries.findById('delivery-1'));
+                assert.equal(after.status, 'sending');
+            } finally {
+                await Promise.all([first.close(), second.close()]);
+            }
         });
 
         await test('the full gateway action loop survives a restart against Postgres', async () => {
@@ -188,6 +220,90 @@ describe(
             assert.equal(replay[0].commandId, command.commandId);
             assert.equal(replay[0].operationId, command.operationId);
             await second.close();
+        });
+
+        await test('a restart through the production composition root recovers pending actions', async () => {
+            const reset = new PostgresImUnitOfWork(POSTGRES_URL);
+            await reset.migrate();
+            await reset.truncateAll();
+            await reset.close();
+
+            const clock = new FixedClock();
+            const first = await createPostgresImGateway({
+                databaseUrl: POSTGRES_URL,
+                ports: mockImGatewayPorts('device-fixture', clock),
+            });
+            await bindFixtureUser(first.runtime);
+            const submission = await first.runtime.application.notifications.submitNotification(strongIntent());
+            const deliveryId = submission.deliveries[0].deliveryId;
+            await first.runtime.application.deliveryDispatch.dispatch(deliveryId);
+            const token = await first.runtime.application.actionUi.issue(deliveryId);
+            const command = await first.runtime.application.actionUi.execute({ token, action: 'acknowledge' });
+            await first.close();
+
+            const second = await createPostgresImGateway({
+                databaseUrl: POSTGRES_URL,
+                ports: mockImGatewayPorts('device-fixture', clock),
+            });
+            const replay = await second.runtime.application.actions.replayPending(
+                command.deviceId,
+                command.reminderTriggerId,
+            );
+            assert.equal(replay.length, 1);
+            assert.equal(replay[0].commandId, command.commandId);
+            assert.equal(replay[0].operationId, command.operationId);
+            await second.close();
+        });
+
+        await test('migrate records a single schema version row and is idempotent', async () => {
+            const uow = new PostgresImUnitOfWork(POSTGRES_URL);
+            await uow.migrate();
+            await uow.truncateAll();
+            const before = await uow.runRaw('SELECT version FROM im_schema_migrations ORDER BY version');
+            assert.deepEqual(before, [{ version: SCHEMA_VERSION }]);
+            await uow.migrate();
+            const after = await uow.runRaw('SELECT COUNT(*)::int AS n FROM im_schema_migrations');
+            assert.equal(after[0].n, 1);
+            await uow.close();
+        });
+
+        await test('concurrent migrate calls serialize on the advisory lock without error', async () => {
+            const first = new PostgresImUnitOfWork(POSTGRES_URL);
+            const second = new PostgresImUnitOfWork(POSTGRES_URL);
+            await Promise.all([first.migrate(), second.migrate()]);
+            const rows = await first.runRaw('SELECT COUNT(*)::int AS n FROM im_schema_migrations');
+            assert.equal(rows[0].n, 1);
+            await Promise.all([first.close(), second.close()]);
+        });
+
+        await test('a failing migration rolls back the whole batch leaving no partial schema', async () => {
+            const uow = new PostgresImUnitOfWork(POSTGRES_URL);
+            await uow.migrate();
+            // 清空业务表与版本表，从“零”验证失败批次的原子回滚
+            const dropList = [...IM_TABLES].reverse().concat('im_schema_migrations').join(', ');
+            await uow.runRaw(`DROP TABLE IF EXISTS ${dropList} CASCADE`);
+            // 预置一个缺列的配对会话表，令迁移在建索引处失败
+            await uow.runRaw('CREATE TABLE im_pairing_sessions (id text PRIMARY KEY)');
+            await assert.rejects(uow.migrate(), 'The sabotaged migration did not reject');
+            const tables = await uow.runRaw(
+                `SELECT table_name FROM information_schema.tables
+                 WHERE table_schema = 'public' AND table_name LIKE 'im_%' ORDER BY table_name`,
+            );
+            assert.deepEqual(
+                tables.map((row) => row.table_name),
+                ['im_pairing_sessions', 'im_schema_migrations'],
+                '除预置表与版本表引导外，其余表都应随事务回滚',
+            );
+            const versions = await uow.runRaw('SELECT COUNT(*)::int AS n FROM im_schema_migrations');
+            assert.equal(versions[0].n, 0, '失败的批次不应记录版本');
+            // 修复后重跑迁移应完整成功
+            await uow.runRaw('DROP TABLE im_pairing_sessions');
+            await uow.migrate();
+            const fixed = await uow.runRaw('SELECT version FROM im_schema_migrations ORDER BY version');
+            assert.deepEqual(fixed, [{ version: SCHEMA_VERSION }]);
+            const channel = await uow.runRaw('SELECT COUNT(*)::int AS n FROM im_channel_accounts');
+            assert.equal(channel[0].n, 0);
+            await uow.close();
         });
     },
 );

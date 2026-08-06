@@ -574,7 +574,7 @@ export class DefaultNotificationApplication implements NotificationApplication {
                 const capability = await this.capabilities.resolve(account);
                 const presentationType = choosePresentationType(capability, input.actionStream !== undefined);
                 if (presentationType === undefined) continue;
-                const delivery: Delivery = {
+                const candidate: Delivery = {
                     id: this.ids.nextDeliveryId(),
                     businessEventId: input.businessEventId,
                     correlationId: input.correlationId,
@@ -588,19 +588,19 @@ export class DefaultNotificationApplication implements NotificationApplication {
                     createdAt: now,
                     updatedAt: now,
                 };
-                await tx.deliveries.save(delivery);
+                const deliveryId = await tx.deliveries.createIfAbsent(candidate);
                 await tx.outbox.append({
                     id: this.ids.nextOutboxEventId(),
                     eventType: 'im.delivery.requested',
-                    aggregateId: delivery.id,
-                    payload: { deliveryId: delivery.id },
+                    aggregateId: deliveryId,
+                    payload: { deliveryId },
                     status: 'pending',
                     attempts: 0,
                     availableAt: now,
                     createdAt: now,
                 });
                 deliveries.push({
-                    deliveryId: delivery.id,
+                    deliveryId,
                     bindingId: binding.id,
                     status: 'pending',
                 });
@@ -715,11 +715,12 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
     /** {@inheritDoc DeliveryDispatchApplication.dispatch} */
     public async dispatch(deliveryId: DeliveryId): Promise<Delivery> {
         const target = await this.unitOfWork.transaction(async (tx) => {
-            const delivery = await tx.deliveries.findById(deliveryId);
+            const delivery = await tx.deliveries.claimForDispatch(deliveryId);
             if (delivery === undefined) {
-                throw new ImGatewayError('delivery_not_found', 'Delivery was not found');
-            }
-            if (delivery.status !== 'pending' && delivery.status !== 'retryable_failed') {
+                const missing = await tx.deliveries.findById(deliveryId);
+                if (missing === undefined) {
+                    throw new ImGatewayError('delivery_not_found', 'Delivery was not found');
+                }
                 throw new ImGatewayError(
                     'invalid_transition',
                     'Only pending or retryable deliveries can be dispatched',

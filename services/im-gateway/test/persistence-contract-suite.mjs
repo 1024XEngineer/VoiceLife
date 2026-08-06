@@ -234,18 +234,74 @@ export async function sharedRepositoryContractSuite(makeUow) {
         });
     });
 
-    await test('delivery receipts round-trip, dedupe lookup and per-delivery listing', async () => {
+    await test('delivery receipts round-trip, dedupe lookup, first-write-wins and per-delivery listing', async () => {
         await withUow(makeUow, async (uow) => {
             await uow.transaction(async (ctx) => {
                 await ctx.deliveries.save(delivery());
                 await ctx.deliveries.saveReceipt(receipt());
+                // 重复 webhook：同一 dedupe_key、不同 id，首写保留
+                await ctx.deliveries.saveReceipt(
+                    receipt('receipt-other', { externalEventId: 'platform-receipt-other' }),
+                );
             });
             const found = await uow.transaction((ctx) => ctx.deliveries.findReceiptByDedupeKey('dedupe-1'));
-            assert.deepEqual(found, receipt());
+            assert.equal(found.id, 'receipt-1');
+            assert.equal(found.externalEventId, 'platform-receipt-1');
             const missing = await uow.transaction((ctx) => ctx.deliveries.findReceiptByDedupeKey('dedupe-unknown'));
             assert.equal(missing, undefined);
             const listed = await uow.transaction((ctx) => ctx.deliveries.listReceipts('delivery-1'));
             assert.equal(listed.length, 1);
+        });
+    });
+
+    await test('createIfAbsent keeps the first delivery for a business key', async () => {
+        await withUow(makeUow, async (uow) => {
+            await uow.transaction(async (ctx) => {
+                await ctx.deliveries.save(delivery());
+                const firstId = await ctx.deliveries.createIfAbsent(delivery());
+                const secondId = await ctx.deliveries.createIfAbsent(
+                    delivery('delivery-other', { businessEventId: 'event-1' }),
+                );
+                assert.equal(firstId, 'delivery-1');
+                assert.equal(secondId, 'delivery-1');
+            });
+            const existing = await uow.transaction((ctx) => ctx.deliveries.findById('delivery-1'));
+            assert.equal(existing.id, 'delivery-1');
+            const notInserted = await uow.transaction((ctx) => ctx.deliveries.findById('delivery-other'));
+            assert.equal(notInserted, undefined);
+            const byKey = await uow.transaction((ctx) =>
+                ctx.deliveries.findByBusinessKey('event-1', 'binding-1', 'reminder_due'),
+            );
+            assert.equal(byKey.id, 'delivery-1');
+        });
+    });
+
+    await test('claimForDispatch atomically claims a pending delivery once', async () => {
+        await withUow(makeUow, async (uow) => {
+            await uow.transaction(async (ctx) => {
+                await ctx.deliveries.save(delivery());
+                const claimed = await ctx.deliveries.claimForDispatch('delivery-1');
+                assert.equal(claimed.id, 'delivery-1');
+                assert.equal(claimed.status, 'sending');
+                const again = await ctx.deliveries.claimForDispatch('delivery-1');
+                assert.equal(again, undefined);
+            });
+            const after = await uow.transaction((ctx) => ctx.deliveries.findById('delivery-1'));
+            assert.equal(after.status, 'sending');
+        });
+    });
+
+    await test('claimForDispatch rejects deliveries not in a dispatchable state', async () => {
+        await withUow(makeUow, async (uow) => {
+            await uow.transaction(async (ctx) => {
+                await ctx.deliveries.save(delivery('delivery-accepted', { status: 'accepted' }));
+                await ctx.deliveries.save(
+                    delivery('delivery-expired', { businessEventId: 'event-expired', status: 'dead_letter' }),
+                );
+                assert.equal(await ctx.deliveries.claimForDispatch('delivery-accepted'), undefined);
+                assert.equal(await ctx.deliveries.claimForDispatch('delivery-expired'), undefined);
+                assert.equal(await ctx.deliveries.claimForDispatch('delivery-missing'), undefined);
+            });
         });
     });
 

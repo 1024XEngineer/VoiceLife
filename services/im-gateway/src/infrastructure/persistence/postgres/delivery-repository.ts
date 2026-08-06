@@ -59,6 +59,26 @@ export class PostgresDeliveryRepository implements DeliveryRepository {
     /** @param executor 事务客户端或连接池。 */
     public constructor(private readonly executor: SqlExecutor) {}
 
+    /** 将投递聚合映射为与 DELIVERY_COLUMNS 一一对应的参数行。 */
+    private toRow(delivery: Delivery): readonly unknown[] {
+        return [
+            delivery.id,
+            delivery.businessEventId,
+            delivery.correlationId,
+            delivery.bindingId,
+            delivery.channelAccountId,
+            delivery.kind,
+            toJson(delivery.semanticPayload),
+            delivery.presentationType,
+            delivery.status,
+            delivery.externalMessageId ?? null,
+            delivery.expiresAt ?? null,
+            delivery.lastErrorCode ?? null,
+            delivery.createdAt,
+            delivery.updatedAt,
+        ];
+    }
+
     /** {@inheritDoc DeliveryRepository.findById} */
     public async findById(id: DeliveryId): Promise<Delivery | undefined> {
         const row = await queryOne(this.executor, 'SELECT * FROM im_deliveries WHERE id = $1', [id]);
@@ -120,28 +140,39 @@ export class PostgresDeliveryRepository implements DeliveryRepository {
 
     /** {@inheritDoc DeliveryRepository.save} */
     public async save(delivery: Delivery): Promise<void> {
-        await upsert(
+        await upsert(this.executor, 'im_deliveries', DELIVERY_COLUMNS, this.toRow(delivery), ['id']);
+    }
+
+    /** {@inheritDoc DeliveryRepository.createIfAbsent} */
+    public async createIfAbsent(delivery: Delivery): Promise<DeliveryId> {
+        const quoted = DELIVERY_COLUMNS.map((column) => `"${column}"`).join(', ');
+        const placeholders = DELIVERY_COLUMNS.map((_, index) => `$${index + 1}`).join(', ');
+        const inserted = await queryOne(
             this.executor,
-            'im_deliveries',
-            DELIVERY_COLUMNS,
-            [
-                delivery.id,
-                delivery.businessEventId,
-                delivery.correlationId,
-                delivery.bindingId,
-                delivery.channelAccountId,
-                delivery.kind,
-                toJson(delivery.semanticPayload),
-                delivery.presentationType,
-                delivery.status,
-                delivery.externalMessageId ?? null,
-                delivery.expiresAt ?? null,
-                delivery.lastErrorCode ?? null,
-                delivery.createdAt,
-                delivery.updatedAt,
-            ],
-            ['id'],
+            `INSERT INTO im_deliveries (${quoted}) VALUES (${placeholders})
+             ON CONFLICT (business_event_id, binding_id, kind) DO NOTHING
+             RETURNING id`,
+            this.toRow(delivery),
         );
+        if (inserted !== undefined) return inserted.id as DeliveryId;
+        const existing = await this.findByBusinessKey(delivery.businessEventId, delivery.bindingId, delivery.kind);
+        if (existing === undefined) {
+            // 仅当冲突行提交后业务键不可见时触发，属不变量异常。
+            throw new Error('im_deliveries business key vanished after idempotent insert');
+        }
+        return existing.id;
+    }
+
+    /** {@inheritDoc DeliveryRepository.claimForDispatch} */
+    public async claimForDispatch(deliveryId: DeliveryId): Promise<Delivery | undefined> {
+        const row = await queryOne(
+            this.executor,
+            `UPDATE im_deliveries SET status = 'sending'
+             WHERE id = $1 AND status IN ('pending', 'retryable_failed')
+             RETURNING *`,
+            [deliveryId],
+        );
+        return row === undefined ? undefined : mapDelivery(row);
     }
 
     /** {@inheritDoc DeliveryRepository.findAttempt} */
@@ -230,6 +261,7 @@ export class PostgresDeliveryRepository implements DeliveryRepository {
                 receipt.receivedAt,
             ],
             ['dedupe_key'],
+            'ignore',
         );
     }
 }

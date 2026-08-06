@@ -18,6 +18,7 @@ export interface SqlExecutor {
  * @param columns 全部列名。
  * @param row 与列一一对应的参数值。
  * @param conflict 唯一冲突列。
+ * @param conflictMode 冲突处理方式：update 表示覆盖，ignore 表示保留已有行。默认为 update
  * @returns 写入完成后兑现的 Promise。
  */
 export async function upsert(
@@ -26,16 +27,20 @@ export async function upsert(
     columns: readonly string[],
     row: readonly unknown[],
     conflict: readonly string[],
+    conflictMode: 'update' | 'ignore' = 'update',
 ): Promise<void> {
     const quoted = columns.map((column) => `"${column}"`).join(', ');
     const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ');
     const conflictTarget = conflict.map((column) => `"${column}"`).join(', ');
-    const updates = columns
-        .filter((column) => !conflict.includes(column))
-        .map((column) => `"${column}" = EXCLUDED."${column}"`)
-        .join(', ');
+    const conflictClause =
+        conflictMode === 'ignore'
+            ? 'DO NOTHING'
+            : `DO UPDATE SET ${columns
+                  .filter((column) => !conflict.includes(column))
+                  .map((column) => `"${column}" = EXCLUDED."${column}"`)
+                  .join(', ')}`;
     await executor.query(
-        `INSERT INTO "${table}" (${quoted}) VALUES (${placeholders}) ON CONFLICT (${conflictTarget}) DO UPDATE SET ${updates}`,
+        `INSERT INTO "${table}" (${quoted}) VALUES (${placeholders}) ON CONFLICT (${conflictTarget}) ${conflictClause}`,
         row,
     );
 }

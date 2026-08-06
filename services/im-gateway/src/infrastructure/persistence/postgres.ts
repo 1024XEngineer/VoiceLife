@@ -58,11 +58,18 @@ export class PostgresImUnitOfWork implements ImUnitOfWork {
     }
 
     /**
-     * 幂等应用 IM Gateway 所需的表结构与索引。
+     * 以版本管理方式应用 IM Gateway 所需的表结构与索引。
+     *
+     * 使用专用连接客户端执行迁移，使会话级咨询锁在整段迁移期间持有。
      * @returns 迁移完成后兑现的 Promise。
      */
     public async migrate(): Promise<void> {
-        await applySchema(toExecutor(this.pool));
+        const client = await this.pool.connect();
+        try {
+            await applySchema(toExecutor(client));
+        } finally {
+            client.release();
+        }
     }
 
     /**

@@ -115,6 +115,31 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         return Promise.resolve();
     }
 
+    /** {@inheritDoc DeliveryRepository.createIfAbsent} */
+    public createIfAbsent(delivery: Delivery): Promise<DeliveryId> {
+        const existing = [...this.deliveryRows.values()].find(
+            (candidate) =>
+                candidate.businessEventId === delivery.businessEventId &&
+                candidate.bindingId === delivery.bindingId &&
+                candidate.kind === delivery.kind,
+        );
+        if (existing !== undefined) return Promise.resolve(existing.id);
+        this.deliveryRows.set(delivery.id, delivery);
+        return Promise.resolve(delivery.id);
+    }
+
+    /** {@inheritDoc DeliveryRepository.claimForDispatch} */
+    public claimForDispatch(deliveryId: DeliveryId): Promise<Delivery | undefined> {
+        const delivery = this.deliveryRows.get(deliveryId);
+        if (delivery === undefined) return Promise.resolve(undefined);
+        if (delivery.status !== 'pending' && delivery.status !== 'retryable_failed') {
+            return Promise.resolve(undefined);
+        }
+        const claimed: Delivery = { ...delivery, status: 'sending' };
+        this.deliveryRows.set(deliveryId, claimed);
+        return Promise.resolve(claimed);
+    }
+
     /** {@inheritDoc ChannelAccountRepository.findById} */
     public findById(id: ChannelAccountId): Promise<ChannelAccount | undefined>;
     /** {@inheritDoc PairingSessionRepository.findById} */
@@ -354,7 +379,9 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
 
     /** {@inheritDoc DeliveryRepository.saveReceipt} */
     public saveReceipt(receipt: DeliveryReceipt): Promise<void> {
-        this.receiptRows.set(receipt.dedupeKey, receipt);
+        if (!this.receiptRows.has(receipt.dedupeKey)) {
+            this.receiptRows.set(receipt.dedupeKey, receipt);
+        }
         return Promise.resolve();
     }
 

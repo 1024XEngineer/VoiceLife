@@ -7,6 +7,11 @@ export default tseslint.config(
     tseslint.configs.recommended,
     {
         files: ['src/**/*.ts'],
+        languageOptions: {
+            globals: {
+                process: 'readonly',
+            },
+        },
         rules: {
             '@typescript-eslint/consistent-type-imports': ['error', { fixStyle: 'inline-type-imports' }],
             '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],

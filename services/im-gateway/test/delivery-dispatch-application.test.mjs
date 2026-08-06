@@ -62,6 +62,26 @@ test('dispatch of a pending delivery sends and records an accepted attempt', asy
     assert.equal(sent.length, 1);
 });
 
+test('concurrent dispatch of the same delivery sends exactly once', async () => {
+    const { gateway, sent } = gatewayWithChannel([{ accepted: true, platformMessageId: 'platform-1' }]);
+    const deliveryId = await pendingStrongDelivery(gateway);
+
+    const results = await Promise.allSettled([
+        gateway.application.deliveryDispatch.dispatch(deliveryId),
+        gateway.application.deliveryDispatch.dispatch(deliveryId),
+    ]);
+
+    assert.equal(sent.length, 1);
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    assert.equal(fulfilled.length, 1);
+    assert.equal(fulfilled[0].value.status, 'accepted');
+    assert.equal(rejected.length, 1);
+    assert.match(rejected[0].reason.message, /Only pending or retryable deliveries can be dispatched/);
+    const details = await gateway.application.deliveries.find(deliveryId);
+    assert.equal(details.attempts.length, 1);
+});
+
 test('dispatch of an unknown delivery is rejected', async () => {
     const { gateway } = buildGateway();
 
