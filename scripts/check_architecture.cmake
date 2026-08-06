@@ -6,6 +6,7 @@ endif()
 
 set(known_components
     voicelife_contracts
+    voicelife_im
     voicelife_mcp
     voicelife_runtime
     voicelife_schedule
@@ -77,6 +78,8 @@ endforeach()
 
 assert_dependencies(voicelife_contracts PUBLIC)
 assert_dependencies(voicelife_contracts PRIVATE yyjson)
+assert_dependencies(voicelife_im PUBLIC voicelife_contracts)
+assert_dependencies(voicelife_im PRIVATE esp_http_client mbedtls)
 assert_dependencies(voicelife_schedule PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_schedule PRIVATE)
 assert_dependencies(voicelife_storage_sqlite PUBLIC voicelife_contracts)
