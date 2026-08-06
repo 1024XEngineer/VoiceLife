@@ -65,11 +65,11 @@ void AppendJsonString(std::string& out, const std::string& value) {
     out.push_back('"');
 }
 
-/// 追加一个键，格式为 "name":。
+/// 追加一个键，格式为 "name":。键与值同样需要转义，否则含引号/反斜杠/
+/// 控制字符的键（如结果 details 的字段名）会生成非法 JSON。
 void AppendKey(std::string& out, const std::string& key) {
-    out.push_back('"');
-    out += key;
-    out += "\":";
+    AppendJsonString(out, key);
+    out.push_back(':');
 }
 
 /// 递归追加任意 JSON 值，用于结果 details 等透传字段。

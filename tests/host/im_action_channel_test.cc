@@ -139,6 +139,34 @@ void TestNonFiniteDetailsSerializedAsNull() {
     Check(voicelife::ParseJson(transport.requests[0].body, root).ok(), "含非有限数的回传体必须是合法 JSON");
 }
 
+void TestResultDetailsKeysEscaped() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeExecutor executor;
+    executor.result = MakeResult();
+    executor.result.details = voicelife::JsonValue::Object({
+        {"quote\"key", voicelife::JsonValue::Number(1)},
+        {"slash\\key", voicelife::JsonValue::Number(2)},
+        {"new\nline", voicelife::JsonValue::Number(3)},
+    });
+    FakeClock clock;
+    ImReportingChannel reporting(transport, credentials);
+    ImActionChannel channel(reporting, credentials, executor, clock);
+    FakeStream stream;
+    stream.commands.push_back(MakeCommand("command-1", "operation-1"));
+
+    channel.Run(stream, MakeWindow());
+
+    Check(transport.requests.size() == 1, "含特殊键名的结果必须能回传，不得被本地契约校验拒绝");
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(transport.requests[0].body, root).ok(), "含特殊键名的回传体必须是合法 JSON");
+    const voicelife::JsonValue* details = root.Get("details");
+    Check(details != nullptr && details->IsObject(), "details 对象必须可解析");
+    Check(details->Get("quote\"key") != nullptr && details->Get("slash\\key") != nullptr &&
+              details->Get("new\nline") != nullptr,
+          "含引号/反斜杠/换行的键必须转义后原样往返");
+}
+
 void TestReconnectReplayExecutesOnce() {
     FakeTransport transport;
     FakeCredentials credentials;
@@ -386,6 +414,7 @@ int main() {
     TestResultSerializationCarriesOptionalFields();
     TestResultSerializationMinimal();
     TestNonFiniteDetailsSerializedAsNull();
+    TestResultDetailsKeysEscaped();
     TestReconnectReplayExecutesOnce();
     TestExpiredCommandReportedAsExpired();
     TestWrongDeviceIdDroppedLocally();
