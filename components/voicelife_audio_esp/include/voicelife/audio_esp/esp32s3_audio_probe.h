@@ -72,6 +72,7 @@ class Esp32s3AudioProbe final {
                                  const AudioProbeOptions& options = {});
 
    private:
+    /** @brief Pimpl 实现。 */
     class Impl;
     std::unique_ptr<Impl> impl_;
 };
