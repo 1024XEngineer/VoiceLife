@@ -63,6 +63,15 @@ python3 scripts/firmware.py list
 python3 scripts/firmware.py validate
 ```
 
+IM Gateway 的持久化契约测试需要 PostgreSQL，用仓库根目录的 `docker-compose.yml` 启动：
+
+```bash
+docker compose up -d postgres
+pnpm --dir services/im-gateway test
+```
+
+PostgreSQL 不可用时这些契约测试会自动跳过，其余测试不受影响。
+
 构建 ESP32-S3 架构固件：
 
 ```bash

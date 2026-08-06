@@ -146,6 +146,32 @@ export function createImGateway(dependencies: ImGatewayDependencies): ImGatewayR
 }
 
 /**
+ * 构造面向测试与本地场景的默认 Mock 外部端口，供内存版或 Postgres 版 Gateway 复用。
+ * @param deviceId Mock 认证器返回的设备身份。
+ * @param clock Mock 适配器共用的时钟。
+ * @returns 除 unitOfWork 之外的全部默认端口。
+ */
+export function mockImGatewayPorts(
+    deviceId: DeviceId = unsafeId<DeviceId>('device-demo'),
+    clock: FixedClock = new FixedClock(),
+): Omit<ImGatewayDependencies, 'unitOfWork'> {
+    return {
+        actionStream: new InMemoryActionCommandStream(),
+        actionTokens: new InMemoryActionTokenPort(),
+        authentication: new MockDeviceAuthenticationPort(deviceId),
+        channelCapabilities: new MockChannelCapabilities(),
+        channelHealth: new MockChannelHealthPort(clock),
+        conversations: new MockConversationResolver(),
+        deliveryRenderer: new MockDeliveryRenderer(),
+        imChannel: new MockImChannel(),
+        pairingCodes: new MockPairingCodePort(),
+        identityProtector: new MockExternalIdentityProtector(),
+        clock,
+        ids: new SequentialIdGenerator(),
+    };
+}
+
+/**
  * 为测试和本地场景装配内存版 Gateway 运行时。
  * @param deviceId Mock 认证器返回的设备身份。
  * @param clock Mock 适配器共用的时钟。
@@ -159,18 +185,7 @@ export function createMockImGateway(
 ): ImGatewayRuntime {
     return createImGateway({
         unitOfWork: new InMemoryImUnitOfWork(),
-        actionStream: new InMemoryActionCommandStream(),
-        actionTokens: new InMemoryActionTokenPort(),
-        authentication: new MockDeviceAuthenticationPort(deviceId),
-        channelCapabilities: new MockChannelCapabilities(),
-        channelHealth: new MockChannelHealthPort(clock),
-        conversations: new MockConversationResolver(),
-        deliveryRenderer: new MockDeliveryRenderer(),
-        imChannel: new MockImChannel(),
-        pairingCodes: new MockPairingCodePort(),
-        identityProtector: new MockExternalIdentityProtector(),
-        clock,
-        ids: new SequentialIdGenerator(),
+        ...mockImGatewayPorts(deviceId, clock),
         ...overrides,
     });
 }

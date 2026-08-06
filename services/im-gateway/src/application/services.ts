@@ -24,6 +24,7 @@ import type { NormalizedDeliveryReceipt, NormalizedImEvent } from '../contracts/
 import type {
     ActionStatus,
     ChannelAccount,
+    ConversationRef,
     Delivery,
     DeliveryStatus,
     ImAction,
@@ -74,6 +75,9 @@ import type {
 
 const DEFAULT_ACTION_WINDOW_MINUTES = 10;
 const DEFAULT_PAIRING_WINDOW_MINUTES = 10;
+
+/** 派发领取租约时长；sending claim 超过该时长未续期即视为崩溃，允许其他 worker 重领。 */
+const DISPATCH_CLAIM_LEASE_SECONDS = 60;
 
 /** 渠道账号注册、停用、查询与健康检查的默认实现。 */
 export class DefaultChannelAccountApplication implements ChannelAccountApplication {
@@ -531,15 +535,26 @@ export class DefaultNotificationApplication implements NotificationApplication {
     }): Promise<NotificationSubmission> {
         return this.unitOfWork.transaction(async (tx) => {
             const requestFingerprint = canonicalizeJson(input.payload);
-            const existingSubmission = await tx.intentSubmissions.findByBusinessKey(input.businessEventId, input.kind);
-            if (existingSubmission !== undefined) {
-                if (existingSubmission.requestFingerprint !== requestFingerprint) {
+            // 预占请求级幂等键：并发同键提交在此串行化，败者读到胜者的最终记录。
+            const claim = await tx.intentSubmissions.createIfAbsent({
+                businessEventId: input.businessEventId,
+                kind: input.kind,
+                requestFingerprint,
+                submission: {
+                    businessEventId: input.businessEventId,
+                    status: 'accepted',
+                    deliveries: [],
+                },
+                createdAt: this.clock.now(),
+            });
+            if (!claim.created) {
+                if (claim.record.requestFingerprint !== requestFingerprint) {
                     throw new ImGatewayError(
                         'idempotency_conflict',
                         'Business event ID was already used with different contract content',
                     );
                 }
-                return existingSubmission.submission;
+                return claim.record.submission;
             }
 
             const bindings =
@@ -574,7 +589,7 @@ export class DefaultNotificationApplication implements NotificationApplication {
                 const capability = await this.capabilities.resolve(account);
                 const presentationType = choosePresentationType(capability, input.actionStream !== undefined);
                 if (presentationType === undefined) continue;
-                const delivery: Delivery = {
+                const candidate: Delivery = {
                     id: this.ids.nextDeliveryId(),
                     businessEventId: input.businessEventId,
                     correlationId: input.correlationId,
@@ -588,19 +603,21 @@ export class DefaultNotificationApplication implements NotificationApplication {
                     createdAt: now,
                     updatedAt: now,
                 };
-                await tx.deliveries.save(delivery);
-                await tx.outbox.append({
-                    id: this.ids.nextOutboxEventId(),
-                    eventType: 'im.delivery.requested',
-                    aggregateId: delivery.id,
-                    payload: { deliveryId: delivery.id },
-                    status: 'pending',
-                    attempts: 0,
-                    availableAt: now,
-                    createdAt: now,
-                });
+                const { id: deliveryId, created } = await tx.deliveries.createIfAbsent(candidate);
+                if (created) {
+                    await tx.outbox.append({
+                        id: this.ids.nextOutboxEventId(),
+                        eventType: 'im.delivery.requested',
+                        aggregateId: deliveryId,
+                        payload: { deliveryId },
+                        status: 'pending',
+                        attempts: 0,
+                        availableAt: now,
+                        createdAt: now,
+                    });
+                }
                 deliveries.push({
-                    deliveryId: delivery.id,
+                    deliveryId,
                     bindingId: binding.id,
                     status: 'pending',
                 });
@@ -614,12 +631,10 @@ export class DefaultNotificationApplication implements NotificationApplication {
                     ? {}
                     : { actionStream: input.actionStream }),
             };
-            await tx.intentSubmissions.save({
-                businessEventId: input.businessEventId,
-                kind: input.kind,
-                requestFingerprint,
+            // 仅 claim 持有者回填最终受理结果；占位记录与其在同一事务，崩溃即整体回滚。
+            await tx.intentSubmissions.finalizeClaim({
+                ...claim.record,
                 submission,
-                createdAt: now,
             });
             return submission;
         });
@@ -714,12 +729,14 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
 
     /** {@inheritDoc DeliveryDispatchApplication.dispatch} */
     public async dispatch(deliveryId: DeliveryId): Promise<Delivery> {
+        const claimTime = this.clock.now();
         const target = await this.unitOfWork.transaction(async (tx) => {
-            const delivery = await tx.deliveries.findById(deliveryId);
+            const delivery = await tx.deliveries.claimForDispatch(deliveryId, claimTime, DISPATCH_CLAIM_LEASE_SECONDS);
             if (delivery === undefined) {
-                throw new ImGatewayError('delivery_not_found', 'Delivery was not found');
-            }
-            if (delivery.status !== 'pending' && delivery.status !== 'retryable_failed') {
+                const missing = await tx.deliveries.findById(deliveryId);
+                if (missing === undefined) {
+                    throw new ImGatewayError('delivery_not_found', 'Delivery was not found');
+                }
                 throw new ImGatewayError(
                     'invalid_transition',
                     'Only pending or retryable deliveries can be dispatched',
@@ -741,43 +758,65 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
             }
             return { delivery, identity, account };
         });
+        const claimToken = target.delivery.claimToken;
+        if (claimToken === undefined) {
+            throw new Error('Claimed delivery is missing a claim token');
+        }
 
-        const capabilities = await this.capabilities.resolve(target.account);
-        const actionToken =
-            target.delivery.expiresAt === undefined ? undefined : await this.actionUi.issue(target.delivery.id);
-        const renderedPayload = await this.renderer.render(
-            target.delivery,
-            target.account,
-            capabilities,
-            actionToken === undefined ? {} : { actionToken },
-        );
-        const conversation = await this.conversations.resolveDirect(target.identity);
-        const attempt = await this.unitOfWork.transaction(async (tx) => {
+        let preSend: { readonly renderedPayload: JsonValue; readonly conversation: ConversationRef };
+        try {
+            const capabilities = await this.capabilities.resolve(target.account);
+            const actionToken =
+                target.delivery.expiresAt === undefined ? undefined : await this.actionUi.issue(target.delivery.id);
+            const renderedPayload = await this.renderer.render(
+                target.delivery,
+                target.account,
+                capabilities,
+                actionToken === undefined ? {} : { actionToken },
+            );
+            const conversation = await this.conversations.resolveDirect(target.identity);
+            preSend = { renderedPayload, conversation };
+        } catch {
+            return this.recordPreSendFailure(deliveryId, target.delivery, claimToken);
+        }
+
+        const gate = await this.unitOfWork.transaction(async (tx) => {
+            const renewal: Delivery = {
+                ...withoutDeliveryAttemptOutcome(target.delivery),
+                status: 'sending',
+                claimedAt: this.clock.now(),
+                claimToken,
+                updatedAt: this.clock.now(),
+            };
+            const owned = await tx.deliveries.saveIfClaimed(renewal, claimToken);
+            if (owned === undefined) {
+                return {
+                    owned: false as const,
+                    delivery: (await tx.deliveries.findById(deliveryId)) ?? target.delivery,
+                };
+            }
             const attemptNo = await tx.deliveries.nextAttemptNo(deliveryId);
-            const started = {
+            const attempt = {
                 id: this.ids.nextDeliveryAttemptId(),
                 deliveryId,
                 attemptNo,
                 requestId: this.ids.nextRequestId(),
-                renderedPayload,
+                renderedPayload: preSend.renderedPayload,
                 status: 'sending' as const,
                 startedAt: this.clock.now(),
             };
-            await tx.deliveries.saveAttempt(started);
-            await tx.deliveries.save({
-                ...target.delivery,
-                status: 'sending',
-                updatedAt: this.clock.now(),
-            });
-            return started;
+            await tx.deliveries.saveAttempt(attempt);
+            return { owned: true as const, delivery: owned, attempt };
         });
+        if (!gate.owned) return gate.delivery;
+        const attempt = gate.attempt;
 
         let acceptance: ImSendAcceptance;
         try {
             acceptance = await this.channel.send({
                 delivery: target.delivery,
-                conversation,
-                content: renderedPayload,
+                conversation: preSend.conversation,
+                content: preSend.renderedPayload,
             });
         } catch {
             acceptance = {
@@ -786,12 +825,27 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
                 errorCode: 'channel_send_exception',
             } as const;
         }
+        const completionTime = this.clock.now();
+        const status = acceptance.accepted
+            ? 'accepted'
+            : acceptance.retryable === true
+              ? 'retryable_failed'
+              : 'permanent_failed';
+        const terminal: Delivery = {
+            ...withoutDeliveryAttemptOutcome(target.delivery),
+            status,
+            ...(status !== 'accepted' || acceptance.platformMessageId === undefined
+                ? {}
+                : { externalMessageId: acceptance.platformMessageId }),
+            ...(acceptance.errorCode === undefined ? {} : { lastErrorCode: acceptance.errorCode }),
+            updatedAt: completionTime,
+        };
         return this.unitOfWork.transaction(async (tx) => {
-            const status = acceptance.accepted
-                ? 'accepted'
-                : acceptance.retryable === true
-                  ? 'retryable_failed'
-                  : 'permanent_failed';
+            const written = await tx.deliveries.saveIfClaimed(terminal, claimToken);
+            if (written === undefined) {
+                // 发送期间失去所有权（超时被重领）：放弃 attempt 与 outbox 回写，避免覆盖新 owner。
+                return (await tx.deliveries.findById(deliveryId)) ?? terminal;
+            }
             await tx.deliveries.saveAttempt({
                 ...attempt,
                 status,
@@ -799,18 +853,8 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
                     ? {}
                     : { platformMessageId: acceptance.platformMessageId }),
                 ...(acceptance.errorCode === undefined ? {} : { errorCode: acceptance.errorCode }),
-                completedAt: this.clock.now(),
+                completedAt: completionTime,
             });
-            const updated: Delivery = {
-                ...withoutDeliveryAttemptOutcome(target.delivery),
-                status,
-                ...(status !== 'accepted' || acceptance.platformMessageId === undefined
-                    ? {}
-                    : { externalMessageId: acceptance.platformMessageId }),
-                ...(acceptance.errorCode === undefined ? {} : { lastErrorCode: acceptance.errorCode }),
-                updatedAt: this.clock.now(),
-            };
-            await tx.deliveries.save(updated);
             if (status === 'retryable_failed') {
                 await tx.outbox.append({
                     id: this.ids.nextOutboxEventId(),
@@ -819,11 +863,61 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
                     payload: { deliveryId },
                     status: 'pending',
                     attempts: attempt.attemptNo,
-                    availableAt: this.clock.addMinutes(this.clock.now(), 1),
-                    createdAt: this.clock.now(),
+                    availableAt: this.clock.addMinutes(completionTime, 1),
+                    createdAt: completionTime,
                 });
             }
-            return updated;
+            return written;
+        });
+    }
+
+    /**
+     * 将发送前步骤（能力解析/动作签发/渲染/会话解析）的异常转为可重试失败并计划重试。
+     * @param deliveryId 投递标识。
+     * @param delivery 本次领取的投递。
+     * @param claimToken 本次派发的所有权令牌。
+     * @returns 写入后的投递；所有权已丢失时返回当前投递。
+     */
+    private async recordPreSendFailure(
+        deliveryId: DeliveryId,
+        delivery: Delivery,
+        claimToken: string,
+    ): Promise<Delivery> {
+        const now = this.clock.now();
+        return this.unitOfWork.transaction(async (tx) => {
+            const failed: Delivery = {
+                ...withoutDeliveryAttemptOutcome(delivery),
+                status: 'retryable_failed',
+                lastErrorCode: 'pre_send_exception',
+                updatedAt: now,
+            };
+            const written = await tx.deliveries.saveIfClaimed(failed, claimToken);
+            if (written === undefined) {
+                return (await tx.deliveries.findById(deliveryId)) ?? failed;
+            }
+            const attemptNo = await tx.deliveries.nextAttemptNo(deliveryId);
+            await tx.deliveries.saveAttempt({
+                id: this.ids.nextDeliveryAttemptId(),
+                deliveryId,
+                attemptNo,
+                requestId: this.ids.nextRequestId(),
+                renderedPayload: {},
+                status: 'retryable_failed',
+                errorCode: 'pre_send_exception',
+                startedAt: now,
+                completedAt: now,
+            });
+            await tx.outbox.append({
+                id: this.ids.nextOutboxEventId(),
+                eventType: 'im.delivery.retry-scheduled',
+                aggregateId: deliveryId,
+                payload: { deliveryId },
+                status: 'pending',
+                attempts: attemptNo,
+                availableAt: this.clock.addMinutes(now, 1),
+                createdAt: now,
+            });
+            return written;
         });
     }
 
@@ -1393,14 +1487,16 @@ function validateReminderActionParams(
 }
 
 /**
- * 返回清除上一次发送结果后的投递，新尝试不继承旧消息标识或错误码。
+ * 返回清除上一次发送结果与派发所有权后的投递；新尝试不继承旧消息标识、错误码或 claim 归属。
  * @param delivery 原投递。
- * @returns 无 externalMessageId 和 lastErrorCode 的投递。
+ * @returns 无 externalMessageId、lastErrorCode、claimedAt 与 claimToken 的投递。
  */
 function withoutDeliveryAttemptOutcome(delivery: Delivery): Delivery {
     const cleared = { ...delivery };
     delete cleared.lastErrorCode;
     delete cleared.externalMessageId;
+    delete cleared.claimedAt;
+    delete cleared.claimToken;
     return cleared;
 }
 
