@@ -84,6 +84,10 @@ add_voicelife_test(schedule_query_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_query_test.cc")
 target_link_libraries(schedule_query_test PRIVATE schedule)
 
+add_voicelife_test(schedule_delete_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_delete_test.cc")
+target_link_libraries(schedule_delete_test PRIVATE schedule)
+
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
 target_link_libraries(status_test PRIVATE contracts)
 
