@@ -212,6 +212,141 @@ int main() {
     });
     Check(missing_schedule.ok() && missing_schedule.value->total == 0, "不存在的日程过滤目标应返回稳定空结果");
 
+    recurring_calendar_store.FailNextTaskList(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
+    const auto failed_task_list = recurring_calendar_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + kDay,
+    });
+    Check(failed_task_list.status.code == ErrorCode::kUnavailable, "任务查询失败应透传 Store 错误");
+
+    recurring_calendar_store.FailNextInstanceList(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
+    const auto failed_instance_list = recurring_calendar_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + kDay,
+    });
+    Check(failed_instance_list.status.code == ErrorCode::kUnavailable, "实例查询失败应透传 Store 错误");
+
+    const auto invalid_calendar_page = service.ListCalendarView({
+        .range_start = 1,
+        .range_end = 2,
+        .page = 0,
+    });
+    Check(invalid_calendar_page.status.code == ErrorCode::kInvalidArgument, "页码必须从一开始");
+    const auto invalid_calendar_size = service.ListCalendarView({
+        .range_start = 1,
+        .range_end = 2,
+        .page_size = 0,
+    });
+    Check(invalid_calendar_size.status.code == ErrorCode::kInvalidArgument, "每页数量必须为正数");
+
+    InMemoryTimingTaskStore weekly_calendar_store;
+    FixedTimingIdGenerator weekly_calendar_ids;
+    DefaultTimingTaskService weekly_calendar_service(weekly_calendar_store, clock, weekly_calendar_ids);
+    const auto weekly_calendar_task = weekly_calendar_service.RegisterTimerTask({
+        .request_id = "request-calendar-weekly",
+        .schedule_id = "schedule-calendar-weekly",
+        .start_at = 1785747600,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kWeek},
+    });
+    Check(weekly_calendar_task.ok(), "每周日历任务应注册成功");
+    const auto weekly_calendar = weekly_calendar_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + 15 * kDay,
+    });
+    Check(weekly_calendar.ok() && weekly_calendar.value->total == 3, "未筛选的每周规则应按七天间隔展开");
+
+    InMemoryTimingTaskStore filtered_weekly_calendar_store;
+    FixedTimingIdGenerator filtered_weekly_calendar_ids;
+    DefaultTimingTaskService filtered_weekly_calendar_service(filtered_weekly_calendar_store, clock,
+                                                              filtered_weekly_calendar_ids);
+    const auto filtered_weekly_calendar_task = filtered_weekly_calendar_service.RegisterTimerTask({
+        .request_id = "request-calendar-filtered-weekly",
+        .schedule_id = "schedule-calendar-filtered-weekly",
+        .start_at = 1785747600,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kWeek, .by_weekdays = {1, 2, 3, 4, 5, 6, 7}},
+    });
+    Check(filtered_weekly_calendar_task.ok(), "带星期筛选的每周任务应注册成功");
+    const auto filtered_weekly_calendar = filtered_weekly_calendar_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + 3 * kDay,
+    });
+    Check(filtered_weekly_calendar.ok() && filtered_weekly_calendar.value->total == 3,
+          "星期筛选应允许展开匹配的每日 occurrence");
+
+    InMemoryTimingTaskStore monthly_calendar_store;
+    FixedTimingIdGenerator monthly_calendar_ids;
+    DefaultTimingTaskService monthly_calendar_service(monthly_calendar_store, clock, monthly_calendar_ids);
+    const auto monthly_calendar_task = monthly_calendar_service.RegisterTimerTask({
+        .request_id = "request-calendar-monthly",
+        .schedule_id = "schedule-calendar-monthly",
+        .start_at = 1785747600,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kMonth},
+    });
+    Check(monthly_calendar_task.ok(), "每月日历任务应注册成功");
+    const auto monthly_calendar = monthly_calendar_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + 70 * kDay,
+    });
+    Check(monthly_calendar.ok() && monthly_calendar.value->total >= 2, "每月规则应按周期锚点的日期展开");
+
+    InMemoryTimingTaskStore filtered_monthly_calendar_store;
+    FixedTimingIdGenerator filtered_monthly_calendar_ids;
+    DefaultTimingTaskService filtered_monthly_calendar_service(filtered_monthly_calendar_store, clock,
+                                                               filtered_monthly_calendar_ids);
+    const auto filtered_monthly_calendar_task = filtered_monthly_calendar_service.RegisterTimerTask({
+        .request_id = "request-calendar-filtered-monthly",
+        .schedule_id = "schedule-calendar-filtered-monthly",
+        .start_at = 1785747600,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kMonth, .by_month_days = {1, 15}},
+    });
+    Check(filtered_monthly_calendar_task.ok(), "带日期筛选的每月任务应注册成功");
+    const auto filtered_monthly_calendar = filtered_monthly_calendar_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + 70 * kDay,
+    });
+    Check(filtered_monthly_calendar.ok() && filtered_monthly_calendar.value->total >= 3,
+          "每月日期筛选应生成匹配 occurrence");
+
+    InMemoryTimingTaskStore yearly_calendar_store;
+    FixedTimingIdGenerator yearly_calendar_ids;
+    DefaultTimingTaskService yearly_calendar_service(yearly_calendar_store, clock, yearly_calendar_ids);
+    const auto yearly_calendar_task = yearly_calendar_service.RegisterTimerTask({
+        .request_id = "request-calendar-yearly",
+        .schedule_id = "schedule-calendar-yearly",
+        .start_at = 1785747600,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kYear},
+    });
+    Check(yearly_calendar_task.ok(), "每年日历任务应注册成功");
+    const auto yearly_calendar = yearly_calendar_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + 370 * kDay,
+    });
+    Check(yearly_calendar.ok() && yearly_calendar.value->total == 2, "每年规则应按周期锚点的月日展开");
+
+    InMemoryTimingTaskStore filtered_yearly_calendar_store;
+    FixedTimingIdGenerator filtered_yearly_calendar_ids;
+    DefaultTimingTaskService filtered_yearly_calendar_service(filtered_yearly_calendar_store, clock,
+                                                              filtered_yearly_calendar_ids);
+    const auto filtered_yearly_calendar_task = filtered_yearly_calendar_service.RegisterTimerTask({
+        .request_id = "request-calendar-filtered-yearly",
+        .schedule_id = "schedule-calendar-filtered-yearly",
+        .start_at = 1785747600,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kYear, .by_month_days = {4}, .by_months = {8}},
+    });
+    Check(filtered_yearly_calendar_task.ok(), "带月日筛选的每年任务应注册成功");
+    const auto filtered_yearly_calendar = filtered_yearly_calendar_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + 370 * kDay,
+    });
+    Check(filtered_yearly_calendar.ok() && filtered_yearly_calendar.value->total == 2,
+          "每年月日筛选应生成匹配 occurrence");
+
     const auto rules = store.ListRules(registered.value->task_id);
     Check(rules.ok() && rules.value->size() == 2, "注册应原子创建两条默认提醒规则");
     bool has_weak_rule = false;
