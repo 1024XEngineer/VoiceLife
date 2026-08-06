@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type {
     BindingId,
     ChannelAccountId,
@@ -25,6 +27,8 @@ const DELIVERY_COLUMNS = [
     'external_message_id',
     'expires_at',
     'last_error_code',
+    'claimed_at',
+    'claim_token',
     'created_at',
     'updated_at',
 ] as const;
@@ -74,6 +78,8 @@ export class PostgresDeliveryRepository implements DeliveryRepository {
             delivery.externalMessageId ?? null,
             delivery.expiresAt ?? null,
             delivery.lastErrorCode ?? null,
+            delivery.claimedAt ?? null,
+            delivery.claimToken ?? null,
             delivery.createdAt,
             delivery.updatedAt,
         ];
@@ -144,7 +150,7 @@ export class PostgresDeliveryRepository implements DeliveryRepository {
     }
 
     /** {@inheritDoc DeliveryRepository.createIfAbsent} */
-    public async createIfAbsent(delivery: Delivery): Promise<DeliveryId> {
+    public async createIfAbsent(delivery: Delivery): Promise<{ id: DeliveryId; created: boolean }> {
         const quoted = DELIVERY_COLUMNS.map((column) => `"${column}"`).join(', ');
         const placeholders = DELIVERY_COLUMNS.map((_, index) => `$${index + 1}`).join(', ');
         const inserted = await queryOne(
@@ -154,23 +160,54 @@ export class PostgresDeliveryRepository implements DeliveryRepository {
              RETURNING id`,
             this.toRow(delivery),
         );
-        if (inserted !== undefined) return inserted.id as DeliveryId;
+        if (inserted !== undefined) return { id: inserted.id as DeliveryId, created: true };
         const existing = await this.findByBusinessKey(delivery.businessEventId, delivery.bindingId, delivery.kind);
         if (existing === undefined) {
             // 仅当冲突行提交后业务键不可见时触发，属不变量异常。
             throw new Error('im_deliveries business key vanished after idempotent insert');
         }
-        return existing.id;
+        return { id: existing.id, created: false };
     }
 
     /** {@inheritDoc DeliveryRepository.claimForDispatch} */
-    public async claimForDispatch(deliveryId: DeliveryId): Promise<Delivery | undefined> {
+    public async claimForDispatch(
+        deliveryId: DeliveryId,
+        now: IsoDateTime,
+        leaseSeconds: number,
+    ): Promise<Delivery | undefined> {
         const row = await queryOne(
             this.executor,
-            `UPDATE im_deliveries SET status = 'sending'
-             WHERE id = $1 AND status IN ('pending', 'retryable_failed')
+            `UPDATE im_deliveries SET status = 'sending', claimed_at = $2, claim_token = $3, updated_at = $2
+             WHERE id = $1
+               AND (
+                   status IN ('pending', 'retryable_failed')
+                   OR (status = 'sending' AND (claimed_at IS NULL OR claimed_at <= $2::timestamptz - make_interval(secs => $4)))
+               )
              RETURNING *`,
-            [deliveryId],
+            [deliveryId, now, randomUUID(), leaseSeconds],
+        );
+        return row === undefined ? undefined : mapDelivery(row);
+    }
+
+    /** {@inheritDoc DeliveryRepository.saveIfClaimed} */
+    public async saveIfClaimed(delivery: Delivery, claimToken: string): Promise<Delivery | undefined> {
+        const row = await queryOne(
+            this.executor,
+            `UPDATE im_deliveries
+             SET status = $2, claimed_at = $3, claim_token = $4, external_message_id = $5,
+                 last_error_code = $6, updated_at = $7
+             WHERE id = $1 AND status = 'sending' AND claim_token = $8
+             RETURNING *`,
+            [
+                delivery.id,
+                delivery.status,
+                delivery.claimedAt ?? null,
+                delivery.claimToken ?? null,
+                delivery.externalMessageId ?? null,
+                delivery.lastErrorCode ?? null,
+                delivery.updatedAt,
+                claimToken,
+            ],
         );
         return row === undefined ? undefined : mapDelivery(row);
     }

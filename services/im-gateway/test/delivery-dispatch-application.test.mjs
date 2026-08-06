@@ -219,6 +219,45 @@ test('a channel send exception is treated as a retryable failure', async () => {
     assert.equal(updated.lastErrorCode, 'channel_send_exception');
 });
 
+test('a pre-send failure becomes retryable_failed with one retry outbox, then recovers', async () => {
+    const clock = new FixedClock();
+    const uow = new ExposedUnitOfWork();
+    let failRender = true;
+    const gateway = createMockImGateway('device-fixture', clock, {
+        unitOfWork: uow,
+        deliveryRenderer: {
+            render: async () => {
+                if (failRender) throw new Error('render boom');
+                return { ok: true };
+            },
+        },
+    });
+    const deliveryId = await pendingStrongDelivery(gateway);
+
+    const failed = await gateway.application.deliveryDispatch.dispatch(deliveryId);
+
+    assert.equal(failed.status, 'retryable_failed');
+    assert.equal(failed.lastErrorCode, 'pre_send_exception');
+    assert.equal(failed.claimedAt, undefined);
+    assert.equal(failed.claimToken, undefined);
+    const failedDetails = await gateway.application.deliveries.find(deliveryId);
+    assert.equal(failedDetails.attempts.length, 1);
+    assert.equal(failedDetails.attempts[0].status, 'retryable_failed');
+    assert.equal(failedDetails.attempts[0].errorCode, 'pre_send_exception');
+    const retries = uow.outboxEvents().filter((event) => event.eventType === 'im.delivery.retry-scheduled');
+    assert.equal(retries.length, 1);
+
+    // 修好渲染器后重派发：retryable_failed 可重领并成功
+    failRender = false;
+    const recovered = await gateway.application.deliveryDispatch.dispatch(deliveryId);
+
+    assert.equal(recovered.status, 'accepted');
+    assert.equal(recovered.lastErrorCode, undefined);
+    const recoveredDetails = await gateway.application.deliveries.find(deliveryId);
+    assert.equal(recoveredDetails.attempts.length, 2);
+    assert.equal(recoveredDetails.attempts[1].status, 'accepted');
+});
+
 test('re-dispatching a retryable delivery resets it and records a second attempt', async () => {
     const { gateway } = gatewayWithChannel([
         { accepted: false, retryable: true, errorCode: 'busy' },

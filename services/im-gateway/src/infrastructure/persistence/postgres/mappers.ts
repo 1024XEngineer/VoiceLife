@@ -181,6 +181,8 @@ export function mapDelivery(row: DbRow): Delivery {
         ...(row.external_message_id === null ? {} : { externalMessageId: row.external_message_id as string }),
         ...(row.expires_at === null ? {} : { expiresAt: toIso(row.expires_at) }),
         ...(row.last_error_code === null ? {} : { lastErrorCode: row.last_error_code as string }),
+        ...(row.claimed_at === null ? {} : { claimedAt: toIso(row.claimed_at) }),
+        ...(row.claim_token === null ? {} : { claimToken: row.claim_token as string }),
         createdAt: toIso(row.created_at),
         updatedAt: toIso(row.updated_at),
     };

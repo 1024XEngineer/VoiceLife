@@ -205,15 +205,30 @@ export interface DeliveryRepository {
     /**
      * 按业务键幂等创建投递；同键已存在时保留首条并返回其标识。
      * @param delivery 待创建的投递。
-     * @returns 数据库中该业务键对应的权威投递标识。
+     * @returns 权威投递标识与是否由本次调用新建。
      */
-    createIfAbsent(delivery: Delivery): Promise<DeliveryId>;
+    createIfAbsent(delivery: Delivery): Promise<{ id: DeliveryId; created: boolean }>;
     /**
-     * 原子领取投递用于派发：仅当状态为 pending 或 retryable_failed 时置为 sending。
+     * 原子领取投递用于派发：pending/retryable_failed 置为 sending，或重领已过期的 sending claim。
+     *
+     * 领取返回携带内部 claimToken 的投递；claimToken 由实现生成、不可由调用方伪造，
+     * 后续 write-back 需凭 token 经 saveIfClaimed 证明所有权（fencing）。
      * @param deliveryId 投递标识。
+     * @param now 领取时刻（UTC ISO）。
+     * @param leaseSeconds 领取租约时长；sending 且 claimed_at 早于 now-lease 视为已过期可重领。
      * @returns 领取后的投递，未被领取时返回 undefined。
      */
-    claimForDispatch(deliveryId: DeliveryId): Promise<Delivery | undefined>;
+    claimForDispatch(deliveryId: DeliveryId, now: IsoDateTime, leaseSeconds: number): Promise<Delivery | undefined>;
+    /**
+     * 凭 claimToken 有界写回投递状态：仅当行仍为 sending 且 claim_token 匹配时生效。
+     *
+     * 这是派发路径唯一的写原语——成功/重试失败/发送前异常都经此写终态并清理 claim 所有权；
+     * 未匹配（失去所有权）返回 undefined，调用方必须放弃 attempt/outbox 回写，避免覆盖新 owner。
+     * @param delivery 要写入的投递终态（claimedAt/claimToken 缺省即清理）。
+     * @param claimToken 本次派发的所有权令牌。
+     * @returns 写入后的投递；所有权丢失时返回 undefined。
+     */
+    saveIfClaimed(delivery: Delivery, claimToken: string): Promise<Delivery | undefined>;
     /**
      * 查询指定序号的发送尝试。
      * @param deliveryId 投递标识。
@@ -272,11 +287,19 @@ export interface IntentSubmissionRepository {
         kind: IntentSubmissionRecord['kind'],
     ): Promise<IntentSubmissionRecord | undefined>;
     /**
-     * 保存请求级幂等受理记录。
-     * @param record 受理记录。
+     * 预占请求级幂等键：同键首次写入成功，冲突时保留首条记录（first-write-wins）。
+     *
+     * 并发下 INSERT 会在冲突键的事务提交后返回既有记录，调用方可据此串行化同键提交。
+     * @param record 待预占的受理记录。
+     * @returns 是否由本次调用新建，以及当前权威记录。
+     */
+    createIfAbsent(record: IntentSubmissionRecord): Promise<{ created: boolean; record: IntentSubmissionRecord }>;
+    /**
+     * 回填已预占幂等键的最终受理结果（仅 claim 持有者在其事务内调用）。
+     * @param record 含最终 submission 的受理记录。
      * @returns 保存完成后兑现的 Promise。
      */
-    save(record: IntentSubmissionRecord): Promise<void>;
+    finalizeClaim(record: IntentSubmissionRecord): Promise<void>;
 }
 
 /** 提醒动作及其待处理窗口的持久化端口。 */

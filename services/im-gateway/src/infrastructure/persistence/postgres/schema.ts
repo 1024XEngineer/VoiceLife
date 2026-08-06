@@ -1,7 +1,7 @@
 import { queryOne, type SqlExecutor } from './sql.js';
 
-/** 当前 schema 版本号；低于该版本的库会在 migrate() 时整体升级。 */
-export const SCHEMA_VERSION = 1;
+/** 当前 schema 版本号；低于该版本的库会在 migrate() 时逐版本升级。 */
+export const SCHEMA_VERSION = 2;
 
 /** 迁移版本表：version 行与对应 DDL 在同一事务内写入，保证原子可见。 */
 const SCHEMA_MIGRATIONS_TABLE = 'im_schema_migrations';
@@ -24,8 +24,8 @@ export const IM_TABLES = [
     'im_outbox_events',
 ] as const;
 
-/** 幂等迁移脚本：全部使用 IF NOT EXISTS，可重复执行。 */
-const MIGRATION_STATEMENTS: readonly string[] = [
+/** v1 幂等迁移脚本：全部使用 IF NOT EXISTS，可重复执行。 */
+const V1_STATEMENTS: readonly string[] = [
     `CREATE TABLE IF NOT EXISTS im_channel_accounts (
         id text PRIMARY KEY,
         platform text NOT NULL,
@@ -186,6 +186,15 @@ const MIGRATION_STATEMENTS: readonly string[] = [
         ON im_outbox_events (status, available_at)`,
 ];
 
+/** v2 幂等迁移：为派发领取与所有权隔离补充 claim 列（sending 且 NULL 视为可重领）。 */
+const V2_STATEMENTS: readonly string[] = [
+    'ALTER TABLE im_deliveries ADD COLUMN IF NOT EXISTS claimed_at timestamptz',
+    'ALTER TABLE im_deliveries ADD COLUMN IF NOT EXISTS claim_token text',
+];
+
+/** 按版本号索引的迁移脚本；下标 i 对应版本 i+1。 */
+const VERSIONED_STATEMENTS: readonly (readonly string[])[] = [V1_STATEMENTS, V2_STATEMENTS];
+
 /**
  * 以版本管理方式应用 IM Gateway 表结构与索引。
  *
@@ -213,10 +222,16 @@ export async function applySchema(executor: SqlExecutor): Promise<void> {
         if (currentVersion >= SCHEMA_VERSION) return;
         await executor.query('BEGIN');
         try {
-            for (const statement of MIGRATION_STATEMENTS) {
-                await executor.query(statement);
+            for (let version = currentVersion + 1; version <= SCHEMA_VERSION; version++) {
+                const statements = VERSIONED_STATEMENTS[version - 1];
+                if (statements === undefined) {
+                    throw new Error(`schema migration scripts missing for version ${version}`);
+                }
+                for (const statement of statements) {
+                    await executor.query(statement);
+                }
+                await executor.query(`INSERT INTO ${SCHEMA_MIGRATIONS_TABLE} (version) VALUES ($1)`, [version]);
             }
-            await executor.query(`INSERT INTO ${SCHEMA_MIGRATIONS_TABLE} (version) VALUES ($1)`, [SCHEMA_VERSION]);
             await executor.query('COMMIT');
         } catch (error) {
             await executor.query('ROLLBACK');

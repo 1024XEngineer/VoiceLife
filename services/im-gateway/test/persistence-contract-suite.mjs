@@ -127,24 +127,31 @@ export async function sharedRepositoryContractSuite(makeUow) {
         });
     });
 
-    await test('intent submissions round-trip by business key and update', async () => {
+    await test('intent submissions claim once by business key and finalize the winner', async () => {
         await withUow(makeUow, async (uow) => {
-            await uow.transaction((ctx) => ctx.intentSubmissions.save(intentSubmission()));
+            await uow.transaction(async (ctx) => {
+                const first = await ctx.intentSubmissions.createIfAbsent(intentSubmission());
+                assert.deepEqual(first, { created: true, record: intentSubmission() });
+                // 同键再次预占：返回首条记录而非覆盖
+                const again = await ctx.intentSubmissions.createIfAbsent(intentSubmission());
+                assert.deepEqual(again, { created: false, record: intentSubmission() });
+                const otherKind = await ctx.intentSubmissions.createIfAbsent(
+                    intentSubmission('event-1', { kind: 'schedule_receipt' }),
+                );
+                assert.equal(otherKind.created, true);
+                // 仅 claim 持有者回填最终受理结果
+                await ctx.intentSubmissions.finalizeClaim(
+                    intentSubmission('event-1', { requestFingerprint: 'fingerprint-2' }),
+                );
+            });
             const found = await uow.transaction((ctx) =>
                 ctx.intentSubmissions.findByBusinessKey('event-1', 'reminder_due'),
             );
-            assert.deepEqual(found, intentSubmission());
+            assert.equal(found.requestFingerprint, 'fingerprint-2');
             const otherKind = await uow.transaction((ctx) =>
                 ctx.intentSubmissions.findByBusinessKey('event-1', 'schedule_receipt'),
             );
-            assert.equal(otherKind, undefined);
-            await uow.transaction((ctx) =>
-                ctx.intentSubmissions.save(intentSubmission('event-1', { requestFingerprint: 'fingerprint-2' })),
-            );
-            const updated = await uow.transaction((ctx) =>
-                ctx.intentSubmissions.findByBusinessKey('event-1', 'reminder_due'),
-            );
-            assert.equal(updated.requestFingerprint, 'fingerprint-2');
+            assert.equal(otherKind.requestFingerprint, 'fingerprint-1');
         });
     });
 
@@ -254,16 +261,15 @@ export async function sharedRepositoryContractSuite(makeUow) {
         });
     });
 
-    await test('createIfAbsent keeps the first delivery for a business key', async () => {
+    await test('createIfAbsent keeps the first delivery for a business key and reports creation', async () => {
         await withUow(makeUow, async (uow) => {
             await uow.transaction(async (ctx) => {
-                await ctx.deliveries.save(delivery());
-                const firstId = await ctx.deliveries.createIfAbsent(delivery());
-                const secondId = await ctx.deliveries.createIfAbsent(
+                const first = await ctx.deliveries.createIfAbsent(delivery());
+                assert.deepEqual(first, { id: 'delivery-1', created: true });
+                const second = await ctx.deliveries.createIfAbsent(
                     delivery('delivery-other', { businessEventId: 'event-1' }),
                 );
-                assert.equal(firstId, 'delivery-1');
-                assert.equal(secondId, 'delivery-1');
+                assert.deepEqual(second, { id: 'delivery-1', created: false });
             });
             const existing = await uow.transaction((ctx) => ctx.deliveries.findById('delivery-1'));
             assert.equal(existing.id, 'delivery-1');
@@ -280,14 +286,33 @@ export async function sharedRepositoryContractSuite(makeUow) {
         await withUow(makeUow, async (uow) => {
             await uow.transaction(async (ctx) => {
                 await ctx.deliveries.save(delivery());
-                const claimed = await ctx.deliveries.claimForDispatch('delivery-1');
+                const claimed = await ctx.deliveries.claimForDispatch('delivery-1', T1, 60);
                 assert.equal(claimed.id, 'delivery-1');
                 assert.equal(claimed.status, 'sending');
-                const again = await ctx.deliveries.claimForDispatch('delivery-1');
+                assert.equal(claimed.claimedAt, T1);
+                assert.notEqual(claimed.claimToken, undefined);
+                const again = await ctx.deliveries.claimForDispatch('delivery-1', T1, 60);
                 assert.equal(again, undefined);
             });
             const after = await uow.transaction((ctx) => ctx.deliveries.findById('delivery-1'));
             assert.equal(after.status, 'sending');
+        });
+    });
+
+    await test('claimForDispatch reclaims an expired sending claim and refuses a live one', async () => {
+        await withUow(makeUow, async (uow) => {
+            await uow.transaction(async (ctx) => {
+                await ctx.deliveries.save(delivery());
+                const first = await ctx.deliveries.claimForDispatch('delivery-1', T0, 60);
+                // 同一时刻重领：lease 未过期，拒绝
+                const live = await ctx.deliveries.claimForDispatch('delivery-1', T0, 60);
+                assert.equal(live, undefined);
+                // lease 到期后重领：换发新 claim token
+                const reclaimed = await ctx.deliveries.claimForDispatch('delivery-1', T2, 60);
+                assert.notEqual(reclaimed, undefined);
+                assert.notEqual(reclaimed.claimToken, first.claimToken);
+                assert.equal(reclaimed.claimedAt, T2);
+            });
         });
     });
 
@@ -298,9 +323,61 @@ export async function sharedRepositoryContractSuite(makeUow) {
                 await ctx.deliveries.save(
                     delivery('delivery-expired', { businessEventId: 'event-expired', status: 'dead_letter' }),
                 );
-                assert.equal(await ctx.deliveries.claimForDispatch('delivery-accepted'), undefined);
-                assert.equal(await ctx.deliveries.claimForDispatch('delivery-expired'), undefined);
-                assert.equal(await ctx.deliveries.claimForDispatch('delivery-missing'), undefined);
+                assert.equal(await ctx.deliveries.claimForDispatch('delivery-accepted', T1, 60), undefined);
+                assert.equal(await ctx.deliveries.claimForDispatch('delivery-expired', T1, 60), undefined);
+                assert.equal(await ctx.deliveries.claimForDispatch('delivery-missing', T1, 60), undefined);
+            });
+        });
+    });
+
+    await test('saveIfClaimed fences stale workers and clears ownership on terminal state', async () => {
+        await withUow(makeUow, async (uow) => {
+            await uow.transaction(async (ctx) => {
+                await ctx.deliveries.save(delivery());
+                const claimA = await ctx.deliveries.claimForDispatch('delivery-1', T0, 60);
+                // 另一个 worker 在 lease 过期后重领
+                const claimB = await ctx.deliveries.claimForDispatch('delivery-1', T2, 60);
+                // 旧 worker A 的迟到写被 fenced
+                const stale = await ctx.deliveries.saveIfClaimed(
+                    delivery('delivery-1', {
+                        status: 'retryable_failed',
+                        lastErrorCode: 'pre_send_exception',
+                        updatedAt: T2,
+                    }),
+                    claimA.claimToken,
+                );
+                assert.equal(stale, undefined);
+                // 当前 owner B 的终态写生效
+                const applied = await ctx.deliveries.saveIfClaimed(
+                    delivery('delivery-1', { status: 'accepted', externalMessageId: 'platform-1', updatedAt: T2 }),
+                    claimB.claimToken,
+                );
+                assert.equal(applied.status, 'accepted');
+                assert.equal(applied.externalMessageId, 'platform-1');
+            });
+            const after = await uow.transaction((ctx) => ctx.deliveries.findById('delivery-1'));
+            assert.equal(after.status, 'accepted');
+            assert.equal(after.claimedAt, undefined);
+            assert.equal(after.claimToken, undefined);
+        });
+    });
+
+    await test('saveIfClaimed refuses writes once the delivery leaves sending', async () => {
+        await withUow(makeUow, async (uow) => {
+            await uow.transaction(async (ctx) => {
+                await ctx.deliveries.save(delivery());
+                const claim = await ctx.deliveries.claimForDispatch('delivery-1', T0, 60);
+                const applied = await ctx.deliveries.saveIfClaimed(
+                    delivery('delivery-1', { status: 'accepted', updatedAt: T1 }),
+                    claim.claimToken,
+                );
+                assert.equal(applied.status, 'accepted');
+                // 已离开 sending，同 token 再写拒绝
+                const again = await ctx.deliveries.saveIfClaimed(
+                    delivery('delivery-1', { status: 'retryable_failed', updatedAt: T1 }),
+                    claim.claimToken,
+                );
+                assert.equal(again, undefined);
             });
         });
     });
