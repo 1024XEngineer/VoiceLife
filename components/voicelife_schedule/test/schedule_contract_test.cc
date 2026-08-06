@@ -3,6 +3,7 @@
 
 using voicelife::schedule::CreateScheduleCommand;
 using voicelife::schedule::QueryScheduleCommand;
+using voicelife::schedule::ScheduleOperationType;
 using voicelife::schedule::ScheduleStatus;
 using voicelife::schedule::ScheduleStatusFilter;
 using voicelife::schedule::UpdateScheduleCommand;
@@ -23,5 +24,6 @@ int main() {
     Check(query.status == ScheduleStatusFilter::kActive, "查询日程命令应默认筛选有效状态");
     Check(static_cast<int>(ScheduleStatus::kCancelled) == 2 && static_cast<int>(ScheduleStatus::kCompleted) == 3,
           "新增完成状态不应改变已取消状态的持久化值");
+    Check(static_cast<int>(ScheduleOperationType::kUndo) == 4, "撤销操作应使用稳定的第四类持久化值");
     return 0;
 }
