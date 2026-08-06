@@ -254,6 +254,13 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
         return;
     }
     const LinxInboundMessage& inbound = *decoded.value;
+    // Reject messages from a different session. A stale or misrouted
+    // message on the same WebSocket must not mutate the current session.
+    if (inbound.session_id.has_value() && *inbound.session_id != config_.session_id) {
+        Emit(Event(voice::VoiceEventKind::kError,
+                   "Linx 消息 session_id 不匹配: " + *inbound.session_id));
+        return;
+    }
     switch (inbound.kind) {
         case LinxMessageKind::kHello: {
             if (!transport_connected_.load()) {

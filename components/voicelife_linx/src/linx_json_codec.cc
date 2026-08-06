@@ -240,6 +240,12 @@ std::string Quote(std::string_view text) {
             case '\\':
                 result += "\\\\";
                 break;
+            case '\b':
+                result += "\\b";
+                break;
+            case '\f':
+                result += "\\f";
+                break;
             case '\n':
                 result += "\\n";
                 break;
@@ -249,9 +255,21 @@ std::string Quote(std::string_view text) {
             case '\t':
                 result += "\\t";
                 break;
-            default:
-                result.push_back(character);
+            default: {
+                const auto byte = static_cast<unsigned char>(character);
+                if (byte < 0x20) {
+                    // Other ASCII control characters escaped as \\u00XX.
+                    result.push_back('\\');
+                    result.push_back('u');
+                    result.push_back('0');
+                    result.push_back('0');
+                    result.push_back("0123456789abcdef"[byte >> 4]);
+                    result.push_back("0123456789abcdef"[byte & 0x0f]);
+                } else {
+                    result.push_back(character);
+                }
                 break;
+            }
         }
     }
     result.push_back('"');
@@ -313,6 +331,7 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
     if (!config.audio.valid()) {
         return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx hello 音频参数无效");
     }
+    const bool is_pcm = config.audio.codec == voice::AudioCodec::kPcmS16Le;
     const uint32_t frame_size = config.audio.sample_rate_hz * config.audio.frame_duration_ms / 1000U;
     std::ostringstream json;
     json << "{\"type\":\"hello\",\"version\":1,\"transport\":\"websocket\","
@@ -320,8 +339,12 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
          << ",\"sample_rate\":" << config.audio.sample_rate_hz
          << ",\"channels\":" << static_cast<unsigned>(config.audio.channels)
          << ",\"bit_depth\":" << static_cast<unsigned>(config.audio.bits_per_sample)
-         << ",\"endianness\":\"little\",\"frame_duration\":" << config.audio.frame_duration_ms
-         << ",\"frame_size\":" << frame_size << ",\"sample_format\":\"signed_int16\",\"play_buffer_duration\":1000}}";
+         << ",\"endianness\":\"little\",\"frame_duration\":" << config.audio.frame_duration_ms;
+    if (is_pcm) {
+        json << ",\"frame_size\":" << frame_size
+             << ",\"sample_format\":\"signed_int16\",\"play_buffer_duration\":1000";
+    }
+    json << "}}";
     return Result<std::string>::Success(json.str());
 }
 

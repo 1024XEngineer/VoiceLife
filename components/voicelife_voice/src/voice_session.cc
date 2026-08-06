@@ -211,22 +211,28 @@ Status VoiceSession::BeginCapture() {
         }
         mode = config_.mode;
     }
-    Status status = provider_.StartCapture(mode);
-    if (!status.ok()) {
-        return status;
+    Status provider_status = provider_.StartCapture(mode);
+    if (!provider_status.ok()) {
+        return provider_status;
     }
-    status = input_.StartCapture(mode);
-    if (status.ok()) {
+    Status input_status = input_.StartCapture(mode);
+    if (input_status.ok()) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             state_ = VoiceSessionState::kCapturing;
             next_sequence_ = 0;
         }
         Emit("capture_started", "");
-    } else {
-        provider_.StopCapture();
+        return Status::Ok();
     }
-    return status;
+    // Input failed after the provider already started listening. The provider
+    // must be stopped so the server does not stay in a half-open capture state.
+    Status rollback = provider_.StopCapture();
+    if (!rollback.ok()) {
+        Emit("capture_rollback_failed", rollback.message);
+        return rollback;
+    }
+    return input_status;
 }
 
 Status VoiceSession::EndCapture() {
