@@ -83,12 +83,15 @@ Result<LinxAudioParams> ParseAudioParams(const cJSON* audio) {
         return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument,
                                                 "不支持的 Linx 音频格式: " + format_str);
     }
-    if (sr->valuedouble < 0 || sr->valuedouble > 0xFFFFFFFFULL) {
+    const uint32_t sample_rate = static_cast<uint32_t>(sr->valuedouble);
+    const uint8_t  channels    = static_cast<uint8_t>(ch->valueint);
+    if (sr->valuedouble < 0 || sr->valuedouble > 0xFFFFFFFFULL ||
+        sample_rate == 0 || channels == 0) {
         return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument,
-                                                "Linx 音频 sample_rate 超出范围");
+                                                "Linx 音频参数超出范围");
     }
-    params.sample_rate_hz = static_cast<uint32_t>(sr->valuedouble);
-    params.channels        = static_cast<uint8_t>(ch->valueint);
+    params.sample_rate_hz = sample_rate;
+    params.channels        = channels;
     const cJSON* bit = GetOptional(audio, "bit_depth", cJSON_Number);
     if (bit != nullptr) params.bits_per_sample = static_cast<uint8_t>(bit->valueint);
     const cJSON* dur = GetOptional(audio, "frame_duration", cJSON_Number);
