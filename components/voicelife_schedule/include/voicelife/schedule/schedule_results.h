@@ -51,7 +51,7 @@ struct RecordScheduleOperationResult {
     std::string error;
 };
 
-/// 查询最近日程操作的返回数据。
+/// 查询最近十五分钟内日程操作的返回数据。
 struct QueryRecentScheduleOperationResult {
     Status status;
     std::vector<OperationRecord> operations;
