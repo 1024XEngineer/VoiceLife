@@ -1,10 +1,9 @@
 #include <cstdint>
 #include <vector>
 
+#include "support/test_support.h"
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #include "voicelife/audio_esp/pcm_frame_assembler.h"
-
-#include "support/test_support.h"
 
 using voicelife::ErrorCode;
 using voicelife::Status;
@@ -37,8 +36,7 @@ int main() {
     };
     std::vector<std::int16_t> period(160, 7);
     for (int i = 0; i < 5; ++i) {
-        Check(assembler.Push(period.data(), period.size(), sink).ok(),
-              "完整硬件 period 应能进入组帧缓存");
+        Check(assembler.Push(period.data(), period.size(), sink).ok(), "完整硬件 period 应能进入组帧缓存");
         Check(frames.empty(), "不足一个传输帧时不能提前向上层投递");
     }
     Check(assembler.Push(period.data(), period.size(), sink).ok(), "第六个 period 应完成组帧");
@@ -47,10 +45,8 @@ int main() {
     Check(frames.front().format.frame_duration_ms == 60, "组帧不能改变协商帧时长");
     Check(assembler.pending_samples() == 0, "完整帧投递后不能残留样本");
 
-    Check(assembler.Push(nullptr, 1, sink).code == ErrorCode::kInvalidArgument,
-          "非零样本数不能搭配空指针");
-    Check(assembler.Push(period.data(), period.size(), {}).code == ErrorCode::kInvalidArgument,
-          "组帧必须拒绝空 sink");
+    Check(assembler.Push(nullptr, 1, sink).code == ErrorCode::kInvalidArgument, "非零样本数不能搭配空指针");
+    Check(assembler.Push(period.data(), period.size(), {}).code == ErrorCode::kInvalidArgument, "组帧必须拒绝空 sink");
 
     PcmFrameAssembler partial(Pcm(60), 10);
     Check(partial.Push(period.data(), 80, sink).ok(), "半帧样本应暂存");
@@ -75,12 +71,10 @@ int main() {
     capture.sample_rate_hz = 16000;
     auto playback = Pcm(60);
     playback.sample_rate_hz = 24000;
-    Check(ports.input().Open(capture).code == ErrorCode::kUnavailable,
-          "主机 Audio Port 不能伪造 ESP32-S3 采集已打开");
+    Check(ports.input().Open(capture).code == ErrorCode::kUnavailable, "主机 Audio Port 不能伪造 ESP32-S3 采集已打开");
     Check(ports.output().Open(playback).code == ErrorCode::kUnavailable,
           "主机 Audio Port 不能伪造 ESP32-S3 播放已打开");
-    Check(ports.input().StartCapture(voicelife::voice::VoiceMode::kManual).code ==
-              ErrorCode::kUnavailable,
+    Check(ports.input().StartCapture(voicelife::voice::VoiceMode::kManual).code == ErrorCode::kUnavailable,
           "主机 Audio Port 不能伪造 ESP32-S3 采集已启动");
 
     return 0;

@@ -7,21 +7,17 @@
 namespace voicelife::audio_esp {
 namespace {
 
-Status Invalid(std::string message) {
-    return Status::Error(ErrorCode::kInvalidArgument, std::move(message));
-}
+Status Invalid(std::string message) { return Status::Error(ErrorCode::kInvalidArgument, std::move(message)); }
 
 }  // namespace
 
-PcmFrameAssembler::PcmFrameAssembler(voice::AudioFormat frame_format,
-                                     uint16_t hardware_period_ms)
+PcmFrameAssembler::PcmFrameAssembler(voice::AudioFormat frame_format, uint16_t hardware_period_ms)
     : frame_format_(std::move(frame_format)), hardware_period_ms_(hardware_period_ms) {
     const uint64_t frame_numerator =
         static_cast<uint64_t>(frame_format_.sample_rate_hz) * frame_format_.frame_duration_ms;
     if (frame_format_.channels != 0 && frame_numerator % 1000 == 0) {
         const uint64_t samples_per_channel = frame_numerator / 1000;
-        if (samples_per_channel <= std::numeric_limits<std::size_t>::max() /
-                                      frame_format_.channels) {
+        if (samples_per_channel <= std::numeric_limits<std::size_t>::max() / frame_format_.channels) {
             frame_samples_ = static_cast<std::size_t>(samples_per_channel) * frame_format_.channels;
         }
     }
@@ -29,26 +25,22 @@ PcmFrameAssembler::PcmFrameAssembler(voice::AudioFormat frame_format,
 
 Status PcmFrameAssembler::Validate() const {
     if (!frame_format_.valid() || frame_format_.codec != voice::AudioCodec::kPcmS16Le ||
-        frame_format_.bits_per_sample != 16 || frame_format_.channels == 0 ||
-        hardware_period_ms_ == 0) {
+        frame_format_.bits_per_sample != 16 || frame_format_.channels == 0 || hardware_period_ms_ == 0) {
         return Invalid("PCM 组帧格式必须是合法的 S16LE");
     }
-    const uint64_t period_numerator =
-        static_cast<uint64_t>(frame_format_.sample_rate_hz) * hardware_period_ms_;
+    const uint64_t period_numerator = static_cast<uint64_t>(frame_format_.sample_rate_hz) * hardware_period_ms_;
     const uint64_t frame_numerator =
         static_cast<uint64_t>(frame_format_.sample_rate_hz) * frame_format_.frame_duration_ms;
     const uint64_t samples_per_channel = frame_numerator / 1000;
     if (period_numerator % 1000 != 0 || frame_numerator % 1000 != 0 ||
         frame_format_.frame_duration_ms % hardware_period_ms_ != 0 || samples_per_channel == 0 ||
-        samples_per_channel > std::numeric_limits<std::size_t>::max() /
-                                  frame_format_.channels) {
+        samples_per_channel > std::numeric_limits<std::size_t>::max() / frame_format_.channels) {
         return Invalid("传输帧时长必须是硬件 period 的整数倍");
     }
     return Status::Ok();
 }
 
-Status PcmFrameAssembler::Push(const int16_t* samples, std::size_t sample_count,
-                               const Sink& sink) {
+Status PcmFrameAssembler::Push(const int16_t* samples, std::size_t sample_count, const Sink& sink) {
     const Status validation = Validate();
     if (!validation.ok()) {
         return validation;
@@ -79,9 +71,8 @@ Status PcmFrameAssembler::Push(const int16_t* samples, std::size_t sample_count,
         }
         frame.payload.resize(frame_samples_ * sizeof(int16_t));
         std::memcpy(frame.payload.data(), pending_samples_.data(), frame.payload.size());
-        pending_samples_.erase(
-            pending_samples_.begin(),
-            pending_samples_.begin() + static_cast<std::ptrdiff_t>(frame_samples_));
+        pending_samples_.erase(pending_samples_.begin(),
+                               pending_samples_.begin() + static_cast<std::ptrdiff_t>(frame_samples_));
         const Status status = sink(std::move(frame));
         if (!status.ok()) {
             return status;
@@ -90,8 +81,6 @@ Status PcmFrameAssembler::Push(const int16_t* samples, std::size_t sample_count,
     return Status::Ok();
 }
 
-void PcmFrameAssembler::Reset() {
-    pending_samples_.clear();
-}
+void PcmFrameAssembler::Reset() { pending_samples_.clear(); }
 
 }  // namespace voicelife::audio_esp
