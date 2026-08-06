@@ -17,9 +17,9 @@
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/im/im_credentials.h"
+#include "voicelife/im/im_endpoint.h"
 #include "voicelife/im/im_transport.h"
 
-using voicelife::contracts::im::NotificationAction;
 using voicelife::contracts::im::NotificationIntent;
 using voicelife::contracts::im::ParseNotificationIntent;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
@@ -101,17 +101,18 @@ std::string HeaderValue(const ImHttpRequest& request, const std::string& name) {
     return "";
 }
 
-/// 校验提交的请求体可通过契约解析，且与提交的意图完全一致。
+/// 校验提交的请求体可通过契约解析，且与提交的意图逐字段一致。
 void CheckBodyRoundTrips(const ImHttpRequest& request, const ScheduleReceiptIntent& intent) {
     voicelife::JsonValue root;
     Check(voicelife::ParseJson(request.body, root).ok(), "回执请求体必须是合法 JSON");
     ScheduleReceiptIntent parsed;
     Check(ParseScheduleReceiptIntent(root, parsed).ok(), "回执请求体必须通过契约校验");
-    Check(parsed.eventId == intent.eventId && parsed.deviceId == intent.deviceId &&
-              parsed.scheduleId == intent.scheduleId && parsed.operationType == intent.operationType &&
-              parsed.result == intent.result && parsed.correlationId == intent.correlationId &&
-              parsed.occurredAt == intent.occurredAt,
-          "回执请求体必须与提交的意图一致");
+    Check(parsed.schemaVersion == intent.schemaVersion && parsed.eventId == intent.eventId &&
+              parsed.correlationId == intent.correlationId && parsed.userId == intent.userId &&
+              parsed.deviceId == intent.deviceId && parsed.operationType == intent.operationType &&
+              parsed.scheduleId == intent.scheduleId && parsed.result == intent.result &&
+              parsed.summary == intent.summary && parsed.occurredAt == intent.occurredAt,
+          "回执请求体必须与提交的意图完全一致");
 }
 
 void CheckBodyRoundTrips(const ImHttpRequest& request, const NotificationIntent& intent) {
@@ -119,10 +120,22 @@ void CheckBodyRoundTrips(const ImHttpRequest& request, const NotificationIntent&
     Check(voicelife::ParseJson(request.body, root).ok(), "通知请求体必须是合法 JSON");
     NotificationIntent parsed;
     Check(ParseNotificationIntent(root, parsed).ok(), "通知请求体必须通过契约校验");
-    Check(parsed.businessEventId == intent.businessEventId && parsed.recipient.deviceId == intent.recipient.deviceId &&
-              parsed.reminderType == intent.reminderType && parsed.actions.size() == intent.actions.size() &&
-              parsed.content.title == intent.content.title,
-          "通知请求体必须与提交的意图一致");
+    Check(parsed.schemaVersion == intent.schemaVersion && parsed.businessEventId == intent.businessEventId &&
+              parsed.correlationId == intent.correlationId && parsed.kind == intent.kind &&
+              parsed.recipient.userId == intent.recipient.userId &&
+              parsed.recipient.deviceId == intent.recipient.deviceId && parsed.scheduleId == intent.scheduleId &&
+              parsed.taskId == intent.taskId && parsed.instanceId == intent.instanceId &&
+              parsed.reminderTriggerId == intent.reminderTriggerId && parsed.reminderType == intent.reminderType &&
+              parsed.content.title == intent.content.title && parsed.content.body == intent.content.body &&
+              parsed.plannedAt == intent.plannedAt && parsed.triggerAt == intent.triggerAt &&
+              parsed.occurredAt == intent.occurredAt && parsed.actions.size() == intent.actions.size(),
+          "通知请求体必须与提交的意图完全一致");
+    for (size_t i = 0; i < intent.actions.size(); ++i) {
+        Check(parsed.actions[i].kind == intent.actions[i].kind && parsed.actions[i].type == intent.actions[i].type &&
+                  parsed.actions[i].label == intent.actions[i].label &&
+                  parsed.actions[i].minutes == intent.actions[i].minutes,
+              "通知动作必须与提交的意图一致");
+    }
 }
 
 void TestScheduleReceiptSuccess() {
@@ -222,16 +235,76 @@ void TestNetworkFailureKeepsFactsAndAllowsIdempotentRetry() {
           "提交不得修改本地事实");
 }
 
-void TestHttpErrorIsRetryable() {
+void TestInvalidIntentRejectedLocally() {
     FakeTransport transport;
     FakeCredentials credentials;
-    transport.next_status = ImTransportStatus::kHttpError;
-    transport.next_status_code = 503;
+    ImReportingChannel channel(transport, credentials);
+
+    ScheduleReceiptIntent no_event = MakeScheduleReceipt();
+    no_event.eventId = "";
+    Check(channel.SubmitScheduleReceipt(no_event).status == ReportStatus::kRejected, "空回执事件 ID 必须本地拒绝");
+    Check(transport.requests.empty(), "空回执事件 ID 不得发起网络请求");
+
+    NotificationIntent no_business_event = MakeNotification();
+    no_business_event.businessEventId = "";
+    Check(channel.SubmitNotification(no_business_event).status == ReportStatus::kRejected,
+          "空业务事件 ID 必须本地拒绝");
+    Check(transport.requests.empty(), "空业务事件 ID 不得发起网络请求");
+
+    NotificationIntent bad_type = MakeNotification();
+    bad_type.reminderType = "urgent";
+    Check(channel.SubmitNotification(bad_type).status == ReportStatus::kRejected, "非法提醒类型必须本地拒绝");
+    Check(transport.requests.empty(), "非法提醒类型不得发起网络请求");
+
+    NotificationIntent snooze_without_minutes = MakeNotification();
+    snooze_without_minutes.actions[1].minutes.reset();
+    Check(channel.SubmitNotification(snooze_without_minutes).status == ReportStatus::kRejected,
+          "snooze 缺 minutes 必须本地拒绝");
+    Check(transport.requests.empty(), "snooze 缺 minutes 不得发起网络请求");
+}
+
+void TestStatusCodeMapping() {
+    struct Case {
+        int code;
+        ReportStatus expected;
+        const char* why;
+    };
+    const Case cases[] = {
+        {400, ReportStatus::kRejected, "400 客户端错误不可重试"},  {409, ReportStatus::kRejected, "409 冲突不可重试"},
+        {422, ReportStatus::kRejected, "422 语义错误不可重试"},    {301, ReportStatus::kRejected, "重定向不可重试"},
+        {408, ReportStatus::kRetryable, "408 超时可重试"},         {429, ReportStatus::kRetryable, "429 限流可重试"},
+        {503, ReportStatus::kRetryable, "503 服务暂不可用可重试"},
+    };
+    for (const Case& c : cases) {
+        FakeTransport transport;
+        FakeCredentials credentials;
+        transport.next_status = ImTransportStatus::kHttpError;
+        transport.next_status_code = c.code;
+        ImReportingChannel channel(transport, credentials);
+        const ReportResult result = channel.SubmitScheduleReceipt(MakeScheduleReceipt());
+        Check(result.status == c.expected, c.why);
+    }
+}
+
+void TestInvalidTransportConfigIsRejected() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    transport.next_status = ImTransportStatus::kInvalidConfig;
     ImReportingChannel channel(transport, credentials);
 
     const ReportResult result = channel.SubmitScheduleReceipt(MakeScheduleReceipt());
 
-    Check(result.status == ReportStatus::kRetryable, "5xx 必须归类为可重试");
+    Check(result.status == ReportStatus::kRejected, "传输配置错误必须归类为拒绝");
+    Check(transport.requests.size() == 1, "传输配置错误仍应被通道映射");
+}
+
+void TestGatewayUrlScheme() {
+    Check(voicelife::im::IsHttpsGatewayUrl("https://im.example.com"), "https 基地址必须通过");
+    Check(!voicelife::im::IsHttpsGatewayUrl("http://im.example.com"), "http 基地址必须拒绝");
+    Check(!voicelife::im::IsHttpsGatewayUrl("im.example.com"), "缺失 scheme 必须拒绝");
+    Check(!voicelife::im::IsHttpsGatewayUrl(""), "空基地址必须拒绝");
+    Check(!voicelife::im::IsHttpsGatewayUrl("https://im.example.com?x=1"), "带 query 必须拒绝");
+    Check(!voicelife::im::IsHttpsGatewayUrl("https://im.example.com#frag"), "带 fragment 必须拒绝");
 }
 
 }  // namespace
@@ -243,6 +316,9 @@ int main() {
     TestDeviceIdMismatchIsLocal();
     TestCredentialRejectedByServer();
     TestNetworkFailureKeepsFactsAndAllowsIdempotentRetry();
-    TestHttpErrorIsRetryable();
+    TestInvalidIntentRejectedLocally();
+    TestStatusCodeMapping();
+    TestInvalidTransportConfigIsRejected();
+    TestGatewayUrlScheme();
     return 0;
 }

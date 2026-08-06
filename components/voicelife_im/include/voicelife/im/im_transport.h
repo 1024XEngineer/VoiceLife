@@ -35,6 +35,8 @@ enum class ImTransportStatus {
     kHttpError,
     /// 连接失败、超时等网络层失败。
     kNetworkFailure,
+    /// 客户端配置错误（例如非 https 网关地址），不可重试。
+    kInvalidConfig,
 };
 
 /// 一次 HTTPS 提交的结果。

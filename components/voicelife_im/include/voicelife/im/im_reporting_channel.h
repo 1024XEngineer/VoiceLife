@@ -17,6 +17,8 @@ enum class ReportStatus {
     kCredentialRejected,
     /// 网络或服务端暂时失败，可重试；本地事实不受影响。
     kRetryable,
+    /// 本地契约校验失败或服务端明确拒绝（4xx/配置错误），不可重试。
+    kRejected,
 };
 
 /// 一次上报提交的结果。

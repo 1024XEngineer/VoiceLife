@@ -41,7 +41,8 @@ add_voicelife_library(contracts voicelife_contracts
 target_link_libraries(contracts PRIVATE yyjson)
 add_voicelife_library(im voicelife_im
     "${ROOT_DIR}/components/voicelife_im/src/im_reporting_channel.cc"
-    "${ROOT_DIR}/components/voicelife_im/src/im_wire.cc")
+    "${ROOT_DIR}/components/voicelife_im/src/im_wire.cc"
+    "${ROOT_DIR}/components/voicelife_im/src/im_endpoint.cc")
 target_link_libraries(im PUBLIC contracts)
 add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_create_helpers.cc"
