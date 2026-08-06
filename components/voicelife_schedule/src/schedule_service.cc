@@ -7,6 +7,8 @@
 
 #include "schedule_create_helpers.h"
 #include "schedule_mock_data.h"
+#include "schedule_operation_helpers.h"
+#include "schedule_operation_mock_data.h"
 #include "schedule_query_helpers.h"
 #include "schedule_time_rules.h"
 #include "schedule_update_helpers.h"
@@ -234,6 +236,39 @@ QueryScheduleResult ScheduleService::query_schedule(const QueryScheduleCommand& 
     std::vector<Schedule> page(matches.begin() + static_cast<std::ptrdiff_t>(begin),
                                matches.begin() + static_cast<std::ptrdiff_t>(begin + count));
     return {.status = Status::Ok(), .schedules = std::move(page), .total = total, .error = {}};
+}
+
+RecordScheduleOperationResult ScheduleService::record_schedule_operation(
+    const RecordScheduleOperationCommand& command) {
+    // 健壮性判断
+    const Status validation = ValidateRecordScheduleOperationCommand(command);
+    if (!validation.ok()) return InvalidRecordScheduleOperationResult(validation.message);
+
+    // 组装实体
+    OperationRecord operation{
+        .id = 0,
+        .type = command.type,
+        .schedule_id = command.schedule_id,
+        .schedule_event = TrimScheduleText(command.schedule_event),
+        .operated_at = {},
+        .previous = command.previous,
+    };
+
+    // mock 存储
+    const Result<OperationRecord> recorded = AppendMockScheduleOperation(std::move(operation));
+    if (!recorded.ok()) {
+        return {
+            .status = recorded.status,
+            .operation = std::nullopt,
+            .error = recorded.status.message,
+        };
+    }
+
+    return {
+        .status = Status::Ok(),
+        .operation = recorded.value,
+        .error = {},
+    };
 }
 
 }  // namespace voicelife::schedule

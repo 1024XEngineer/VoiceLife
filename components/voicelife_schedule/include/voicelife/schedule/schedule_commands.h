@@ -58,7 +58,7 @@ struct RecordScheduleOperationCommand {
     ScheduleOperationType type = ScheduleOperationType::kCreate;
     ScheduleId schedule_id = 0;
     std::string schedule_event;
-    std::optional<JsonDocument> previous;
+    std::optional<Schedule> previous;  ///< 创建时为空，修改和删除时保存操作前的完整日程。
 };
 
 /// 撤销指定日程操作所需的数据。

@@ -5,8 +5,6 @@
 #include <optional>
 #include <string>
 
-#include "voicelife/contracts/json.h"
-
 namespace voicelife::schedule {
 
 /// 日程、操作记录和提醒使用数据库兼容的 64 位整数标识。
@@ -50,7 +48,7 @@ struct OperationRecord {
     ScheduleId schedule_id = 0;
     std::string schedule_event;
     DateTime operated_at;
-    std::optional<JsonDocument> previous;
+    std::optional<Schedule> previous;  ///< 操作前的领域快照；存储适配器落库时序列化到 JSON 字段。
 };
 
 }  // namespace voicelife::schedule
