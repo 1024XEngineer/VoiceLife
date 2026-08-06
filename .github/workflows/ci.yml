@@ -52,6 +52,20 @@ jobs:
     name: IM Gateway / Node 24
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      DATABASE_URL: postgres://voicelife:voicelife@localhost:5432/voicelife
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: voicelife
+          POSTGRES_PASSWORD: voicelife
+          POSTGRES_DB: voicelife
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
