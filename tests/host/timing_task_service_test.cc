@@ -1,5 +1,7 @@
 #include "voicelife/timing/timing_task_service.h"
 
+#include <limits>
+
 #include "support/test_support.h"
 #include "support/timing_fakes.h"
 #include "voicelife/contracts/status.h"
@@ -169,6 +171,7 @@ int main() {
         .task_id = recurring_calendar_task.value->task_id,
         .planned_at = 1785747600 + kDay,
         .planned_end_at = 1785747600 + kDay + 1800,
+        .actual_trigger_at = 1785747600 + kDay + 300,
         .status = TimerInstanceStatus::kModified,
         .override_fields =
             {
@@ -194,6 +197,30 @@ int main() {
               recurring_calendar.value->occurrences[1].planned_start_at == 1785747600 + kDay + 3600,
           "已修改例外应覆盖基础 occurrence 的开始时间");
 
+    const auto descending_second_page = recurring_calendar_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + 3 * kDay,
+        .schedule_id = "schedule-calendar-recurring",
+        .page = 2,
+        .page_size = 2,
+        .sort_by = CalendarSortBy::kPlannedStartAt,
+        .sort_order = SortOrder::kDescending,
+    });
+    Check(descending_second_page.ok() && descending_second_page.value->occurrences.size() == 1 &&
+              !descending_second_page.value->has_more &&
+              descending_second_page.value->occurrences.front().planned_start_at == 1785747600,
+          "降序第二页应返回剩余的最早 occurrence");
+
+    const auto actual_trigger_descending = recurring_calendar_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + 3 * kDay,
+        .schedule_id = "schedule-calendar-recurring",
+        .sort_by = CalendarSortBy::kActualTriggerAt,
+        .sort_order = SortOrder::kDescending,
+    });
+    Check(actual_trigger_descending.ok() && actual_trigger_descending.value->occurrences.front().is_exception,
+          "按实际触发时间降序时已触发例外应排在未触发 occurrence 前");
+
     const auto pending_only = recurring_calendar_service.ListCalendarView({
         .range_start = 1785747600,
         .range_end = 1785747600 + 3 * kDay,
@@ -204,6 +231,12 @@ int main() {
 
     const auto invalid_calendar = service.ListCalendarView({.range_start = 10, .range_end = 10});
     Check(invalid_calendar.status.code == ErrorCode::kInvalidArgument, "左闭右开范围必须满足 start 小于 end");
+    const auto invalid_calendar_minimum = service.ListCalendarView({
+        .range_start = std::numeric_limits<int64_t>::min(),
+        .range_end = std::numeric_limits<int64_t>::min() + kDay,
+    });
+    Check(invalid_calendar_minimum.status.code == ErrorCode::kInvalidArgument,
+          "无法安全对齐到日边界的极小时间戳应被拒绝");
 
     const auto missing_schedule = service.ListCalendarView({
         .range_start = 1785740000,
@@ -211,6 +244,21 @@ int main() {
         .schedule_id = "missing-schedule",
     });
     Check(missing_schedule.ok() && missing_schedule.value->total == 0, "不存在的日程过滤目标应返回稳定空结果");
+
+    store.AddTask({
+        .id = "task-deleted-calendar",
+        .schedule_id = "schedule-deleted-calendar",
+        .start_at = 1785747600,
+        .time_zone = "UTC",
+        .status = TimingTaskStatus::kActive,
+        .deleted_at = 1785747601,
+    });
+    const auto deleted_task_calendar = service.ListCalendarView({
+        .range_start = 1785740000,
+        .range_end = 1785750000,
+        .schedule_id = "schedule-deleted-calendar",
+    });
+    Check(deleted_task_calendar.ok() && deleted_task_calendar.value->total == 0, "软删除任务不应出现在日历视图中");
 
     recurring_calendar_store.FailNextTaskList(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
     const auto failed_task_list = recurring_calendar_service.ListCalendarView({
@@ -308,7 +356,7 @@ int main() {
         .range_start = 1785747600,
         .range_end = 1785747600 + 70 * kDay,
     });
-    Check(monthly_calendar.ok() && monthly_calendar.value->total >= 2, "每月规则应按周期锚点的日期展开");
+    Check(monthly_calendar.ok() && monthly_calendar.value->total == 3, "每月规则应按周期锚点的日期展开");
 
     InMemoryTimingTaskStore filtered_monthly_calendar_store;
     FixedTimingIdGenerator filtered_monthly_calendar_ids;
@@ -326,7 +374,7 @@ int main() {
         .range_start = 1785747600,
         .range_end = 1785747600 + 70 * kDay,
     });
-    Check(filtered_monthly_calendar.ok() && filtered_monthly_calendar.value->total >= 3,
+    Check(filtered_monthly_calendar.ok() && filtered_monthly_calendar.value->total == 4,
           "每月日期筛选应生成匹配 occurrence");
 
     InMemoryTimingTaskStore yearly_calendar_store;

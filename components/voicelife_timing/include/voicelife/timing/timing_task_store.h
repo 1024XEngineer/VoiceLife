@@ -47,7 +47,7 @@ class TimingTaskStorePort {
     /**
      * @brief 查询任务已物化的 occurrence 实例。
      * @param task_id 定时任务标识。
-     * @return 实例列表或存储错误。
+     * @return 包含软删除记录的实例列表或存储错误；日历服务负责决定它们是否用户可见。
      */
     virtual Result<std::vector<TimerInstance>> ListInstances(const TimingTaskId& task_id) = 0;
     /**
