@@ -97,6 +97,7 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
     }
     Status Abort(std::string_view) override {
         ++aborts;
+        generation_at_abort = generation_;
         return abort_result;
     }
     Status Speak(std::string_view) override {
@@ -127,6 +128,7 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
     voicelife::voice::AudioFrame last_audio_frame;
     voicelife::voice::VoiceAudioFormats formats;
     uint64_t generation_ = 0;
+    uint64_t generation_at_abort = 0;
     Status connect_result = Status::Ok();
     Status start_result = Status::Ok();
     Status stop_result = Status::Ok();
@@ -213,7 +215,8 @@ int main() {
     provider.Emit(tts_started);
     Check(session.state() == voicelife::voice::VoiceSessionState::kSpeaking, "TTS start 应进入 speaking");
     Check(session.Interrupt().ok(), "播报应支持打断");
-    Check(session.generation() != generation && provider.generation_ == session.generation() && output.flushes == 1,
+    Check(session.generation() != generation && provider.generation_ == session.generation() &&
+              provider.generation_at_abort == session.generation() && output.flushes == 1,
           "打断应刷新播放并让 Provider 切换到新 generation");
     Check(provider.EmitAudio(Frame(generation, 1)).code == ErrorCode::kInvalidArgument && output.pushes == 1,
           "打断后迟到的旧 generation 音频不得重新进入播放队列");
@@ -234,6 +237,52 @@ int main() {
     Check(failed.Start(Config()).code == ErrorCode::kUnavailable, "输入端口失败应向上传播");
     Check(unused_provider.connects == 1 && unused_provider.disconnects == 1,
           "音频协商后输入端口失败必须回滚 Provider 连接");
+
+    FakeInput connect_failure_input;
+    FakeOutput connect_failure_output;
+    FakeProvider connect_failure_provider;
+    connect_failure_provider.connect_result = Status::Error(ErrorCode::kUnavailable, "Provider 连接失败");
+    voicelife::voice::VoiceSession connect_failure(connect_failure_input, connect_failure_output,
+                                                   connect_failure_provider);
+    Check(connect_failure.Start(Config()).code == ErrorCode::kUnavailable &&
+              connect_failure_provider.disconnects == 1 &&
+              connect_failure.state() == voicelife::voice::VoiceSessionState::kFailed,
+          "Provider 连接失败后会话必须执行断开回滚并进入 failed");
+
+    FakeInput capture_failure_input;
+    FakeOutput capture_failure_output;
+    FakeProvider capture_failure_provider;
+    capture_failure_input.start_result = Status::Error(ErrorCode::kUnavailable, "采集启动失败");
+    capture_failure_provider.stop_result = Status::Error(ErrorCode::kUnavailable, "远端采集回滚失败");
+    voicelife::voice::VoiceSession capture_failure(capture_failure_input, capture_failure_output,
+                                                   capture_failure_provider);
+    Check(capture_failure.Start(Config()).ok(), "回滚失败用例应先启动会话");
+    Check(capture_failure.BeginCapture().code == ErrorCode::kUnavailable &&
+              capture_failure.state() == voicelife::voice::VoiceSessionState::kFailed,
+          "本地采集启动和远端回滚都失败时会话必须进入 failed");
+
+    FakeInput stop_capture_failure_input;
+    FakeOutput stop_capture_failure_output;
+    FakeProvider stop_capture_failure_provider;
+    voicelife::voice::VoiceSession stop_capture_failure(stop_capture_failure_input, stop_capture_failure_output,
+                                                        stop_capture_failure_provider);
+    Check(stop_capture_failure.Start(Config()).ok() && stop_capture_failure.BeginCapture().ok(),
+          "停止采集失败用例应先进入 capturing");
+    stop_capture_failure_provider.stop_result = Status::Error(ErrorCode::kUnavailable, "远端停止失败");
+    Check(stop_capture_failure.EndCapture().code == ErrorCode::kUnavailable &&
+              stop_capture_failure.state() == voicelife::voice::VoiceSessionState::kFailed,
+          "本地已停止而远端停止失败时不得继续保持 capturing");
+
+    FakeInput disconnect_failure_input;
+    FakeOutput disconnect_failure_output;
+    FakeProvider disconnect_failure_provider;
+    disconnect_failure_provider.disconnect_result = Status::Error(ErrorCode::kUnavailable, "Provider 断开失败");
+    voicelife::voice::VoiceSession disconnect_failure(disconnect_failure_input, disconnect_failure_output,
+                                                      disconnect_failure_provider);
+    Check(disconnect_failure.Start(Config()).ok(), "断开失败用例应先启动会话");
+    Check(disconnect_failure.Stop().code == ErrorCode::kUnavailable &&
+              disconnect_failure.state() == voicelife::voice::VoiceSessionState::kFailed,
+          "Provider 断开失败时会话不得伪装为 stopped");
 
     FakeInput speak_input;
     FakeOutput speak_output;

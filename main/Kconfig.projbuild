@@ -6,6 +6,15 @@ config VOICELIFE_AUDIO_PROBE
     help
         Run the bounded I2S topology, PCM evidence and optional replay probe.
 
+config VOICELIFE_AUDIO_PORT_SMOKE
+    bool "Enable ESP32-S3 PCM Audio Port smoke"
+    default n
+    depends on IDF_TARGET_ESP32S3
+    help
+        Exercise the profile-driven PCM Audio Port with separate capture and
+        playback tasks. This proves digital I2S and bounded queue behavior;
+        it does not prove acoustic playback or a cloud voice session.
+
 if VOICELIFE_AUDIO_PROBE
 
 choice VOICELIFE_AUDIO_PROBE_PROFILE

@@ -80,6 +80,7 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
     Status status = provider_.Connect(provider_config, [this](const VoiceEvent& event) { HandleEvent(event); });
     if (!status.ok()) {
         provider_.SetAudioSink({});
+        (void)provider_.Disconnect();
         {
             std::lock_guard<std::mutex> lock(mutex_);
             state_ = VoiceSessionState::kFailed;
@@ -227,6 +228,10 @@ Status VoiceSession::BeginCapture() {
     // must be stopped so the server does not stay in a half-open capture state.
     Status rollback = provider_.StopCapture();
     if (!rollback.ok()) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            state_ = VoiceSessionState::kFailed;
+        }
         Emit("capture_rollback_failed", rollback.message);
         return rollback;
     }
@@ -401,7 +406,15 @@ Status VoiceSession::Stop() {
     output_.Close();
     input_.SetAudioSink({});
     input_.Close();
-    Emit("stopped", "");
+    if (!provider_status.ok()) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            state_ = VoiceSessionState::kFailed;
+        }
+        Emit("stop_disconnect_failed", provider_status.message);
+    } else {
+        Emit("stopped", "");
+    }
     return provider_status;
 }
 
