@@ -44,7 +44,29 @@ pnpm --dir services/im-gateway test
 
 跨端 JSON fixture 位于 `contracts/im-gateway/v1/fixtures`，由 C++ 主机测试与 TypeScript 测试共同消费。
 
-`createMockImGateway()` 使用内存 Repository 和 Mock 通道，可用于后续主干串联测试。生产装配应替换为 PostgreSQL、Koishi、微信 Capability Plugin 和真实 SSE Hub。
+## PostgreSQL 持久化
+
+持久化契约测试（`test/persistence-contract.test.mjs`）会用同一套断言分别跑内存实现与
+`PostgresImUnitOfWork`，覆盖投递、尝试、回执、用户动作和事务性发件箱的跨聚合事务。
+
+本地用 Docker 启动 PostgreSQL：
+
+```bash
+docker compose up -d postgres
+```
+
+连接参数默认取 `postgres://voicelife:voicelife@localhost:5432/voicelife`，可通过环境变量覆盖：
+
+```bash
+DATABASE_URL=postgres://voicelife:voicelife@localhost:5432/voicelife \
+  node --test test/persistence-contract.test.mjs
+```
+
+PostgreSQL 不可用时对应测试自动跳过，其余断言照常执行；CI 通过 service container 提供相同的
+PostgreSQL 16，确保契约套件在真实数据库上通过。
+
+`createMockImGateway()` 使用内存 Repository 和 Mock 通道，可用于后续主干串联测试。生产装配应替换为
+`PostgresImUnitOfWork`、Koishi、微信 Capability Plugin 和真实 SSE Hub。
 
 当前 mock 场景覆盖：PairingSession 绑定/过期、强弱提醒分流、DeliveryAttempt 与 H5 Token 渲染、复合入站幂等键、`externalMessageId` 回执归并、Receipt 去重及迟到回执不倒退、H5/平台 Action 入口合流、SSE 持久化回放、HTTPS Result 回传与 Action 过期关闭。
 
