@@ -41,10 +41,13 @@ VoiceSessionConfig VoiceSession::config() const {
 bool VoiceSession::AcceptFrameLocked(const AudioFrame& frame) const {
     const AudioFormat& expected = audio_formats_.capture;
     const AudioFormat& actual = frame.format;
-    return state_ == VoiceSessionState::kCapturing && frame.generation == generation_ && actual.valid() &&
-           actual.codec == expected.codec && actual.sample_rate_hz == expected.sample_rate_hz &&
-           actual.channels == expected.channels && actual.bits_per_sample == expected.bits_per_sample &&
-           actual.frame_duration_ms == expected.frame_duration_ms && !frame.payload.empty();
+    return state_ == VoiceSessionState::kCapturing && frame.generation == generation_ &&
+           actual.valid() && actual.codec == expected.codec &&
+           actual.sample_rate_hz == expected.sample_rate_hz &&
+           actual.channels == expected.channels &&
+           actual.bits_per_sample == expected.bits_per_sample &&
+           actual.frame_duration_ms == expected.frame_duration_ms &&
+           !frame.payload.empty() && frame.payload.size() <= AudioFrame::kMaxPayloadBytes;
 }
 
 Status VoiceSession::Start(const VoiceSessionConfig& config) {
@@ -288,7 +291,8 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
         if (!frame.format.valid() || frame.format.codec != expected.codec ||
             frame.format.sample_rate_hz != expected.sample_rate_hz || frame.format.channels != expected.channels ||
             frame.format.bits_per_sample != expected.bits_per_sample ||
-            frame.format.frame_duration_ms != expected.frame_duration_ms || frame.payload.empty()) {
+            frame.format.frame_duration_ms != expected.frame_duration_ms ||
+            frame.payload.empty() || frame.payload.size() > AudioFrame::kMaxPayloadBytes) {
             return Status::Error(ErrorCode::kInvalidArgument, "采集帧格式与会话不一致");
         }
         generation = generation_;
@@ -315,7 +319,8 @@ Status VoiceSession::HandleAudio(AudioFrame frame) {
     if (frame.generation != generation_ || frame.format.codec != expected.codec ||
         frame.format.sample_rate_hz != expected.sample_rate_hz || frame.format.channels != expected.channels ||
         frame.format.bits_per_sample != expected.bits_per_sample ||
-        frame.format.frame_duration_ms != expected.frame_duration_ms || frame.payload.empty()) {
+        frame.format.frame_duration_ms != expected.frame_duration_ms ||
+        frame.payload.empty() || frame.payload.size() > AudioFrame::kMaxPayloadBytes) {
         return Status::Error(ErrorCode::kInvalidArgument, "播放帧不属于当前会话");
     }
     return output_.Push(frame);

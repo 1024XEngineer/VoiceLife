@@ -37,6 +37,10 @@ struct AudioFormat {
 };
 
 struct AudioFrame {
+    // Absolute upper bound for a single audio frame payload in bytes.
+    // Covers 24 kHz 32-bit stereo 60 ms PCM (~11.5 KB) with headroom.
+    static constexpr size_t kMaxPayloadBytes = 16384;
+
     uint64_t generation = 0;
     uint64_t sequence = 0;
     AudioFormat format;

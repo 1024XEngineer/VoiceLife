@@ -36,7 +36,7 @@ LinxSpeechProviderAdapter::LinxSpeechProviderAdapter(LinxTransportPort& transpor
 
 voice::CapabilityProfile LinxSpeechProviderAdapter::DefaultCapabilities() {
     return {.provider_id = "xrobot-websocket",
-            .capabilities = {"streaming-asr", "tts", "cancel-generation", "pcm", "opus"}};
+            .capabilities = {"streaming-asr", "tts", "cancel-generation", "pcm"}};
 }
 
 void LinxSpeechProviderAdapter::SetAudioSink(voice::AudioFrameSink sink) {
