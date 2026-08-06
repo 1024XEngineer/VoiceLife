@@ -44,6 +44,7 @@ target_link_libraries(contracts PRIVATE yyjson)
 add_voicelife_library(im voicelife_im
     "${ROOT_DIR}/components/voicelife_im/src/im_reporting_channel.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_action_channel.cc"
+    "${ROOT_DIR}/components/voicelife_im/src/im_sse.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_wire.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_endpoint.cc")
 target_link_libraries(im PUBLIC contracts)
@@ -143,6 +144,10 @@ target_compile_definitions(im_reporting_channel_test PRIVATE VOICELIFE_SOURCE_DI
 add_voicelife_test(im_action_channel_test "unit;im" im_action_channel_test.cc)
 target_link_libraries(im_action_channel_test PRIVATE im contracts)
 target_compile_definitions(im_action_channel_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
+
+add_voicelife_test(im_sse_test "unit;im" im_sse_test.cc)
+target_link_libraries(im_sse_test PRIVATE im contracts)
+target_compile_definitions(im_sse_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
 
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)

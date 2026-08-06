@@ -1,5 +1,6 @@
 #include "esp_http_transport.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <utility>
@@ -14,6 +15,26 @@ namespace {
 
 constexpr char kTag[] = "voicelife_im";
 constexpr int kTransportTimeoutMs = 10 * 1000;
+
+// 读取响应体：受理结果（如 NotificationSubmission）需透传给调用方提取动作窗口。
+// content_length 未知（-1，分块编码）时持续读到 EOF；否则按 Content-Length 精确读取。
+void ReadResponseBody(esp_http_client_handle_t client, std::string& body) {
+    const int64_t content_length = esp_http_client_get_content_length(client);
+    char buffer[256];
+    int64_t remaining = content_length;
+    while (remaining != 0) {
+        const size_t want =
+            remaining > 0 ? std::min<size_t>(sizeof(buffer), static_cast<size_t>(remaining)) : sizeof(buffer);
+        const int n = esp_http_client_read(client, buffer, static_cast<int>(want));
+        if (n <= 0) {
+            break;
+        }
+        body.append(buffer, static_cast<size_t>(n));
+        if (remaining > 0) {
+            remaining -= n;
+        }
+    }
+}
 
 }  // namespace
 
@@ -83,6 +104,7 @@ ImHttpResponse EspHttpTransport::Post(const ImHttpRequest& request) {
     result.message = std::to_string(result.status_code);
     if (result.status_code >= 200 && result.status_code < 300) {
         result.status = ImTransportStatus::kSuccess;
+        ReadResponseBody(client, result.body);
     } else if (result.status_code == 401 || result.status_code == 403) {
         result.status = ImTransportStatus::kCredentialRejected;
     } else {
