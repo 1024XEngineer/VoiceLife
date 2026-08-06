@@ -46,7 +46,9 @@ add_voicelife_library(im voicelife_im
     "${ROOT_DIR}/components/voicelife_im/src/im_action_channel.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_sse.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_wire.cc"
-    "${ROOT_DIR}/components/voicelife_im/src/im_endpoint.cc")
+    "${ROOT_DIR}/components/voicelife_im/src/im_endpoint.cc"
+    "${ROOT_DIR}/components/voicelife_im/src/transport/im_response_reader.cc")
+target_include_directories(im PUBLIC "${ROOT_DIR}/components/voicelife_im/src/transport")
 target_link_libraries(im PUBLIC contracts)
 add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_create_helpers.cc"
@@ -152,6 +154,9 @@ target_compile_definitions(im_action_channel_window_test PRIVATE VOICELIFE_SOURC
 add_voicelife_test(im_sse_test "unit;im" im_sse_test.cc)
 target_link_libraries(im_sse_test PRIVATE im contracts)
 target_compile_definitions(im_sse_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
+
+add_voicelife_test(im_response_reader_test "unit;im" im_response_reader_test.cc)
+target_link_libraries(im_response_reader_test PRIVATE im contracts)
 
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)

@@ -8,6 +8,7 @@ idf_component_register(
         "src/transport/esp_http_transport.cc"
         "src/transport/esp_action_stream_transport.cc"
         "src/transport/esp_clock.cc"
+        "src/transport/im_response_reader.cc"
     INCLUDE_DIRS "include"
     REQUIRES voicelife_contracts
     PRIV_REQUIRES esp_http_client mbedtls
