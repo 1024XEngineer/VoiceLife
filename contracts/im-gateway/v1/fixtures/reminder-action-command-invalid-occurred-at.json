@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1",
+  "commandId": "command-fixture",
+  "operationId": "operation-fixture",
+  "correlationId": "correlation-fixture",
+  "deviceId": "device-fixture",
+  "actorBindingId": "binding-fixture",
+  "reminderTriggerId": "trigger-fixture",
+  "action": "snooze",
+  "params": {
+    "minutes": 10
+  },
+  "occurredAt": "not-a-time",
+  "expiresAt": "2026-08-03T00:05:00.000Z"
+}

@@ -225,6 +225,78 @@ void TestStrongWindowExecutesAndReports() {
     CheckResultRoundTrips(request, expected);
 }
 
+/// 构造覆盖 AppendJsonValue 全部值种类的嵌套 details。
+voicelife::JsonValue MakeRichDetails() {
+    return voicelife::JsonValue::Object({
+        {"code", voicelife::JsonValue::String("E_CONFLICT")},
+        {"count", voicelife::JsonValue::Number(3)},
+        {"ratio", voicelife::JsonValue::Number(0.5)},
+        {"ok", voicelife::JsonValue::Bool(true)},
+        {"empty", voicelife::JsonValue()},
+        {"tags", voicelife::JsonValue::Array({voicelife::JsonValue::String("a"), voicelife::JsonValue::String("b")})},
+        {"nested", voicelife::JsonValue::Object({{"x", voicelife::JsonValue::Number(1)}})},
+    });
+}
+
+void TestResultSerializationCarriesOptionalFields() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeExecutor executor;
+    executor.result = MakeResult();
+    executor.result.errorCode = "E_CONFLICT";
+    executor.result.details = MakeRichDetails();
+    FakeClock clock;
+    ImReportingChannel reporting(transport, credentials);
+    ImActionChannel channel(reporting, credentials, executor, clock);
+    FakeStream stream;
+    stream.commands.push_back(MakeCommand("command-1", "operation-1"));
+
+    channel.Run(stream, MakeWindow());
+
+    Check(transport.requests.size() == 1, "结果回传必须发生");
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(transport.requests[0].body, root).ok(), "回传请求体必须是合法 JSON");
+    const voicelife::JsonValue* error_code = root.Get("errorCode");
+    Check(error_code != nullptr && error_code->IsString() && error_code->string == "E_CONFLICT",
+          "errorCode 必须被序列化");
+    const voicelife::JsonValue* details = root.Get("details");
+    Check(details != nullptr && details->IsObject(), "details 对象必须被序列化");
+    const voicelife::JsonValue* nested = details->Get("nested");
+    Check(nested != nullptr && nested->IsObject() && nested->Get("x") != nullptr, "details 嵌套对象必须被序列化");
+    const voicelife::JsonValue* count = details->Get("count");
+    Check(count != nullptr && count->kind == voicelife::JsonValue::Kind::kNumber && count->number == 3,
+          "details 整数必须被序列化");
+    const voicelife::JsonValue* ratio = details->Get("ratio");
+    Check(ratio != nullptr && ratio->kind == voicelife::JsonValue::Kind::kNumber && ratio->number == 0.5,
+          "details 浮点必须被序列化");
+    const voicelife::JsonValue* ok = details->Get("ok");
+    Check(ok != nullptr && ok->kind == voicelife::JsonValue::Kind::kBool && ok->boolean, "details 布尔必须被序列化");
+    const voicelife::JsonValue* none = details->Get("empty");
+    Check(none != nullptr && none->kind == voicelife::JsonValue::Kind::kNull, "details null 必须被序列化");
+    const voicelife::JsonValue* tags = details->Get("tags");
+    Check(tags != nullptr && tags->IsArray() && tags->array.size() == 2, "details 数组必须被序列化");
+}
+
+void TestResultSerializationMinimal() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeExecutor executor;
+    executor.result = MakeResult();
+    executor.result.nextTriggerAt.reset();
+    FakeClock clock;
+    ImReportingChannel reporting(transport, credentials);
+    ImActionChannel channel(reporting, credentials, executor, clock);
+    FakeStream stream;
+    stream.commands.push_back(MakeCommand("command-1", "operation-1"));
+
+    channel.Run(stream, MakeWindow());
+
+    Check(transport.requests.size() == 1, "结果回传必须发生");
+    Check(transport.requests[0].body.find("\"nextTriggerAt\"") == std::string::npos, "缺省 nextTriggerAt 不得序列化");
+    Check(transport.requests[0].body.find("\"errorCode\"") == std::string::npos, "缺省 errorCode 不得序列化");
+    Check(transport.requests[0].body.find("\"details\"") == std::string::npos, "缺省 details 不得序列化");
+}
+
 void TestReconnectReplayExecutesOnce() {
     FakeTransport transport;
     FakeCredentials credentials;
@@ -390,6 +462,8 @@ void TestMalformedSubmissionBodyHasNoWindow() {
 int main() {
     TestExpiredWindowDoesNotOpenStream();
     TestStrongWindowExecutesAndReports();
+    TestResultSerializationCarriesOptionalFields();
+    TestResultSerializationMinimal();
     TestReconnectReplayExecutesOnce();
     TestExpiredCommandReportedAsExpired();
     TestWrongDeviceIdDroppedLocally();
