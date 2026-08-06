@@ -201,7 +201,7 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 | Linx XRobot 协议与 Provider Adapter | 主机 + ESP-IDF 构建完成 | 已覆盖 16 kHz 上行/24 kHz 下行协商、hello/listen/detect/abort、STT/TTS、断线阻断、重连 hello 与旧代次拒绝；ESP32-S3 WSS Transport 已编译进固件，但尚未完成真实云端音频闭环 |
 | 小智音频与 ESP32-S3 XRobot Adapter | 待开发 | 从上游能力逐段迁移，真实板优先 |
 | 持久化 Adapter | 待开发 | 必须满足原子写入和重启恢复；只允许基于已验证底座实现，并复用单连接、迁移和事务生命周期 |
-| 微信 / 飞书 IM Adapter | 待开发 | 先稳定平台无关语义契约 |
+| 微信 / 飞书 IM Adapter | 部分完成 | 微信公众号已支持 Webhook 验签、入站规范化与模板回执归并；真实账号出站与飞书仍待开发 |
 | 真机闭环与用户试用 | 待开发 | 属于 MS3 功能 Issue |
 
 > ESP32-S3 的物理板身份、Flash/PSRAM 和双 OTA 分区已经在 115200 下完成只读核对与数据分区备份；新固件已只写入非活动 `ota_1` 槽并真实启动，随后恢复 `otadata`、确认原固件从 `ota_0` 启动。Linx token 没有进入 Profile；真实 headers、TLS、hello、断线重连、ASR/TTS 和音频闭环仍须在 [Issue #107](https://github.com/1024XEngineer/XE6-15/issues/107) 中用脱敏日志补齐。

@@ -1,0 +1,8 @@
+<xml>
+  <FromUserName><![CDATA[gh_fixture]]></FromUserName>
+  <CreateTime>1722643260</CreateTime>
+  <MsgType><![CDATA[event]]></MsgType>
+  <Event><![CDATA[TEMPLATESENDJOBFINISH]]></Event>
+  <MsgID>mock-platform-message</MsgID>
+  <Status><![CDATA[success]]></Status>
+</xml>
