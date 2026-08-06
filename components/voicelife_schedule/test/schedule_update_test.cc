@@ -34,14 +34,14 @@ void CheckFieldUpdates(ScheduleService& service) {
     command.location = std::optional<std::string>{"会议室 B"};
     command.notes = std::optional<std::string>{};
     command.reminder_id = std::optional<int64_t>{42};
-    command.status = ScheduleStatus::kComplete;
+    command.status = ScheduleStatus::kCompleted;
 
     const auto result = service.update_schedule(command);
     Check(result.status.ok() && result.schedule.has_value(), "合法字段修改应成功并返回完整日程");
     Check(result.schedule->event == "更新后的周会", "修改日程应清理事件名称两端空白");
     Check(result.schedule->location == "会议室 B" && !result.schedule->notes.has_value(),
           "修改日程应支持设置和清空可空文本字段");
-    Check(result.schedule->reminder_id == 42 && result.schedule->status == ScheduleStatus::kComplete,
+    Check(result.schedule->reminder_id == 42 && result.schedule->status == ScheduleStatus::kCompleted,
           "修改日程应支持关联提醒和完成状态");
 }
 

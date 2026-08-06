@@ -16,9 +16,7 @@ int main() {
     const UpdateScheduleCommand update;
     Check(!update.location.has_value() && !update.status.has_value() && !update.ignore_conflict,
           "修改日程命令默认不修改可选字段且不忽略冲突");
-    Check(ScheduleStatus::kCompleted != ScheduleStatus::kCancelled &&
-              ScheduleStatus::kComplete == ScheduleStatus::kCompleted,
-          "已完成状态应是独立的日程状态并兼容旧命名");
+    Check(ScheduleStatus::kCompleted != ScheduleStatus::kCancelled, "已完成状态应是独立的日程状态");
 
     const QueryScheduleCommand query;
     Check(query.limit == 10 && query.offset == 0, "查询日程命令应提供默认分页参数");

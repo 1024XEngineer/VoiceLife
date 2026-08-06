@@ -18,7 +18,7 @@ bool IsSupportedScheduleStatus(ScheduleStatus status) {
     switch (status) {
         case ScheduleStatus::kActive:
         case ScheduleStatus::kCancelled:
-        case ScheduleStatus::kComplete:
+        case ScheduleStatus::kCompleted:
             return true;
     }
     return false;

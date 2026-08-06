@@ -21,8 +21,6 @@ enum class ScheduleStatus {
     kActive = 1,
     kCancelled = 2,
     kCompleted = 3,
-    // 兼容修改日程接口早期使用的命名；持久化值与 kCompleted 相同。
-    kComplete = kCompleted,
 };
 
 /// 日程查询使用的状态筛选条件。
