@@ -1,6 +1,13 @@
 #pragma once
 
+#include <cstddef>
+#include <map>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "voicelife/contracts/status.h"
 
 namespace voicelife {
 
@@ -8,5 +15,73 @@ namespace voicelife {
 struct JsonDocument {
     std::string value;
 };
+
+/// JSON 值 DOM。契约解析器消费共享 fixture 前先解析为该结构。
+struct JsonValue {
+    /// JSON 值种类。
+    enum class Kind {
+        kNull,
+        kBool,
+        kNumber,
+        kString,
+        kArray,
+        kObject,
+    };
+
+    /// JSON 对象成员表。
+    using ObjectMap = std::map<std::string, JsonValue>;
+
+    Kind kind = Kind::kNull;
+    bool boolean = false;
+    double number = 0.0;
+    std::string string;
+    std::vector<JsonValue> array;
+    std::map<std::string, JsonValue> object;
+
+    /** @brief 构造布尔值节点。 @param value 布尔值。 @return 对应节点。 */
+    static JsonValue Bool(bool value);
+    /** @brief 构造数值节点。 @param value 数值。 @return 对应节点。 */
+    static JsonValue Number(double value);
+    /** @brief 构造字符串节点。 @param value 字符串内容。 @return 对应节点。 */
+    static JsonValue String(std::string value);
+    /** @brief 构造数组节点。 @param value 数组元素。 @return 对应节点。 */
+    static JsonValue Array(std::vector<JsonValue> value);
+    /** @brief 构造对象节点。 @param value 键值成员。 @return 对应节点。 */
+    static JsonValue Object(ObjectMap value);
+
+    /** @brief 判断节点是否为字符串。 @return 是字符串时返回 true。 */
+    [[nodiscard]] bool IsString() const { return kind == Kind::kString; }
+    /** @brief 判断节点是否为对象。 @return 是对象时返回 true。 */
+    [[nodiscard]] bool IsObject() const { return kind == Kind::kObject; }
+    /** @brief 判断节点是否为数组。 @return 是数组时返回 true。 */
+    [[nodiscard]] bool IsArray() const { return kind == Kind::kArray; }
+
+    /**
+     * @brief 读取对象成员。
+     * @param key 成员名。
+     * @return 非对象或成员缺失时返回 nullptr，否则返回成员指针。
+     */
+    [[nodiscard]] const JsonValue* Get(const std::string& key) const;
+};
+
+/// 设备侧 JSON 解析预算。默认值适用于 IM 契约输入，调用方可在更窄的边界覆盖。
+struct JsonParseOptions {
+    size_t max_bytes = 32 * 1024;
+    size_t max_depth = 32;
+    size_t max_nodes = 512;
+    size_t max_object_members = 64;
+    size_t max_array_items = 32;
+    size_t max_string_bytes = 4096;
+    size_t max_allocator_bytes = 128 * 1024;
+};
+
+/**
+ * @brief 把 JSON 文本解析为 DOM。
+ * @param input JSON 文本。
+ * @param out 解析结果节点。
+ * @param options 输入和内存资源预算。
+ * @return 语法或结构非法时返回 kInvalidArgument，资源预算耗尽时返回 kUnavailable。
+ */
+Status ParseJson(std::string_view input, JsonValue& out, const JsonParseOptions& options = {});
 
 }  // namespace voicelife

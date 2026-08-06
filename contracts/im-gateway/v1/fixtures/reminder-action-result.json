@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "1",
+  "operationId": "operation-fixture",
+  "reminderTriggerId": "trigger-fixture",
+  "status": "succeeded",
+  "nextTriggerAt": "2026-08-03T00:10:00.000Z",
+  "occurredAt": "2026-08-03T00:00:00.000Z"
+}
