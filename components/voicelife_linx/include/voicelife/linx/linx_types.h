@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -63,8 +64,11 @@ struct LinxInboundMessage {
 
 /** 保存 Linx 传输层向 Provider 上报事件的回调集合。 */
 struct LinxTransportSink {
+    std::function<void()> on_connected;
+    std::function<void()> on_disconnected;
     std::function<void(std::string_view)> on_text;
     std::function<void(const std::vector<uint8_t>&)> on_binary;
+    std::function<void(Status)> on_error;
 };
 
 /** 定义 Linx WebSocket 传输的异步端口。 */
@@ -96,6 +100,11 @@ class LinxTransportPort {
      * @return 关闭结果。
      */
     virtual Status Close() = 0;
+    /**
+     * @brief 设置异步回调使用的会话代次。
+     * @param generation 当前会话代次。
+     */
+    virtual void SetGeneration(uint64_t generation) { (void)generation; }
 };
 
 /** 定义 Linx 控制消息与领域语义之间的编解码端口。 */

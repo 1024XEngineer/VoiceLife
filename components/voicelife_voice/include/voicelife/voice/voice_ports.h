@@ -13,282 +13,272 @@
 
 namespace voicelife::voice {
 
+/** @brief 语音事件回调：Provider 传输层将事件推送给会话。 */
 using VoiceEventSink = std::function<void(const VoiceEvent&)>;
+
+/** @brief 诊断证据回调：会话生命周期中产出可追踪事件。 */
 using EvidenceSink = std::function<void(const VoiceEvidence&)>;
+
+/** @brief 原始音频帧回调：Provider 下行或输入端口上行。 */
 using AudioFrameSink = std::function<Status(AudioFrame)>;
 
-/** 定义音频采集设备的生命周期边界。 */
+/** @brief 硬件音频采集设备抽象（I2S 麦克风、AFE 管线等）。 */
 class AudioInputPort {
    public:
-    /** @brief 允许通过接口类型释放输入端口。 */
+    /** @brief 虚析构函数。 */
     virtual ~AudioInputPort() = default;
-    /**
-     * @brief 按协商格式打开输入设备。
-     * @param format 输入音频格式。
-     * @return 打开结果。
-     */
+
+    /** @brief 设置采集帧回调。 @param sink 接收采集帧的回调。 */
+    virtual void SetAudioSink(AudioFrameSink sink) = 0;
+
+    /** @brief 按协商的上行格式打开采集设备。
+     *  @param format 上行音频格式。
+     *  @return 打开成功返回 Ok。 */
     virtual Status Open(const AudioFormat& format) = 0;
-    /**
-     * @brief 开始指定模式的音频采集。
-     * @param mode 采集触发模式。
-     * @return 启动结果。
-     */
+
+    /** @brief 开始向设置的回调投递采集帧。
+     *  @param mode 采集模式。
+     *  @return 启动成功返回 Ok。 */
     virtual Status StartCapture(VoiceMode mode) = 0;
-    /**
-     * @brief 停止当前音频采集。
-     * @return 停止结果。
-     */
+
+    /** @brief 停止采集，此后迟到的帧会被会话拒绝。
+     *  @return 停止成功返回 Ok。 */
     virtual Status StopCapture() = 0;
-    /** @brief 关闭输入设备并释放其资源。 */
+
+    /** @brief 释放硬件资源并清除回调。 */
     virtual void Close() = 0;
 };
 
-/** 定义音频播放设备的生命周期和帧推送边界。 */
+/** @brief 硬件音频播放设备抽象（I2S 扬声器、DAC 等）。 */
 class AudioOutputPort {
    public:
-    /** @brief 允许通过接口类型释放输出端口。 */
+    /** @brief 虚析构函数。 */
     virtual ~AudioOutputPort() = default;
-    /**
-     * @brief 按协商格式打开输出设备。
-     * @param format 输出音频格式。
-     * @return 打开结果。
-     */
+
+    /** @brief 按协商的下行格式打开播放设备。
+     *  @param format 下行音频格式。
+     *  @return 打开成功返回 Ok。 */
     virtual Status Open(const AudioFormat& format) = 0;
-    /**
-     * @brief 推送一帧待播放音频。
-     * @param frame 待播放音频帧。
-     * @return 推送结果。
-     */
+
+    /** @brief 将解码后的音频帧推入播放队列。
+     *  @param frame 要播放的音频帧。
+     *  @return 推送成功返回 Ok。 */
     virtual Status Push(const AudioFrame& frame) = 0;
-    /**
-     * @brief 等待已提交的播放数据完成。
-     * @return 刷新结果。
-     */
+
+    /** @brief 丢弃所有缓冲帧，在打断或代次失效时调用。
+     *  @return 刷新成功返回 Ok。 */
     virtual Status Flush() = 0;
-    /** @brief 关闭输出设备并释放其资源。 */
+
+    /** @brief 释放硬件资源。 */
     virtual void Close() = 0;
 };
 
-/** 定义语音会话与底层网络传输之间的协议无关边界。 */
+/** @brief 语音会话的低层传输端口（WebSocket、TCP 等）。 */
 class VoiceTransportPort {
    public:
-    /** @brief 允许通过接口类型释放语音传输端口。 */
+    /** @brief 虚析构函数。 */
     virtual ~VoiceTransportPort() = default;
-    /**
-     * @brief 建立语音服务连接并注册事件回调。
-     * @param config 会话连接配置。
-     * @param sink 接收传输事件的回调。
-     * @return 连接结果。
-     */
+
+    /** @brief 建立传输连接并注册事件/文本/音频回调。
+     *  @param config 会话配置。
+     *  @param sink 事件回调。
+     *  @return 连接成功返回 Ok。 */
     virtual Status Connect(const VoiceSessionConfig& config, VoiceEventSink sink) = 0;
-    /**
-     * @brief 发送文本控制消息。
-     * @param message 待发送的协议消息。
-     * @return 发送结果。
-     */
+
+    /** @brief 通过传输发送文本控制消息。
+     *  @param message 要发送的消息。
+     *  @return 发送成功返回 Ok。 */
     virtual Status SendText(std::string_view message) = 0;
-    /**
-     * @brief 发送一帧音频数据。
-     * @param frame 待发送的音频帧。
-     * @return 发送结果。
-     */
+
+    /** @brief 通过传输发送音频帧。
+     *  @param frame 要发送的音频帧。
+     *  @return 发送成功返回 Ok。 */
     virtual Status SendAudio(const AudioFrame& frame) = 0;
-    /**
-     * @brief 关闭语音传输连接。
-     * @return 关闭结果。
-     */
+
+    /** @brief 拆除传输连接。
+     *  @return 关闭成功返回 Ok。 */
     virtual Status Close() = 0;
 };
 
-/** 保留旧协调器生命周期接口，供迁移期 Adapter 逐步替换。 */
+/** @brief 迁移期保留的旧生命周期端口，新代码应使用 SpeechProviderAdapter。 */
 class SpeechProviderPort {
    public:
-    /** @brief 允许通过接口类型释放旧 Provider 端口。 */
+    /** @brief 虚析构函数。 */
     virtual ~SpeechProviderPort() = default;
-    /**
-     * @brief 建立旧版语音服务连接。
-     * @return 连接结果。
-     */
+    /** @brief 建立连接。 @return 成功返回 Ok。 */
     virtual Status Connect() = 0;
-    /** @brief 断开旧版语音服务连接。 */
+    /** @brief 断开连接。 */
     virtual void Disconnect() = 0;
 };
 
-/** 定义音频编解码策略的统一接口。 */
+/** @brief 特定音频编解码器的编解码策略（PCM、Opus 等）。 */
 class CodecStrategy {
    public:
-    /** @brief 允许通过接口类型释放编解码策略。 */
+    /** @brief 虚析构函数。 */
     virtual ~CodecStrategy() = default;
-    /**
-     * @brief 返回该策略处理的编码格式。
-     * @return 编码格式。
-     */
+
+    /** @brief 当前策略处理的编解码器类型。
+     *  @return 编解码器枚举值。 */
     [[nodiscard]] virtual AudioCodec codec() const = 0;
-    /**
-     * @brief 将 PCM 音频编码为目标格式。
-     * @param pcm 待编码的 PCM 帧。
-     * @return 编码后的音频帧或错误。
-     */
+
+    /** @brief 将 PCM 帧编码为压缩格式。
+     *  @param pcm 原始 PCM 帧。
+     *  @return 编码成功返回压缩帧。 */
     virtual Result<AudioFrame> Encode(const AudioFrame& pcm) = 0;
-    /**
-     * @brief 将目标格式音频解码为 PCM。
-     * @param encoded 待解码的音频帧。
-     * @return 解码后的 PCM 帧或错误。
-     */
+
+    /** @brief 将压缩帧解码回 PCM。
+     *  @param encoded 压缩帧。
+     *  @return 解码成功返回 PCM 帧。 */
     virtual Result<AudioFrame> Decode(const AudioFrame& encoded) = 0;
 };
 
-/** 将外部 STT 字段映射为稳定语音语义的协议防腐层。 */
+/** @brief 将 Provider 特有 ASR 事件映射为稳定 VoiceEvent 语义。 */
 class ASRAdapter {
    public:
-    /** @brief 允许通过接口类型释放识别适配器。 */
+    /** @brief 虚析构函数。 */
     virtual ~ASRAdapter() = default;
-    /**
-     * @brief 消费一个语音领域事件。
-     * @param event 待处理的语音事件。
-     * @return 处理结果。
-     */
+    /** @brief 转发 ASR 事件。 @param event 语音事件。 @return 处理成功返回 Ok。 */
     virtual Status OnEvent(const VoiceEvent& event) = 0;
 };
 
-/** 将外部 TTS 字段映射为稳定语音语义的协议防腐层。 */
+/** @brief 将 Provider 特有 TTS 事件映射为稳定 VoiceEvent 语义。 */
 class TTSAdapter {
    public:
-    /** @brief 允许通过接口类型释放合成适配器。 */
+    /** @brief 虚析构函数。 */
     virtual ~TTSAdapter() = default;
-    /**
-     * @brief 请求合成并播放文本。
-     * @param text 待合成文本。
-     * @return 请求结果。
-     */
+    /** @brief 播报指定文本。 @param text 要播报的文本。 @return 成功返回 Ok。 */
     virtual Status Speak(std::string_view text) = 0;
-    /**
-     * @brief 消费一个语音领域事件。
-     * @param event 待处理的语音事件。
-     * @return 处理结果。
-     */
+    /** @brief 转发 TTS 事件。 @param event 语音事件。 @return 处理成功返回 Ok。 */
     virtual Status OnEvent(const VoiceEvent& event) = 0;
 };
 
-/** 定义实时语音流的开始和中断边界。 */
+/** @brief 需要显式开始/打断信号的实时流协议适配器。 */
 class RealtimeAdapter {
    public:
-    /** @brief 允许通过接口类型释放实时适配器。 */
+    /** @brief 虚析构函数。 */
     virtual ~RealtimeAdapter() = default;
-    /**
-     * @brief 开始指定模式的实时流。
-     * @param mode 实时流模式。
-     * @return 启动结果。
-     */
+    /** @brief 开始实时会话。 @param mode 会话模式。 @return 成功返回 Ok。 */
     virtual Status Begin(VoiceMode mode) = 0;
-    /**
-     * @brief 中断当前实时流。
-     * @return 中断结果。
-     */
+    /** @brief 打断当前操作。 @return 成功返回 Ok。 */
     virtual Status Interrupt() = 0;
 };
 
-/** 定义可插拔语音 Provider 的会话契约。 */
+/**
+ * @brief 完整语音 Provider 抽象。
+ *
+ * 具体实现（Linx、xiaozhi 等）将传输、编解码器和协议逻辑封装
+ * 在此单一接口之后。
+ */
 class SpeechProviderAdapter {
    public:
-    /** @brief 允许通过接口类型释放 Provider 适配器。 */
+    /** @brief 虚析构函数。 */
     virtual ~SpeechProviderAdapter() = default;
-    // Optional during migration. Providers with downlink audio should call
-    // this sink for each decoded frame; the session owns generation checks.
+
     /**
-     * @brief 设置 Provider 下行音频的接收回调。
-     * @param sink 接收解码后音频帧的回调。
+     * @brief 设置下行音频回调。
+     *
+     * 迁移期可选。有下行音频的 Provider 应通过此回调投递每一解码帧，
+     * 代次检查由会话层负责。
+     * @param sink 接收下行音频帧的回调。
      */
-    virtual void SetAudioSink(AudioFrameSink sink) { (void)sink; }
-    // A single transport connection may survive an interrupt. The session
-    // advances its epoch locally and gives the Provider the new epoch before
-    // accepting the next stream.
+    virtual void SetAudioSink(AudioFrameSink /*sink*/) {}
+
     /**
-     * @brief 设置当前会话代次以丢弃过期异步事件。
-     * @param generation 当前会话代次。
+     * @brief 通知 Provider 当前连接代次。
+     *
+     * 旧代次的迟到帧会被拒绝。
+     * @param generation 当前代次编号。
      */
-    virtual void SetGeneration(uint64_t generation) { (void)generation; }
-    /**
-     * @brief 建立 Provider 会话并注册事件回调。
-     * @param config 语音会话配置。
-     * @param sink 接收 Provider 事件的回调。
-     * @return 连接结果。
-     */
+    virtual void SetGeneration(uint64_t /*generation*/) {}
+
+    /** @brief 建立 Provider 连接并注册事件回调。
+     *  @param config 会话配置。
+     *  @param sink 事件回调。
+     *  @return 连接成功返回 Ok。 */
     virtual Status Connect(const VoiceSessionConfig& config, VoiceEventSink sink) = 0;
-    /**
-     * @brief 开始指定模式的采集。
-     * @param mode 语音采集模式。
-     * @return 启动结果。
-     */
+
+    /** @brief 在 Provider 侧启动上行音频采集。
+     *  @param mode 采集模式。
+     *  @return 启动成功返回 Ok。 */
     virtual Status StartCapture(VoiceMode mode) = 0;
-    /**
-     * @brief 停止当前采集。
-     * @return 停止结果。
-     */
+
+    /** @brief 停止上行音频采集。 @return 停止成功返回 Ok。 */
     virtual Status StopCapture() = 0;
-    /**
-     * @brief 发送一帧上行音频。
-     * @param frame 待发送的音频帧。
-     * @return 发送结果。
-     */
+
+    /** @brief 向 Provider 发送音频帧。
+     *  @param frame 要发送的音频帧。
+     *  @return 发送成功返回 Ok。 */
     virtual Status SendAudio(const AudioFrame& frame) = 0;
-    /**
-     * @brief 中止当前识别或合成流程。
-     * @param reason 中止原因。
-     * @return 中止结果。
-     */
+
+    /** @brief 以指定原因中止当前操作（播放或采集）。
+     *  @param reason 中止原因。
+     *  @return 中止成功返回 Ok。 */
     virtual Status Abort(std::string_view reason) = 0;
-    /**
-     * @brief 请求合成指定文本。
-     * @param text 待合成文本。
-     * @return 合成请求结果。
-     */
+
+    /** @brief 请求对指定文本进行 TTS 播报。
+     *  @param text 要播报的文本。
+     *  @return 请求成功返回 Ok。 */
     virtual Status Speak(std::string_view text) = 0;
-    /**
-     * @brief 断开 Provider 会话。
-     * @return 断开结果。
-     */
+
+    /** @brief 拆除 Provider 连接。 @return 断开成功返回 Ok。 */
     virtual Status Disconnect() = 0;
+
     /**
-     * @brief 返回 Provider 的能力声明。
-     * @return 能力声明的只读引用。
+     * @brief 返回服务端 hello 握手中协商的双向音频格式。
+     *
+     * 仅在 Connect() 完成后可用。
+     * @return 协商后的双向音频格式。
      */
+    [[nodiscard]] virtual Result<VoiceAudioFormats> audio_formats() const = 0;
+
+    /** @brief 注册时声明的能力 Profile。
+     *  @return 能力 Profile 引用。 */
     [[nodiscard]] virtual const CapabilityProfile& capabilities() const = 0;
 };
 
+/** @brief 创建 SpeechProviderAdapter 实例的工厂函数。 */
 using SpeechProviderFactory = std::function<std::unique_ptr<SpeechProviderAdapter>()>;
 
-/** 按 Provider 标识和能力声明创建适配器的进程内注册表。 */
+/**
+ * @brief 固定容量的 Provider 注册表。
+ *
+ * 所有 Register() 调用必须在 RTOS 调度器启动前完成；
+ * 运行时通过 Create() 只读查询。
+ *
+ * @note 线程安全：内部无互斥锁，调用方负责初始化时序。
+ */
 class SpeechProviderRegistry {
    public:
-    /** 注册表允许保存的 Provider 最大数量。 */
-    static constexpr std::size_t kMaxProviders = 8;
-    /**
-     * @brief 返回进程内唯一的 Provider 注册表。
-     * @return Provider 注册表实例。
-     */
+    /** @brief 最大可注册 Provider 数量。 */
+    static constexpr std::size_t kMaxProviders = 16;
+
+    /** @brief 全局单例。 @return 注册表单例引用。 */
     static SpeechProviderRegistry& Instance();
 
     /**
-     * @brief 注册一个可按能力选择的 Provider 工厂。
-     * @param provider_id Provider 的稳定标识。
-     * @param profile Provider 的能力声明。
-     * @param factory 创建 Provider 实例的工厂。
-     * @return 注册结果。
+     * @brief 注册 Provider 工厂及其能力 Profile。
+     *
+     * 必须在调度器启动前调用。
+     * @param provider_id Provider 标识。
+     * @param profile 能力 Profile。
+     * @param factory 工厂函数。
+     * @return 注册成功返回 Ok。
      */
     Status Register(std::string provider_id, CapabilityProfile profile, SpeechProviderFactory factory);
+
     /**
-     * @brief 按标识和能力约束创建 Provider。
-     * @param provider_id 目标 Provider 标识。
-     * @param required_capabilities 必须满足的能力名称。
-     * @return 新 Provider 实例或错误。
+     * @brief 按 ID 和所需能力创建 Provider 实例。
+     *
+     * @param provider_id Provider 标识。
+     * @param required_capabilities 所需能力列表。
+     * @return 创建成功返回 Provider 实例。
      */
     Result<std::unique_ptr<SpeechProviderAdapter>> Create(std::string_view provider_id,
                                                           const std::vector<std::string>& required_capabilities) const;
 
    private:
     SpeechProviderRegistry() = default;
-    /** 保存一个 Provider 工厂及其能力声明。 */
+    /** @brief 注册表条目。 */
     struct Entry {
         std::string provider_id;
         CapabilityProfile profile;

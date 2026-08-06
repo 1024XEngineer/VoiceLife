@@ -20,7 +20,9 @@ Status SpeechProviderRegistry::Register(std::string provider_id, CapabilityProfi
         }
     }
     if (size_ == kMaxProviders) {
-        return Status::Error(ErrorCode::kUnavailable, "语音 Provider 注册表已满");
+        return Status::Error(
+            ErrorCode::kUnavailable,
+            "语音 Provider 注册表已满 (上限 " + std::to_string(kMaxProviders) + ")，请检查是否重复注册或缺少卸载逻辑");
     }
     entries_[size_++] = Entry{std::move(provider_id), std::move(profile), std::move(factory)};
     return Status::Ok();

@@ -28,6 +28,10 @@ target_include_directories(yyjson PUBLIC "${ROOT_DIR}/third_party/yyjson")
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(yyjson PRIVATE -w)
 endif()
+# Portable cJSON for host tests. ESP-IDF uses its own built-in json component.
+add_library(cjson STATIC "${ROOT_DIR}/third_party/cjson/cJSON.c")
+target_include_directories(cjson PUBLIC "${ROOT_DIR}/third_party/cjson")
+set_target_properties(cjson PROPERTIES LINKER_LANGUAGE C)
 
 function(add_voicelife_library target component)
     add_library(${target} STATIC ${ARGN})
@@ -69,6 +73,7 @@ add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_tool_gateway.cc")
 target_link_libraries(mcp PUBLIC contracts)
 add_voicelife_library(voice voicelife_voice
+    "${ROOT_DIR}/components/voicelife_voice/src/audio_frame_queue.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_provider_registry.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
@@ -76,7 +81,10 @@ target_link_libraries(voice PUBLIC contracts)
 add_voicelife_library(linx voicelife_linx
     "${ROOT_DIR}/components/voicelife_linx/src/linx_json_codec.cc"
     "${ROOT_DIR}/components/voicelife_linx/src/linx_speech_provider.cc")
-target_link_libraries(linx PUBLIC voice)
+target_link_libraries(linx PUBLIC voice cjson)
+add_voicelife_library(linx_esp voicelife_linx_esp
+    "${ROOT_DIR}/components/voicelife_linx_esp/src/websocket_fragment_assembler.cc")
+target_link_libraries(linx_esp PUBLIC contracts linx)
 add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/storage_protocol.cc")
 target_link_libraries(storage_sqlite PUBLIC contracts)
@@ -158,8 +166,16 @@ target_link_libraries(voice_session_coordinator_test PRIVATE voice)
 add_voicelife_test(voice_session_contract_test "unit;voice;contract" voice_session_contract_test.cc)
 target_link_libraries(voice_session_contract_test PRIVATE voice)
 
+add_voicelife_test(audio_frame_queue_contract_test "unit;voice;audio;contract"
+    audio_frame_queue_contract_test.cc)
+target_link_libraries(audio_frame_queue_contract_test PRIVATE voice)
+
 add_voicelife_test(linx_provider_contract_test "unit;voice;linx;contract" linx_provider_contract_test.cc)
 target_link_libraries(linx_provider_contract_test PRIVATE linx)
+
+add_voicelife_test(linx_esp_transport_contract_test "unit;voice;linx;esp;contract"
+    linx_esp_transport_contract_test.cc)
+target_link_libraries(linx_esp_transport_contract_test PRIVATE linx_esp)
 
 add_voicelife_test(im_gateway_contract_test "unit;im" im_gateway_contract_test.cc)
 target_compile_definitions(im_gateway_contract_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")

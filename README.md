@@ -113,8 +113,9 @@ VoiceLife 是一个 ESP-IDF 组件化模块单体。业务核心使用纯 C++，
 | `voicelife_mcp` | Tool Schema、注册中心与调用路由 | contracts |
 | `voicelife_voice` | 会话、音频/传输 Port 与 Provider Registry | contracts |
 | `voicelife_linx` | Linx XRobot WebSocket 协议防腐层与 Provider | contracts、voice |
+| `voicelife_linx_esp` | ESP32-S3 WSS/TLS Transport、事件队列与分片重组 | contracts、linx；ESP-IDF 依赖为私有实现 |
 | `voicelife_storage_sqlite` | SQLite 生命周期、命名语句、事务回执与健康指标底座 | contracts |
-| `voicelife_runtime` | 唯一组装入口，不承载业务规则 | contracts、mcp、voice、linx |
+| `voicelife_runtime` | 唯一组装入口，不承载业务规则 | contracts、mcp、voice、linx、linx_esp |
 
 ### 文件树
 
@@ -129,8 +130,9 @@ VoiceLife/
 │   ├── voicelife_schedule/      # 日程领域结构与服务接口骨架
 │   ├── voicelife_timing/        # 定时任务与触发规则
 │   ├── voicelife_mcp/           # MCP 工具注册中心
-│   ├── voicelife_voice/         # 语音会话、音频/传输 Port 与 Provider Registry
+│   ├── voicelife_voice/         # 语音会话、音频/传输 Port、队列与 Provider Registry
 │   ├── voicelife_linx/          # Linx/XRobot 协议编解码与 Provider Adapter
+│   ├── voicelife_linx_esp/      # ESP32-S3 WSS/TLS、分片重组与重连外壳
 │   ├── voicelife_storage_sqlite/ # SQLite 单连接、事务协议与健康指标底座
 │   └── voicelife_runtime/       # Composition Root
 ├── config/
@@ -190,17 +192,19 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
 | 组件边界与依赖检查 | 已完成 | 主机与 CI 可验证 |
-| 分组件 TDD 主机测试 | 已完成 | 7 个测试，可按名称和标签筛选 |
+| 分组件 TDD 主机测试 | 已完成 | 10 个测试，可按名称和标签筛选 |
 | MCP → 日程 → 定时任务串联 | 已完成 | 使用内存适配器，仅证明架构 |
 | ESP32-S3 固件构建 | 已完成 | ESP-IDF 6.0.2 已验证 |
 | SQLite 存储资格测试 | 已完成基线验证 | FATFS/WL 四轮通过；LittleFS 路线已否决；真实断电与寿命测试待补 |
 | Profile 驱动 Runtime 装配 | 待开发 | 当前只完成 Schema、构建选择和设计契约 |
 | 语音 Port、会话状态与 Provider Registry | 已完成 | 主机契约通过；下行音频也通过 generation 绑定到会话 |
-| Linx XRobot 协议与 Provider Adapter | 主机完成 | hello/listen/detect/abort、STT/TTS、二进制音频和非法消息已有离线契约测试；ESP-IDF WebSocket 传输仍待接入 |
+| Linx XRobot 协议与 Provider Adapter | 主机 + ESP-IDF 构建完成 | 已覆盖 16 kHz 上行/24 kHz 下行协商、hello/listen/detect/abort、STT/TTS、断线阻断、重连 hello 与旧代次拒绝；ESP32-S3 WSS Transport 已编译进固件，但尚未完成真实云端音频闭环 |
 | 小智音频与 ESP32-S3 XRobot Adapter | 待开发 | 从上游能力逐段迁移，真实板优先 |
 | 持久化 Adapter | 待开发 | 必须满足原子写入和重启恢复；只允许基于已验证底座实现，并复用单连接、迁移和事务生命周期 |
 | 微信 / 飞书 IM Adapter | 待开发 | 先稳定平台无关语义契约 |
 | 真机闭环与用户试用 | 待开发 | 属于 MS3 功能 Issue |
+
+> ESP32-S3 的物理板身份、Flash/PSRAM 和双 OTA 分区已经在 115200 下完成只读核对与数据分区备份；新固件已只写入非活动 `ota_1` 槽并真实启动，随后恢复 `otadata`、确认原固件从 `ota_0` 启动。Linx token 没有进入 Profile；真实 headers、TLS、hello、断线重连、ASR/TTS 和音频闭环仍须在 [Issue #107](https://github.com/1024XEngineer/XE6-15/issues/107) 中用脱敏日志补齐。
 
 ## 文档
 
@@ -209,6 +213,11 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 - [ADR 0002：采用能力驱动的适配器 Profile](./docs/adr/0002-capability-driven-adapters.md)
 - [小智能力迁移方案](./docs/architecture/xiaozhi-migration.md)
 - [语音模块子架构](./docs/architecture/voice-subarchitecture.md)
+- [语音模块可迁移性调研与决策（2026-08-04）](./research/voice-module-portability-20260804/2026-08-04_decision.md)
+- [语音研究增量与官方资料反证（2026-08-04）](./research/voice-module-portability-20260804/diffs/2026-08-04_delta.md)
+- [Linx 当前接入方式目录](./research/voice-module-portability-20260804/sources/12_linx_current_access_matrix.md)
+- [ESP-IDF 6.0.2 I2S 与跨板能力矩阵](./research/voice-module-portability-20260804/sources/14_cross_board_audio_capabilities.md)
+- [ESP32-S3 实板变更与恢复](./docs/engineering/esp32-hardware-validation.md)
 - [提交描述规范](./docs/engineering/commit-convention.md)
 - [协同开发规范](./docs/engineering/collaboration.md)
 - [SQLite 实板验证与 Flash 恢复手册](./docs/engineering/board-storage-validation.md)
