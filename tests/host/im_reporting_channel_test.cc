@@ -1,0 +1,247 @@
+// #126 设备侧 voicelife_im 上报通道：主机测试（TDD 先写）。
+// 验收来源：Issue #126 —— 提交成功 / 凭据错误 / 网络失败三路径、
+// 网络失败本地事实不变、提交意图使用事件 ID 幂等。
+// 本文件先于实现存在，据此 pin 公共 API 形状与契约行为。
+
+#include <fstream>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "support/test_support.h"
+#include "voicelife/contracts/im/notification_intent.h"
+#include "voicelife/contracts/im/schedule_receipt.h"
+#include "voicelife/contracts/json.h"
+#include "voicelife/im/im_credentials.h"
+#include "voicelife/im/im_reporting_channel.h"
+#include "voicelife/im/im_transport.h"
+
+using voicelife::contracts::im::NotificationAction;
+using voicelife::contracts::im::NotificationIntent;
+using voicelife::contracts::im::ParseNotificationIntent;
+using voicelife::contracts::im::ParseScheduleReceiptIntent;
+using voicelife::contracts::im::ScheduleReceiptIntent;
+using voicelife::im::ImCredentialProvider;
+using voicelife::im::ImHttpHeader;
+using voicelife::im::ImHttpRequest;
+using voicelife::im::ImHttpResponse;
+using voicelife::im::ImReportingChannel;
+using voicelife::im::ImTransport;
+using voicelife::im::ImTransportStatus;
+using voicelife::im::ReportResult;
+using voicelife::im::ReportStatus;
+using voicelife::test::Check;
+
+namespace {
+
+constexpr const char* kDeviceId = "device-fixture";
+constexpr const char* kToken = "device-token";
+
+std::string ReadFixture(const char* name) {
+    std::ifstream input(std::string(VOICELIFE_SOURCE_DIR) + "/contracts/im-gateway/v1/fixtures/" + name);
+    Check(input.good(), "共享 IM fixture 必须存在");
+    std::ostringstream content;
+    content << input.rdbuf();
+    return content.str();
+}
+
+/// 记录请求并可控返回结果的假传输。
+class FakeTransport : public ImTransport {
+   public:
+    std::vector<ImHttpRequest> requests;
+    ImTransportStatus next_status = ImTransportStatus::kSuccess;
+    int next_status_code = 200;
+
+    ImHttpResponse Post(const ImHttpRequest& request) override {
+        requests.push_back(request);
+        ImHttpResponse response;
+        response.status = next_status;
+        response.status_code = next_status_code;
+        response.message = "fake";
+        return response;
+    }
+};
+
+/// 可控凭据的假凭据提供者。
+class FakeCredentials : public ImCredentialProvider {
+   public:
+    std::string token = kToken;
+    std::string device_id = kDeviceId;
+
+    std::string DeviceToken() const override { return token; }
+    std::string DeviceId() const override { return device_id; }
+};
+
+/// 从共享 fixture 构造契约意图，保证测试输入与双端契约一致。
+ScheduleReceiptIntent MakeScheduleReceipt() {
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(ReadFixture("schedule-receipt.json"), root).ok(), "共享回执 fixture 必须可解析");
+    ScheduleReceiptIntent intent;
+    Check(ParseScheduleReceiptIntent(root, intent).ok(), "共享回执 fixture 必须通过契约校验");
+    return intent;
+}
+
+NotificationIntent MakeNotification() {
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(ReadFixture("notification-strong.json"), root).ok(), "共享通知 fixture 必须可解析");
+    NotificationIntent intent;
+    Check(ParseNotificationIntent(root, intent).ok(), "共享通知 fixture 必须通过契约校验");
+    return intent;
+}
+
+std::string HeaderValue(const ImHttpRequest& request, const std::string& name) {
+    for (const ImHttpHeader& header : request.headers) {
+        if (header.name == name) {
+            return header.value;
+        }
+    }
+    return "";
+}
+
+/// 校验提交的请求体可通过契约解析，且与提交的意图完全一致。
+void CheckBodyRoundTrips(const ImHttpRequest& request, const ScheduleReceiptIntent& intent) {
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(request.body, root).ok(), "回执请求体必须是合法 JSON");
+    ScheduleReceiptIntent parsed;
+    Check(ParseScheduleReceiptIntent(root, parsed).ok(), "回执请求体必须通过契约校验");
+    Check(parsed.eventId == intent.eventId && parsed.deviceId == intent.deviceId &&
+              parsed.scheduleId == intent.scheduleId && parsed.operationType == intent.operationType &&
+              parsed.result == intent.result && parsed.correlationId == intent.correlationId &&
+              parsed.occurredAt == intent.occurredAt,
+          "回执请求体必须与提交的意图一致");
+}
+
+void CheckBodyRoundTrips(const ImHttpRequest& request, const NotificationIntent& intent) {
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(request.body, root).ok(), "通知请求体必须是合法 JSON");
+    NotificationIntent parsed;
+    Check(ParseNotificationIntent(root, parsed).ok(), "通知请求体必须通过契约校验");
+    Check(parsed.businessEventId == intent.businessEventId && parsed.recipient.deviceId == intent.recipient.deviceId &&
+              parsed.reminderType == intent.reminderType && parsed.actions.size() == intent.actions.size() &&
+              parsed.content.title == intent.content.title,
+          "通知请求体必须与提交的意图一致");
+}
+
+void TestScheduleReceiptSuccess() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    ImReportingChannel channel(transport, credentials);
+    const ScheduleReceiptIntent intent = MakeScheduleReceipt();
+
+    const ReportResult result = channel.SubmitScheduleReceipt(intent);
+
+    Check(result.status == ReportStatus::kSubmitted, "日程回执提交成功");
+    Check(transport.requests.size() == 1, "日程回执应发起一次传输");
+    const ImHttpRequest& request = transport.requests[0];
+    Check(request.path == "/v1/im/schedule-receipts", "日程回执必须提交到 schedule-receipts 路径");
+    Check(request.method == "POST", "提交必须使用 POST");
+    Check(HeaderValue(request, "Content-Type") == "application/json", "必须声明 JSON 请求体");
+    Check(HeaderValue(request, "Authorization") == "Bearer " + std::string(kToken), "必须携带设备令牌");
+    Check(HeaderValue(request, "Idempotency-Key") == intent.eventId, "幂等键必须等于回执事件 ID");
+    CheckBodyRoundTrips(request, intent);
+}
+
+void TestNotificationSuccess() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    ImReportingChannel channel(transport, credentials);
+    const NotificationIntent intent = MakeNotification();
+
+    const ReportResult result = channel.SubmitNotification(intent);
+
+    Check(result.status == ReportStatus::kSubmitted, "通知提交成功");
+    Check(transport.requests.size() == 1, "通知应发起一次传输");
+    const ImHttpRequest& request = transport.requests[0];
+    Check(request.path == "/v1/im/notifications", "通知必须提交到统一的 notifications 路径");
+    Check(request.method == "POST", "提交必须使用 POST");
+    Check(HeaderValue(request, "Authorization") == "Bearer " + std::string(kToken), "必须携带设备令牌");
+    Check(HeaderValue(request, "Idempotency-Key") == intent.businessEventId, "幂等键必须等于业务事件 ID");
+    Check(request.path.find("/v1/notification-intents") == std::string::npos, "不得再使用旧的 notification-intents 路径");
+    CheckBodyRoundTrips(request, intent);
+}
+
+void TestMissingCredentialIsLocal() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    credentials.token = "";
+    ImReportingChannel channel(transport, credentials);
+
+    const ReportResult result = channel.SubmitNotification(MakeNotification());
+
+    Check(result.status == ReportStatus::kCredentialRejected, "空令牌必须本地拒绝");
+    Check(transport.requests.empty(), "凭据错误不得发起网络请求");
+}
+
+void TestDeviceIdMismatchIsLocal() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    credentials.device_id = "other-device";
+    ImReportingChannel channel(transport, credentials);
+
+    const ReportResult result = channel.SubmitScheduleReceipt(MakeScheduleReceipt());
+
+    Check(result.status == ReportStatus::kCredentialRejected, "deviceId 不一致必须本地拒绝");
+    Check(transport.requests.empty(), "deviceId 不一致不得发起网络请求");
+}
+
+void TestCredentialRejectedByServer() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    transport.next_status = ImTransportStatus::kCredentialRejected;
+    transport.next_status_code = 401;
+    ImReportingChannel channel(transport, credentials);
+
+    const ReportResult result = channel.SubmitScheduleReceipt(MakeScheduleReceipt());
+
+    Check(result.status == ReportStatus::kCredentialRejected, "401 必须归类为凭据错误");
+    Check(transport.requests.size() == 1, "服务端拒绝仍应发起一次传输");
+}
+
+void TestNetworkFailureKeepsFactsAndAllowsIdempotentRetry() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    transport.next_status = ImTransportStatus::kNetworkFailure;
+    ImReportingChannel channel(transport, credentials);
+    const NotificationIntent original = MakeNotification();
+
+    const ReportResult first = channel.SubmitNotification(original);
+    Check(first.status == ReportStatus::kRetryable, "网络失败必须归类为可重试");
+    Check(transport.requests.size() == 1, "网络失败应发起一次传输");
+
+    const ReportResult retry = channel.SubmitNotification(original);
+    Check(retry.status == ReportStatus::kRetryable, "重试后网络仍失败保持可重试");
+    Check(transport.requests.size() == 2, "相同事件 ID 允许重试");
+    Check(HeaderValue(transport.requests[1], "Idempotency-Key") == original.businessEventId,
+          "重试必须复用相同幂等键");
+    Check(transport.requests[1].body == transport.requests[0].body, "重试必须携带相同请求体");
+    Check(original.businessEventId == "event-fixture" && original.recipient.deviceId == kDeviceId &&
+              !original.actions.empty(),
+          "提交不得修改本地事实");
+}
+
+void TestHttpErrorIsRetryable() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    transport.next_status = ImTransportStatus::kHttpError;
+    transport.next_status_code = 503;
+    ImReportingChannel channel(transport, credentials);
+
+    const ReportResult result = channel.SubmitScheduleReceipt(MakeScheduleReceipt());
+
+    Check(result.status == ReportStatus::kRetryable, "5xx 必须归类为可重试");
+}
+
+}  // namespace
+
+int main() {
+    TestScheduleReceiptSuccess();
+    TestNotificationSuccess();
+    TestMissingCredentialIsLocal();
+    TestDeviceIdMismatchIsLocal();
+    TestCredentialRejectedByServer();
+    TestNetworkFailureKeepsFactsAndAllowsIdempotentRetry();
+    TestHttpErrorIsRetryable();
+    return 0;
+}
