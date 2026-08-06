@@ -1,16 +1,26 @@
 #include "schedule_mock_data.h"
 
+#include <algorithm>
 #include <chrono>
+#include <mutex>
+#include <utility>
 
 namespace voicelife::schedule {
 namespace {
 
-/** @brief 将固定 Unix 秒转换为日程模块使用的时间类型。 */
+/**
+ * @brief 将固定 Unix 秒转换为日程模块使用的时间类型。
+ * @param unix_seconds Unix 时间戳秒数。
+ * @return 对应的日程时间。
+ */
 DateTime At(int64_t unix_seconds) { return DateTime{std::chrono::seconds{unix_seconds}}; }
 
-/** @brief 返回进程内共享的模拟日程集合。 @return 可变的模拟日程集合。 */
-std::vector<Schedule>& MockSchedules() {
-    static std::vector<Schedule> schedules{
+/**
+ * @brief 创建模块默认的模拟日程集合。
+ * @return 每次调用均返回一份独立的默认日程数据。
+ */
+std::vector<Schedule> MakeDefaultMockSchedules() {
+    return {
         Schedule{
             .id = 1001,
             .event = "模拟团队周会",
@@ -36,25 +46,92 @@ std::vector<Schedule>& MockSchedules() {
             .updated_at = At(1'799'900'000),
         },
     };
-    return schedules;
+}
+
+/// 进程内共享的模拟日程存储及其同步状态。
+struct MockScheduleStore {
+    std::mutex mutex;
+    std::vector<Schedule> schedules = MakeDefaultMockSchedules();
+};
+
+/**
+ * @brief 返回进程内共享的模拟日程存储。
+ * @return 可变的模拟日程存储。
+ */
+MockScheduleStore& Store() {
+    static MockScheduleStore store;
+    return store;
 }
 
 }  // namespace
 
 std::vector<Schedule> LoadMockSchedules() {
     // 兼容修改日程接口使用的旧入口；数据来自同一份共享模拟存储。
-    return MockSchedules();
+    MockScheduleStore& store = Store();
+    std::lock_guard<std::mutex> lock(store.mutex);
+    return store.schedules;
 }
 
 std::vector<Schedule> LoadMockSchedulesForCreate() {
     // TODO(#134): 伪代码：database.query_active_schedules(command.start_time, command.end_time)。
     // 数据库适配器可用后，改为查询可能冲突或临近的有效日程，并删除这些固定模拟数据。
-    return MockSchedules();
+    return LoadMockSchedules();
+}
+
+Result<Schedule> FindMockScheduleById(ScheduleId schedule_id) {
+    MockScheduleStore& store = Store();
+    std::lock_guard<std::mutex> lock(store.mutex);
+    const auto& schedules = store.schedules;
+    const auto found = std::find_if(schedules.begin(), schedules.end(),
+                                    [schedule_id](const Schedule& schedule) { return schedule.id == schedule_id; });
+    if (found == schedules.end()) {
+        return Result<Schedule>::Failure(ErrorCode::kNotFound, "未找到指定日程");
+    }
+    return Result<Schedule>::Success(*found);
+}
+
+Result<Schedule> RemoveMockSchedule(ScheduleId schedule_id) {
+    MockScheduleStore& store = Store();
+    std::lock_guard<std::mutex> lock(store.mutex);
+    auto& schedules = store.schedules;
+    const auto found = std::find_if(schedules.begin(), schedules.end(),
+                                    [schedule_id](const Schedule& schedule) { return schedule.id == schedule_id; });
+    if (found == schedules.end()) {
+        return Result<Schedule>::Failure(ErrorCode::kNotFound, "未找到指定日程");
+    }
+
+    // 擦除前复制完整快照，供撤销服务记录撤销操作前的状态。
+    Schedule removed = *found;
+    schedules.erase(found);
+    return Result<Schedule>::Success(std::move(removed));
+}
+
+Result<Schedule> RestoreMockSchedule(const Schedule& snapshot) {
+    if (snapshot.id <= 0) {
+        return Result<Schedule>::Failure(ErrorCode::kInvalidArgument, "日程 ID 必须为正整数");
+    }
+
+    MockScheduleStore& store = Store();
+    std::lock_guard<std::mutex> lock(store.mutex);
+    auto& schedules = store.schedules;
+    const auto found = std::find_if(schedules.begin(), schedules.end(),
+                                    [&snapshot](const Schedule& schedule) { return schedule.id == snapshot.id; });
+    if (found == schedules.end()) {
+        // 撤销删除时目标已不存在，需要按原快照重新插入。
+        schedules.push_back(snapshot);
+        return Result<Schedule>::Success(schedules.back());
+    }
+
+    // 撤销修改或撤销操作时完整覆盖，确保可空字段、状态和时间戳均恢复。
+    *found = snapshot;
+    return Result<Schedule>::Success(*found);
 }
 
 Result<Schedule> CancelMockSchedule(ScheduleId schedule_id) {
     // TODO(#134): 数据库适配器可用后，替换为带状态前置条件的原子 UPDATE。
-    for (Schedule& schedule : MockSchedules()) {
+    MockScheduleStore& store = Store();
+    std::lock_guard<std::mutex> lock(store.mutex);
+    for (Schedule& schedule : store.schedules) {
         if (schedule.id != schedule_id) continue;
         if (schedule.status == ScheduleStatus::kCancelled) {
             return Result<Schedule>::Failure(ErrorCode::kConflict, "日程已取消，不能重复删除");
@@ -65,6 +142,18 @@ Result<Schedule> CancelMockSchedule(ScheduleId schedule_id) {
         return Result<Schedule>::Success(schedule);
     }
     return Result<Schedule>::Failure(ErrorCode::kNotFound, "未找到指定日程");
+}
+
+void ResetMockSchedulesForTesting() {
+    MockScheduleStore& store = Store();
+    std::lock_guard<std::mutex> lock(store.mutex);
+    store.schedules = MakeDefaultMockSchedules();
+}
+
+void SeedMockSchedulesForTesting(std::vector<Schedule> schedules) {
+    MockScheduleStore& store = Store();
+    std::lock_guard<std::mutex> lock(store.mutex);
+    store.schedules = std::move(schedules);
 }
 
 std::vector<Schedule> LoadMockSchedulesForQuery() {

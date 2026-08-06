@@ -37,15 +37,15 @@ class ScheduleService {
     QueryScheduleResult query_schedule(const QueryScheduleCommand& command) const;
 
     /**
-     * @brief 记录一次创建、修改或删除操作。
+     * @brief 记录一次创建、修改、删除或撤销操作。
      * @param command 要持久化的操作详情。
      * @return 操作记录结果。
      */
     RecordScheduleOperationResult record_schedule_operation(const RecordScheduleOperationCommand& command);
 
     /**
-     * @brief 查询最近十条可撤销的操作。
-     * @return 最近的可撤销操作。
+     * @brief 查询当前时间往前十五分钟内的可撤销操作。
+     * @return 按操作时间倒序排列的可撤销操作。
      */
     QueryRecentScheduleOperationResult query_recent_schedule_operation() const;
 
