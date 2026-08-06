@@ -25,6 +25,9 @@ import type { IsoDateTime, JsonValue } from '../shared/types.js';
 
 type JsonObject = Record<string, unknown>;
 
+const MAX_NOTIFICATION_ACTIONS = 16;
+const MAX_SNOOZE_MINUTES = 24 * 60;
+
 const ISO_8601 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:Z|[+-](\d{2}):(\d{2}))$/;
 
 /**
@@ -68,6 +71,9 @@ export function parseNotificationIntent(input: unknown): NotificationIntent {
         invalid('body.actions', 'must be an array');
     }
     const actions = value.actions.map((action, index) => parseNotificationAction(action, `body.actions[${index}]`));
+    if (actions.length > MAX_NOTIFICATION_ACTIONS) {
+        invalid('body.actions', `must contain at most ${MAX_NOTIFICATION_ACTIONS} actions`);
+    }
     if (reminderType === 'weak' && actions.length !== 0) {
         invalid('body.actions', 'must be empty for a weak reminder');
     }
@@ -180,8 +186,13 @@ function parseNotificationAction(input: unknown, path: string): NotificationActi
 
 function parseActionParams(input: unknown, path: string): { readonly minutes: number } {
     const value = objectAt(input, path);
-    if (typeof value.minutes !== 'number' || !Number.isInteger(value.minutes) || value.minutes <= 0) {
-        invalid(`${path}.minutes`, 'must be a positive integer');
+    if (
+        typeof value.minutes !== 'number' ||
+        !Number.isInteger(value.minutes) ||
+        value.minutes <= 0 ||
+        value.minutes > MAX_SNOOZE_MINUTES
+    ) {
+        invalid(`${path}.minutes`, `must be an integer from 1 to ${MAX_SNOOZE_MINUTES}`);
     }
     return { minutes: value.minutes };
 }

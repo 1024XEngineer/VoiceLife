@@ -1,5 +1,22 @@
 # 第三方来源
 
+## yyjson
+
+`third_party/yyjson/yyjson.c` 与 `third_party/yyjson/yyjson.h` 原样来自
+[`ibireme/yyjson`](https://github.com/ibireme/yyjson) `0.12.0`，固定上游 commit
+`8b4a38dc994a110abaec8a400615567bd996105f`。VoiceLife 使用其严格 RFC 8259
+读取模式构建临时 DOM，再映射为平台无关的契约值对象；第三方类型不进入公共 API。
+
+| 文件 | SHA-256 |
+| --- | --- |
+| `third_party/yyjson/yyjson.c` | `ac2e9bbb2e2d9149d90878d40506a1d624fa0b33c979a11b61075c54782c6d6a` |
+| `third_party/yyjson/yyjson.h` | `175867c5493a5df648cec566717fa1c29aa2f6096f5f0cf1efad0b65e1f6d7b3` |
+| `third_party/licenses/yyjson-MIT.txt` | `45e384d3d52c73cba3a64d6e6c25d47cd738cd8a55c30629e3201046eda62947` |
+
+MIT 许可原文见 [`third_party/licenses/yyjson-MIT.txt`](./third_party/licenses/yyjson-MIT.txt)。
+
+## 小智迁移参考
+
 本仓库没有直接复制小智固件业务代码。以下工具基于其公开实现思路做了收敛和改写，继续遵循上游 MIT 许可：
 
 | 本仓库文件 | 上游来源 | 迁移方式 |
