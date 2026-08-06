@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1",
+  "contracts": {
+    "notification": {
+      "valid": [
+        "notification-conflict.json",
+        "notification-strong-replay.json",
+        "notification-strong.json",
+        "notification-weak.json"
+      ],
+      "invalid": [
+        "notification-invalid-enum.json",
+        "notification-invalid-time.json",
+        "notification-invalid-version.json",
+        "notification-missing-field.json"
+      ]
+    },
+    "schedule-receipt": {
+      "valid": [
+        "schedule-receipt.json"
+      ],
+      "invalid": [
+        "schedule-receipt-invalid-enum.json",
+        "schedule-receipt-invalid-time.json",
+        "schedule-receipt-invalid-version.json"
+      ]
+    },
+    "reminder-action-result": {
+      "valid": [
+        "reminder-action-result.json"
+      ],
+      "invalid": [
+        "reminder-action-result-invalid-status.json",
+        "reminder-action-result-invalid-time.json"
+      ]
+    }
+  }
+}
