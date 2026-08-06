@@ -18,10 +18,12 @@ constexpr int kTransportTimeoutMs = 10 * 1000;
 // 受理结果响应体上限：防止恶意网关回灌无界响应耗尽设备堆内存。
 constexpr size_t kMaxResponseBodyBytes = 64 * 1024;
 
-// 读取响应体：受理结果（如 NotificationSubmission）需透传给调用方提取动作窗口。
-// content_length 未知（-1，分块编码）时持续读到 EOF；否则按 Content-Length 精确读取。
-// 无论声明长度如何，读取总量不得超过 kMaxResponseBodyBytes。
-void ReadResponseBody(esp_http_client_handle_t client, std::string& body) {
+// 读取响应体并报告是否完整：受理结果（如 NotificationSubmission）需透传给
+// 调用方提取动作窗口。content_length 未知（-1，分块编码）时持续读到 EOF；
+// 否则按 Content-Length 精确读取。无论声明长度如何，读取总量不得超过
+// kMaxResponseBodyBytes。返回 false 表示响应超出上限被截断，body 不完整，
+// 调用方不得按成功受理处理。
+bool ReadResponseBody(esp_http_client_handle_t client, std::string& body) {
     const int64_t content_length = esp_http_client_get_content_length(client);
     char buffer[256];
     int64_t remaining = content_length;
@@ -37,6 +39,9 @@ void ReadResponseBody(esp_http_client_handle_t client, std::string& body) {
             remaining -= n;
         }
     }
+    // 仅命中上限时判定截断：Content-Length 恰好等于上限时 remaining 会先归零，
+    // 属于完整读取；分块流在读到上限时仍可能有后续数据，同样视为截断。
+    return body.size() < kMaxResponseBodyBytes || remaining == 0;
 }
 
 }  // namespace
@@ -107,7 +112,13 @@ ImHttpResponse EspHttpTransport::Post(const ImHttpRequest& request) {
     result.message = std::to_string(result.status_code);
     if (result.status_code >= 200 && result.status_code < 300) {
         result.status = ImTransportStatus::kSuccess;
-        ReadResponseBody(client, result.body);
+        // 响应体超限截断不得按成功受理处理：截断的 NotificationSubmission
+        // 无法提取可靠动作窗口，按未确认处理由调用方重连重放。
+        if (!ReadResponseBody(client, result.body)) {
+            ESP_LOGW(kTag, "受理结果响应超过 %zu 字节上限，按未受理处理", kMaxResponseBodyBytes);
+            result.status = ImTransportStatus::kNetworkFailure;
+            result.message = "受理结果响应超过上限";
+        }
     } else if (result.status_code == 401 || result.status_code == 403) {
         result.status = ImTransportStatus::kCredentialRejected;
     } else {
