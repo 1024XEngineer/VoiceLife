@@ -54,6 +54,10 @@ class LookupFailureStore final : public TimingTaskStorePort {
     Result<std::vector<ReminderRule>> ListRules(const TimingTaskId&) override {
         return Result<std::vector<ReminderRule>>::Failure(ErrorCode::kInternal, "unexpected list");
     }
+
+    Result<int> DisableReminderRule(const std::string&, int64_t) override {
+        return Result<int>::Failure(ErrorCode::kInternal, "unexpected delete");
+    }
 };
 
 class ConcurrentReplayStore final : public TimingTaskStorePort {
@@ -77,6 +81,10 @@ class ConcurrentReplayStore final : public TimingTaskStorePort {
 
     Result<std::vector<ReminderRule>> ListRules(const TimingTaskId&) override {
         return Result<std::vector<ReminderRule>>::Failure(ErrorCode::kInternal, "unexpected list");
+    }
+
+    Result<int> DisableReminderRule(const std::string&, int64_t) override {
+        return Result<int>::Failure(ErrorCode::kInternal, "unexpected delete");
     }
 
    private:
@@ -273,13 +281,72 @@ int main() {
     Check(service.CancelTimerTask({}).status.code == ErrorCode::kUnavailable, "默认取消接口应明确返回未实现");
     Check(service.UpsertReminderRules({}).status.code == ErrorCode::kUnavailable,
           "默认提醒规则写入接口应明确返回未实现");
-    Check(service.DeleteReminderRule({}).status.code == ErrorCode::kUnavailable,
-          "默认提醒规则删除接口应明确返回未实现");
     Check(service.ListCalendarView({}).status.code == ErrorCode::kUnavailable, "默认日历查询接口应明确返回未实现");
     Check(service.ListReminderTriggers({}).status.code == ErrorCode::kUnavailable,
           "默认提醒触发查询接口应明确返回未实现");
     Check(service.SnoozeReminderTrigger({}).status.code == ErrorCode::kUnavailable, "默认提醒推迟接口应明确返回未实现");
     Check(service.DismissReminderTrigger({}).status.code == ErrorCode::kUnavailable,
           "默认提醒关闭接口应明确返回未实现");
+
+    const auto rules_before_delete = store.ListRules(registered.value->task_id);
+    const std::string rule_to_delete = rules_before_delete.value->front().id;
+    store.AddReminderTrigger({
+        .id = "future-trigger",
+        .reminder_rule_id = rule_to_delete,
+        .task_id = registered.value->task_id,
+        .planned_trigger_at = 1785740060,
+        .status = voicelife::timing::ReminderTriggerStatus::kPending,
+    });
+    store.AddReminderTrigger({
+        .id = "historical-trigger",
+        .reminder_rule_id = rule_to_delete,
+        .task_id = registered.value->task_id,
+        .planned_trigger_at = 1785739940,
+        .actual_trigger_at = 1785739940,
+        .status = voicelife::timing::ReminderTriggerStatus::kTriggered,
+    });
+    const auto deleted_rule = service.DeleteReminderRule({.reminder_rule_id = rule_to_delete});
+    Check(deleted_rule.ok() && deleted_rule.value->status == voicelife::timing::ReminderRuleStatus::kDisabled,
+          "活动提醒规则应删除为 disabled");
+    Check(deleted_rule.ok() && deleted_rule.value->affected_trigger_count == 1,
+          "删除规则应返回被取消的未来 trigger 数量");
+    const auto cancelled_trigger = store.FindReminderTrigger("future-trigger");
+    Check(cancelled_trigger.ok() &&
+              cancelled_trigger.value->status == voicelife::timing::ReminderTriggerStatus::kCancelled,
+          "删除规则应取消未来 pending trigger");
+    const auto historical_trigger = store.FindReminderTrigger("historical-trigger");
+    Check(historical_trigger.ok() &&
+              historical_trigger.value->status == voicelife::timing::ReminderTriggerStatus::kTriggered,
+          "删除规则不能修改历史 trigger");
+    Check(service.DeleteReminderRule({.reminder_rule_id = rule_to_delete}).status.code == ErrorCode::kConflict,
+          "重复删除提醒规则应返回冲突错误");
+    Check(service.DeleteReminderRule({.reminder_rule_id = "missing-rule"}).status.code == ErrorCode::kNotFound,
+          "删除未知提醒规则应返回 not found");
+    Check(service.DeleteReminderRule({}).status.code == ErrorCode::kInvalidArgument,
+          "删除请求缺少规则标识应返回参数错误");
+
+    store.AddReminderRule({
+        .id = "orphan-rule",
+        .task_id = "missing-task",
+        .status = voicelife::timing::ReminderRuleStatus::kActive,
+    });
+    Check(service.DeleteReminderRule({.reminder_rule_id = "orphan-rule"}).status.code == ErrorCode::kConflict,
+          "规则关联任务不存在应返回冲突错误");
+
+    const std::string rule_for_failed_delete = rules_before_delete.value->at(1).id;
+    store.AddReminderTrigger({
+        .id = "failed-delete-trigger",
+        .reminder_rule_id = rule_for_failed_delete,
+        .task_id = registered.value->task_id,
+        .planned_trigger_at = 1785740060,
+        .status = voicelife::timing::ReminderTriggerStatus::kPending,
+    });
+    store.FailNextRuleDisable(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
+    Check(
+        service.DeleteReminderRule({.reminder_rule_id = rule_for_failed_delete}).status.code == ErrorCode::kUnavailable,
+        "规则关闭失败应透传 Store 错误");
+    const auto retained_trigger = store.FindReminderTrigger("failed-delete-trigger");
+    Check(retained_trigger.ok() && retained_trigger.value->status == voicelife::timing::ReminderTriggerStatus::kPending,
+          "规则关闭失败不能改变未来 trigger");
     return 0;
 }

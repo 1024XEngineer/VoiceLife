@@ -50,6 +50,7 @@ target_link_libraries(schedule PUBLIC contracts)
 add_voicelife_library(timing voicelife_timing
     "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_delete_reminder_rule.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_stubs.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_state.cc")
 target_link_libraries(timing PUBLIC contracts)

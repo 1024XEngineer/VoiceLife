@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "voicelife/timing/timing_task_store.h"
 
@@ -71,9 +72,65 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         return Result<std::vector<timing::ReminderRule>>::Success(std::move(result));
     }
 
+    Result<int> DisableReminderRule(const std::string& reminder_rule_id, int64_t now) override {
+        if (!next_rule_disable_failure_.ok()) {
+            Status failure = std::move(next_rule_disable_failure_);
+            next_rule_disable_failure_ = Status::Ok();
+            return Result<int>::Failure(failure.code, failure.message);
+        }
+        const auto existing = rules_.find(reminder_rule_id);
+        if (existing == rules_.end()) {
+            return Result<int>::Failure(ErrorCode::kNotFound, "reminder rule not found");
+        }
+        if (existing->second.status == timing::ReminderRuleStatus::kDisabled) {
+            return Result<int>::Failure(ErrorCode::kConflict, "reminder rule already disabled");
+        }
+        if (!tasks_.contains(existing->second.task_id)) {
+            return Result<int>::Failure(ErrorCode::kConflict, "reminder rule task relation is invalid");
+        }
+
+        auto next_rules = rules_;
+        auto next_triggers = triggers_;
+        auto& rule = next_rules.at(reminder_rule_id);
+        rule.status = timing::ReminderRuleStatus::kDisabled;
+        rule.updated_at = now;
+        rule.deleted_at = now;
+        int affected_trigger_count = 0;
+        for (auto& [_, trigger] : next_triggers) {
+            if (trigger.reminder_rule_id == reminder_rule_id &&
+                trigger.status == timing::ReminderTriggerStatus::kPending && trigger.planned_trigger_at >= now) {
+                trigger.status = timing::ReminderTriggerStatus::kCancelled;
+                trigger.updated_at = now;
+                trigger.last_action_at = now;
+                ++affected_trigger_count;
+            }
+        }
+        rules_ = std::move(next_rules);
+        triggers_ = std::move(next_triggers);
+        return Result<int>::Success(affected_trigger_count);
+    }
+
+    void FailNextRuleDisable(Status failure) { next_rule_disable_failure_ = std::move(failure); }
+
+    void AddReminderRule(timing::ReminderRule rule) { rules_.insert_or_assign(rule.id, std::move(rule)); }
+
+    void AddReminderTrigger(timing::ReminderTrigger trigger) {
+        triggers_.insert_or_assign(trigger.id, std::move(trigger));
+    }
+
+    Result<timing::ReminderTrigger> FindReminderTrigger(const std::string& trigger_id) const {
+        const auto found = triggers_.find(trigger_id);
+        if (found == triggers_.end()) {
+            return Result<timing::ReminderTrigger>::Failure(ErrorCode::kNotFound, "reminder trigger not found");
+        }
+        return Result<timing::ReminderTrigger>::Success(found->second);
+    }
+
    private:
     std::unordered_map<timing::TimingTaskId, timing::TimingTask> tasks_;
     std::unordered_map<std::string, timing::ReminderRule> rules_;
+    std::unordered_map<std::string, timing::ReminderTrigger> triggers_;
+    Status next_rule_disable_failure_ = Status::Ok();
 };
 
 }  // namespace voicelife::test
