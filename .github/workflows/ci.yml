@@ -68,8 +68,6 @@ jobs:
       - name: 安装冻结依赖
         run: pnpm --dir services/im-gateway install --frozen-lockfile
       - name: 检查格式、静态规则、类型与测试
-        env:
-          TSDOC_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: pnpm --dir services/im-gateway run ci
 
   coverage:

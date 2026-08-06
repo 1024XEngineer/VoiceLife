@@ -1,5 +1,8 @@
 import {
     DEVICE_CONTRACT_VERSION,
+    MAX_PAIRING_SESSION_MINUTES,
+    MIN_PAIRING_SESSION_MINUTES,
+    type CreatePairingSessionRequest,
     type NotificationActionOption,
     type NotificationIntent,
     type ReminderActionIntent,
@@ -19,18 +22,40 @@ import type {
     TimerTaskId,
     UserId,
 } from './ids.js';
+import type { ImPlatform } from './platform-events.js';
 import { unsafeId } from './ids.js';
 import { ImGatewayError } from '../shared/errors.js';
 import type { IsoDateTime, JsonValue } from '../shared/types.js';
 
 type JsonObject = Record<string, unknown>;
 
+const MAX_NOTIFICATION_ACTIONS = 16;
+const MAX_SNOOZE_MINUTES = 24 * 60;
+
 const ISO_8601 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:Z|[+-](\d{2}):(\d{2}))$/;
 
 /**
- * Parses and validates a device schedule-operation receipt.
- * @param input Untrusted request payload.
- * @returns Normalized receipt intent for the application layer.
+ * 解析并校验设备创建配对会话的请求。
+ * @param input 未受信任的请求载荷。
+ * @returns 经过校验的配对会话请求。
+ */
+export function parseCreatePairingSessionRequest(input: unknown): CreatePairingSessionRequest {
+    const value = objectAt(input, 'body');
+    const userId = optionalId<UserId>(value, 'userId', 'body.userId');
+    const allowedPlatforms = optionalPlatformArray(value.allowedPlatforms, 'body.allowedPlatforms');
+    const expiresInMinutes = optionalPairingMinutes(value.expiresInMinutes, 'body.expiresInMinutes');
+    return {
+        ...(userId === undefined ? {} : { userId }),
+        deviceId: requiredId<DeviceId>(value, 'deviceId', 'body.deviceId'),
+        ...(allowedPlatforms === undefined ? {} : { allowedPlatforms }),
+        ...(expiresInMinutes === undefined ? {} : { expiresInMinutes }),
+    };
+}
+
+/**
+ * 解析并校验设备上报的日程操作回执。
+ * @param input 未受信任的请求载荷。
+ * @returns 供应用层使用的规范化回执意图。
  */
 export function parseScheduleReceiptIntent(input: unknown): ScheduleReceiptIntent {
     const value = objectAt(input, 'body');
@@ -54,9 +79,9 @@ export function parseScheduleReceiptIntent(input: unknown): ScheduleReceiptInten
 }
 
 /**
- * Parses and validates a device notification request.
- * @param input Untrusted request payload.
- * @returns Normalized notification intent for the application layer.
+ * 解析并校验设备发起的通知请求。
+ * @param input 未受信任的请求载荷。
+ * @returns 供应用层使用的规范化通知意图。
  */
 export function parseNotificationIntent(input: unknown): NotificationIntent {
     const value = objectAt(input, 'body');
@@ -68,6 +93,9 @@ export function parseNotificationIntent(input: unknown): NotificationIntent {
         invalid('body.actions', 'must be an array');
     }
     const actions = value.actions.map((action, index) => parseNotificationAction(action, `body.actions[${index}]`));
+    if (actions.length > MAX_NOTIFICATION_ACTIONS) {
+        invalid('body.actions', `must contain at most ${MAX_NOTIFICATION_ACTIONS} actions`);
+    }
     if (reminderType === 'weak' && actions.length !== 0) {
         invalid('body.actions', 'must be empty for a weak reminder');
     }
@@ -107,9 +135,9 @@ export function parseNotificationIntent(input: unknown): NotificationIntent {
 }
 
 /**
- * Parses a device callback reporting reminder-action execution.
- * @param input Untrusted request payload.
- * @returns Normalized reminder-action result.
+ * 解析设备回传的提醒动作执行结果。
+ * @param input 未受信任的请求载荷。
+ * @returns 规范化的提醒动作结果。
  */
 export function parseReminderActionResult(input: unknown): ReminderActionResult {
     const value = objectAt(input, 'body');
@@ -133,9 +161,9 @@ export function parseReminderActionResult(input: unknown): ReminderActionResult 
 }
 
 /**
- * Parses a user action submitted through an action entry point.
- * @param input Untrusted request payload.
- * @returns Validated reminder-action intent.
+ * 解析用户从动作入口提交的提醒操作。
+ * @param input 未受信任的请求载荷。
+ * @returns 经过校验的提醒动作意图。
  */
 export function parseReminderActionIntent(input: unknown): ReminderActionIntent {
     const value = objectAt(input, 'body');
@@ -155,9 +183,9 @@ export function parseReminderActionIntent(input: unknown): ReminderActionIntent 
 }
 
 /**
- * Parses the opaque token submitted by an action UI.
- * @param input Untrusted token payload.
- * @returns Non-empty action token.
+ * 解析动作页面提交的不透明令牌。
+ * @param input 未受信任的令牌载荷。
+ * @returns 非空动作令牌。
  */
 export function parseActionToken(input: unknown): string {
     return stringAt(input, 'token');
@@ -180,8 +208,13 @@ function parseNotificationAction(input: unknown, path: string): NotificationActi
 
 function parseActionParams(input: unknown, path: string): { readonly minutes: number } {
     const value = objectAt(input, path);
-    if (typeof value.minutes !== 'number' || !Number.isInteger(value.minutes) || value.minutes <= 0) {
-        invalid(`${path}.minutes`, 'must be a positive integer');
+    if (
+        typeof value.minutes !== 'number' ||
+        !Number.isInteger(value.minutes) ||
+        value.minutes <= 0 ||
+        value.minutes > MAX_SNOOZE_MINUTES
+    ) {
+        invalid(`${path}.minutes`, `must be an integer from 1 to ${MAX_SNOOZE_MINUTES}`);
     }
     return { minutes: value.minutes };
 }
@@ -217,6 +250,27 @@ function optionalId<T>(value: JsonObject, key: string, path: string): T | undefi
 
 function optionalString(value: JsonObject, key: string, path: string): string | undefined {
     return value[key] === undefined ? undefined : stringAt(value[key], path);
+}
+
+function optionalPlatformArray(input: unknown, path: string): readonly ImPlatform[] | undefined {
+    if (input === undefined) return undefined;
+    if (!Array.isArray(input)) invalid(path, 'must be an array');
+    return input.map((platform, index) =>
+        enumAt(platform, ['wechat_official', 'wecom_aibot', 'feishu', 'dingtalk'] as const, `${path}[${index}]`),
+    );
+}
+
+function optionalPairingMinutes(input: unknown, path: string): number | undefined {
+    if (input === undefined) return undefined;
+    if (
+        typeof input !== 'number' ||
+        !Number.isInteger(input) ||
+        input < MIN_PAIRING_SESSION_MINUTES ||
+        input > MAX_PAIRING_SESSION_MINUTES
+    ) {
+        invalid(path, `must be an integer from ${MIN_PAIRING_SESSION_MINUTES} to ${MAX_PAIRING_SESSION_MINUTES}`);
+    }
+    return input;
 }
 
 function enumAt<const T extends readonly string[]>(input: unknown, allowed: T, path: string): T[number] {

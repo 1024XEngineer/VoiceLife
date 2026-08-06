@@ -45,55 +45,75 @@ import type {
 import type { IsoDateTime, JsonValue } from '../shared/types.js';
 import { ImGatewayError } from '../shared/errors.js';
 
+/** 可手动推进时间的确定性测试时钟。 */
 export class FixedClock implements Clock {
+    /** @param value 初始日期时间。 */
     public constructor(private value: IsoDateTime = '2026-08-03T00:00:00.000Z' as IsoDateTime) {}
 
+    /** {@inheritDoc Clock.now} */
     public now(): IsoDateTime {
         return this.value;
     }
 
+    /** {@inheritDoc Clock.addMinutes} */
     public addMinutes(value: IsoDateTime, minutes: number): IsoDateTime {
         return new Date(Date.parse(value) + minutes * 60_000).toISOString() as IsoDateTime;
     }
 
+    /**
+     * 将测试时钟向前推进指定分钟数。
+     * @param minutes 要推进的分钟数。
+     */
     public advanceMinutes(minutes: number): void {
         this.value = this.addMinutes(this.value, minutes);
     }
 }
 
+/** 使用递增序列生成可预测测试标识的实现。 */
 export class SequentialIdGenerator implements IdGenerator {
     private sequence = 0;
 
+    /** {@inheritDoc IdGenerator.nextChannelAccountId} */
     public nextChannelAccountId(): ChannelAccountId {
         return this.next<ChannelAccountId>('channel');
     }
+    /** {@inheritDoc IdGenerator.nextPairingSessionId} */
     public nextPairingSessionId(): PairingSessionId {
         return this.next<PairingSessionId>('pairing');
     }
+    /** {@inheritDoc IdGenerator.nextBindingId} */
     public nextBindingId(): BindingId {
         return this.next<BindingId>('binding');
     }
+    /** {@inheritDoc IdGenerator.nextExternalIdentityId} */
     public nextExternalIdentityId(): ExternalIdentityId {
         return this.next<ExternalIdentityId>('identity');
     }
+    /** {@inheritDoc IdGenerator.nextDeliveryId} */
     public nextDeliveryId(): DeliveryId {
         return this.next<DeliveryId>('delivery');
     }
+    /** {@inheritDoc IdGenerator.nextDeliveryAttemptId} */
     public nextDeliveryAttemptId(): DeliveryAttemptId {
         return this.next<DeliveryAttemptId>('attempt');
     }
+    /** {@inheritDoc IdGenerator.nextDeliveryReceiptId} */
     public nextDeliveryReceiptId(): DeliveryReceiptId {
         return this.next<DeliveryReceiptId>('receipt');
     }
+    /** {@inheritDoc IdGenerator.actionIdForDelivery} */
     public actionIdForDelivery(deliveryId: DeliveryId): ActionId {
         return unsafeId<ActionId>(`action-ui:${deliveryId}`);
     }
+    /** {@inheritDoc IdGenerator.nextOperationId} */
     public nextOperationId(): OperationId {
         return this.next<OperationId>('operation');
     }
+    /** {@inheritDoc IdGenerator.nextOutboxEventId} */
     public nextOutboxEventId(): OutboxEventId {
         return this.next<OutboxEventId>('outbox');
     }
+    /** {@inheritDoc IdGenerator.nextRequestId} */
     public nextRequestId(): RequestId {
         return this.next<RequestId>('request');
     }
@@ -104,17 +124,22 @@ export class SequentialIdGenerator implements IdGenerator {
     }
 }
 
+/** 固定签发六位展示码的配对码测试实现。 */
 export class MockPairingCodePort implements PairingCodePort {
+    /** {@inheritDoc PairingCodePort.issue} */
     public issue(): Promise<{ readonly displayCode: string; readonly hash: string }> {
         return Promise.resolve({ displayCode: '123456', hash: 'hash:123456' });
     }
 
+    /** {@inheritDoc PairingCodePort.hash} */
     public hash(displayCode: string): Promise<string> {
         return Promise.resolve(`hash:${displayCode}`);
     }
 }
 
+/** 使用可预测前缀模拟外部身份保护的测试实现。 */
 export class MockExternalIdentityProtector implements ExternalIdentityProtector {
+    /** {@inheritDoc ExternalIdentityProtector.protect} */
     public protect(plainExternalUserId: string): Promise<ProtectedExternalIdentity> {
         return Promise.resolve({
             ciphertext: `ciphertext:${plainExternalUserId}`,
@@ -123,7 +148,9 @@ export class MockExternalIdentityProtector implements ExternalIdentityProtector 
     }
 }
 
+/** 返回固定渠道能力集合的测试实现。 */
 export class MockChannelCapabilities implements ChannelCapabilityResolver {
+    /** {@inheritDoc ChannelCapabilityResolver.resolve} */
     public resolve(_account: ChannelAccount): Promise<ChannelCapabilities> {
         return Promise.resolve({
             proactiveMessage: true,
@@ -135,9 +162,12 @@ export class MockChannelCapabilities implements ChannelCapabilityResolver {
     }
 }
 
+/** 根据账号状态生成健康结果的测试实现。 */
 export class MockChannelHealthPort implements ChannelHealthPort {
+    /** @param clock 用于记录检查时间的时钟。 */
     public constructor(private readonly clock: Clock) {}
 
+    /** {@inheritDoc ChannelHealthPort.check} */
     public check(account: ChannelAccount): Promise<ChannelHealth> {
         return Promise.resolve({
             accountId: account.id,
@@ -147,7 +177,9 @@ export class MockChannelHealthPort implements ChannelHealthPort {
     }
 }
 
+/** 从外部身份生成确定性私聊引用的测试实现。 */
 export class MockConversationResolver implements ConversationResolverPort {
+    /** {@inheritDoc ConversationResolverPort.resolveDirect} */
     public resolveDirect(identity: ExternalIdentity): Promise<ConversationRef> {
         return Promise.resolve({
             channelAccountId: identity.channelAccountId,
@@ -158,7 +190,9 @@ export class MockConversationResolver implements ConversationResolverPort {
     }
 }
 
+/** 将语义载荷和可选动作令牌组合成测试消息的渲染器。 */
 export class MockDeliveryRenderer implements DeliveryRendererPort {
+    /** {@inheritDoc DeliveryRendererPort.render} */
     public render(
         delivery: Delivery,
         _account: ChannelAccount,
@@ -175,7 +209,9 @@ export class MockDeliveryRenderer implements DeliveryRendererPort {
     }
 }
 
+/** 始终接受发送请求的 IM 渠道测试实现。 */
 export class MockImChannel implements ImChannelPort {
+    /** {@inheritDoc ImChannelPort.send} */
     public send(_message: OutboundImMessage): Promise<ImSendAcceptance> {
         return Promise.resolve({
             accepted: true,
@@ -184,15 +220,17 @@ export class MockImChannel implements ImChannelPort {
     }
 }
 
-/** Snapshot-only stream used by skeleton tests; it is not a live SSE hub. */
+/** 仅提供快照回放的测试命令流，不模拟实时 SSE Hub。 */
 export class InMemoryActionCommandStream implements ActionCommandStreamPort {
     private readonly commands: ReminderActionCommand[] = [];
 
+    /** {@inheritDoc ActionCommandStreamPort.publish} */
     public publish(command: ReminderActionCommand): Promise<void> {
         this.commands.push(command);
         return Promise.resolve();
     }
 
+    /** {@inheritDoc ActionCommandStreamPort.subscribe} */
     public subscribe(subscription: ActionStreamSubscription): AsyncIterable<ReminderActionCommand> {
         const matching = this.commands.filter(
             (command) =>
@@ -207,6 +245,7 @@ export class InMemoryActionCommandStream implements ActionCommandStreamPort {
         return snapshot(matching.slice(start));
     }
 
+    /** {@inheritDoc ActionCommandStreamPort.close} */
     public close(actionId: ActionId): Promise<void> {
         for (let index = this.commands.length - 1; index >= 0; index -= 1) {
             if (this.commands[index]?.commandId === actionId) this.commands.splice(index, 1);
@@ -215,15 +254,18 @@ export class InMemoryActionCommandStream implements ActionCommandStreamPort {
     }
 }
 
+/** 在内存中保存动作令牌声明的测试实现。 */
 export class InMemoryActionTokenPort implements ActionTokenPort {
     private readonly claimsByToken = new Map<string, ActionTokenClaims>();
 
+    /** {@inheritDoc ActionTokenPort.issue} */
     public issue(claims: ActionTokenClaims): Promise<string> {
         const token = `mock-token:${claims.actionId}`;
         this.claimsByToken.set(token, claims);
         return Promise.resolve(token);
     }
 
+    /** {@inheritDoc ActionTokenPort.verify} */
     public verify(token: string): Promise<ActionTokenClaims> {
         const claims = this.claimsByToken.get(token);
         if (claims === undefined) {
@@ -232,14 +274,18 @@ export class InMemoryActionTokenPort implements ActionTokenPort {
         return Promise.resolve(claims);
     }
 
+    /** {@inheritDoc ActionTokenPort.fingerprint} */
     public fingerprint(token: string): Promise<string> {
         return Promise.resolve(`hash:${token}`);
     }
 }
 
+/** 始终认证为指定设备的测试认证端口。 */
 export class MockDeviceAuthenticationPort implements DeviceAuthenticationPort {
+    /** @param deviceId 所有认证请求返回的设备标识。 */
     public constructor(private readonly deviceId: DeviceId) {}
 
+    /** {@inheritDoc DeviceAuthenticationPort.authenticate} */
     public authenticate(_authorization: string): Promise<DevicePrincipal> {
         return Promise.resolve({ deviceId: this.deviceId });
     }

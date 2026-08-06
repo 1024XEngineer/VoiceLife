@@ -1,9 +1,9 @@
 import type { JsonValue } from './types.js';
 
 /**
- * Creates a stable, lossless representation for request-level idempotency checks.
- * @param value JSON-compatible value to serialize.
- * @returns Canonical JSON with object keys sorted recursively.
+ * 为请求级幂等检查生成稳定且无损的 JSON 表示。
+ * @param value 要序列化的 JSON 兼容值。
+ * @returns 对象键经过递归排序的规范 JSON。
  */
 export function canonicalizeJson(value: JsonValue): string {
     if (Array.isArray(value)) {

@@ -50,4 +50,4 @@ pnpm --dir services/im-gateway test
 
 ## TSDoc 规范
 
-从本次改动起，任何新增或修改的导出 class、interface、type、enum、const 和 function 都必须紧邻 `/** ... */` TSDoc 注释。导出函数还必须逐一使用 `@param` 说明参数，并通过 `@returns` 说明非 `void` 返回值。内部实现不强制；已有公开 API 采用增量迁移，修改到相应声明时必须补齐注释。
+所有导出的 class、interface、type、enum、const 和 function 都必须紧邻简洁的 `/** ... */` TSDoc 注释，并包含中文职责说明。导出函数、导出接口的方法，以及导出类的公开构造函数、方法和访问器还必须逐一使用 `@param` 说明参数，并通过 `@returns` 说明非 `void` 返回值。实现类可使用 `{@inheritDoc Interface.method}` 继承接口契约；`private` 和 `protected` 成员不强制添加重复代码的注释。`pnpm run docs:check` 每次全量扫描 `src`，不区分新旧代码。

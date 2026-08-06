@@ -2,6 +2,7 @@ import type { ChannelAccountId, DeliveryAttemptId, ExternalIdentityId, InboundEv
 import type { ReminderActionIntent } from './device-gateway.js';
 import type { IsoDateTime, JsonValue } from '../shared/types.js';
 
+/** Gateway 支持的 IM 平台。 */
 export type ImPlatform = 'wechat_official' | 'wecom_aibot' | 'feishu' | 'dingtalk';
 
 interface NormalizedImEventBase {
@@ -13,6 +14,7 @@ interface NormalizedImEventBase {
     readonly occurredAt: IsoDateTime;
 }
 
+/** 平台投递状态回调归一化后的回执。 */
 export interface NormalizedDeliveryReceipt {
     readonly externalEventId: string;
     readonly channelAccountId: ChannelAccountId;
@@ -25,6 +27,7 @@ export interface NormalizedDeliveryReceipt {
     readonly detail?: JsonValue;
 }
 
+/** 外部用户发起的账号绑定请求。 */
 export interface NormalizedBindingRequest {
     readonly displayCode: string;
     readonly externalUserId: string;
@@ -32,6 +35,7 @@ export interface NormalizedBindingRequest {
     readonly displayName?: string;
 }
 
+/** 平台入站事件归一化后的判别联合。 */
 export type NormalizedImEvent =
     | (NormalizedImEventBase & {
           readonly type: 'message.received';
