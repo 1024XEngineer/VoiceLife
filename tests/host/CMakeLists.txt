@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(voicelife_host_tests LANGUAGES C CXX)
 
+find_package(Threads REQUIRED)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -51,15 +53,20 @@ target_link_libraries(im PUBLIC contracts)
 add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_create_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_mock_data.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_operation_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_operation_mock_data.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_operation_query_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_query_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_service.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_time_rules.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_undo_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_update_helpers.cc")
 target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
-target_link_libraries(schedule PUBLIC contracts)
+target_link_libraries(schedule PUBLIC contracts Threads::Threads)
 add_voicelife_library(timing voicelife_timing
     "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_reminder_rules.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_stubs.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_state.cc")
 target_link_libraries(timing PUBLIC contracts)
@@ -74,7 +81,6 @@ add_voicelife_library(voice voicelife_voice
 target_link_libraries(voice PUBLIC contracts)
 add_voicelife_library(linx voicelife_linx
     "${ROOT_DIR}/components/voicelife_linx/src/linx_json_codec.cc"
-    "${ROOT_DIR}/components/voicelife_linx/src/linx_json_reader.cc"
     "${ROOT_DIR}/components/voicelife_linx/src/linx_speech_provider.cc")
 target_link_libraries(linx PUBLIC voice cjson)
 add_voicelife_library(linx_esp voicelife_linx_esp
@@ -119,6 +125,24 @@ target_link_libraries(schedule_delete_test PRIVATE schedule)
 add_voicelife_test(schedule_update_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_update_test.cc")
 target_link_libraries(schedule_update_test PRIVATE schedule)
+
+add_voicelife_test(schedule_operation_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_operation_test.cc")
+target_include_directories(schedule_operation_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_schedule/src")
+target_link_libraries(schedule_operation_test PRIVATE schedule)
+
+add_voicelife_test(schedule_recent_operation_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_recent_operation_test.cc")
+target_include_directories(schedule_recent_operation_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_schedule/src")
+target_link_libraries(schedule_recent_operation_test PRIVATE schedule)
+
+add_voicelife_test(schedule_undo_operation_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_undo_operation_test.cc")
+target_include_directories(schedule_undo_operation_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_schedule/src")
+target_link_libraries(schedule_undo_operation_test PRIVATE schedule)
 
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
 target_link_libraries(status_test PRIVATE contracts)
