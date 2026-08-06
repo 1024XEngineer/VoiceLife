@@ -1,9 +1,8 @@
-#include "voicelife/voice/voice_session.h"
-
 #include <memory>
 #include <utility>
 
 #include "support/test_support.h"
+#include "voicelife/voice/voice_session.h"
 
 using voicelife::ErrorCode;
 using voicelife::Status;
@@ -119,8 +118,7 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
         }
     }
     Status EmitAudio(voicelife::voice::AudioFrame frame) {
-        return audio_sink_ ? audio_sink_(std::move(frame))
-                           : Status::Error(ErrorCode::kUnavailable, "音频回调未绑定");
+        return audio_sink_ ? audio_sink_(std::move(frame)) : Status::Error(ErrorCode::kUnavailable, "音频回调未绑定");
     }
 
     voicelife::voice::CapabilityProfile profile{"fake", {"streaming-asr", "tts", "cancel-generation"}};
@@ -165,9 +163,9 @@ voicelife::voice::AudioFrame Frame(uint64_t generation, uint64_t sequence) {
 
 int main() {
     auto& registry = voicelife::voice::SpeechProviderRegistry::Instance();
-    Check(registry.Register(
-              "fake-registry", voicelife::voice::CapabilityProfile{"fake-registry", {"tts"}},
-              []() { return std::make_unique<FakeProvider>(); })
+    Check(registry
+              .Register("fake-registry", voicelife::voice::CapabilityProfile{"fake-registry", {"tts"}},
+                        []() { return std::make_unique<FakeProvider>(); })
               .ok(),
           "Provider 工厂应可注册");
     auto created = registry.Create("fake-registry", {"tts"});
@@ -185,12 +183,10 @@ int main() {
     Check(session.Start(Config()).ok(), "合法配置应启动语音会话");
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady, "启动后应进入 ready");
     const uint64_t generation = session.generation();
-    Check(provider.EmitAudio(Frame(generation, 0)).ok() && output.pushes == 1,
-          "Provider 下行音频应通过会话输出端口");
+    Check(provider.EmitAudio(Frame(generation, 0)).ok() && output.pushes == 1, "Provider 下行音频应通过会话输出端口");
     auto mismatched_playback = Frame(generation, 0);
     mismatched_playback.format.channels = 2;
-    Check(provider.EmitAudio(std::move(mismatched_playback)).code == ErrorCode::kInvalidArgument &&
-              output.pushes == 1,
+    Check(provider.EmitAudio(std::move(mismatched_playback)).code == ErrorCode::kInvalidArgument && output.pushes == 1,
           "下行音频格式变化必须拒绝");
     Check(session.BeginCapture().ok(), "ready 会话应开始采集");
     Check(session.SubmitAudio(Frame(generation, 0)).ok(), "当前 generation 的首帧应发送");
