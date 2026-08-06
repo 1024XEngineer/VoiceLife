@@ -1,5 +1,6 @@
 #include "im_wire.h"
 
+#include <cmath>
 #include <cstdio>
 #include <string>
 
@@ -8,6 +9,7 @@ namespace {
 
 using contracts::im::NotificationAction;
 using contracts::im::NotificationIntent;
+using contracts::im::ReminderActionResult;
 using contracts::im::ScheduleReceiptIntent;
 
 /// 追加一个 JSON 字符串字面量，转义引号、反斜杠与控制字符。
@@ -49,6 +51,59 @@ void AppendKey(std::string& out, const std::string& key) {
     out.push_back('"');
     out += key;
     out += "\":";
+}
+
+/// 递归追加任意 JSON 值，用于结果 details 等透传字段。
+void AppendJsonValue(std::string& out, const voicelife::JsonValue& value) {
+    switch (value.kind) {
+        case voicelife::JsonValue::Kind::kNull:
+            out += "null";
+            break;
+        case voicelife::JsonValue::Kind::kBool:
+            out += value.boolean ? "true" : "false";
+            break;
+        case voicelife::JsonValue::Kind::kNumber: {
+            const double number = value.number;
+            if (number == std::floor(number) && std::abs(number) < 1e15) {
+                out += std::to_string(static_cast<long long>(number));
+            } else {
+                char buffer[32];
+                std::snprintf(buffer, sizeof buffer, "%g", number);
+                out += buffer;
+            }
+            break;
+        }
+        case voicelife::JsonValue::Kind::kString:
+            AppendJsonString(out, value.string);
+            break;
+        case voicelife::JsonValue::Kind::kArray: {
+            out.push_back('[');
+            bool first = true;
+            for (const voicelife::JsonValue& item : value.array) {
+                if (!first) {
+                    out.push_back(',');
+                }
+                first = false;
+                AppendJsonValue(out, item);
+            }
+            out.push_back(']');
+            break;
+        }
+        case voicelife::JsonValue::Kind::kObject: {
+            out.push_back('{');
+            bool first = true;
+            for (const auto& [key, item] : value.object) {
+                if (!first) {
+                    out.push_back(',');
+                }
+                first = false;
+                AppendKey(out, key);
+                AppendJsonValue(out, item);
+            }
+            out.push_back('}');
+            break;
+        }
+    }
 }
 
 }  // namespace
@@ -170,6 +225,43 @@ std::string SerializeNotificationIntent(const NotificationIntent& intent) {
     out.push_back(',');
     AppendKey(out, "occurredAt");
     AppendJsonString(out, intent.occurredAt);
+    out.push_back('}');
+    return out;
+}
+
+std::string SerializeReminderActionResult(const ReminderActionResult& result) {
+    std::string out;
+    out.reserve(256);
+    out.push_back('{');
+    AppendKey(out, "schemaVersion");
+    AppendJsonString(out, result.schemaVersion);
+    out.push_back(',');
+    AppendKey(out, "operationId");
+    AppendJsonString(out, result.operationId);
+    out.push_back(',');
+    AppendKey(out, "reminderTriggerId");
+    AppendJsonString(out, result.reminderTriggerId);
+    out.push_back(',');
+    AppendKey(out, "status");
+    AppendJsonString(out, result.status);
+    if (result.nextTriggerAt.has_value()) {
+        out.push_back(',');
+        AppendKey(out, "nextTriggerAt");
+        AppendJsonString(out, *result.nextTriggerAt);
+    }
+    if (result.errorCode.has_value()) {
+        out.push_back(',');
+        AppendKey(out, "errorCode");
+        AppendJsonString(out, *result.errorCode);
+    }
+    if (result.details.has_value()) {
+        out.push_back(',');
+        AppendKey(out, "details");
+        AppendJsonValue(out, *result.details);
+    }
+    out.push_back(',');
+    AppendKey(out, "occurredAt");
+    AppendJsonString(out, result.occurredAt);
     out.push_back('}');
     return out;
 }

@@ -3,6 +3,7 @@
 #include <string>
 
 #include "voicelife/contracts/im/notification_intent.h"
+#include "voicelife/contracts/im/reminder_action_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/im/im_credentials.h"
 #include "voicelife/im/im_transport.h"
@@ -53,6 +54,15 @@ class ImReportingChannel {
      * @return 提交结果分类。
      */
     ReportResult SubmitNotification(const contracts::im::NotificationIntent& intent);
+    /**
+     * @brief 回传提醒动作执行结果到 POST /v1/devices/{deviceId}/reminder-actions/{commandId}/result。
+     * @param result 执行结果，operationId 作为回传幂等键。
+     * @param device_id 命令归属的设备标识。
+     * @param command_id 命令标识。
+     * @return 提交结果分类。
+     */
+    ReportResult SubmitReminderActionResult(const contracts::im::ReminderActionResult& result,
+                                            const std::string& device_id, const std::string& command_id);
 
    private:
     /// 统一提交入口：装配请求头并映射传输结果。

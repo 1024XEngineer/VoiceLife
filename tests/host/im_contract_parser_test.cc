@@ -168,8 +168,7 @@ int main() {
 
     // 动作命令：字段与 TS ReminderActionCommand 一致
     ReminderActionCommand command;
-    Check(ParseCommandFixture("reminder-action-command.json", command).ok(),
-          "共享动作命令 fixture 必须被 C++ 解析");
+    Check(ParseCommandFixture("reminder-action-command.json", command).ok(), "共享动作命令 fixture 必须被 C++ 解析");
     Check(command.schemaVersion == kDeviceContractVersion, "动作命令必须共享设备契约版本");
     Check(command.commandId == "command-fixture" && command.operationId == "operation-fixture",
           "动作命令的命令/操作标识必须被保留");
@@ -193,7 +192,8 @@ int main() {
           "共享强提醒受理结果 fixture 必须被 C++ 解析");
     Check(strong_submission.businessEventId == "event-fixture" && strong_submission.status == "accepted",
           "受理结果业务事件标识与状态必须被保留");
-    Check(strong_submission.deliveries.size() == 1 && strong_submission.deliveries[0].deliveryId == "delivery-fixture" &&
+    Check(strong_submission.deliveries.size() == 1 &&
+              strong_submission.deliveries[0].deliveryId == "delivery-fixture" &&
               strong_submission.deliveries[0].bindingId == "binding-fixture" &&
               strong_submission.deliveries[0].status == "pending",
           "受理结果交付行必须被保留");

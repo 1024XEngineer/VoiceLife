@@ -10,6 +10,9 @@ namespace {
 
 constexpr const char* kScheduleReceiptPath = "/v1/im/schedule-receipts";
 constexpr const char* kNotificationPath = "/v1/im/notifications";
+constexpr const char* kReminderActionResultPrefix = "/v1/devices/";
+constexpr const char* kReminderActionResultSuffix = "/reminder-actions/";
+constexpr const char* kReminderActionResultResultSuffix = "/result";
 
 /// 发送前契约校验：序列化结果必须能通过网关契约解析，否则本地拒绝。
 bool ValidatesAsScheduleReceipt(const std::string& body) {
@@ -22,6 +25,12 @@ bool ValidatesAsNotification(const std::string& body) {
     voicelife::JsonValue root;
     contracts::im::NotificationIntent validated;
     return voicelife::ParseJson(body, root).ok() && contracts::im::ParseNotificationIntent(root, validated).ok();
+}
+
+bool ValidatesAsActionResult(const std::string& body) {
+    voicelife::JsonValue root;
+    contracts::im::ReminderActionResult validated;
+    return voicelife::ParseJson(body, root).ok() && contracts::im::ParseReminderActionResult(root, validated).ok();
 }
 
 }  // namespace
@@ -43,6 +52,18 @@ ReportResult ImReportingChannel::SubmitNotification(const contracts::im::Notific
         return {ReportStatus::kRejected, "发送前契约校验失败"};
     }
     return Submit(kNotificationPath, intent.businessEventId, intent.recipient.deviceId, body);
+}
+
+ReportResult ImReportingChannel::SubmitReminderActionResult(const contracts::im::ReminderActionResult& result,
+                                                            const std::string& device_id,
+                                                            const std::string& command_id) {
+    const std::string body = SerializeReminderActionResult(result);
+    if (!ValidatesAsActionResult(body)) {
+        return {ReportStatus::kRejected, "发送前契约校验失败"};
+    }
+    const std::string path = kReminderActionResultPrefix + device_id + kReminderActionResultSuffix + command_id +
+                             kReminderActionResultResultSuffix;
+    return Submit(path, result.operationId, device_id, body);
 }
 
 ReportResult ImReportingChannel::Submit(const std::string& path, const std::string& idempotency_key,
