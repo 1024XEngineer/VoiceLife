@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 
 import { createMockImGateway } from '../dist/index.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
-import { bindFixtureUser, buildGateway, expectRejected, pendingStrongDelivery, weakIntent } from './helpers.mjs';
+import {
+    bindFixtureUser,
+    buildGateway,
+    expectRejected,
+    pendingStrongDelivery,
+    strongIntent,
+    weakIntent,
+} from './helpers.mjs';
 
 /** 记录发布命令与关闭动作的动作流 Port。 */
 function recordingActionStream() {
@@ -195,6 +202,45 @@ test('Last-Event-ID does not acknowledge an unconfirmed action command', async (
     assert.equal(replay.length, 1);
     assert.equal(replay[0].commandId, command.commandId);
     assert.equal(replay[0].operationId, command.operationId);
+});
+
+test('replayPending with an unknown cursor replays the whole unconfirmed window', async () => {
+    const { gateway } = actionGateway();
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+
+    const replay = await gateway.application.actions.replayPending(
+        command.deviceId,
+        command.reminderTriggerId,
+        'action-cursor-unknown',
+    );
+
+    assert.equal(replay.length, 1);
+    assert.equal(replay[0].commandId, command.commandId);
+});
+
+test('Last-Event-ID does not exclude earlier unconfirmed commands in the same window', async () => {
+    const { gateway } = actionGateway();
+    await bindFixtureUser(gateway, { externalUserId: 'fixture-open-id-1' });
+    await bindFixtureUser(gateway, { externalUserId: 'fixture-open-id-2' });
+    const submission = await gateway.application.notifications.submitNotification(strongIntent());
+    assert.equal(submission.deliveries.length, 2);
+    const commands = [];
+    for (const delivery of submission.deliveries) {
+        const token = await gateway.application.actionUi.issue(delivery.deliveryId);
+        commands.push(await gateway.application.actionUi.execute({ token, action: 'acknowledge' }));
+    }
+
+    const replay = await gateway.application.actions.replayPending(
+        commands[1].deviceId,
+        commands[1].reminderTriggerId,
+        commands[1].commandId,
+    );
+
+    assert.deepEqual(
+        replay.map((command) => command.commandId),
+        commands.map((command) => command.commandId),
+    );
 });
 
 test('markProcessing validates command scope and is idempotent once processing', async () => {

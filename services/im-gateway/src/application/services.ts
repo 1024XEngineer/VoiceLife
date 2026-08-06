@@ -1152,14 +1152,9 @@ export class DefaultActionApplication implements ActionApplication {
                 reminderTriggerId,
                 this.clock.now(),
             );
-            const start =
-                after === undefined
-                    ? 0
-                    : Math.max(
-                          0,
-                          actions.findIndex((action) => action.id === after),
-                      );
-            const replay = actions.slice(start);
+            // Last-Event-ID 只描述传输进度；业务结果返回前，任何命令都不能被游标排除。
+            void after;
+            const replay = actions;
             for (const action of replay) {
                 if (action.status === 'pending') {
                     await tx.actions.save({

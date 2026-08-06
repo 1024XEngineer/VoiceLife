@@ -340,10 +340,10 @@ export interface ActionApplication {
      */
     findByOperationId(operationId: OperationId): Promise<ImAction | undefined>;
     /**
-     * 回放指定游标之后仍需设备处理的动作命令。
+     * 回放窗口内所有仍未确认、未过期的动作命令；传输游标不代表业务确认。
      * @param deviceId 目标设备标识。
      * @param reminderTriggerId 提醒触发窗口标识。
-     * @param after 已处理的最后一个动作标识。
+     * @param after 设备已收到的最新动作标识，仅作为续接上下文，不能排除未确认动作。
      * @returns 有序的待处理动作命令。
      */
     replayPending(
