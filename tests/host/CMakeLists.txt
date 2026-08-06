@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(voicelife_host_tests LANGUAGES CXX)
+project(voicelife_host_tests LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,18 +21,36 @@ endif()
 
 set(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../..")
 
+add_library(yyjson STATIC "${ROOT_DIR}/third_party/yyjson/yyjson.c")
+target_include_directories(yyjson PUBLIC "${ROOT_DIR}/third_party/yyjson")
+if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(yyjson PRIVATE -w)
+endif()
+
 function(add_voicelife_library target component)
     add_library(${target} STATIC ${ARGN})
     target_include_directories(${target} PUBLIC "${ROOT_DIR}/components/${component}/include")
 endfunction()
 
 add_voicelife_library(contracts voicelife_contracts
-    "${ROOT_DIR}/components/voicelife_contracts/src/status.cc")
+    "${ROOT_DIR}/components/voicelife_contracts/src/status.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/json.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_intent.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_receipt.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_result.cc")
+target_link_libraries(contracts PRIVATE yyjson)
+add_voicelife_library(im voicelife_im
+    "${ROOT_DIR}/components/voicelife_im/src/im_reporting_channel.cc"
+    "${ROOT_DIR}/components/voicelife_im/src/im_wire.cc"
+    "${ROOT_DIR}/components/voicelife_im/src/im_endpoint.cc")
+target_link_libraries(im PUBLIC contracts)
 add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_create_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_mock_data.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_query_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/schedule_service.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_time_rules.cc")
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_time_rules.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_update_helpers.cc")
 target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule PUBLIC contracts)
 add_voicelife_library(timing voicelife_timing
@@ -69,6 +87,18 @@ add_voicelife_test(schedule_create_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_create_test.cc")
 target_link_libraries(schedule_create_test PRIVATE schedule)
 
+add_voicelife_test(schedule_query_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_query_test.cc")
+target_link_libraries(schedule_query_test PRIVATE schedule)
+
+add_voicelife_test(schedule_delete_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_delete_test.cc")
+target_link_libraries(schedule_delete_test PRIVATE schedule)
+
+add_voicelife_test(schedule_update_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_update_test.cc")
+target_link_libraries(schedule_update_test PRIVATE schedule)
+
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
 target_link_libraries(status_test PRIVATE contracts)
 
@@ -98,6 +128,20 @@ target_link_libraries(voice_session_coordinator_test PRIVATE voice)
 
 add_voicelife_test(im_gateway_contract_test "unit;im" im_gateway_contract_test.cc)
 target_compile_definitions(im_gateway_contract_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
+
+add_voicelife_test(im_contract_parser_test "unit;im" im_contract_parser_test.cc)
+target_link_libraries(im_contract_parser_test PRIVATE contracts)
+target_compile_definitions(im_contract_parser_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
+
+add_voicelife_test(im_json_parser_test "unit;im" im_json_parser_test.cc)
+target_link_libraries(im_json_parser_test PRIVATE contracts)
+
+add_voicelife_test(im_contract_validation_test "unit;im" im_contract_validation_test.cc)
+target_link_libraries(im_contract_validation_test PRIVATE contracts)
+
+add_voicelife_test(im_reporting_channel_test "unit;im" im_reporting_channel_test.cc)
+target_link_libraries(im_reporting_channel_test PRIVATE im contracts)
+target_compile_definitions(im_reporting_channel_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
 
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)

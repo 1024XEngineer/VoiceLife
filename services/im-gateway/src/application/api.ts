@@ -11,6 +11,7 @@ import type {
 } from '../contracts/ids.js';
 import type {
     ActionIntent,
+    CreatePairingSessionRequest,
     NotificationIntent,
     NotificationSubmission,
     ReminderActionCommand,
@@ -70,12 +71,7 @@ export interface ChannelAccountApplication {
 }
 
 /** 创建短期配对会话所需的参数。 */
-export interface CreatePairingSessionCommand {
-    readonly userId?: UserId;
-    readonly deviceId: DeviceId;
-    readonly allowedPlatforms?: readonly ImPlatform[];
-    readonly expiresInMinutes?: number;
-}
+export type CreatePairingSessionCommand = CreatePairingSessionRequest;
 
 /** 新建配对会话及其一次性展示码。 */
 export interface CreatedPairingSession {
@@ -176,7 +172,7 @@ export interface DeliveryDetails {
     readonly receipts: readonly DeliveryReceipt[];
 }
 
-/** 查询投递详情并恢复死信的应用服务。 */
+/** 查询投递详情并恢复死信或永久失败投递的应用服务。 */
 export interface DeliveryApplication {
     /**
      * 查询一次投递及其全部尝试和回执。
@@ -185,7 +181,7 @@ export interface DeliveryApplication {
      */
     find(deliveryId: DeliveryId): Promise<DeliveryDetails | undefined>;
     /**
-     * 将死信投递恢复为可再次发送状态。
+     * 将死信或永久失败投递恢复为可再次发送状态。
      * @param deliveryId 投递标识。
      * @returns 更新后的投递。
      */
@@ -221,9 +217,9 @@ export interface ReceiptApplication {
 /** 持久化并推进规范化入站事件状态的应用服务。 */
 export interface InboundEventApplication {
     /**
-     * 仅在事件首次出现时创建入站记录。
+     * 仅在事件首次出现时创建入站记录；失败记录可在平台重放时重新进入处理流程。
      * @param event 规范化入站事件。
-     * @returns accepted 表示新建，duplicate 表示已存在。
+     * @returns accepted 表示首次事件或失败重放，duplicate 表示已存在且无需处理。
      */
     recordIfNew(event: NormalizedImEvent): Promise<'accepted' | 'duplicate'>;
     /**
@@ -340,10 +336,10 @@ export interface ActionApplication {
      */
     findByOperationId(operationId: OperationId): Promise<ImAction | undefined>;
     /**
-     * 回放指定游标之后仍需设备处理的动作命令。
+     * 回放窗口内所有仍未确认、未过期的动作命令；传输游标不代表业务确认。
      * @param deviceId 目标设备标识。
      * @param reminderTriggerId 提醒触发窗口标识。
-     * @param after 已处理的最后一个动作标识。
+     * @param after 设备已收到的最新动作标识，仅作为续接上下文，不能排除未确认动作。
      * @returns 有序的待处理动作命令。
      */
     replayPending(
