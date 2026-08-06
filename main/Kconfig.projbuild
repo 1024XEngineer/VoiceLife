@@ -1,0 +1,32 @@
+menu "VoiceLife"
+
+config VOICELIFE_AUDIO_PROBE
+    bool "Enable ESP32-S3 audio wiring probe"
+    default n
+    help
+        Run the bounded I2S topology, PCM evidence and optional replay probe.
+
+if VOICELIFE_AUDIO_PROBE
+
+choice VOICELIFE_AUDIO_PROBE_PROFILE
+    prompt "Audio probe profile"
+    default VOICELIFE_AUDIO_PROBE_PROFILE_LICHUANG
+
+config VOICELIFE_AUDIO_PROBE_PROFILE_LICHUANG
+    bool "ESP32-S3 Lichuang external Codec duplex"
+
+config VOICELIFE_AUDIO_PROBE_PROFILE_VOICELIFE_PCB
+    bool "ESP32-S3 VoiceLife PCB direct I2S simplex"
+
+endchoice
+
+config VOICELIFE_AUDIO_PROBE_REPLAY
+    bool "Replay one attenuated captured PCM frame"
+    default n
+    help
+        Write one bounded, attenuated frame after capture. This is a bus-level
+        smoke only and never proves that the speaker was acoustically heard.
+
+endif
+
+endmenu
