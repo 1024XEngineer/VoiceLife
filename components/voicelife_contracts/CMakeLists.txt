@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS "src/status.cc" "src/json.cc" "src/im/notification_intent.cc" "src/im/schedule_receipt.cc"
          "src/im/reminder_action_result.cc" "src/im/reminder_action_command.cc"
+         "src/im/notification_submission.cc"
     INCLUDE_DIRS "include"
     PRIV_REQUIRES yyjson
 )

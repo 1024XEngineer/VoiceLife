@@ -4,6 +4,7 @@
 
 #include "support/test_support.h"
 #include "voicelife/contracts/im/notification_intent.h"
+#include "voicelife/contracts/im/notification_submission.h"
 #include "voicelife/contracts/im/reminder_action_command.h"
 #include "voicelife/contracts/im/reminder_action_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
@@ -14,7 +15,9 @@ using voicelife::JsonValue;
 using voicelife::Status;
 using voicelife::contracts::im::kDeviceContractVersion;
 using voicelife::contracts::im::NotificationIntent;
+using voicelife::contracts::im::NotificationSubmission;
 using voicelife::contracts::im::ParseNotificationIntent;
+using voicelife::contracts::im::ParseNotificationSubmission;
 using voicelife::contracts::im::ParseReminderActionCommand;
 using voicelife::contracts::im::ParseReminderActionResult;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
@@ -86,6 +89,20 @@ Status ParseCommandFixture(const char* name, ReminderActionCommand& out) {
 void RequireCommandRejected(const char* name, const char* message) {
     ReminderActionCommand command;
     const Status status = ParseCommandFixture(name, command);
+    Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
+}
+
+Status ParseSubmissionFixture(const char* name, NotificationSubmission& out) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) {
+        return json_status;
+    }
+    return ParseNotificationSubmission(root, out);
+}
+
+void RequireSubmissionRejected(const char* name, const char* message) {
+    NotificationSubmission submission;
+    const Status status = ParseSubmissionFixture(name, submission);
     Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
 }
 
@@ -169,5 +186,31 @@ int main() {
     RequireCommandRejected("reminder-action-command-invalid-action.json", "非法动作类型命令必须被 C++ 拒绝");
     RequireCommandRejected("reminder-action-command-invalid-time.json", "非法时间命令必须被 C++ 拒绝");
     RequireCommandRejected("reminder-action-command-missing-field.json", "缺字段命令必须被 C++ 拒绝");
+
+    // 通知受理结果：强提醒携带 actionStream 窗口，弱提醒不携带
+    NotificationSubmission strong_submission;
+    Check(ParseSubmissionFixture("notification-submission.json", strong_submission).ok(),
+          "共享强提醒受理结果 fixture 必须被 C++ 解析");
+    Check(strong_submission.businessEventId == "event-fixture" && strong_submission.status == "accepted",
+          "受理结果业务事件标识与状态必须被保留");
+    Check(strong_submission.deliveries.size() == 1 && strong_submission.deliveries[0].deliveryId == "delivery-fixture" &&
+              strong_submission.deliveries[0].bindingId == "binding-fixture" &&
+              strong_submission.deliveries[0].status == "pending",
+          "受理结果交付行必须被保留");
+    Check(strong_submission.actionStream.has_value() &&
+              strong_submission.actionStream->reminderTriggerId == "trigger-fixture" &&
+              strong_submission.actionStream->expiresAt == "2026-08-03T00:10:00.000Z",
+          "强提醒受理结果必须携带 actionStream 窗口");
+
+    NotificationSubmission weak_submission;
+    Check(ParseSubmissionFixture("notification-submission-weak.json", weak_submission).ok(),
+          "共享弱提醒受理结果 fixture 必须被 C++ 解析");
+    Check(!weak_submission.actionStream.has_value() && weak_submission.deliveries.empty(),
+          "弱提醒受理结果不得携带 actionStream");
+
+    // 非法受理结果 fixture：与 TS 一致的拒绝语义
+    RequireSubmissionRejected("notification-submission-invalid-status.json", "非法状态受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-time.json", "非法时间受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-missing-field.json", "缺字段受理结果必须被 C++ 拒绝");
     return 0;
 }
