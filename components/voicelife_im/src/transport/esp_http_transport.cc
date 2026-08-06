@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 
+#include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 
@@ -31,6 +32,8 @@ ImHttpResponse EspHttpTransport::Post(const ImHttpRequest& request) {
     config.method = HTTP_METHOD_POST;
     config.timeout_ms = kTransportTimeoutMs;
     config.buffer_size_tx = request.body.size() + 32;
+    // 通过系统证书 bundle 校验网关证书；若网关使用私有 CA，可改用 config.cert_pem 注入根证书。
+    config.crt_bundle_attach = esp_crt_bundle_attach;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == nullptr) {

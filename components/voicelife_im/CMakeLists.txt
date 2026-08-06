@@ -5,5 +5,5 @@ idf_component_register(
         "src/transport/esp_http_transport.cc"
     INCLUDE_DIRS "include"
     REQUIRES voicelife_contracts
-    PRIV_REQUIRES esp_http_client
+    PRIV_REQUIRES esp_http_client mbedtls
 )
