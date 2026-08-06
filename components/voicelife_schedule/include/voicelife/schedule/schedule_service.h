@@ -37,7 +37,7 @@ class ScheduleService {
     QueryScheduleResult query_schedule(const QueryScheduleCommand& command) const;
 
     /**
-     * @brief 记录一次创建、修改或删除操作。
+     * @brief 记录一次创建、修改、删除或撤销操作。
      * @param command 要持久化的操作详情。
      * @return 操作记录结果。
      */
