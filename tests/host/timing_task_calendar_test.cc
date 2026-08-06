@@ -122,6 +122,30 @@ int main() {
     });
     Check(pending_only.ok() && pending_only.value->total == 2, "状态过滤应排除已修改例外");
 
+    calendar_store.AddInstance({
+        .id = "calendar-deleted-instance",
+        .task_id = recurring_task.value->task_id,
+        .planned_at = kStartAt + 2 * kDay,
+        .deleted_at = kStartAt,
+    });
+    const auto after_deleted_instance = calendar_service.ListCalendarView({
+        .range_start = kStartAt,
+        .range_end = kStartAt + 3 * kDay,
+        .schedule_id = "schedule-daily",
+        .status = TimerInstanceStatus::kPending,
+    });
+    Check(after_deleted_instance.ok() && after_deleted_instance.value->total == 2,
+          "软删除例外不应隐藏对应的基础 occurrence");
+    const auto beyond_last_page = calendar_service.ListCalendarView({
+        .range_start = kStartAt,
+        .range_end = kStartAt + 3 * kDay,
+        .schedule_id = "schedule-daily",
+        .page = 3,
+        .page_size = 2,
+    });
+    Check(beyond_last_page.ok() && beyond_last_page.value->occurrences.empty() && !beyond_last_page.value->has_more,
+          "超过末页的分页查询应返回空页");
+
     calendar_store.FailNextTaskList(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
     Check(calendar_service.ListCalendarView({.range_start = kStartAt, .range_end = kStartAt + kDay}).status.code ==
               ErrorCode::kUnavailable,
@@ -134,6 +158,9 @@ int main() {
     Check(single_service.ListCalendarView({.range_start = 10, .range_end = 10}).status.code ==
               ErrorCode::kInvalidArgument,
           "空范围应返回参数错误");
+    Check(single_service.ListCalendarView({.range_start = 10, .range_end = 11, .page = 0}).status.code ==
+              ErrorCode::kInvalidArgument,
+          "非法页码应返回参数错误");
     Check(single_service
                   .ListCalendarView({
                       .range_start = std::numeric_limits<int64_t>::min(),
@@ -176,6 +203,23 @@ int main() {
         weekly_service.ListCalendarView({.range_start = kStartAt, .range_end = kStartAt + 15 * kDay}).value->total == 3,
         "每周规则应按七天间隔展开");
 
+    InMemoryTimingTaskStore filtered_weekly_store;
+    FixedTimingIdGenerator filtered_weekly_ids;
+    DefaultTimingTaskService filtered_weekly_service(filtered_weekly_store, clock, filtered_weekly_ids);
+    Check(filtered_weekly_service
+              .RegisterTimerTask({
+                  .request_id = "calendar-weekday-filter",
+                  .schedule_id = "schedule-weekday-filter",
+                  .start_at = kStartAt,
+                  .time_zone = "UTC",
+                  .recurrence = {.frequency = RecurrenceFrequency::kWeek, .by_weekdays = {1}},
+              })
+              .ok(),
+          "带星期筛选的每周任务应注册成功");
+    Check(filtered_weekly_service.ListCalendarView({.range_start = kStartAt, .range_end = kStartAt + 15 * kDay})
+                  .value->total == 3,
+          "每周规则应按指定星期展开");
+
     InMemoryTimingTaskStore monthly_store;
     FixedTimingIdGenerator monthly_ids;
     DefaultTimingTaskService monthly_service(monthly_store, clock, monthly_ids);
@@ -193,6 +237,23 @@ int main() {
               3,
           "每月规则应按周期锚点的日期展开");
 
+    InMemoryTimingTaskStore filtered_monthly_store;
+    FixedTimingIdGenerator filtered_monthly_ids;
+    DefaultTimingTaskService filtered_monthly_service(filtered_monthly_store, clock, filtered_monthly_ids);
+    Check(filtered_monthly_service
+              .RegisterTimerTask({
+                  .request_id = "calendar-monthday-filter",
+                  .schedule_id = "schedule-monthday-filter",
+                  .start_at = kStartAt,
+                  .time_zone = "UTC",
+                  .recurrence = {.frequency = RecurrenceFrequency::kMonth, .by_month_days = {4}},
+              })
+              .ok(),
+          "带日期筛选的每月任务应注册成功");
+    Check(filtered_monthly_service.ListCalendarView({.range_start = kStartAt, .range_end = kStartAt + 70 * kDay})
+                  .value->total == 3,
+          "每月规则应按指定日期展开");
+
     InMemoryTimingTaskStore yearly_store;
     FixedTimingIdGenerator yearly_ids;
     DefaultTimingTaskService yearly_service(yearly_store, clock, yearly_ids);
@@ -209,6 +270,22 @@ int main() {
     Check(yearly_service.ListCalendarView({.range_start = kStartAt, .range_end = kStartAt + 370 * kDay}).value->total ==
               2,
           "每年规则应按周期锚点的月日展开");
+
+    InMemoryTimingTaskStore effective_until_store;
+    FixedTimingIdGenerator effective_until_ids;
+    DefaultTimingTaskService effective_until_service(effective_until_store, clock, effective_until_ids);
+    effective_until_store.AddTask({
+        .id = "calendar-effective-until",
+        .schedule_id = "schedule-effective-until",
+        .start_at = kStartAt,
+        .next_trigger_at = kStartAt,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+        .effective_until = kStartAt + 2 * kDay,
+    });
+    Check(effective_until_service.ListCalendarView({.range_start = kStartAt, .range_end = kStartAt + 4 * kDay})
+                  .value->total == 2,
+          "周期规则应在 effective_until 前停止展开");
 
     InMemoryTimingTaskStore timezone_store;
     FixedTimingIdGenerator timezone_ids;
