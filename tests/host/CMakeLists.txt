@@ -63,8 +63,14 @@ add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_tool_gateway.cc")
 target_link_libraries(mcp PUBLIC contracts)
 add_voicelife_library(voice voicelife_voice
+    "${ROOT_DIR}/components/voicelife_voice/src/voice_provider_registry.cc"
+    "${ROOT_DIR}/components/voicelife_voice/src/voice_session.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
 target_link_libraries(voice PUBLIC contracts)
+add_voicelife_library(linx voicelife_linx
+    "${ROOT_DIR}/components/voicelife_linx/src/linx_json_codec.cc"
+    "${ROOT_DIR}/components/voicelife_linx/src/linx_speech_provider.cc")
+target_link_libraries(linx PUBLIC voice)
 add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/storage_protocol.cc")
 target_link_libraries(storage_sqlite PUBLIC contracts)
@@ -124,6 +130,12 @@ target_link_libraries(mcp_tool_gateway_test PRIVATE mcp)
 
 add_voicelife_test(voice_session_coordinator_test "unit;voice" voice_session_coordinator_test.cc)
 target_link_libraries(voice_session_coordinator_test PRIVATE voice)
+
+add_voicelife_test(voice_session_contract_test "unit;voice;contract" voice_session_contract_test.cc)
+target_link_libraries(voice_session_contract_test PRIVATE voice)
+
+add_voicelife_test(linx_provider_contract_test "unit;voice;linx;contract" linx_provider_contract_test.cc)
+target_link_libraries(linx_provider_contract_test PRIVATE linx)
 
 add_voicelife_test(im_gateway_contract_test "unit;im" im_gateway_contract_test.cc)
 target_compile_definitions(im_gateway_contract_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
