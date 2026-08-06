@@ -13,9 +13,23 @@ import type {
     UserId,
 } from './ids.js';
 import type { IsoDateTime, JsonValue } from '../shared/types.js';
+import type { ImPlatform } from './platform-events.js';
 
 /** 当前设备与 Gateway 之间的契约版本。 */
 export const DEVICE_CONTRACT_VERSION = '1' as const;
+
+/** 配对会话允许的最短有效期（分钟）。 */
+export const MIN_PAIRING_SESSION_MINUTES = 1;
+/** 配对会话允许的最长有效期（分钟）。 */
+export const MAX_PAIRING_SESSION_MINUTES = 10;
+
+/** 设备创建配对会话的请求契约。 */
+export interface CreatePairingSessionRequest {
+    readonly userId?: UserId;
+    readonly deviceId: DeviceId;
+    readonly allowedPlatforms?: readonly ImPlatform[];
+    readonly expiresInMinutes?: number;
+}
 
 /** 日程变更产生回执时的操作类型。 */
 export type ScheduleOperationType = 'created' | 'updated' | 'cancelled' | 'undone';

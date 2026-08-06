@@ -5,8 +5,6 @@
 #include <optional>
 #include <string>
 
-#include "voicelife/contracts/json.h"
-
 namespace voicelife::schedule {
 
 /// 日程、操作记录和提醒使用数据库兼容的 64 位整数标识。
@@ -17,13 +15,17 @@ using ReminderId = int64_t;
 using DateTime = std::chrono::time_point<std::chrono::system_clock, std::chrono::seconds>;
 
 /// 日程持久化状态。
-enum class ScheduleStatus { kActive = 1, kCancelled = 2, kCompleted = 3 };
+enum class ScheduleStatus {
+    kActive = 1,
+    kCancelled = 2,
+    kCompleted = 3,
+};
 
 /// 日程查询使用的状态筛选条件。
 enum class ScheduleStatusFilter { kAll, kActive, kCancelled, kCompleted };
 
-/// 可记录和撤销的日程操作类型。
-enum class ScheduleOperationType { kCreate = 1, kUpdate = 2, kDelete = 3 };
+/// 可记录和撤销的日程操作类型；撤销本身也是可再次撤销的独立操作。
+enum class ScheduleOperationType { kCreate = 1, kUpdate = 2, kDelete = 3, kUndo = 4 };
 
 /// 日程实体，对应 Schedule 数据表。
 struct Schedule {
@@ -46,7 +48,8 @@ struct OperationRecord {
     ScheduleId schedule_id = 0;
     std::string schedule_event;
     DateTime operated_at;
-    std::optional<JsonDocument> previous;
+    /// 操作前的领域快照；创建时为空，撤销时为空表示撤销前日程不存在。
+    std::optional<Schedule> previous;
 };
 
 }  // namespace voicelife::schedule

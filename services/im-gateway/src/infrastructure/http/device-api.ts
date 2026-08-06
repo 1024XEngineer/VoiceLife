@@ -1,13 +1,13 @@
 import type { ActionId, DeviceId, PairingSessionId, ReminderTriggerId } from '../../contracts/ids.js';
 import type { NotificationSubmission, ReminderActionCommand, ReminderType } from '../../contracts/device-gateway.js';
 import {
+    parseCreatePairingSessionRequest,
     parseNotificationIntent,
     parseReminderActionResult,
     parseScheduleReceiptIntent,
 } from '../../contracts/device-gateway-parser.js';
 import type {
     ActionApplication,
-    CreatePairingSessionCommand,
     CreatedPairingSession,
     NotificationApplication,
     PairingApplication,
@@ -80,10 +80,11 @@ export class DeviceIntentController {
      */
     public async postPairingSession(input: {
         readonly authorization: string;
-        readonly body: CreatePairingSessionCommand;
+        readonly body: unknown;
     }): Promise<CreatedPairingSession> {
-        await this.authenticateDevice(input.authorization, input.body.deviceId);
-        return this.pairing.create(input.body);
+        const body = parseCreatePairingSessionRequest(input.body);
+        await this.authenticateDevice(input.authorization, body.deviceId);
+        return this.pairing.create(body);
     }
 
     /**

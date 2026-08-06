@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type {
     ActionId,
     BindingId,
@@ -79,8 +81,6 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
     public save(value: ImBinding): Promise<void>;
     /** {@inheritDoc InboundEventRepository.save} */
     public save(value: InboundEventRecord): Promise<void>;
-    /** {@inheritDoc IntentSubmissionRepository.save} */
-    public save(value: IntentSubmissionRecord): Promise<void>;
     /** {@inheritDoc DeliveryRepository.save} */
     public save(value: Delivery): Promise<void>;
     /** {@inheritDoc ActionRepository.save} */
@@ -92,14 +92,7 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
      */
     public save(
         value:
-            | ChannelAccount
-            | PairingSession
-            | ExternalIdentity
-            | ImBinding
-            | InboundEventRecord
-            | IntentSubmissionRecord
-            | Delivery
-            | ImAction,
+            ChannelAccount | PairingSession | ExternalIdentity | ImBinding | InboundEventRecord | Delivery | ImAction,
     ): Promise<void> {
         if ('koishiBotId' in value) this.channelRows.set(value.id, value);
         else if ('displayCodeHash' in value) this.pairingRows.set(value.id, value);
@@ -108,11 +101,85 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         } else if ('externalIdentityId' in value) this.bindingRows.set(value.id, value);
         else if ('externalEventId' in value && 'eventType' in value) {
             this.inboundRows.set(inboundKey(value.channelAccountId, value.externalEventId), value);
-        } else if ('requestFingerprint' in value) {
-            this.intentSubmissionRows.set(intentSubmissionKey(value.businessEventId, value.kind), value);
         } else if ('businessEventId' in value) this.deliveryRows.set(value.id, value);
         else this.actionRows.set(value.id, value);
         return Promise.resolve();
+    }
+
+    /** {@inheritDoc DeliveryRepository.createIfAbsent} */
+    public createIfAbsent(delivery: Delivery): Promise<{ id: DeliveryId; created: boolean }>;
+    /** {@inheritDoc IntentSubmissionRepository.createIfAbsent} */
+    public createIfAbsent(
+        record: IntentSubmissionRecord,
+    ): Promise<{ created: boolean; record: IntentSubmissionRecord }>;
+    /**
+     * 按业务键幂等创建投递或受理记录；同键已存在时保留首条。
+     * @param value 待创建的投递或受理记录。
+     * @returns 投递：权威标识与是否新建；受理记录：是否新建与当前权威记录。
+     */
+    public createIfAbsent(
+        value: Delivery | IntentSubmissionRecord,
+    ): Promise<{ id: DeliveryId; created: boolean } | { created: boolean; record: IntentSubmissionRecord }> {
+        if ('requestFingerprint' in value) {
+            const existing = this.intentSubmissionRows.get(intentSubmissionKey(value.businessEventId, value.kind));
+            if (existing !== undefined) {
+                return Promise.resolve({ created: false, record: existing });
+            }
+            this.intentSubmissionRows.set(intentSubmissionKey(value.businessEventId, value.kind), value);
+            return Promise.resolve({ created: true, record: value });
+        }
+        const existing = [...this.deliveryRows.values()].find(
+            (candidate) =>
+                candidate.businessEventId === value.businessEventId &&
+                candidate.bindingId === value.bindingId &&
+                candidate.kind === value.kind,
+        );
+        if (existing !== undefined) return Promise.resolve({ id: existing.id, created: false });
+        this.deliveryRows.set(value.id, value);
+        return Promise.resolve({ id: value.id, created: true });
+    }
+
+    /** {@inheritDoc IntentSubmissionRepository.finalizeClaim} */
+    public finalizeClaim(record: IntentSubmissionRecord): Promise<void> {
+        this.intentSubmissionRows.set(intentSubmissionKey(record.businessEventId, record.kind), record);
+        return Promise.resolve();
+    }
+
+    /** {@inheritDoc DeliveryRepository.claimForDispatch} */
+    public claimForDispatch(
+        deliveryId: DeliveryId,
+        now: IsoDateTime,
+        leaseSeconds: number,
+    ): Promise<Delivery | undefined> {
+        const delivery = this.deliveryRows.get(deliveryId);
+        if (delivery === undefined) return Promise.resolve(undefined);
+        const claim = randomUUID();
+        const isClaimable =
+            delivery.status === 'pending' ||
+            delivery.status === 'retryable_failed' ||
+            (delivery.status === 'sending' &&
+                (delivery.claimedAt === undefined ||
+                    Date.parse(now) - Date.parse(delivery.claimedAt) >= leaseSeconds * 1000));
+        if (!isClaimable) return Promise.resolve(undefined);
+        const claimed: Delivery = {
+            ...delivery,
+            status: 'sending',
+            claimedAt: now,
+            claimToken: claim,
+            updatedAt: now,
+        };
+        this.deliveryRows.set(deliveryId, claimed);
+        return Promise.resolve(claimed);
+    }
+
+    /** {@inheritDoc DeliveryRepository.saveIfClaimed} */
+    public saveIfClaimed(delivery: Delivery, claimToken: string): Promise<Delivery | undefined> {
+        const existing = this.deliveryRows.get(delivery.id);
+        if (existing === undefined || existing.status !== 'sending' || existing.claimToken !== claimToken) {
+            return Promise.resolve(undefined);
+        }
+        this.deliveryRows.set(delivery.id, delivery);
+        return Promise.resolve(delivery);
     }
 
     /** {@inheritDoc ChannelAccountRepository.findById} */
@@ -354,7 +421,9 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
 
     /** {@inheritDoc DeliveryRepository.saveReceipt} */
     public saveReceipt(receipt: DeliveryReceipt): Promise<void> {
-        this.receiptRows.set(receipt.dedupeKey, receipt);
+        if (!this.receiptRows.has(receipt.dedupeKey)) {
+            this.receiptRows.set(receipt.dedupeKey, receipt);
+        }
         return Promise.resolve();
     }
 

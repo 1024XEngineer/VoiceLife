@@ -12,18 +12,6 @@ Result<T> NotImplemented(const char* operation) {
 
 }  // namespace
 
-Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const UpdateTimerTaskCommand&) {
-    return NotImplemented<UpdateTimerTaskResult>("UpdateTimerTask");
-}
-
-Result<CancelTimerTaskResult> DefaultTimingTaskService::CancelTimerTask(const CancelTimerTaskCommand&) {
-    return NotImplemented<CancelTimerTaskResult>("CancelTimerTask");
-}
-
-Result<UpsertReminderRulesResult> DefaultTimingTaskService::UpsertReminderRules(const UpsertReminderRulesCommand&) {
-    return NotImplemented<UpsertReminderRulesResult>("UpsertReminderRules");
-}
-
 Result<CalendarView> DefaultTimingTaskService::ListCalendarView(const CalendarViewQuery&) {
     return NotImplemented<CalendarView>("ListCalendarView");
 }
