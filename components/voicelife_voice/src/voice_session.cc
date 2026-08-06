@@ -242,8 +242,18 @@ Status VoiceSession::EndCapture() {
             state_ = VoiceSessionState::kReady;
         }
         Emit("capture_stopped", "");
+        return Status::Ok();
     }
-    return !input_status.ok() ? input_status : provider_status;
+    // Input is already stopped but provider stop failed: the session cannot
+    // safely return to kReady or kCapturing. Transition to kFailed so the
+    // caller does not attempt further capture on a half-closed session.
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        state_ = VoiceSessionState::kFailed;
+    }
+    const Status failure = !input_status.ok() ? input_status : provider_status;
+    Emit("capture_stop_failed", failure.message);
+    return failure;
 }
 
 Status VoiceSession::SubmitAudio(AudioFrame frame) {
@@ -331,38 +341,34 @@ Status VoiceSession::Speak(std::string_view text) {
 Status VoiceSession::Interrupt() {
     std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
     bool capturing = false;
+    uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (state_ != VoiceSessionState::kCapturing && state_ != VoiceSessionState::kSpeaking) {
             return Status::Ok();
         }
         capturing = state_ == VoiceSessionState::kCapturing;
-    }
-    Status input_status = Status::Ok();
-    if (capturing) {
-        input_status = input_.StopCapture();
-    }
-    Status status = provider_.Abort("user_interrupt");
-    Status flush_status;
-    uint64_t generation = 0;
-    {
-        // HandleAudio uses the same mutex. A frame either reaches the output
-        // before this Flush and is removed, or observes the new generation
-        // after the critical section and is rejected.
-        std::lock_guard<std::mutex> lock(mutex_);
-        flush_status = output_.Flush();
+        // Invalidate the old generation first. Late frames that arrive during
+        // the subsequent Abort/Flush window are rejected by HandleAudio (which
+        // checks generation_) and HandleInputAudio (which checks state_).
         ++generation_;
         config_.generation = generation_;
         next_sequence_ = 0;
         state_ = VoiceSessionState::kReady;
         generation = generation_;
     }
+    // Notify the provider before tearing down so it can drop stale frames.
     provider_.SetGeneration(generation);
-    Emit("interrupted", "old audio generation invalidated");
-    if (!input_status.ok()) {
-        return input_status;
+    Status input_status = Status::Ok();
+    if (capturing) {
+        input_status = input_.StopCapture();
     }
-    return !status.ok() ? status : flush_status;
+    Status abort_status = provider_.Abort("user_interrupt");
+    Status flush_status = output_.Flush();
+    Emit("interrupted", "old audio generation invalidated");
+    if (!input_status.ok()) return input_status;
+    if (!abort_status.ok()) return abort_status;
+    return flush_status;
 }
 
 Status VoiceSession::Stop() {
