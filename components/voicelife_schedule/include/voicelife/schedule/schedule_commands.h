@@ -53,12 +53,13 @@ struct QueryScheduleCommand {
     int64_t offset = 0;
 };
 
-/// 写入日程操作记录所需的数据。
+/// 写入日程操作记录所需的数据；撤销操作允许用空快照表达操作前日程不存在。
 struct RecordScheduleOperationCommand {
     ScheduleOperationType type = ScheduleOperationType::kCreate;
     ScheduleId schedule_id = 0;
     std::string schedule_event;
-    std::optional<Schedule> previous;  ///< 创建时为空，修改和删除时保存操作前的完整日程。
+    /// 创建时为空，修改和删除时保存完整快照，撤销时保存撤销前可能不存在的日程状态。
+    std::optional<Schedule> previous;
 };
 
 /// 撤销指定日程操作所需的数据。

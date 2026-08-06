@@ -84,6 +84,24 @@ void CheckPreviousStateRules(ScheduleService& service) {
               result.operation->previous->id == previous.id && result.operation->previous->event == previous.event &&
               result.operation->previous->location == previous.location,
           "删除操作应保留删除前快照");
+
+    RecordScheduleOperationCommand undo_without_previous{
+        .type = ScheduleOperationType::kUndo,
+        .schedule_id = 3005,
+        .schedule_event = "撤销创建",
+        .previous = std::nullopt,
+    };
+    Check(service.record_schedule_operation(undo_without_previous).status.ok(),
+          "撤销前日程不存在时 undo 操作应允许 previous 为空");
+
+    RecordScheduleOperationCommand mismatched_previous{
+        .type = ScheduleOperationType::kUpdate,
+        .schedule_id = 3006,
+        .schedule_event = "快照错配",
+        .previous = previous,
+    };
+    Check(service.record_schedule_operation(mismatched_previous).status.code == ErrorCode::kInvalidArgument,
+          "操作记录应拒绝与日程 ID 不一致的 previous 快照");
 }
 
 /**

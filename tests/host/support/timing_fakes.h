@@ -1,8 +1,10 @@
 #pragma once
 
 #include <algorithm>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "voicelife/timing/timing_task_store.h"
 
@@ -10,6 +12,8 @@ namespace voicelife::test {
 
 class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
    public:
+    void FailNextUpdate(Status status) { next_update_failure_ = std::move(status); }
+
     Status RegisterTaskWithRules(const timing::TimingTask& task,
                                  const std::vector<timing::ReminderRule>& rules) override {
         if (task.id.empty() || task.request_id.empty()) {
@@ -51,6 +55,32 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         return Result<timing::TimingTask>::Failure(ErrorCode::kNotFound, "request not found");
     }
 
+    Status UpdateTaskWithInstances(const timing::TimingTaskUpdateWrite& update) override {
+        if (next_update_failure_.has_value()) {
+            const Status failure = *next_update_failure_;
+            next_update_failure_.reset();
+            return failure;
+        }
+        if (update.task.id.empty() || !tasks_.contains(update.task.id)) {
+            return Status::Error(ErrorCode::kNotFound, "task not found");
+        }
+
+        std::unordered_set<std::string> incoming_instance_ids;
+        for (const auto& instance : update.upsert_instances) {
+            if (instance.id.empty() || instance.task_id != update.task.id ||
+                !incoming_instance_ids.insert(instance.id).second ||
+                (instances_.contains(instance.id) && instances_.at(instance.id).task_id != update.task.id)) {
+                return Status::Error(ErrorCode::kConflict, "invalid timer instance");
+            }
+        }
+
+        tasks_[update.task.id] = update.task;
+        for (const auto& instance : update.upsert_instances) {
+            instances_[instance.id] = instance;
+        }
+        return Status::Ok();
+    }
+
     Result<timing::TimingTask> FindTask(const timing::TimingTaskId& task_id) override {
         const auto found = tasks_.find(task_id);
         if (found == tasks_.end()) {
@@ -71,9 +101,27 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         return Result<std::vector<timing::ReminderRule>>::Success(std::move(result));
     }
 
+    Result<std::vector<timing::TimerInstance>> ListInstances(const timing::TimingTaskId& task_id) override {
+        std::vector<timing::TimerInstance> result;
+        for (const auto& [_, instance] : instances_) {
+            if (instance.task_id == task_id && instance.deleted_at == 0) {
+                result.push_back(instance);
+            }
+        }
+        std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
+            if (left.planned_at == right.planned_at) {
+                return left.id < right.id;
+            }
+            return left.planned_at < right.planned_at;
+        });
+        return Result<std::vector<timing::TimerInstance>>::Success(std::move(result));
+    }
+
    private:
+    std::optional<Status> next_update_failure_{};
     std::unordered_map<timing::TimingTaskId, timing::TimingTask> tasks_;
     std::unordered_map<std::string, timing::ReminderRule> rules_;
+    std::unordered_map<std::string, timing::TimerInstance> instances_;
 };
 
 }  // namespace voicelife::test
