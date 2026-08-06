@@ -46,6 +46,31 @@ bool IsSupportedChangeScope(ChangeScope scope) {
     return false;
 }
 
+Status ValidateCancelCommand(const CancelTimerTaskCommand& command) {
+    if (command.task_id.empty() || command.schedule_id.empty()) {
+        return Status::Error(ErrorCode::kInvalidArgument, "取消任务缺少 task_id 或 schedule_id");
+    }
+    if (!IsSupportedChangeScope(command.change_scope)) {
+        return Status::Error(ErrorCode::kInvalidArgument, "不支持的取消范围");
+    }
+
+    switch (command.change_scope) {
+        case ChangeScope::kSingle:
+            if (command.instance_id.empty() || command.target_occurrence_at <= 0) {
+                return Status::Error(ErrorCode::kInvalidArgument, "single 取消缺少目标 occurrence");
+            }
+            break;
+        case ChangeScope::kFuture:
+            if (command.effective_from <= 0) {
+                return Status::Error(ErrorCode::kInvalidArgument, "future 取消缺少 effective_from");
+            }
+            break;
+        case ChangeScope::kAll:
+            break;
+    }
+    return Status::Ok();
+}
+
 Status ValidateRecurrence(const RecurrenceRule& recurrence) {
     const bool has_weekdays = !recurrence.by_weekdays.empty();
     const bool has_month_days = !recurrence.by_month_days.empty();
@@ -324,6 +349,121 @@ Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const Up
         .next_trigger_at = updated_task.next_trigger_at,
         .instance_id = std::move(instance_id),
         .override_fields = override_fields,
+        .affected_instance_count = affected_instance_count,
+    });
+}
+
+Result<CancelTimerTaskResult> DefaultTimingTaskService::CancelTimerTask(const CancelTimerTaskCommand& command) {
+    const Status validation = ValidateCancelCommand(command);
+    if (!validation.ok()) {
+        return Result<CancelTimerTaskResult>::Failure(validation.code, validation.message);
+    }
+
+    const auto existing_task = store_.FindTask(command.task_id);
+    if (!existing_task.ok()) {
+        return Result<CancelTimerTaskResult>::Failure(existing_task.status.code, existing_task.status.message);
+    }
+    if (existing_task.value->schedule_id != command.schedule_id) {
+        return Result<CancelTimerTaskResult>::Failure(ErrorCode::kConflict, "任务不属于指定日程");
+    }
+    if (existing_task.value->status == TimingTaskStatus::kTerminated) {
+        return Result<CancelTimerTaskResult>::Failure(ErrorCode::kConflict, "任务已终止");
+    }
+    if (command.change_scope == ChangeScope::kFuture && command.effective_from < existing_task.value->start_at) {
+        return Result<CancelTimerTaskResult>::Failure(ErrorCode::kInvalidArgument, "future 取消边界早于任务开始时间");
+    }
+
+    const auto existing_instances = store_.ListInstances(command.task_id);
+    if (!existing_instances.ok()) {
+        return Result<CancelTimerTaskResult>::Failure(existing_instances.status.code,
+                                                      existing_instances.status.message);
+    }
+
+    const int64_t now = clock_.Now();
+    TimingTask updated_task = *existing_task.value;
+    updated_task.updated_at = now;
+    std::vector<TimerInstance> upsert_instances;
+    std::string instance_id;
+    int affected_instance_count = 0;
+
+    switch (command.change_scope) {
+        case ChangeScope::kSingle:
+            for (const auto& instance : *existing_instances.value) {
+                if (instance.id == command.instance_id && instance.planned_at == command.target_occurrence_at) {
+                    if (!CanTransition(instance.status, TimerInstanceStatus::kSkipped)) {
+                        return Result<CancelTimerTaskResult>::Failure(ErrorCode::kConflict, "目标 occurrence 不能取消");
+                    }
+                    TimerInstance cancelled_instance = instance;
+                    cancelled_instance.status = TimerInstanceStatus::kSkipped;
+                    cancelled_instance.last_action_at = now;
+                    cancelled_instance.updated_at = now;
+                    upsert_instances.push_back(std::move(cancelled_instance));
+                    instance_id = command.instance_id;
+                    affected_instance_count = 1;
+                    break;
+                }
+            }
+            if (upsert_instances.empty()) {
+                return Result<CancelTimerTaskResult>::Failure(ErrorCode::kNotFound, "目标 occurrence 不存在");
+            }
+            break;
+        case ChangeScope::kFuture:
+            if (updated_task.effective_until != 0) {
+                return Result<CancelTimerTaskResult>::Failure(ErrorCode::kConflict, "任务已设置未来取消边界");
+            }
+            updated_task.effective_until = command.effective_from - 1;
+            if (updated_task.next_trigger_at >= command.effective_from) {
+                updated_task.next_trigger_at = 0;
+            }
+            for (const auto& instance : *existing_instances.value) {
+                if (instance.planned_at < command.effective_from) {
+                    continue;
+                }
+                if (!CanTransition(instance.status, TimerInstanceStatus::kSkipped)) {
+                    if (instance.status == TimerInstanceStatus::kCompleted ||
+                        instance.status == TimerInstanceStatus::kSkipped) {
+                        continue;
+                    }
+                    return Result<CancelTimerTaskResult>::Failure(ErrorCode::kConflict, "未来 occurrence 不能取消");
+                }
+                TimerInstance cancelled_instance = instance;
+                cancelled_instance.status = TimerInstanceStatus::kSkipped;
+                cancelled_instance.last_action_at = now;
+                cancelled_instance.updated_at = now;
+                upsert_instances.push_back(std::move(cancelled_instance));
+            }
+            affected_instance_count = static_cast<int>(upsert_instances.size());
+            break;
+        case ChangeScope::kAll:
+            updated_task.status = TimingTaskStatus::kTerminated;
+            updated_task.next_trigger_at = 0;
+            updated_task.deleted_at = now;
+            for (const auto& instance : *existing_instances.value) {
+                if (!CanTransition(instance.status, TimerInstanceStatus::kSkipped)) {
+                    continue;
+                }
+                TimerInstance cancelled_instance = instance;
+                cancelled_instance.status = TimerInstanceStatus::kSkipped;
+                cancelled_instance.last_action_at = now;
+                cancelled_instance.updated_at = now;
+                upsert_instances.push_back(std::move(cancelled_instance));
+            }
+            affected_instance_count = static_cast<int>(upsert_instances.size());
+            break;
+    }
+
+    const Status saved = store_.UpdateTaskWithInstances({
+        .task = updated_task,
+        .upsert_instances = std::move(upsert_instances),
+    });
+    if (!saved.ok()) {
+        return Result<CancelTimerTaskResult>::Failure(saved.code, saved.message);
+    }
+
+    return Result<CancelTimerTaskResult>::Success({
+        .task_id = updated_task.id,
+        .instance_id = std::move(instance_id),
+        .status = updated_task.status,
         .affected_instance_count = affected_instance_count,
     });
 }
