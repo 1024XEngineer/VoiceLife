@@ -107,8 +107,15 @@ int main() {
     };
     Check(store.UpdateTaskWithInstances({.task = updated_task, .upsert_instances = {deleted_instance}}).ok(),
           "测试应能保存软删除实例");
-    const auto active_instances = store.ListInstances("task-1");
-    Check(active_instances.ok() && active_instances.value->size() == 1, "查询实例默认不应返回软删除记录");
+    const auto all_instances = store.ListInstances("task-1");
+    Check(all_instances.ok() && all_instances.value->size() == 2, "查询实例应包含软删除记录供上层过滤");
+    bool has_deleted_instance = false;
+    if (all_instances.ok()) {
+        for (const auto& instance : *all_instances.value) {
+            has_deleted_instance = has_deleted_instance || instance.deleted_at != 0;
+        }
+    }
+    Check(has_deleted_instance, "软删除实例应保留删除时间");
 
     auto rejected_task = updated_task;
     rejected_task.next_trigger_at = 1786006800;
@@ -126,7 +133,7 @@ int main() {
     Check(after_rejected_task.ok() && after_rejected_task.value->next_trigger_at == 1785920400,
           "实例归属错误后任务不应半更新");
     const auto after_rejected_instances = store.ListInstances("task-1");
-    Check(after_rejected_instances.ok() && after_rejected_instances.value->size() == 1, "实例归属错误后不应新增覆盖");
+    Check(after_rejected_instances.ok() && after_rejected_instances.value->size() == 2, "实例归属错误后不应新增覆盖");
 
     store.FailNextUpdate(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
     rejected_task.next_trigger_at = 1786093200;
