@@ -15,14 +15,17 @@ namespace {
 
 constexpr char kTag[] = "voicelife_im";
 constexpr int kTransportTimeoutMs = 10 * 1000;
+// 受理结果响应体上限：防止恶意网关回灌无界响应耗尽设备堆内存。
+constexpr size_t kMaxResponseBodyBytes = 64 * 1024;
 
 // 读取响应体：受理结果（如 NotificationSubmission）需透传给调用方提取动作窗口。
 // content_length 未知（-1，分块编码）时持续读到 EOF；否则按 Content-Length 精确读取。
+// 无论声明长度如何，读取总量不得超过 kMaxResponseBodyBytes。
 void ReadResponseBody(esp_http_client_handle_t client, std::string& body) {
     const int64_t content_length = esp_http_client_get_content_length(client);
     char buffer[256];
     int64_t remaining = content_length;
-    while (remaining != 0) {
+    while (remaining != 0 && body.size() < kMaxResponseBodyBytes) {
         const size_t want =
             remaining > 0 ? std::min<size_t>(sizeof(buffer), static_cast<size_t>(remaining)) : sizeof(buffer);
         const int n = esp_http_client_read(client, buffer, static_cast<int>(want));

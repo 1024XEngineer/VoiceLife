@@ -61,8 +61,8 @@ ReportResult ImReportingChannel::SubmitReminderActionResult(const contracts::im:
     if (!ValidatesAsActionResult(body)) {
         return {ReportStatus::kRejected, "发送前契约校验失败", ""};
     }
-    const std::string path = kReminderActionResultPrefix + device_id + kReminderActionResultSuffix + command_id +
-                             kReminderActionResultResultSuffix;
+    const std::string path = kReminderActionResultPrefix + EncodePathSegment(device_id) + kReminderActionResultSuffix +
+                             EncodePathSegment(command_id) + kReminderActionResultResultSuffix;
     return Submit(path, result.operationId, device_id, body);
 }
 

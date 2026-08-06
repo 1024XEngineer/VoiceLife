@@ -1,5 +1,6 @@
 #pragma once
 
+#include <deque>
 #include <optional>
 #include <string>
 #include <vector>
@@ -15,8 +16,8 @@ namespace voicelife::im {
 /// 基于 esp_http_client 流式读取的动作命令流（SSE）实现。仅固件编译。
 ///
 /// Open 建立 GET /v1/devices/{deviceId}/reminder-actions/stream 连接，携带
-/// Authorization 与 Last-Event-ID；Next 阻塞读取 SSE 帧并把 reminder.action
-/// 载荷解析为动作命令；连接关闭或读取失败时返回 nullopt。
+/// Authorization 与 Last-Event-ID 请求头；Next 阻塞读取 SSE 帧并把 reminder.action
+/// 载荷解析为动作命令；连接关闭或读取失败时返回 nullopt。析构时自动关闭连接。
 class EspActionStreamTransport : public ImActionCommandStream {
    public:
     /**
@@ -26,7 +27,8 @@ class EspActionStreamTransport : public ImActionCommandStream {
      * @param reminder_trigger_id 本次窗口绑定的提醒触发标识。
      */
     EspActionStreamTransport(std::string base_url, ImCredentialProvider& credentials, std::string reminder_trigger_id);
-    void Open(const std::string& last_event_id) override;
+    ~EspActionStreamTransport() override { CloseConnection(); }
+    bool Open(const std::string& last_event_id) override;
     std::optional<contracts::im::ReminderActionCommand> Next() override;
     void Close() override;
 
@@ -38,7 +40,7 @@ class EspActionStreamTransport : public ImActionCommandStream {
     std::string reminder_trigger_id_;
     esp_http_client_handle_t client_ = nullptr;
     SseDecoder decoder_;
-    std::vector<SseFrame> pending_;
+    std::deque<SseFrame> pending_;
     bool open_ = false;
 };
 

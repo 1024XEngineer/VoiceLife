@@ -14,6 +14,7 @@
 
 #include "support/test_support.h"
 #include "voicelife/contracts/im/notification_intent.h"
+#include "voicelife/contracts/im/reminder_action_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/im/im_credentials.h"
@@ -23,6 +24,7 @@
 using voicelife::contracts::im::NotificationIntent;
 using voicelife::contracts::im::ParseNotificationIntent;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
+using voicelife::contracts::im::ReminderActionResult;
 using voicelife::contracts::im::ScheduleReceiptIntent;
 using voicelife::im::ImCredentialProvider;
 using voicelife::im::ImHttpHeader;
@@ -313,6 +315,26 @@ void TestInvalidTransportConfigIsRejected() {
     Check(transport.requests.size() == 1, "传输配置错误仍应被通道映射");
 }
 
+void TestActionResultPathEncodesSegments() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    credentials.device_id = "dev/ice?x=1";
+    ImReportingChannel channel(transport, credentials);
+
+    ReminderActionResult result;
+    result.schemaVersion = "1";
+    result.operationId = "operation-1";
+    result.reminderTriggerId = "trigger-fixture";
+    result.status = "succeeded";
+    result.occurredAt = "2026-08-03T00:01:00.000Z";
+    const ReportResult report = channel.SubmitReminderActionResult(result, credentials.device_id, "cmd/1#x");
+
+    Check(report.status == ReportStatus::kSubmitted, "编码路径段后提交应成功");
+    Check(transport.requests.size() == 1, "编码路径段后应发起一次传输");
+    Check(transport.requests[0].path == "/v1/devices/dev%2Fice%3Fx%3D1/reminder-actions/cmd%2F1%23x/result",
+          "deviceId 与 commandId 必须按 path 段百分号编码，不得改写路径");
+}
+
 void TestGatewayUrlScheme() {
     Check(voicelife::im::IsHttpsGatewayUrl("https://im.example.com"), "https 基地址必须通过");
     Check(!voicelife::im::IsHttpsGatewayUrl("http://im.example.com"), "http 基地址必须拒绝");
@@ -335,6 +357,7 @@ int main() {
     TestInvalidIntentRejectedLocally();
     TestStatusCodeMapping();
     TestInvalidTransportConfigIsRejected();
+    TestActionResultPathEncodesSegments();
     TestGatewayUrlScheme();
     return 0;
 }

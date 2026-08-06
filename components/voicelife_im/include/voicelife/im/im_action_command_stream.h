@@ -18,8 +18,10 @@ class ImActionCommandStream {
     /**
      * @brief 打开（或重连）动作命令流连接。
      * @param last_event_id 上次确认的 commandId 游标，空串表示无历史游标。
+     * @return 连接是否成功建立。失败（网络、TLS、鉴权等）由调用方按
+     *         可重连处理，不得与「正常空流结束」混淆。
      */
-    virtual void Open(const std::string& last_event_id) = 0;
+    virtual bool Open(const std::string& last_event_id) = 0;
     /**
      * @brief 拉取下一条动作命令。
      * @return 命令；连接结束或中断时返回 nullopt。

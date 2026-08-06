@@ -40,6 +40,8 @@ struct ActionRunResult {
     int executed = 0;
     /// 本轮结果已确认（回传成功）的命令数。
     int confirmed = 0;
+    /// 本轮因 deviceId/reminderTriggerId 不匹配而被本地丢弃的命令数。
+    int dropped = 0;
 };
 
 /// 设备侧动作通道：强提醒窗口内建立临时 SSE，执行命令并回传结果。
@@ -74,15 +76,16 @@ class ImActionChannel {
                        ActionRunResult& result, bool& has_unconfirmed);
     /// 依据回传结果推进游标并统计确认数。
     void Settle(const ReportResult& report, const contracts::im::ReminderActionCommand& command,
-                ActionRunResult& result, bool& has_unconfirmed);
+                const std::string& trigger_id, ActionRunResult& result, bool& has_unconfirmed);
 
     ImReportingChannel& reporting_;
     ImCredentialProvider& credentials_;
     ImActionExecutor& executor_;
     ImClock& clock_;
-    /// 上次已确认的 commandId 游标，作为重连时 Last-Event-ID。
-    std::string last_confirmed_command_id_;
-    /// operationId -> 已执行结果缓存，保证重复命令只执行一次。
+    /// 上次已确认的 commandId 游标（按提醒触发分区，避免窗口间串扰），
+    /// 作为重连时 Last-Event-ID。
+    std::map<std::string, std::string> cursors_;
+    /// {提醒触发, operationId} -> 已执行结果缓存，保证同窗重复命令只执行一次。
     std::map<std::string, contracts::im::ReminderActionResult> executed_;
 };
 

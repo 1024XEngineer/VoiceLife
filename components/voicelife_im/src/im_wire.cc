@@ -3,8 +3,27 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <string_view>
 
 namespace voicelife::im {
+
+std::string EncodePathSegment(std::string_view segment) {
+    std::string out;
+    out.reserve(segment.size());
+    for (const unsigned char ch : segment) {
+        // RFC 3986 非保留字符：ALPHA / DIGIT / "-" / "." / "_" / "~"。
+        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' ||
+            ch == '.' || ch == '_' || ch == '~') {
+            out.push_back(static_cast<char>(ch));
+        } else {
+            char buffer[4];
+            std::snprintf(buffer, sizeof buffer, "%%%02X", ch);
+            out += buffer;
+        }
+    }
+    return out;
+}
+
 namespace {
 
 using contracts::im::NotificationAction;
@@ -64,6 +83,11 @@ void AppendJsonValue(std::string& out, const voicelife::JsonValue& value) {
             break;
         case voicelife::JsonValue::Kind::kNumber: {
             const double number = value.number;
+            // NaN/Inf 不是合法 JSON 数字，序列化为 null 避免生成非法载荷。
+            if (!std::isfinite(number)) {
+                out += "null";
+                break;
+            }
             if (number == std::floor(number) && std::abs(number) < 1e15) {
                 out += std::to_string(static_cast<long long>(number));
             } else {

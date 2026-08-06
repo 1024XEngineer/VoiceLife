@@ -1,200 +1,19 @@
 // #127 设备侧动作通道：主机测试（TDD 先写）。
-// 验收来源：Issue #127 —— 强提醒窗口内建流、弱提醒不建流由调用方决定；
-// 过期命令被拒绝；断线重连后相同 commandId 可重放但 operationId 只执行
-// 一次；回传结果以 operationId 幂等确认，Last-Event-ID 不代替业务 ACK。
+// 验收来源：Issue #127 —— 命令执行、结果序列化与回传、operationId 幂等去重、
+// 断线重连后相同 commandId 可重放但 operationId 只执行一次。
+// 窗口/时间/游标分区语义见 im_action_channel_window_test.cc。
 
 #include "voicelife/im/im_action_channel.h"
 
-#include <fstream>
-#include <sstream>
+#include <limits>
 #include <string>
-#include <vector>
 
-#include "support/test_support.h"
-#include "voicelife/contracts/im/reminder_action_command.h"
-#include "voicelife/contracts/im/reminder_action_result.h"
-#include "voicelife/contracts/json.h"
-#include "voicelife/im/im_clock.h"
-#include "voicelife/im/im_credentials.h"
-#include "voicelife/im/im_transport.h"
+#include "im_action_channel_test_support.h"
 
-using voicelife::contracts::im::ParseReminderActionCommand;
-using voicelife::contracts::im::ParseReminderActionResult;
-using voicelife::contracts::im::ReminderActionCommand;
-using voicelife::contracts::im::ReminderActionResult;
-using voicelife::im::ActionRunResult;
-using voicelife::im::ActionRunStatus;
-using voicelife::im::ActionWindow;
-using voicelife::im::ImActionChannel;
-using voicelife::im::ImActionCommandStream;
-using voicelife::im::ImActionExecutor;
-using voicelife::im::ImClock;
-using voicelife::im::ImCredentialProvider;
-using voicelife::im::ImHttpHeader;
-using voicelife::im::ImHttpRequest;
-using voicelife::im::ImHttpResponse;
-using voicelife::im::ImReportingChannel;
-using voicelife::im::ImTransport;
-using voicelife::im::ImTransportStatus;
 using voicelife::test::Check;
 
 namespace {
-
-constexpr const char* kDeviceId = "device-fixture";
-constexpr const char* kToken = "device-token";
-constexpr const char* kNow = "2026-08-03T00:01:00.000Z";
-constexpr const char* kWindowExpires = "2026-08-03T00:10:00.000Z";
-
-/// 读取共享受理结果 fixture，保证强/弱窗口语义与网关 TS 契约一致。
-std::string ReadFixture(const char* name) {
-    std::ifstream input(std::string(VOICELIFE_SOURCE_DIR) + "/contracts/im-gateway/v1/fixtures/" + name);
-    Check(input.good(), "共享 IM fixture 必须存在");
-    std::ostringstream content;
-    content << input.rdbuf();
-    return content.str();
-}
-
-/// 记录请求并可控返回结果的假传输。
-class FakeTransport : public ImTransport {
-   public:
-    std::vector<ImHttpRequest> requests;
-    ImTransportStatus next_status = ImTransportStatus::kSuccess;
-    int next_status_code = 200;
-
-    ImHttpResponse Post(const ImHttpRequest& request) override {
-        requests.push_back(request);
-        ImHttpResponse response;
-        response.status = next_status;
-        response.status_code = next_status_code;
-        response.message = "fake";
-        return response;
-    }
-};
-
-/// 可控凭据的假凭据提供者。
-class FakeCredentials : public ImCredentialProvider {
-   public:
-    std::string token = kToken;
-    std::string device_id = kDeviceId;
-
-    std::string DeviceToken() const override { return token; }
-    std::string DeviceId() const override { return device_id; }
-};
-
-/// 记录执行调用并返回可控结果的假执行器。
-class FakeExecutor : public ImActionExecutor {
-   public:
-    std::vector<ReminderActionCommand> calls;
-    ReminderActionResult result;
-
-    ReminderActionResult Execute(const ReminderActionCommand& command) override {
-        calls.push_back(command);
-        return result;
-    }
-};
-
-/// 可控当前时间的假时钟。
-class FakeClock : public ImClock {
-   public:
-    std::string now = kNow;
-
-    std::string NowIso() override { return now; }
-};
-
-/// 从预置命令队列拉取并记录 Open/Close 游标的假动作流。
-class FakeStream : public ImActionCommandStream {
-   public:
-    std::vector<ReminderActionCommand> commands;
-    std::vector<std::string> open_cursors;
-    int close_count = 0;
-
-    void Open(const std::string& last_event_id) override { open_cursors.push_back(last_event_id); }
-    std::optional<ReminderActionCommand> Next() override {
-        if (commands.empty()) {
-            return std::nullopt;
-        }
-        ReminderActionCommand command = commands.front();
-        commands.erase(commands.begin());
-        return command;
-    }
-    void Close() override { close_count++; }
-};
-
-/// 构造窗口内的合法 snooze 命令，覆盖字段后得到变体。
-ReminderActionCommand MakeCommand(const std::string& command_id, const std::string& operation_id) {
-    ReminderActionCommand command;
-    command.schemaVersion = "1";
-    command.commandId = command_id;
-    command.operationId = operation_id;
-    command.correlationId = "correlation-fixture";
-    command.deviceId = kDeviceId;
-    command.actorBindingId = "binding-fixture";
-    command.reminderTriggerId = "trigger-fixture";
-    command.action = "snooze";
-    command.minutes = 10;
-    command.occurredAt = "2026-08-03T00:00:00.000Z";
-    command.expiresAt = "2026-08-03T00:05:00.000Z";
-    return command;
-}
-
-ReminderActionResult MakeResult() {
-    ReminderActionResult result;
-    result.schemaVersion = "1";
-    result.operationId = "operation-1";
-    result.reminderTriggerId = "trigger-fixture";
-    result.status = "succeeded";
-    result.nextTriggerAt = "2026-08-03T00:11:00.000Z";
-    result.occurredAt = kNow;
-    return result;
-}
-
-ActionWindow MakeWindow() {
-    ActionWindow window;
-    window.reminderTriggerId = "trigger-fixture";
-    window.expiresAt = kWindowExpires;
-    return window;
-}
-
-std::string HeaderValue(const ImHttpRequest& request, const std::string& name) {
-    for (const ImHttpHeader& header : request.headers) {
-        if (header.name == name) {
-            return header.value;
-        }
-    }
-    return "";
-}
-
-/// 校验回传请求体可解析为动作结果且字段一致。
-void CheckResultRoundTrips(const ImHttpRequest& request, const ReminderActionResult& expected) {
-    voicelife::JsonValue root;
-    Check(voicelife::ParseJson(request.body, root).ok(), "回传请求体必须是合法 JSON");
-    ReminderActionResult parsed;
-    Check(ParseReminderActionResult(root, parsed).ok(), "回传请求体必须通过契约校验");
-    Check(parsed.operationId == expected.operationId && parsed.reminderTriggerId == expected.reminderTriggerId &&
-              parsed.status == expected.status && parsed.nextTriggerAt == expected.nextTriggerAt &&
-              parsed.occurredAt == expected.occurredAt,
-          "回传请求体必须与执行结果一致");
-}
-
-void TestExpiredWindowDoesNotOpenStream() {
-    FakeTransport transport;
-    FakeCredentials credentials;
-    FakeExecutor executor;
-    executor.result = MakeResult();
-    FakeClock clock;
-    clock.now = "2026-08-03T00:11:00.000Z";  // 窗口 00:10 已过
-    ImReportingChannel reporting(transport, credentials);
-    ImActionChannel channel(reporting, credentials, executor, clock);
-    FakeStream stream;
-    stream.commands.push_back(MakeCommand("command-1", "operation-1"));
-
-    const ActionRunResult result = channel.Run(stream, MakeWindow());
-
-    Check(result.status == ActionRunStatus::kWindowExpired, "过期窗口不得建立动作流");
-    Check(stream.open_cursors.empty(), "过期窗口不得打开流连接");
-    Check(executor.calls.empty(), "过期窗口不得执行命令");
-    Check(transport.requests.empty(), "过期窗口不得回传结果");
-}
+using namespace voicelife::test::action_channel;
 
 void TestStrongWindowExecutesAndReports() {
     FakeTransport transport;
@@ -295,6 +114,29 @@ void TestResultSerializationMinimal() {
     Check(transport.requests[0].body.find("\"nextTriggerAt\"") == std::string::npos, "缺省 nextTriggerAt 不得序列化");
     Check(transport.requests[0].body.find("\"errorCode\"") == std::string::npos, "缺省 errorCode 不得序列化");
     Check(transport.requests[0].body.find("\"details\"") == std::string::npos, "缺省 details 不得序列化");
+}
+
+void TestNonFiniteDetailsSerializedAsNull() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeExecutor executor;
+    executor.result = MakeResult();
+    executor.result.details =
+        voicelife::JsonValue::Object({{"bad", voicelife::JsonValue::Number(std::numeric_limits<double>::quiet_NaN())}});
+    FakeClock clock;
+    ImReportingChannel reporting(transport, credentials);
+    ImActionChannel channel(reporting, credentials, executor, clock);
+    FakeStream stream;
+    stream.commands.push_back(MakeCommand("command-1", "operation-1"));
+
+    channel.Run(stream, MakeWindow());
+
+    Check(transport.requests.size() == 1, "结果回传必须发生");
+    Check(transport.requests[0].body.find("nan") == std::string::npos &&
+              transport.requests[0].body.find("inf") == std::string::npos,
+          "非有限数不得输出为 JSON 数字字面量");
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(transport.requests[0].body, root).ok(), "含非有限数的回传体必须是合法 JSON");
 }
 
 void TestReconnectReplayExecutesOnce() {
@@ -435,42 +277,93 @@ void TestDuplicateOperationIdWithinRunExecutesOnce() {
           "重复命令回传必须复用相同 operationId 幂等键");
 }
 
-void TestStrongSubmissionBodyYieldsActionWindow() {
-    const std::optional<ActionWindow> window =
-        voicelife::im::ExtractActionWindow(ReadFixture("notification-submission.json"));
+void TestInvalidExecutorResultFaults() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeExecutor executor;
+    executor.result = MakeResult();
+    executor.result.status = "";  // 非法状态，序列化后无法通过契约解析
+    FakeClock clock;
+    ImReportingChannel reporting(transport, credentials);
+    ImActionChannel channel(reporting, credentials, executor, clock);
+    FakeStream stream;
+    stream.commands.push_back(MakeCommand("command-1", "operation-1"));
 
-    Check(window.has_value(), "强提醒受理结果必须提取出动作窗口");
-    Check(window->reminderTriggerId == "trigger-fixture" && window->expiresAt == kWindowExpires,
-          "动作窗口必须与强提醒受理结果的 actionStream 一致");
+    const ActionRunResult result = channel.Run(stream, MakeWindow());
+
+    Check(result.status == ActionRunStatus::kDisconnected, "执行器返回非法结果必须故障隔离");
+    Check(executor.calls.size() == 1, "非法结果命令应执行一次");
+    Check(transport.requests.empty(), "非法结果不得回传");
+
+    FakeStream replay;
+    replay.commands.push_back(MakeCommand("command-1", "operation-1"));
+    channel.Run(replay, MakeWindow());
+    Check(executor.calls.size() == 2, "非法结果不得缓存，重放必须重新执行");
+    Check(replay.open_cursors.size() == 1 && replay.open_cursors[0].empty(), "非法结果不得推进确认游标");
 }
 
-void TestWeakSubmissionBodyHasNoWindow() {
-    const std::optional<ActionWindow> window =
-        voicelife::im::ExtractActionWindow(ReadFixture("notification-submission-weak.json"));
+void TestCredentialRejectedDoesNotAdvanceCursor() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeExecutor executor;
+    executor.result = MakeResult();
+    FakeClock clock;
+    ImReportingChannel reporting(transport, credentials);
+    ImActionChannel channel(reporting, credentials, executor, clock);
 
-    Check(!window.has_value(), "弱提醒受理结果不得提取出动作窗口");
+    transport.next_status = ImTransportStatus::kCredentialRejected;
+    transport.next_status_code = 401;
+    FakeStream first;
+    first.commands.push_back(MakeCommand("command-1", "operation-1"));
+    const ActionRunResult first_result = channel.Run(first, MakeWindow());
+
+    Check(first_result.status == ActionRunStatus::kDisconnected, "凭据被拒必须归类为可重连");
+    Check(executor.calls.size() == 1, "凭据被拒时命令仍执行一次");
+
+    transport.next_status = ImTransportStatus::kSuccess;
+    FakeStream replay;
+    replay.commands.push_back(MakeCommand("command-1", "operation-1"));
+    channel.Run(replay, MakeWindow());
+    Check(replay.open_cursors.size() == 1 && replay.open_cursors[0].empty(),
+          "凭据被拒不得推进确认游标，网关应重放该命令");
 }
 
-void TestMalformedSubmissionBodyHasNoWindow() {
-    const std::optional<ActionWindow> window = voicelife::im::ExtractActionWindow("{not-json");
+void TestWrongDeviceIncrementsDropped() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeExecutor executor;
+    executor.result = MakeResult();
+    FakeClock clock;
+    ImReportingChannel reporting(transport, credentials);
+    ImActionChannel channel(reporting, credentials, executor, clock);
 
-    Check(!window.has_value(), "畸形受理结果不得提取出动作窗口");
+    ReminderActionCommand foreign = MakeCommand("command-1", "operation-1");
+    foreign.deviceId = "other-device";
+    FakeStream stream;
+    stream.commands.push_back(foreign);
+
+    const ActionRunResult result = channel.Run(stream, MakeWindow());
+
+    Check(result.status == ActionRunStatus::kFinished, "本地丢弃后应正常结束");
+    Check(result.dropped == 1, "错误 deviceId 命令必须计入 dropped");
+    Check(executor.calls.empty(), "错误 deviceId 命令不得执行");
+    Check(transport.requests.empty(), "错误 deviceId 命令不得回传");
 }
 
 }  // namespace
 
 int main() {
-    TestExpiredWindowDoesNotOpenStream();
     TestStrongWindowExecutesAndReports();
     TestResultSerializationCarriesOptionalFields();
     TestResultSerializationMinimal();
+    TestNonFiniteDetailsSerializedAsNull();
     TestReconnectReplayExecutesOnce();
     TestExpiredCommandReportedAsExpired();
     TestWrongDeviceIdDroppedLocally();
     TestMismatchedTriggerDroppedLocally();
     TestDuplicateOperationIdWithinRunExecutesOnce();
-    TestStrongSubmissionBodyYieldsActionWindow();
-    TestWeakSubmissionBodyHasNoWindow();
-    TestMalformedSubmissionBodyHasNoWindow();
+    TestInvalidExecutorResultFaults();
+    TestCredentialRejectedDoesNotAdvanceCursor();
+    TestWrongDeviceIncrementsDropped();
     return 0;
 }

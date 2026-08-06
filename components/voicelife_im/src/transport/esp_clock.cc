@@ -22,6 +22,10 @@ std::string EspClock::NowIso() {
             ESP_LOGW(kTag, "系统时间未同步（SNTP），动作窗口将按已过期处理");
             warned = true;
         }
+        // SNTP 未同步时 time() 返回 1970 纪元值；若按原值上报，任何窗口都判定为
+        // “未过期”，与预期相反。改报 2035 哨兵时刻，使所有窗口一律判定过期、
+        // 动作流保持关闭，直到时间同步。
+        return "2035-01-01T00:00:00.000Z";
     }
     struct tm utc;
     if (gmtime_r(&now, &utc) == nullptr) {

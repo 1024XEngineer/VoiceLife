@@ -145,6 +145,10 @@ add_voicelife_test(im_action_channel_test "unit;im" im_action_channel_test.cc)
 target_link_libraries(im_action_channel_test PRIVATE im contracts)
 target_compile_definitions(im_action_channel_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
 
+add_voicelife_test(im_action_channel_window_test "unit;im" im_action_channel_window_test.cc)
+target_link_libraries(im_action_channel_window_test PRIVATE im contracts)
+target_compile_definitions(im_action_channel_window_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
+
 add_voicelife_test(im_sse_test "unit;im" im_sse_test.cc)
 target_link_libraries(im_sse_test PRIVATE im contracts)
 target_compile_definitions(im_sse_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")

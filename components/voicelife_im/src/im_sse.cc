@@ -53,11 +53,19 @@ void SseDecoder::Feed(std::string_view bytes, std::vector<SseFrame>& frames) {
             frames.push_back(std::move(frame));
         }
     }
+
+    // 单帧上限保护：切帧后残留的是未完成帧，超限视为协议错误。切帧前不做限制，
+    // 避免一次喂入多个合法小帧时误判溢出；本机堆内存由调用方按块读取封顶。
+    if (buffer_.size() >= kMaxFrameBytes) {
+        overflow_ = true;
+        buffer_.clear();
+    }
 }
 
 void SseDecoder::Reset() {
     buffer_.clear();
     trailing_cr_ = false;
+    overflow_ = false;
 }
 
 bool SseDecoder::ParseBlock(const std::string& block, SseFrame& frame) {

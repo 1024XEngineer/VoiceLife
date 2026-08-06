@@ -137,6 +137,36 @@ void TestCommandDataRoundTripsThroughContract() {
           "命令标识必须与载荷一致");
 }
 
+void TestFeedBufferOverflowFlag() {
+    SseDecoder decoder;
+    std::vector<SseFrame> frames;
+    // 单个未完成帧超过上限必须触发溢出标记，且不得产出事件。
+    const std::string huge(SseDecoder::kMaxFrameBytes + 1, 'x');
+    decoder.Feed(huge, frames);
+    Check(decoder.Overflowed(), "超长未完成帧必须触发溢出标记");
+    Check(frames.empty(), "溢出时不得产出事件");
+
+    // 溢出后继续喂入不再累积（缓冲已被清空）；复位后标记清除且可正常解析。
+    decoder.Feed(huge, frames);
+    Check(decoder.Overflowed(), "溢出后必须保持溢出标记");
+    decoder.Reset();
+    Check(!decoder.Overflowed(), "复位必须清除溢出标记");
+    decoder.Feed("id: command-1\nevent: reminder.action\ndata: {}\n\n", frames);
+    Check(frames.size() == 1, "复位后必须能正常解析新帧");
+
+    // 一次喂入多个合计超过上限的合法小帧不得误报溢出（以帧边界为准）。
+    SseDecoder batch;
+    std::vector<SseFrame> batch_frames;
+    std::string payload;
+    payload.reserve(SseDecoder::kMaxFrameBytes * 2);
+    for (size_t i = 0; i < 400; ++i) {
+        payload += "id: command-\n\n";
+    }
+    batch.Feed(payload, batch_frames);
+    Check(!batch.Overflowed(), "多个合法小帧合计超限不得误报溢出");
+    Check(batch_frames.size() == 400, "多个合法小帧必须全部产出");
+}
+
 }  // namespace
 
 int main() {
@@ -149,5 +179,6 @@ int main() {
     TestDataFieldsJoinWithNewline();
     TestResetClearsPartialFrame();
     TestCommandDataRoundTripsThroughContract();
+    TestFeedBufferOverflowFlag();
     return 0;
 }
