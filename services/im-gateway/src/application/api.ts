@@ -221,9 +221,9 @@ export interface ReceiptApplication {
 /** 持久化并推进规范化入站事件状态的应用服务。 */
 export interface InboundEventApplication {
     /**
-     * 仅在事件首次出现时创建入站记录。
+     * 仅在事件首次出现时创建入站记录；失败记录可在平台重放时重新进入处理流程。
      * @param event 规范化入站事件。
-     * @returns accepted 表示新建，duplicate 表示已存在。
+     * @returns accepted 表示首次事件或失败重放，duplicate 表示已存在且无需处理。
      */
     recordIfNew(event: NormalizedImEvent): Promise<'accepted' | 'duplicate'>;
     /**
