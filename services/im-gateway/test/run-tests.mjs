@@ -312,7 +312,49 @@ async function runFailureStateTests() {
   );
 }
 
+async function runIssue65TransportBoundaryTests() {
+  const strong = await readFixture("notification-strong.json");
+  const { gateway } = await createBoundGateway();
+  await submitFixture(gateway, strong);
+
+  await expectGatewayError(
+    () =>
+      gateway.deviceApi.postNotification({
+        authorization: "Bearer fixture-device-token",
+        idempotencyKey: "another-event-id",
+        body: strong,
+      }),
+    "duplicate_event",
+    "A notification with an Idempotency-Key different from businessEventId was accepted",
+  );
+
+  await expectGatewayError(
+    () =>
+      gateway.actionStreamApi.connect({
+        authorization: "Bearer fixture-device-token",
+        deviceId: "another-device",
+        reminderType: "strong",
+        reminderTriggerId: "trigger-fixture",
+      }),
+    "invalid_transition",
+    "A device token was allowed to open another device's action stream",
+  );
+
+  await expectGatewayError(
+    () =>
+      gateway.actionStreamApi.connect({
+        authorization: "Bearer fixture-device-token",
+        deviceId: "device-fixture",
+        reminderType: "weak",
+        reminderTriggerId: "trigger-fixture",
+      }),
+    "invalid_contract",
+    "A weak reminder was allowed to establish the strong-reminder SSE action stream",
+  );
+}
+
 await runMockNotificationScenario();
 await runContractFixtureTests();
 await runFailureStateTests();
-console.log("IM Gateway Issue #95 contract and review regression tests passed");
+await runIssue65TransportBoundaryTests();
+console.log("IM Gateway Issue #65/#95 contract and regression tests passed");
