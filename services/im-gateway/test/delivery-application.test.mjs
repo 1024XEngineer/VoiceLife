@@ -65,7 +65,6 @@ test('find of an unknown delivery returns undefined', async () => {
 
 test('retrying a dead-letter delivery restores it to pending and requests a retry', async () => {
     const uow = new ExposedUnitOfWork();
-    // 非可重试拒绝(permanent_failed)必须先经 markDeadLetter 进入死信队列,才可手动重试。
     const { gateway, clock } = gatewayWithChannel([{ accepted: false, retryable: false, errorCode: 'blocked' }], {
         unitOfWork: uow,
     });
@@ -76,6 +75,8 @@ test('retrying a dead-letter delivery restores it to pending and requests a retr
     const pending = await gateway.application.deliveries.retryDeadLetter(deliveryId);
 
     assert.equal(pending.status, 'pending');
+    assert.equal(pending.externalMessageId, undefined);
+    assert.equal(pending.lastErrorCode, undefined);
     const events = uow.outboxEvents().filter((event) => event.eventType === 'im.delivery.retry-requested');
     assert.equal(events.length, 1);
     assert.equal(events[0].aggregateId, deliveryId);
@@ -96,10 +97,34 @@ test('retrying a permanent_failed delivery restores it to pending and requests a
     const pending = await gateway.application.deliveries.retryDeadLetter(deliveryId);
 
     assert.equal(pending.status, 'pending');
+    assert.equal(pending.externalMessageId, undefined);
+    assert.equal(pending.lastErrorCode, undefined);
     const events = uow.outboxEvents().filter((event) => event.eventType === 'im.delivery.retry-requested');
     assert.equal(events.length, 1);
     assert.equal(events[0].aggregateId, deliveryId);
     assert.equal(events[0].availableAt, clock.now());
+});
+
+test('manual retry clears the previous accepted platform message before redispatch', async () => {
+    const { gateway, clock } = gatewayWithChannel([{ accepted: true, platformMessageId: 'platform-old' }]);
+    const deliveryId = await pendingStrongDelivery(gateway);
+    await gateway.application.deliveryDispatch.dispatch(deliveryId);
+    const accepted = await gateway.application.deliveries.find(deliveryId);
+    await gateway.application.receipts.record({
+        externalEventId: 'rcpt-failed',
+        channelAccountId: accepted.delivery.channelAccountId,
+        externalMessageId: 'platform-old',
+        attemptId: accepted.attempts[0].id,
+        dedupeKey: 'rcpt-dedupe-failed',
+        stage: 'failed',
+        occurredAt: clock.now(),
+    });
+
+    const pending = await gateway.application.deliveries.retryDeadLetter(deliveryId);
+
+    assert.equal(pending.status, 'pending');
+    assert.equal(pending.externalMessageId, undefined);
+    assert.equal(pending.lastErrorCode, undefined);
 });
 
 test('retrying a pending delivery is rejected', async () => {

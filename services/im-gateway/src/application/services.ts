@@ -645,7 +645,11 @@ export class DefaultDeliveryApplication implements DeliveryApplication {
                 );
             }
             const now = this.clock.now();
-            const pending: Delivery = { ...delivery, status: 'pending', updatedAt: now };
+            const pending = {
+                ...withoutDeliveryAttemptOutcome(delivery),
+                status: 'pending' as const,
+                updatedAt: now,
+            };
             await tx.deliveries.save(pending);
             await tx.outbox.append({
                 id: this.ids.nextOutboxEventId(),
@@ -721,13 +725,6 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
         const conversation = await this.conversations.resolveDirect(target.identity);
         const attempt = await this.unitOfWork.transaction(async (tx) => {
             const attemptNo = await tx.deliveries.nextAttemptNo(deliveryId);
-            if (target.delivery.status === 'retryable_failed') {
-                await tx.deliveries.save({
-                    ...target.delivery,
-                    status: 'pending',
-                    updatedAt: this.clock.now(),
-                });
-            }
             const started = {
                 id: this.ids.nextDeliveryAttemptId(),
                 deliveryId,
@@ -776,9 +773,9 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
                 completedAt: this.clock.now(),
             });
             const updated: Delivery = {
-                ...(status === 'accepted' ? withoutLastErrorCode(target.delivery) : target.delivery),
+                ...withoutDeliveryAttemptOutcome(target.delivery),
                 status,
-                ...(acceptance.platformMessageId === undefined
+                ...(status !== 'accepted' || acceptance.platformMessageId === undefined
                     ? {}
                     : { externalMessageId: acceptance.platformMessageId }),
                 ...(acceptance.errorCode === undefined ? {} : { lastErrorCode: acceptance.errorCode }),
@@ -852,6 +849,19 @@ export class DefaultReceiptApplication implements ReceiptApplication {
             if (delivery === undefined) {
                 throw new ImGatewayError('delivery_not_found', 'Delivery was not found for the platform message');
             }
+            const attempts = await tx.deliveries.listAttempts(delivery.id);
+            const matchingAttempts = attempts.filter(
+                (attempt) => attempt.platformMessageId === receipt.externalMessageId,
+            );
+            const receiptAttempt =
+                receipt.attemptId === undefined
+                    ? matchingAttempts.length === 1
+                        ? matchingAttempts[0]
+                        : undefined
+                    : matchingAttempts.find((attempt) => attempt.id === receipt.attemptId);
+            if (receipt.attemptId !== undefined && receiptAttempt === undefined) {
+                throw new ImGatewayError('invalid_contract', 'Receipt attempt does not match its platform message');
+            }
             await tx.deliveries.saveReceipt({
                 id: this.ids.nextDeliveryReceiptId(),
                 deliveryId: delivery.id,
@@ -863,6 +873,15 @@ export class DefaultReceiptApplication implements ReceiptApplication {
                 occurredAt: receipt.occurredAt,
                 receivedAt: this.clock.now(),
             });
+            const currentAttempt = attempts.at(-1);
+            // 旧尝试或无法唯一关联的回执只保留审计记录，不能推进当前投递。
+            if (
+                receipt.externalMessageId !== delivery.externalMessageId ||
+                currentAttempt?.status !== 'accepted' ||
+                receiptAttempt?.id !== currentAttempt.id
+            ) {
+                return;
+            }
             const status = advanceDeliveryStatus(delivery.status, receipt.stage);
             if (status !== delivery.status) {
                 await tx.deliveries.save({
@@ -1350,14 +1369,14 @@ function validateReminderActionParams(
 }
 
 /**
- * 返回清除历史错误码后的投递,成功派发后不应残留上次失败的错误码。
+ * 返回清除上一次发送结果后的投递，新尝试不继承旧消息标识或错误码。
  * @param delivery 原投递。
- * @returns 无 lastErrorCode 的投递。
+ * @returns 无 externalMessageId 和 lastErrorCode 的投递。
  */
-function withoutLastErrorCode(delivery: Delivery): Delivery {
-    if (delivery.lastErrorCode === undefined) return delivery;
+function withoutDeliveryAttemptOutcome(delivery: Delivery): Delivery {
     const cleared = { ...delivery };
     delete cleared.lastErrorCode;
+    delete cleared.externalMessageId;
     return cleared;
 }
 
