@@ -1,5 +1,3 @@
-#include "voicelife/linx/linx_types.h"
-
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -7,6 +5,7 @@
 #include <utility>
 
 #include "cJSON.h"
+#include "voicelife/linx/linx_types.h"
 
 namespace voicelife::linx {
 namespace {
@@ -15,7 +14,9 @@ namespace {
 
 // RAII wrapper so every code path deletes the cJSON root.
 struct JsonDeleter {
-    void operator()(cJSON* ptr) const { if (ptr != nullptr) cJSON_Delete(ptr); }
+    void operator()(cJSON* ptr) const {
+        if (ptr != nullptr) cJSON_Delete(ptr);
+    }
 };
 using JsonPtr = std::unique_ptr<cJSON, JsonDeleter>;
 
@@ -34,23 +35,23 @@ Status StringToResult(char* cjson_string, std::string& out) {
     return Status::Ok();
 }
 
-const char* CodecName(voice::AudioCodec codec) {
-    return codec == voice::AudioCodec::kOpus ? "opus" : "pcm";
-}
+const char* CodecName(voice::AudioCodec codec) { return codec == voice::AudioCodec::kOpus ? "opus" : "pcm"; }
 
 const char* ModeName(voice::VoiceMode mode) {
     switch (mode) {
-        case voice::VoiceMode::kManual:   return "manual";
-        case voice::VoiceMode::kAuto:     return "auto";
-        case voice::VoiceMode::kRealtime: return "realtime";
+        case voice::VoiceMode::kManual:
+            return "manual";
+        case voice::VoiceMode::kAuto:
+            return "auto";
+        case voice::VoiceMode::kRealtime:
+            return "realtime";
     }
     return "manual";
 }
 
 // ---- Helpers for decoding with cJSON ----
 
-const cJSON* GetRequired(const cJSON* root, const char* key, int expected_type,
-                         std::string& error) {
+const cJSON* GetRequired(const cJSON* root, const char* key, int expected_type, std::string& error) {
     const cJSON* item = cJSON_GetObjectItem(root, key);
     if (item == nullptr || (item->type & expected_type) == 0) {
         error = "缺少或类型错误的字段: ";
@@ -68,8 +69,8 @@ const cJSON* GetOptional(const cJSON* root, const char* key, int expected_type) 
 Result<LinxAudioParams> ParseAudioParams(const cJSON* audio) {
     std::string error;
     const cJSON* fmt = GetRequired(audio, "format", cJSON_String, error);
-    const cJSON* sr  = GetRequired(audio, "sample_rate", cJSON_Number, error);
-    const cJSON* ch  = GetRequired(audio, "channels", cJSON_Number, error);
+    const cJSON* sr = GetRequired(audio, "sample_rate", cJSON_Number, error);
+    const cJSON* ch = GetRequired(audio, "channels", cJSON_Number, error);
     if (fmt == nullptr || sr == nullptr || ch == nullptr) {
         return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument, error);
     }
@@ -80,18 +81,15 @@ Result<LinxAudioParams> ParseAudioParams(const cJSON* audio) {
     } else if (format_str == "opus") {
         params.codec = voice::AudioCodec::kOpus;
     } else {
-        return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument,
-                                                "不支持的 Linx 音频格式: " + format_str);
+        return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument, "不支持的 Linx 音频格式: " + format_str);
     }
     const uint32_t sample_rate = static_cast<uint32_t>(sr->valuedouble);
-    const uint8_t  channels    = static_cast<uint8_t>(ch->valueint);
-    if (sr->valuedouble < 0 || sr->valuedouble > 0xFFFFFFFFULL ||
-        sample_rate == 0 || channels == 0) {
-        return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument,
-                                                "Linx 音频参数超出范围");
+    const uint8_t channels = static_cast<uint8_t>(ch->valueint);
+    if (sr->valuedouble < 0 || sr->valuedouble > 0xFFFFFFFFULL || sample_rate == 0 || channels == 0) {
+        return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument, "Linx 音频参数超出范围");
     }
     params.sample_rate_hz = sample_rate;
-    params.channels        = channels;
+    params.channels = channels;
     const cJSON* bit = GetOptional(audio, "bit_depth", cJSON_Number);
     if (bit != nullptr) params.bits_per_sample = static_cast<uint8_t>(bit->valueint);
     const cJSON* dur = GetOptional(audio, "frame_duration", cJSON_Number);
@@ -107,8 +105,7 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
                                                const LinxConnectionConfig& connection) const {
     (void)connection;
     if (!config.audio.valid()) {
-        return Result<std::string>::Failure(ErrorCode::kInvalidArgument,
-                                            "Linx hello 音频参数无效");
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx hello 音频参数无效");
     }
     JsonPtr root(cJSON_CreateObject());
     cJSON_AddStringToObject(root.get(), "type", "hello");
@@ -124,8 +121,7 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
     cJSON_AddNumberToObject(audio, "frame_duration", config.audio.frame_duration_ms);
 
     if (config.audio.codec == voice::AudioCodec::kPcmS16Le) {
-        const uint32_t frame_size = config.audio.sample_rate_hz *
-                                    config.audio.frame_duration_ms / 1000U;
+        const uint32_t frame_size = config.audio.sample_rate_hz * config.audio.frame_duration_ms / 1000U;
         const uint32_t play_buffer_ms = config.audio.frame_duration_ms * 50U;
         cJSON_AddNumberToObject(audio, "frame_size", frame_size);
         cJSON_AddStringToObject(audio, "sample_format", "signed_int16");
@@ -172,14 +168,12 @@ Result<std::string> LinxJsonCodec::EncodeListenStop(const voice::VoiceSessionCon
 Result<std::string> LinxJsonCodec::EncodeListenDetect(const voice::VoiceSessionConfig& config,
                                                       std::string_view text) const {
     if (text.empty()) {
-        return Result<std::string>::Failure(ErrorCode::kInvalidArgument,
-                                            "Linx detect 文本不能为空");
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx detect 文本不能为空");
     }
     JsonPtr root(cJSON_CreateObject());
     cJSON_AddStringToObject(root.get(), "type", "listen");
     cJSON_AddStringToObject(root.get(), "state", "detect");
-    cJSON_AddStringToObject(root.get(), "text",
-                            std::string(text).c_str());
+    cJSON_AddStringToObject(root.get(), "text", std::string(text).c_str());
     if (!config.session_id.empty()) {
         cJSON_AddStringToObject(root.get(), "session_id", config.session_id.c_str());
     }
@@ -190,11 +184,9 @@ Result<std::string> LinxJsonCodec::EncodeListenDetect(const voice::VoiceSessionC
                        : Result<std::string>::Failure(status.code, status.message);
 }
 
-Result<std::string> LinxJsonCodec::EncodeAbort(const voice::VoiceSessionConfig& config,
-                                               std::string_view reason) const {
+Result<std::string> LinxJsonCodec::EncodeAbort(const voice::VoiceSessionConfig& config, std::string_view reason) const {
     if (reason.empty()) {
-        return Result<std::string>::Failure(ErrorCode::kInvalidArgument,
-                                            "Linx abort 原因不能为空");
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx abort 原因不能为空");
     }
     JsonPtr root(cJSON_CreateObject());
     cJSON_AddStringToObject(root.get(), "type", "abort");
@@ -214,12 +206,10 @@ Result<std::string> LinxJsonCodec::EncodeAbort(const voice::VoiceSessionConfig& 
 Result<LinxInboundMessage> LinxJsonCodec::DecodeText(std::string_view message) const {
     JsonPtr root(cJSON_ParseWithLength(message.data(), message.size()));
     if (root == nullptr) {
-        return Result<LinxInboundMessage>::Failure(ErrorCode::kInvalidArgument,
-                                                   "Linx JSON 解析失败");
+        return Result<LinxInboundMessage>::Failure(ErrorCode::kInvalidArgument, "Linx JSON 解析失败");
     }
     if (!cJSON_IsObject(root.get())) {
-        return Result<LinxInboundMessage>::Failure(ErrorCode::kInvalidArgument,
-                                                   "Linx 控制消息必须是 JSON 对象");
+        return Result<LinxInboundMessage>::Failure(ErrorCode::kInvalidArgument, "Linx 控制消息必须是 JSON 对象");
     }
     std::string error;
     const cJSON* type = GetRequired(root.get(), "type", cJSON_String, error);
@@ -241,16 +231,15 @@ Result<LinxInboundMessage> LinxJsonCodec::DecodeText(std::string_view message) c
         if (transport != nullptr) {
             const std::string t = cJSON_GetStringValue(transport);
             if (t != "websocket") {
-                return Result<LinxInboundMessage>::Failure(
-                    ErrorCode::kInvalidArgument, "Linx hello transport 无效: " + t);
+                return Result<LinxInboundMessage>::Failure(ErrorCode::kInvalidArgument,
+                                                           "Linx hello transport 无效: " + t);
             }
         }
         const cJSON* audio = GetOptional(root.get(), "audio_params", cJSON_Object);
         if (audio != nullptr) {
             auto params = ParseAudioParams(audio);
             if (!params.ok()) {
-                return Result<LinxInboundMessage>::Failure(params.status.code,
-                                                           params.status.message);
+                return Result<LinxInboundMessage>::Failure(params.status.code, params.status.message);
             }
             decoded.audio_params = *params.value;
         }
@@ -285,8 +274,7 @@ Result<LinxInboundMessage> LinxJsonCodec::DecodeText(std::string_view message) c
             const cJSON* aborted = GetOptional(root.get(), "is_aborted", cJSON_False | cJSON_True);
             if (aborted != nullptr) decoded.aborted = cJSON_IsTrue(aborted);
         } else {
-            return Result<LinxInboundMessage>::Failure(ErrorCode::kInvalidArgument,
-                                                       "未知 Linx TTS 状态: " + state_str);
+            return Result<LinxInboundMessage>::Failure(ErrorCode::kInvalidArgument, "未知 Linx TTS 状态: " + state_str);
         }
         return Result<LinxInboundMessage>::Success(std::move(decoded));
     }
@@ -298,8 +286,7 @@ Result<LinxInboundMessage> LinxJsonCodec::DecodeText(std::string_view message) c
         return Result<LinxInboundMessage>::Success(std::move(decoded));
     }
 
-    return Result<LinxInboundMessage>::Failure(ErrorCode::kInvalidArgument,
-                                               "未知 Linx 消息类型: " + type_str);
+    return Result<LinxInboundMessage>::Failure(ErrorCode::kInvalidArgument, "未知 Linx 消息类型: " + type_str);
 }
 
 }  // namespace voicelife::linx

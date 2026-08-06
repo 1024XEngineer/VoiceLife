@@ -118,8 +118,8 @@ class SpeechProviderRegistry {
     static SpeechProviderRegistry& Instance();
 
     Status Register(std::string provider_id, CapabilityProfile profile, SpeechProviderFactory factory);
-    Result<std::unique_ptr<SpeechProviderAdapter>> Create(
-        std::string_view provider_id, const std::vector<std::string>& required_capabilities) const;
+    Result<std::unique_ptr<SpeechProviderAdapter>> Create(std::string_view provider_id,
+                                                          const std::vector<std::string>& required_capabilities) const;
 
    private:
     SpeechProviderRegistry() = default;

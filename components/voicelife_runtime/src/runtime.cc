@@ -34,9 +34,7 @@ class ScaffoldAudioOutput final : public voice::AudioOutputPort {
 
 class ScaffoldSpeechProvider final : public voice::SpeechProviderAdapter {
    public:
-    Status Connect(const voice::VoiceSessionConfig&, voice::VoiceEventSink) override {
-        return Status::Ok();
-    }
+    Status Connect(const voice::VoiceSessionConfig&, voice::VoiceEventSink) override { return Status::Ok(); }
     Status StartCapture(voice::VoiceMode) override { return Status::Ok(); }
     Status StopCapture() override { return Status::Ok(); }
     Status SendAudio(const voice::AudioFrame&) override { return Status::Ok(); }
@@ -59,17 +57,15 @@ class Runtime final {
    public:
     Runtime() {
         auto& registry = voice::SpeechProviderRegistry::Instance();
-        registry.Register(
-            "scaffold", voice::CapabilityProfile{"scaffold", {"streaming-asr", "tts"}},
-            []() { return std::make_unique<ScaffoldSpeechProvider>(); });
+        registry.Register("scaffold", voice::CapabilityProfile{"scaffold", {"streaming-asr", "tts"}},
+                          []() { return std::make_unique<ScaffoldSpeechProvider>(); });
     }
 
     Status Start() {
         auto& registry = voice::SpeechProviderRegistry::Instance();
         auto result = registry.Create("scaffold", {});
         if (!result.ok() || !result.value.has_value()) {
-            return Status::Error(ErrorCode::kInternal,
-                                 "无法创建语音 Provider: " + result.status.message);
+            return Status::Error(ErrorCode::kInternal, "无法创建语音 Provider: " + result.status.message);
         }
         provider_ = std::move(*result.value);
 

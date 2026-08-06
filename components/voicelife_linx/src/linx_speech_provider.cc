@@ -35,8 +35,7 @@ LinxSpeechProviderAdapter::LinxSpeechProviderAdapter(LinxTransportPort& transpor
       capabilities_(std::move(capabilities)) {}
 
 voice::CapabilityProfile LinxSpeechProviderAdapter::DefaultCapabilities() {
-    return {.provider_id = "xrobot-websocket",
-            .capabilities = {"streaming-asr", "tts", "cancel-generation", "pcm"}};
+    return {.provider_id = "xrobot-websocket", .capabilities = {"streaming-asr", "tts", "cancel-generation", "pcm"}};
 }
 
 void LinxSpeechProviderAdapter::SetAudioSink(voice::AudioFrameSink sink) {
@@ -257,8 +256,7 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
     // Reject messages from a different session. A stale or misrouted
     // message on the same WebSocket must not mutate the current session.
     if (inbound.session_id.has_value() && *inbound.session_id != config_.session_id) {
-        Emit(Event(voice::VoiceEventKind::kError,
-                   "Linx 消息 session_id 不匹配: " + *inbound.session_id));
+        Emit(Event(voice::VoiceEventKind::kError, "Linx 消息 session_id 不匹配: " + *inbound.session_id));
         return;
     }
     switch (inbound.kind) {
@@ -268,14 +266,12 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
             }
             voice::VoiceAudioFormats formats{.capture = config_.audio, .playback = config_.audio};
             if (!inbound.audio_params.has_value()) {
-                Emit(Event(voice::VoiceEventKind::kError,
-                           "Linx hello 缺少 audio_params，无法确认音频格式协商"));
+                Emit(Event(voice::VoiceEventKind::kError, "Linx hello 缺少 audio_params，无法确认音频格式协商"));
                 {
                     std::lock_guard<std::mutex> lock(hello_mutex_);
                     hello_received_ = true;
-                    hello_status_ =
-                        Status::Error(ErrorCode::kInvalidArgument,
-                                      "Linx hello 缺少 audio_params，无法确认音频格式协商");
+                    hello_status_ = Status::Error(ErrorCode::kInvalidArgument,
+                                                  "Linx hello 缺少 audio_params，无法确认音频格式协商");
                 }
                 hello_cv_.notify_all();
                 return;
