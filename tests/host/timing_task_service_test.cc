@@ -289,27 +289,44 @@ int main() {
           "默认提醒关闭接口应明确返回未实现");
 
     const auto rules_before_delete = store.ListRules(registered.value->task_id);
-    const std::string rule_to_delete = rules_before_delete.value->front().id;
+    std::string rule_to_delete;
+    std::string rule_for_failed_delete;
+    for (const auto& rule : *rules_before_delete.value) {
+        if (rule.type == ReminderType::kWeak) {
+            rule_to_delete = rule.id;
+        }
+        if (rule.type == ReminderType::kStrong) {
+            rule_for_failed_delete = rule.id;
+        }
+    }
+    Check(!rule_to_delete.empty() && !rule_for_failed_delete.empty(), "默认规则应同时包含弱提醒和强提醒");
     store.AddReminderTrigger({
         .id = "future-trigger",
         .reminder_rule_id = rule_to_delete,
         .task_id = registered.value->task_id,
-        .planned_trigger_at = 1785740060,
+        .planned_trigger_at = clock.Now() + 60,
         .status = voicelife::timing::ReminderTriggerStatus::kPending,
     });
     store.AddReminderTrigger({
         .id = "historical-trigger",
         .reminder_rule_id = rule_to_delete,
         .task_id = registered.value->task_id,
-        .planned_trigger_at = 1785739940,
-        .actual_trigger_at = 1785739940,
+        .planned_trigger_at = clock.Now() - 60,
+        .actual_trigger_at = clock.Now() - 60,
         .status = voicelife::timing::ReminderTriggerStatus::kTriggered,
+    });
+    store.AddReminderTrigger({
+        .id = "at-delete-trigger",
+        .reminder_rule_id = rule_to_delete,
+        .task_id = registered.value->task_id,
+        .planned_trigger_at = clock.Now(),
+        .status = voicelife::timing::ReminderTriggerStatus::kPending,
     });
     const auto deleted_rule = service.DeleteReminderRule({.reminder_rule_id = rule_to_delete});
     Check(deleted_rule.ok() && deleted_rule.value->status == voicelife::timing::ReminderRuleStatus::kDisabled,
           "活动提醒规则应删除为 disabled");
-    Check(deleted_rule.ok() && deleted_rule.value->affected_trigger_count == 1,
-          "删除规则应返回被取消的未来 trigger 数量");
+    Check(deleted_rule.ok() && deleted_rule.value->affected_trigger_count == 2,
+          "删除规则应返回被取消的未来及当前边界 trigger 数量");
     const auto cancelled_trigger = store.FindReminderTrigger("future-trigger");
     Check(cancelled_trigger.ok() &&
               cancelled_trigger.value->status == voicelife::timing::ReminderTriggerStatus::kCancelled,
@@ -333,12 +350,11 @@ int main() {
     Check(service.DeleteReminderRule({.reminder_rule_id = "orphan-rule"}).status.code == ErrorCode::kConflict,
           "规则关联任务不存在应返回冲突错误");
 
-    const std::string rule_for_failed_delete = rules_before_delete.value->at(1).id;
     store.AddReminderTrigger({
         .id = "failed-delete-trigger",
         .reminder_rule_id = rule_for_failed_delete,
         .task_id = registered.value->task_id,
-        .planned_trigger_at = 1785740060,
+        .planned_trigger_at = clock.Now() + 60,
         .status = voicelife::timing::ReminderTriggerStatus::kPending,
     });
     store.FailNextRuleDisable(Status::Error(ErrorCode::kUnavailable, "store unavailable"));
@@ -348,5 +364,29 @@ int main() {
     const auto retained_trigger = store.FindReminderTrigger("failed-delete-trigger");
     Check(retained_trigger.ok() && retained_trigger.value->status == voicelife::timing::ReminderTriggerStatus::kPending,
           "规则关闭失败不能改变未来 trigger");
+    const auto rules_after_store_failure = store.ListRules(registered.value->task_id);
+    bool retained_active_rule = false;
+    for (const auto& rule : *rules_after_store_failure.value) {
+        retained_active_rule = retained_active_rule || (rule.id == rule_for_failed_delete &&
+                                                        rule.status == voicelife::timing::ReminderRuleStatus::kActive);
+    }
+    Check(retained_active_rule, "规则关闭失败不能改变已保存规则");
+    store.AddReminderTrigger({
+        .id = "cross-task-trigger",
+        .reminder_rule_id = rule_for_failed_delete,
+        .task_id = "other-task",
+        .planned_trigger_at = clock.Now() + 60,
+        .status = voicelife::timing::ReminderTriggerStatus::kPending,
+    });
+    Check(service.DeleteReminderRule({.reminder_rule_id = rule_for_failed_delete}).status.code == ErrorCode::kConflict,
+          "trigger 与规则任务不一致应返回冲突错误");
+    const auto rule_after_relation_failure = store.ListRules(registered.value->task_id);
+    bool retained_rule_after_relation_failure = false;
+    for (const auto& rule : *rule_after_relation_failure.value) {
+        retained_rule_after_relation_failure =
+            retained_rule_after_relation_failure ||
+            (rule.id == rule_for_failed_delete && rule.status == voicelife::timing::ReminderRuleStatus::kActive);
+    }
+    Check(retained_rule_after_relation_failure, "关联错误不能关闭提醒规则");
     return 0;
 }

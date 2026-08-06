@@ -73,11 +73,6 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
     }
 
     Result<int> DisableReminderRule(const std::string& reminder_rule_id, int64_t now) override {
-        if (!next_rule_disable_failure_.ok()) {
-            Status failure = std::move(next_rule_disable_failure_);
-            next_rule_disable_failure_ = Status::Ok();
-            return Result<int>::Failure(failure.code, failure.message);
-        }
         const auto existing = rules_.find(reminder_rule_id);
         if (existing == rules_.end()) {
             return Result<int>::Failure(ErrorCode::kNotFound, "reminder rule not found");
@@ -97,13 +92,23 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         rule.deleted_at = now;
         int affected_trigger_count = 0;
         for (auto& [_, trigger] : next_triggers) {
-            if (trigger.reminder_rule_id == reminder_rule_id &&
-                trigger.status == timing::ReminderTriggerStatus::kPending && trigger.planned_trigger_at >= now) {
+            if (trigger.reminder_rule_id != reminder_rule_id) {
+                continue;
+            }
+            if (trigger.task_id != rule.task_id) {
+                return Result<int>::Failure(ErrorCode::kConflict, "reminder trigger task relation is invalid");
+            }
+            if (trigger.status == timing::ReminderTriggerStatus::kPending && trigger.planned_trigger_at >= now) {
                 trigger.status = timing::ReminderTriggerStatus::kCancelled;
                 trigger.updated_at = now;
                 trigger.last_action_at = now;
                 ++affected_trigger_count;
             }
+        }
+        if (!next_rule_disable_failure_.ok()) {
+            Status failure = std::move(next_rule_disable_failure_);
+            next_rule_disable_failure_ = Status::Ok();
+            return Result<int>::Failure(failure.code, failure.message);
         }
         rules_ = std::move(next_rules);
         triggers_ = std::move(next_triggers);
