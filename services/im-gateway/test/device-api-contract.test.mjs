@@ -43,6 +43,26 @@ test('notification rejects an Idempotency-Key different from businessEventId', a
     );
 });
 
+test('pairing creation parses untrusted device input before authentication', async () => {
+    const { gateway } = buildGateway();
+    const invalidBodies = [
+        null,
+        {},
+        { deviceId: '' },
+        { deviceId: 'device-fixture', allowedPlatforms: ['unknown'] },
+        { deviceId: 'device-fixture', expiresInMinutes: 0 },
+        { deviceId: 'device-fixture', expiresInMinutes: 11 },
+    ];
+
+    for (const body of invalidBodies) {
+        await expectGatewayError(
+            () => gateway.deviceApi.postPairingSession({ authorization: 'Bearer fixture-device-token', body }),
+            'invalid_contract',
+            `Pairing accepted invalid body: ${JSON.stringify(body)}`,
+        );
+    }
+});
+
 test('notification rejects a body for another device principal', async () => {
     const { gateway } = buildGateway();
 

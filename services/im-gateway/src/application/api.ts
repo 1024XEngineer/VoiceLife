@@ -11,6 +11,7 @@ import type {
 } from '../contracts/ids.js';
 import type {
     ActionIntent,
+    CreatePairingSessionRequest,
     NotificationIntent,
     NotificationSubmission,
     ReminderActionCommand,
@@ -70,12 +71,7 @@ export interface ChannelAccountApplication {
 }
 
 /** 创建短期配对会话所需的参数。 */
-export interface CreatePairingSessionCommand {
-    readonly userId?: UserId;
-    readonly deviceId: DeviceId;
-    readonly allowedPlatforms?: readonly ImPlatform[];
-    readonly expiresInMinutes?: number;
-}
+export type CreatePairingSessionCommand = CreatePairingSessionRequest;
 
 /** 新建配对会话及其一次性展示码。 */
 export interface CreatedPairingSession {

@@ -139,6 +139,7 @@ test('strong reminder without a native or H5 action entry produces no delivery',
     const submission = await gateway.application.notifications.submitNotification(strongIntent());
 
     assert.equal(submission.deliveries.length, 0);
+    assert.equal(submission.actionStream, undefined);
 });
 
 test('channel without proactive messaging produces no delivery', async () => {
@@ -156,6 +157,7 @@ test('channel without proactive messaging produces no delivery', async () => {
     const submission = await gateway.application.notifications.submitNotification(strongIntent());
 
     assert.equal(submission.deliveries.length, 0);
+    assert.equal(submission.actionStream, undefined);
 });
 
 test('notification with no binding produces no delivery', async () => {
@@ -164,6 +166,7 @@ test('notification with no binding produces no delivery', async () => {
     const submission = await gateway.application.notifications.submitNotification(strongIntent());
 
     assert.equal(submission.deliveries.length, 0);
+    assert.equal(submission.actionStream, undefined);
 });
 
 test('notification to a disabled channel account produces no delivery', async () => {

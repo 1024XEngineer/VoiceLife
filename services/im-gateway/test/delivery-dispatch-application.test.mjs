@@ -22,6 +22,11 @@ class ExposedUnitOfWork extends InMemoryImUnitOfWork {
     deleteBinding(bindingId) {
         this.bindingRows.delete(bindingId);
     }
+
+    setIdentityStatus(identityId, status) {
+        const identity = this.identityRows.get(identityId);
+        this.identityRows.set(identityId, { ...identity, status });
+    }
 }
 
 /** 按脚本逐个返回发送结果(或抛异常)的可编程 IM 渠道。 */
@@ -105,6 +110,49 @@ test('dispatch is rejected when the delivery target binding is missing', async (
         'binding_not_found',
         'Dispatch with a missing binding was not rejected',
     );
+});
+
+test('dispatch rejects a delivery whose channel account was disabled after submission', async () => {
+    const { gateway, sent } = gatewayWithChannel([]);
+    const { channel } = await bindFixtureUser(gateway);
+    const submission = await gateway.application.notifications.submitNotification(strongIntent());
+    await gateway.application.channels.disable(channel.id);
+
+    await expectGatewayError(
+        () => gateway.application.deliveryDispatch.dispatch(submission.deliveries[0].deliveryId),
+        'binding_not_found',
+        'Dispatch used a disabled channel account',
+    );
+    assert.equal(sent.length, 0);
+});
+
+test('dispatch rejects a delivery whose binding was terminated after submission', async () => {
+    const { gateway, sent } = gatewayWithChannel([]);
+    const { binding } = await bindFixtureUser(gateway);
+    const submission = await gateway.application.notifications.submitNotification(strongIntent());
+    await gateway.application.bindings.revoke(binding.id);
+
+    await expectGatewayError(
+        () => gateway.application.deliveryDispatch.dispatch(submission.deliveries[0].deliveryId),
+        'binding_not_found',
+        'Dispatch used a terminated binding',
+    );
+    assert.equal(sent.length, 0);
+});
+
+test('dispatch rejects a delivery whose external identity was revoked after submission', async () => {
+    const uow = new ExposedUnitOfWork();
+    const { gateway, sent } = gatewayWithChannel([], { unitOfWork: uow });
+    const { binding } = await bindFixtureUser(gateway);
+    const submission = await gateway.application.notifications.submitNotification(strongIntent());
+    uow.setIdentityStatus(binding.externalIdentityId, 'revoked');
+
+    await expectGatewayError(
+        () => gateway.application.deliveryDispatch.dispatch(submission.deliveries[0].deliveryId),
+        'binding_not_found',
+        'Dispatch used a revoked external identity',
+    );
+    assert.equal(sent.length, 0);
 });
 
 test('a permanent platform rejection marks the delivery permanent_failed', async () => {

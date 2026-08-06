@@ -1,7 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { createMockImGateway } from '../dist/index.js';
+import { FixedClock } from '../dist/infrastructure/mock-support.js';
+import { InMemoryImUnitOfWork } from '../dist/infrastructure/persistence/in-memory.js';
 import { buildGateway, expectGatewayError, registerChannel } from './helpers.mjs';
+
+class ExposedUnitOfWork extends InMemoryImUnitOfWork {
+    setIdentityStatus(identityId, status) {
+        const identity = this.identityRows.get(identityId);
+        this.identityRows.set(identityId, { ...identity, status });
+    }
+}
 
 test('create issues a pending ten-minute pairing session by default', async () => {
     const { gateway, clock } = buildGateway();
@@ -32,6 +42,18 @@ test('create preserves platform restrictions and a custom expiry', async () => {
     assert.deepEqual(created.session.allowedPlatforms, ['feishu']);
     assert.equal(created.session.userId, undefined);
     assert.equal(created.session.expiresAt, clock.addMinutes(clock.now(), 3));
+});
+
+test('create rejects a pairing lifetime outside the one-to-ten-minute contract', async () => {
+    const { gateway } = buildGateway();
+
+    for (const expiresInMinutes of [-1, 0, 1.5, 11]) {
+        await expectGatewayError(
+            () => gateway.application.pairing.create({ deviceId: 'device-fixture', expiresInMinutes }),
+            'invalid_contract',
+            `Pairing accepted expiresInMinutes=${expiresInMinutes}`,
+        );
+    }
 });
 
 test('confirm protects the external identity and completes the pairing session', async () => {
@@ -143,6 +165,38 @@ test('confirm rejects a disabled or unknown channel account', async () => {
             'Pairing confirmation accepted an unavailable channel account',
         );
     }
+});
+
+test('confirm does not reactivate a revoked external identity implicitly', async () => {
+    const clock = new FixedClock();
+    const uow = new ExposedUnitOfWork();
+    const gateway = createMockImGateway('device-fixture', clock, { unitOfWork: uow });
+    const channel = await registerChannel(gateway);
+    const first = await gateway.application.pairing.create({
+        userId: 'user-fixture',
+        deviceId: 'device-fixture',
+    });
+    const binding = await gateway.application.pairing.confirm({
+        displayCode: first.displayCode,
+        channelAccountId: channel.id,
+        externalUserId: 'open-fixture',
+    });
+    uow.setIdentityStatus(binding.externalIdentityId, 'revoked');
+    const retry = await gateway.application.pairing.create({
+        userId: 'user-fixture',
+        deviceId: 'device-fixture',
+    });
+
+    await expectGatewayError(
+        () =>
+            gateway.application.pairing.confirm({
+                displayCode: retry.displayCode,
+                channelAccountId: channel.id,
+                externalUserId: 'open-fixture',
+            }),
+        'binding_not_found',
+        'Pairing implicitly reactivated a revoked external identity',
+    );
 });
 
 test('cancel and expiry make a pairing code unusable', async () => {

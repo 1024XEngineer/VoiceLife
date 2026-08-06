@@ -13,7 +13,7 @@ export default tseslint.config(
         },
     },
     {
-        files: ['test/**/*.mjs'],
+        files: ['test/**/*.mjs', 'scripts/**/*.mjs'],
         languageOptions: {
             globals: {
                 URL: 'readonly',

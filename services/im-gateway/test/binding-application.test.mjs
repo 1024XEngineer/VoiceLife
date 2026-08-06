@@ -49,6 +49,15 @@ test('unbind records its terminal status and removes the binding from active que
         await gateway.application.bindings.findActiveByExternalIdentity(binding.externalIdentityId),
         undefined,
     );
+    const unboundAt = stored.unboundAt;
+    clock.advanceMinutes(1);
+    await gateway.application.bindings.unbind(binding.id);
+    assert.equal(uow.binding(binding.id).unboundAt, unboundAt);
+    await expectGatewayError(
+        () => gateway.application.bindings.revoke(binding.id),
+        'invalid_transition',
+        'An unbound binding was changed to revoked',
+    );
 });
 
 test('revoke records its terminal status and removes the binding from active queries', async () => {
@@ -62,6 +71,15 @@ test('revoke records its terminal status and removes the binding from active que
     assert.equal(stored.status, 'revoked');
     assert.equal(stored.revokedAt, clock.now());
     assert.deepEqual(await gateway.application.bindings.list(binding.userId), []);
+    const revokedAt = stored.revokedAt;
+    clock.advanceMinutes(1);
+    await gateway.application.bindings.revoke(binding.id);
+    assert.equal(uow.binding(binding.id).revokedAt, revokedAt);
+    await expectGatewayError(
+        () => gateway.application.bindings.unbind(binding.id),
+        'invalid_transition',
+        'A revoked binding was changed to unbound',
+    );
 });
 
 test('unbind and revoke reject an unknown binding', async () => {

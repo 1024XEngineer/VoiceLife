@@ -12,6 +12,8 @@ import type {
 } from '../contracts/ids.js';
 import {
     DEVICE_CONTRACT_VERSION,
+    MAX_PAIRING_SESSION_MINUTES,
+    MIN_PAIRING_SESSION_MINUTES,
     type NotificationIntent,
     type NotificationSubmission,
     type ReminderActionCommand,
@@ -158,6 +160,17 @@ export class DefaultPairingApplication implements PairingApplication {
 
     /** {@inheritDoc PairingApplication.create} */
     public async create(command: CreatePairingSessionCommand): Promise<CreatedPairingSession> {
+        if (
+            command.expiresInMinutes !== undefined &&
+            (!Number.isInteger(command.expiresInMinutes) ||
+                command.expiresInMinutes < MIN_PAIRING_SESSION_MINUTES ||
+                command.expiresInMinutes > MAX_PAIRING_SESSION_MINUTES)
+        ) {
+            throw new ImGatewayError(
+                'invalid_contract',
+                `Pairing expiry must be an integer from ${MIN_PAIRING_SESSION_MINUTES} to ${MAX_PAIRING_SESSION_MINUTES} minutes`,
+            );
+        }
         const code = await this.pairingCodes.issue();
         const now = this.clock.now();
         const session: PairingSession = {
@@ -211,6 +224,9 @@ export class DefaultPairingApplication implements PairingApplication {
 
             let identity = await tx.identities.findByChannelAndHash(account.id, protectedIdentity.hash);
             const now = this.clock.now();
+            if (identity !== undefined && identity.status !== 'active') {
+                throw new ImGatewayError('binding_not_found', 'External identity is not active');
+            }
             if (identity === undefined) {
                 identity = {
                     id: this.ids.nextExternalIdentityId(),
@@ -302,6 +318,10 @@ export class DefaultBindingApplication implements BindingApplication {
             const binding = await tx.bindings.findById(bindingId);
             if (binding === undefined) {
                 throw new ImGatewayError('binding_not_found', 'Binding was not found');
+            }
+            if (binding.status === status) return;
+            if (binding.status !== 'active') {
+                throw new ImGatewayError('invalid_transition', 'Binding is already in a terminal state');
             }
             const now = this.clock.now();
             await tx.bindings.save({
@@ -590,7 +610,9 @@ export class DefaultNotificationApplication implements NotificationApplication {
                 businessEventId: input.businessEventId,
                 status: 'accepted',
                 deliveries,
-                ...(input.actionStream === undefined ? {} : { actionStream: input.actionStream }),
+                ...(input.actionStream === undefined || deliveries.length === 0
+                    ? {}
+                    : { actionStream: input.actionStream }),
             };
             await tx.intentSubmissions.save({
                 businessEventId: input.businessEventId,
@@ -707,7 +729,14 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
             const identity =
                 binding === undefined ? undefined : await tx.identities.findById(binding.externalIdentityId);
             const account = await tx.channelAccounts.findById(delivery.channelAccountId);
-            if (binding === undefined || identity === undefined || account === undefined) {
+            if (
+                binding === undefined ||
+                binding.status !== 'active' ||
+                identity === undefined ||
+                identity.status !== 'active' ||
+                account === undefined ||
+                account.status !== 'active'
+            ) {
                 throw new ImGatewayError('binding_not_found', 'Delivery target is incomplete');
             }
             return { delivery, identity, account };
