@@ -160,6 +160,10 @@ Result<CalendarView> DefaultTimingTaskService::ListCalendarView(const CalendarVi
             continue;
         }
 
+        if (task.recurrence.frequency != RecurrenceFrequency::kNone && task.time_zone != "UTC") {
+            return Result<CalendarView>::Failure(ErrorCode::kUnavailable, "周期日历展开暂仅支持 UTC 时区");
+        }
+
         const auto instances = store_.ListInstances(task.id);
         if (!instances.ok()) {
             return Result<CalendarView>::Failure(instances.status.code, instances.status.message);

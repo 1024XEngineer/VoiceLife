@@ -275,6 +275,24 @@ int main() {
     Check(filtered_weekly_calendar.ok() && filtered_weekly_calendar.value->total == 3,
           "星期筛选应允许展开匹配的每日 occurrence");
 
+    InMemoryTimingTaskStore unsupported_timezone_store;
+    FixedTimingIdGenerator unsupported_timezone_ids;
+    DefaultTimingTaskService unsupported_timezone_service(unsupported_timezone_store, clock, unsupported_timezone_ids);
+    const auto unsupported_timezone_task = unsupported_timezone_service.RegisterTimerTask({
+        .request_id = "request-calendar-local-timezone",
+        .schedule_id = "schedule-calendar-local-timezone",
+        .start_at = 1785747600,
+        .time_zone = "Asia/Shanghai",
+        .recurrence = {.frequency = RecurrenceFrequency::kWeek},
+    });
+    Check(unsupported_timezone_task.ok(), "非 UTC 周期任务本身仍应允许注册");
+    const auto unsupported_timezone_calendar = unsupported_timezone_service.ListCalendarView({
+        .range_start = 1785747600,
+        .range_end = 1785747600 + 7 * kDay,
+    });
+    Check(unsupported_timezone_calendar.status.code == ErrorCode::kUnavailable,
+          "非 UTC 周期任务应明确报告日历展开能力未提供");
+
     InMemoryTimingTaskStore monthly_calendar_store;
     FixedTimingIdGenerator monthly_calendar_ids;
     DefaultTimingTaskService monthly_calendar_service(monthly_calendar_store, clock, monthly_calendar_ids);
