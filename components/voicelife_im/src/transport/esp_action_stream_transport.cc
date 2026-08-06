@@ -12,7 +12,7 @@
 namespace voicelife::im {
 namespace {
 
-constexpr char kTag[] = "voicelife_im";
+constexpr char kTag[] = "voicelife_im_sse";
 // 单次读取超时必须大于网关心跳间隔（20 秒），否则空闲心跳期间的读取会超时。
 constexpr int kSseTimeoutMs = 30 * 1000;
 constexpr int kSseReadBufferSize = 256;

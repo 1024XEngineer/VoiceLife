@@ -13,7 +13,7 @@
 namespace voicelife::im {
 namespace {
 
-constexpr char kTag[] = "voicelife_im";
+constexpr char kTag[] = "voicelife_im_http";
 constexpr int kTransportTimeoutMs = 10 * 1000;
 // 受理结果响应体上限：防止恶意网关回灌无界响应耗尽设备堆内存。
 constexpr size_t kMaxResponseBodyBytes = 64 * 1024;

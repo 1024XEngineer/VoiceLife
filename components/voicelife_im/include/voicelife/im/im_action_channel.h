@@ -51,6 +51,9 @@ struct ActionRunResult {
 /// 相同 operationId 的重复命令（含断线重连后的重放）只执行一次，回传
 /// 始终以 operationId 作为幂等键；Last-Event-ID 仅用于流游标，不代替
 /// 业务确认。
+///
+/// 本通道为单线程所有权：Run 必须由同一调用方串行调用，实例不可并发
+/// 访问；多个强提醒窗口应由调用方排队调度。
 class ImActionChannel {
    public:
     /**
