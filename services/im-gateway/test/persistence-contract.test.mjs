@@ -7,11 +7,13 @@ import { PostgresImUnitOfWork } from '../dist/infrastructure/persistence/postgre
 import { bindFixtureUser, strongIntent } from './helpers.mjs';
 import {
     action,
+    attempt,
     channelAccount,
     delivery,
     makeInMemoryUow,
     makePostgresUow,
     outboxEvent,
+    receipt,
     POSTGRES_URL,
     T0,
     T1,
@@ -115,6 +117,49 @@ describe(
                     assert.equal(column[0].data_type, 'timestamp with time zone');
                     const raw = await uow.runRaw(`SELECT created_at FROM im_deliveries WHERE id = $1`, ['delivery-1']);
                     assert.equal(new Date(raw[0].created_at).toISOString(), T0);
+                },
+            );
+        });
+
+        await test('a concurrent saveAttempt with a new id converges on the (delivery, attempt) business key', async () => {
+            await withUow(
+                () => makePostgresUow(),
+                async (uow) => {
+                    await uow.transaction(async (ctx) => {
+                        await ctx.deliveries.save(delivery());
+                        await ctx.deliveries.saveAttempt(attempt('attempt-1', 'delivery-1'));
+                    });
+                    // 模拟并发重试：另一事务用不同 id 写同一 (delivery_id, attempt_no)，应收敛而非报唯一约束冲突
+                    await uow.transaction((ctx) =>
+                        ctx.deliveries.saveAttempt(attempt('attempt-other', 'delivery-1', { requestId: 'request-2' })),
+                    );
+                    const found = await uow.transaction((ctx) => ctx.deliveries.findAttempt('delivery-1', 1));
+                    assert.equal(found.id, 'attempt-other');
+                    assert.equal(found.requestId, 'request-2');
+                    const count = await uow.runRaw('SELECT COUNT(*)::int AS n FROM im_delivery_attempts');
+                    assert.equal(count[0].n, 1);
+                },
+            );
+        });
+
+        await test('a concurrent saveReceipt with a new id converges on the dedupe_key', async () => {
+            await withUow(
+                () => makePostgresUow(),
+                async (uow) => {
+                    await uow.transaction(async (ctx) => {
+                        await ctx.deliveries.save(delivery());
+                        await ctx.deliveries.saveReceipt(receipt('receipt-1'));
+                    });
+                    // 模拟平台 webhook 重复投递：不同 id + 相同 dedupe_key，应收敛而非报唯一约束冲突
+                    await uow.transaction((ctx) =>
+                        ctx.deliveries.saveReceipt(
+                            receipt('receipt-other', { externalEventId: 'platform-receipt-other' }),
+                        ),
+                    );
+                    const found = await uow.transaction((ctx) => ctx.deliveries.findReceiptByDedupeKey('dedupe-1'));
+                    assert.equal(found.id, 'receipt-other');
+                    const count = await uow.runRaw('SELECT COUNT(*)::int AS n FROM im_delivery_receipts');
+                    assert.equal(count[0].n, 1);
                 },
             );
         });

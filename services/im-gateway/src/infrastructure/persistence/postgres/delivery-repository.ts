@@ -191,7 +191,7 @@ export class PostgresDeliveryRepository implements DeliveryRepository {
                 attempt.startedAt,
                 attempt.completedAt ?? null,
             ],
-            ['id'],
+            ['delivery_id', 'attempt_no'],
         );
     }
 
@@ -229,7 +229,7 @@ export class PostgresDeliveryRepository implements DeliveryRepository {
                 receipt.occurredAt,
                 receipt.receivedAt,
             ],
-            ['id'],
+            ['dedupe_key'],
         );
     }
 }
