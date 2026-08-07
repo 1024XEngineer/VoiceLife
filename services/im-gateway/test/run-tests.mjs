@@ -397,6 +397,7 @@ async function runOutboundGenerationTests() {
     const actionSubmission = await submitFixture(actionGateway, strong);
     const actionDeliveryId = actionSubmission.deliveries[0]?.deliveryId;
     assert(actionDeliveryId !== undefined, 'Outbound action fixture did not create a Delivery');
+    await actionGateway.application.deliveryDispatch.dispatch(actionDeliveryId);
     const token = await actionGateway.application.actionUi.issue(actionDeliveryId);
     // 生成与 fixture 一致的 snooze + minutes=10 场景；仅归一化真正动态的 ID 后整体深比较。
     await actionGateway.actionUiApi.post({ token, action: 'snooze', params: { minutes: 10 } });
