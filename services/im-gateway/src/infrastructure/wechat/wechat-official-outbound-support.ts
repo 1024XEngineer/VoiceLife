@@ -5,7 +5,14 @@ import type { JsonValue } from '../../shared/types.js';
 const MAX_API_RESPONSE_BYTES = 64 * 1024;
 const TEXT_ENCODER = new TextEncoder();
 
-/** 解析并校验微信模板消息载荷。 */
+/**
+ * 解析并校验微信模板消息载荷。
+ * @param value 待解析的微信模板消息载荷。
+ * @param expectedTemplateId 配置中预期的模板 ID。
+ * @param expectedTemplateFields 配置中预期的模板字段名集合。
+ * @param actionUiBaseUrl H5 动作页的 HTTPS 基地址，用于约束动作 URL 的安全范围。
+ * @returns 规范化后的微信模板消息载荷。
+ */
 export function parseTemplatePayload(
     value: JsonValue,
     expectedTemplateId: string,
@@ -65,7 +72,11 @@ export function parseTemplatePayload(
     return { type: 'wechat_template', templateId, data, ...(url === undefined ? {} : { url }) };
 }
 
-/** 读取并校验微信 API JSON 响应，同时保留顶层 msgid 的精确十进制文本。 */
+/**
+ * 读取并校验微信 API JSON 响应，同时保留顶层 msgid 的精确十进制文本。
+ * @param response 微信 API 返回的 HTTP 响应。
+ * @returns 规范化后的微信 API 结果。
+ */
 export async function readWechatApiResponse(response: Response): Promise<{
     readonly errcode: number;
     readonly msgid?: string;
@@ -119,7 +130,14 @@ export async function readWechatApiResponse(response: Response): Promise<{
     };
 }
 
-/** 使用 AbortController 为微信 HTTP 请求设置截止时间。 */
+/**
+ * 使用 AbortController 为微信 HTTP 请求设置截止时间。
+ * @param fetchImpl 可替换的 Fetch 实现。
+ * @param url 微信 API 请求地址。
+ * @param init 请求选项。
+ * @param timeoutMs 请求截止时间，单位毫秒。
+ * @returns 微信 API 的 HTTP 响应。
+ */
 export async function fetchWithTimeout(
     fetchImpl: typeof fetch,
     url: URL,
