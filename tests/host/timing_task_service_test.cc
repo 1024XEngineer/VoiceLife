@@ -57,6 +57,10 @@ class LookupFailureStore final : public TimingTaskStorePort {
         return Status::Error(ErrorCode::kInternal, "unexpected update");
     }
 
+    Status AdvanceTaskWithFacts(const voicelife::timing::TimingTaskAdvanceWrite&) override {
+        return Status::Error(ErrorCode::kInternal, "unexpected advance");
+    }
+
     Result<TimingTask> FindTask(const TimingTaskId&) override {
         return Result<TimingTask>::Success({
             .id = "task-lookup",
@@ -117,6 +121,10 @@ class ConcurrentReplayStore final : public TimingTaskStorePort {
 
     Status UpdateTaskWithInstances(const TimingTaskUpdateWrite&) override {
         return Status::Error(ErrorCode::kInternal, "unexpected update");
+    }
+
+    Status AdvanceTaskWithFacts(const voicelife::timing::TimingTaskAdvanceWrite&) override {
+        return Status::Error(ErrorCode::kInternal, "unexpected advance");
     }
 
     Result<TimingTask> FindTask(const TimingTaskId&) override {

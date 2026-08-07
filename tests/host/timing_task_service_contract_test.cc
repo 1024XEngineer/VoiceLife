@@ -34,6 +34,7 @@ concept TimingTaskServiceContract = requires(
     { service.DeleteReminderRule(delete_rule_command) } -> std::same_as<Result<DeleteReminderRuleResult>>;
     { service.ListCalendarView(calendar_query) } -> std::same_as<Result<CalendarView>>;
     { service.ListReminderTriggers(trigger_query) } -> std::same_as<Result<ReminderTriggerPage>>;
+    { service.AdvanceDueTasks(0) } -> std::same_as<Result<AdvanceDueTasksResult>>;
     { service.SnoozeReminderTrigger(snooze_command) } -> std::same_as<Result<ReminderTrigger>>;
     { service.DismissReminderTrigger(dismiss_command) } -> std::same_as<Result<ReminderTrigger>>;
 };

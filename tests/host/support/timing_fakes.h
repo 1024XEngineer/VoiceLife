@@ -81,6 +81,70 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         return Status::Ok();
     }
 
+    Status AdvanceTaskWithFacts(const timing::TimingTaskAdvanceWrite& update) override {
+        if (next_update_failure_.has_value()) {
+            const Status failure = *next_update_failure_;
+            next_update_failure_.reset();
+            return failure;
+        }
+        if (update.task.id.empty() || !tasks_.contains(update.task.id)) {
+            return Status::Error(ErrorCode::kNotFound, "task not found");
+        }
+
+        auto next_tasks = tasks_;
+        auto next_instances = instances_;
+        auto next_triggers = triggers_;
+        auto next_events = events_;
+        if (next_tasks.at(update.task.id).id != update.task.id) {
+            return Status::Error(ErrorCode::kConflict, "invalid task");
+        }
+        std::unordered_set<std::string> incoming_instance_ids;
+        for (const auto& instance : update.upsert_instances) {
+            if (instance.id.empty() || instance.task_id != update.task.id) {
+                return Status::Error(ErrorCode::kConflict, "invalid timer instance");
+            }
+            if (!incoming_instance_ids.insert(instance.id).second) {
+                return Status::Error(ErrorCode::kConflict, "duplicate timer instance");
+            }
+            if (next_instances.contains(instance.id) && next_instances.at(instance.id).task_id != update.task.id) {
+                return Status::Error(ErrorCode::kConflict, "timer instance belongs to another task");
+            }
+        }
+        std::unordered_set<std::string> incoming_trigger_ids;
+        for (const auto& trigger : update.upsert_triggers) {
+            if (trigger.id.empty() || trigger.task_id != update.task.id || next_triggers.contains(trigger.id)) {
+                return Status::Error(ErrorCode::kConflict, "invalid reminder trigger");
+            }
+            if (!incoming_trigger_ids.insert(trigger.id).second) {
+                return Status::Error(ErrorCode::kConflict, "duplicate reminder trigger");
+            }
+        }
+        std::unordered_set<std::string> incoming_event_ids;
+        for (const auto& event : update.events) {
+            if (event.event_id.empty() || event.task_id != update.task.id || next_events.contains(event.event_id)) {
+                return Status::Error(ErrorCode::kConflict, "invalid timing event");
+            }
+            if (!incoming_event_ids.insert(event.event_id).second) {
+                return Status::Error(ErrorCode::kConflict, "duplicate timing event");
+            }
+        }
+        next_tasks.at(update.task.id) = update.task;
+        for (const auto& instance : update.upsert_instances) {
+            next_instances.insert_or_assign(instance.id, instance);
+        }
+        for (const auto& trigger : update.upsert_triggers) {
+            next_triggers.emplace(trigger.id, trigger);
+        }
+        for (const auto& event : update.events) {
+            next_events.emplace(event.event_id, event);
+        }
+        tasks_ = std::move(next_tasks);
+        instances_ = std::move(next_instances);
+        triggers_ = std::move(next_triggers);
+        events_ = std::move(next_events);
+        return Status::Ok();
+    }
+
     Result<timing::TimingTask> FindTask(const timing::TimingTaskId& task_id) override {
         const auto found = tasks_.find(task_id);
         if (found == tasks_.end()) {

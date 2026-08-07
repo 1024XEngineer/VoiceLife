@@ -24,6 +24,14 @@ struct ReminderTriggerUpdateWrite {
     int64_t expected_updated_at = 0;
 };
 
+/// 表示一次到期推进需要原子提交的任务、实例、提醒触发和事件事实。
+struct TimingTaskAdvanceWrite {
+    TimingTask task{};
+    std::vector<TimerInstance> upsert_instances{};
+    std::vector<ReminderTrigger> upsert_triggers{};
+    std::vector<TimingEvent> events{};
+};
+
 /// 持久化定时任务的边界。
 class TimingTaskStorePort {
    public:
@@ -48,6 +56,12 @@ class TimingTaskStorePort {
      * @return 全部提交成功或完全不写入的结果；目标不存在、实例归属错误或存储失败返回领域错误。
      */
     virtual Status UpdateTaskWithInstances(const TimingTaskUpdateWrite& update) = 0;
+    /**
+     * @brief 原子提交一次到期推进产生的全部本地事实。
+     * @param update 包含任务 next_trigger_at、实例、提醒触发和事件；所有对象必须属于同一任务。
+     * @return 全部提交成功或完全不写入的结果；重复事实、归属错误或存储故障返回领域错误。
+     */
+    virtual Status AdvanceTaskWithFacts(const TimingTaskAdvanceWrite& update) = 0;
     /**
      * @brief 按标识查询任务。
      * @param task_id 定时任务标识。

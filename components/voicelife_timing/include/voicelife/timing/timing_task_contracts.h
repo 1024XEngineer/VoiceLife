@@ -181,6 +181,13 @@ struct ReminderTriggerPage {
     bool has_more = false;
 };
 
+/// 表示一次到期推进写入的统计结果。
+struct AdvanceDueTasksResult {
+    int materialized_instance_count = 0;
+    int derived_trigger_count = 0;
+    int emitted_event_count = 0;
+};
+
 /// 提供推迟强提醒所需的数据。
 struct SnoozeReminderTriggerCommand {
     std::string reminder_trigger_id{};
