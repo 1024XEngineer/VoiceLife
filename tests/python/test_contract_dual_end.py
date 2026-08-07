@@ -119,6 +119,20 @@ class ContractDualEndCheckTest(unittest.TestCase):
 
             shutil.rmtree(directory)
 
+    def test_detects_duplicate_manifest_entries(self) -> None:
+        directory, manifest = make_fixture_tree()
+        try:
+            manifest["contracts"]["duplicate-scenario"] = {
+                "valid": ["notification-strong.json"],
+                "invalid": [],
+            }
+            errors = self.check(Path(directory) / "fixtures", manifest)
+            self.assertTrue(any("notification-strong.json 在 manifest 中重复声明" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
     def test_detects_valid_fixture_with_wrong_version(self) -> None:
         directory, manifest = make_fixture_tree()
         try:
@@ -150,6 +164,19 @@ class ContractDualEndCheckTest(unittest.TestCase):
             ts = TS_TEST_SOURCE.replace("notification-weak.json", "ignored.json")
             errors = self.check(Path(directory) / "fixtures", manifest, ts_source=ts)
             self.assertTrue(any("notification-weak.json 未接入 TypeScript 测试" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
+    def test_comment_mention_does_not_count_as_coverage(self) -> None:
+        directory, manifest = make_fixture_tree()
+        try:
+            cpp = ["// 注释里提到 notification-strong.json，但不是真实引用\n"]
+            ts = "// 同上 notification-strong.json\n"
+            errors = self.check(Path(directory) / "fixtures", manifest, cpp_sources=cpp, ts_source=ts)
+            self.assertTrue(any("notification-strong.json 未接入 C++ 主机测试" in error for error in errors))
+            self.assertTrue(any("notification-strong.json 未接入 TypeScript 测试" in error for error in errors))
         finally:
             import shutil
 

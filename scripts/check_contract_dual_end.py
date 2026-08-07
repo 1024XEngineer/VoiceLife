@@ -44,17 +44,34 @@ def extract_version(text: str, marker: str) -> str:
     return match.group(1)
 
 
-def manifest_fixture_names(manifest: dict) -> dict[str, str]:
+def manifest_fixture_names(manifest: dict) -> tuple[dict[str, str], list[str]]:
     """Flatten the manifest into ``{fixture_name: expected_outcome}``.
 
-    Expected outcomes are ``valid`` or ``invalid``.
+    Expected outcomes are ``valid`` or ``invalid``.  A fixture declared more
+    than once (across contracts or across outcomes) is reported as a
+    duplicate, because the manifest must pin each fixture to exactly one
+    contract and outcome.
     """
     by_name: dict[str, str] = {}
+    duplicates: list[str] = []
     for _contract, groups in manifest.get("contracts", {}).items():
         for outcome in ("valid", "invalid"):
             for name in groups.get(outcome, []):
-                by_name[name] = outcome
-    return by_name
+                if name in by_name:
+                    duplicates.append(name)
+                else:
+                    by_name[name] = outcome
+    return by_name, duplicates
+
+
+def is_referenced(text: str, fixture_name: str) -> bool:
+    """Whether a test source actually references the fixture.
+
+    Matches only the name as a quoted string literal (``"name"`` or
+    ``'name'``), so a bare mention in a comment or a longer identifier is
+    not mistaken for coverage.
+    """
+    return f'"{fixture_name}"' in text or f"'{fixture_name}'" in text
 
 
 def check_fixtures(
@@ -68,9 +85,11 @@ def check_fixtures(
     errors: list[str] = []
 
     on_disk = {path.name for path in fixtures_dir.glob("*.json") if path.name != "manifest.json"}
-    by_name = manifest_fixture_names(manifest)
+    by_name, duplicates = manifest_fixture_names(manifest)
     declared = set(by_name)
 
+    for name in sorted(duplicates):
+        errors.append(f"FAIL fixture {name} 在 manifest 中重复声明")
     for name in sorted(on_disk - declared):
         errors.append(f"FAIL fixture {name} 未在 manifest 中声明")
     for name in sorted(declared - on_disk):
@@ -84,9 +103,9 @@ def check_fixtures(
                 errors.append(f"FAIL 有效 fixture {name} 的 schemaVersion 与双端常量不一致")
 
     for name in sorted(declared):
-        if not any(name in text for text in cpp_test_sources):
+        if not any(is_referenced(text, name) for text in cpp_test_sources):
             errors.append(f"FAIL fixture {name} 未接入 C++ 主机测试")
-        if name not in ts_test_source:
+        if not is_referenced(ts_test_source, name):
             errors.append(f"FAIL fixture {name} 未接入 TypeScript 测试")
 
     return errors
