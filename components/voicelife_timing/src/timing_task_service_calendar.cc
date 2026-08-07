@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -11,6 +12,7 @@ namespace voicelife::timing {
 namespace {
 
 constexpr int64_t kSecondsPerDay = 24 * 60 * 60;
+constexpr int64_t kUtcPlusEightOffsetSeconds = 8 * 60 * 60;
 constexpr int64_t kMinimumRangeStart = (std::numeric_limits<int64_t>::min() / kSecondsPerDay) * kSecondsPerDay;
 
 int64_t FloorDiv(int64_t value, int64_t divisor) {
@@ -19,7 +21,7 @@ int64_t FloorDiv(int64_t value, int64_t divisor) {
     return remainder < 0 ? quotient - 1 : quotient;
 }
 
-// Gregorian conversion is deliberately UTC-only; timezone database expansion is outside this issue.
+// MVP recurrence uses a fixed UTC+8 civil calendar; IANA timezone rules remain outside this scope.
 struct CivilDate {
     int year;
     unsigned month;
@@ -48,7 +50,7 @@ int Weekday(int64_t timestamp) {
     return static_cast<int>(((days + 3) % 7 + 7) % 7 + 1);  // Monday=1, Sunday=7.
 }
 
-bool IsGeneratedDate(const TimingTask& task, int64_t timestamp) {
+bool IsGeneratedDate(const TimingTask& task, int64_t timestamp, int64_t local_start_at) {
     const auto& rule = task.recurrence;
     switch (rule.frequency) {
         case RecurrenceFrequency::kNone:
@@ -56,16 +58,17 @@ bool IsGeneratedDate(const TimingTask& task, int64_t timestamp) {
         case RecurrenceFrequency::kDay:
             return true;
         case RecurrenceFrequency::kWeek:
-            return rule.by_weekdays.empty() ? FloorDiv(timestamp - task.start_at, kSecondsPerDay) % 7 == 0
-                                            : Contains(rule.by_weekdays, Weekday(timestamp));
+            return rule.by_weekdays.empty()
+                       ? (FloorDiv(timestamp, kSecondsPerDay) - FloorDiv(local_start_at, kSecondsPerDay)) % 7 == 0
+                       : Contains(rule.by_weekdays, Weekday(timestamp));
         case RecurrenceFrequency::kMonth: {
-            const CivilDate anchor = CivilFromDays(FloorDiv(task.start_at, kSecondsPerDay));
+            const CivilDate anchor = CivilFromDays(FloorDiv(local_start_at, kSecondsPerDay));
             const CivilDate date = CivilFromDays(FloorDiv(timestamp, kSecondsPerDay));
             return Contains(rule.by_month_days, static_cast<int>(date.day)) ||
                    (rule.by_month_days.empty() && date.day == anchor.day);
         }
         case RecurrenceFrequency::kYear: {
-            const CivilDate anchor = CivilFromDays(FloorDiv(task.start_at, kSecondsPerDay));
+            const CivilDate anchor = CivilFromDays(FloorDiv(local_start_at, kSecondsPerDay));
             const CivilDate date = CivilFromDays(FloorDiv(timestamp, kSecondsPerDay));
             const bool month_matches = rule.by_months.empty() ? date.month == anchor.month
                                                               : Contains(rule.by_months, static_cast<int>(date.month));
@@ -78,14 +81,15 @@ bool IsGeneratedDate(const TimingTask& task, int64_t timestamp) {
     return false;
 }
 
+std::optional<int64_t> AddOffset(int64_t value, int64_t offset) {
+    if (offset > 0 && value > std::numeric_limits<int64_t>::max() - offset) {
+        return std::nullopt;
+    }
+    return value + offset;
+}
+
 std::vector<int64_t> ExpandTask(const TimingTask& task, int64_t range_start, int64_t range_end) {
     std::vector<int64_t> planned_times;
-    const int64_t first_day = FloorDiv(range_start, kSecondsPerDay) * kSecondsPerDay;
-    const int64_t last_day = range_end > std::numeric_limits<int64_t>::min() ? range_end - 1 : range_end;
-    const int64_t last_day_start = FloorDiv(last_day, kSecondsPerDay) * kSecondsPerDay;
-    const int64_t anchor_day = FloorDiv(task.start_at, kSecondsPerDay) * kSecondsPerDay;
-    const int64_t time_of_day = task.start_at - anchor_day;
-
     if (task.recurrence.frequency == RecurrenceFrequency::kNone) {
         if (task.start_at >= range_start && task.start_at < range_end) {
             planned_times.push_back(task.start_at);
@@ -93,11 +97,28 @@ std::vector<int64_t> ExpandTask(const TimingTask& task, int64_t range_start, int
         return planned_times;
     }
 
+    const int64_t offset = task.time_zone == "+08:00" ? kUtcPlusEightOffsetSeconds : 0;
+    const auto local_range_start = AddOffset(range_start, offset);
+    const auto local_range_end = AddOffset(range_end, offset);
+    const auto local_start_at = AddOffset(task.start_at, offset);
+    if (!local_range_start.has_value() || !local_range_end.has_value() || !local_start_at.has_value()) {
+        return planned_times;
+    }
+
+    const int64_t first_day = FloorDiv(*local_range_start, kSecondsPerDay) * kSecondsPerDay;
+    const int64_t last_day =
+        *local_range_end > std::numeric_limits<int64_t>::min() ? *local_range_end - 1 : *local_range_end;
+    const int64_t last_day_start = FloorDiv(last_day, kSecondsPerDay) * kSecondsPerDay;
+    const int64_t anchor_day = FloorDiv(*local_start_at, kSecondsPerDay) * kSecondsPerDay;
+    const int64_t time_of_day = *local_start_at - anchor_day;
+
     for (int64_t day = first_day; day <= last_day_start && day <= std::numeric_limits<int64_t>::max() - kSecondsPerDay;
          day += kSecondsPerDay) {
-        const int64_t candidate = day + time_of_day;
+        const int64_t candidate_local = day + time_of_day;
+        const int64_t candidate = candidate_local - offset;
         if (candidate >= range_start && candidate < range_end && candidate >= task.start_at &&
-            (task.effective_until == 0 || candidate < task.effective_until) && IsGeneratedDate(task, candidate)) {
+            (task.effective_until == 0 || candidate < task.effective_until) &&
+            IsGeneratedDate(task, candidate_local, *local_start_at)) {
             planned_times.push_back(candidate);
         }
     }
@@ -162,8 +183,8 @@ Result<CalendarView> DefaultTimingTaskService::ListCalendarView(const CalendarVi
             continue;
         }
 
-        if (task.recurrence.frequency != RecurrenceFrequency::kNone && task.time_zone != "UTC") {
-            return Result<CalendarView>::Failure(ErrorCode::kUnavailable, "周期日历展开暂仅支持 UTC 时区");
+        if (task.recurrence.frequency != RecurrenceFrequency::kNone && task.time_zone != "+08:00") {
+            return Result<CalendarView>::Failure(ErrorCode::kUnavailable, "周期日历展开暂仅支持 +08:00 时区");
         }
 
         const auto instances = store_.ListInstances(task.id);
