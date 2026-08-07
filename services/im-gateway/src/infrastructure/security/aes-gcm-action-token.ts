@@ -1,9 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
 
-import type { ActionId, DeliveryId } from '../../contracts/ids.js';
 import type { ActionTokenClaims, ActionTokenPort } from '../../ports/external.js';
 import { ImGatewayError } from '../../shared/errors.js';
-import type { IsoDateTime } from '../../shared/types.js';
 
 const TOKEN_VERSION = 'v1';
 const TOKEN_AAD = Buffer.from('voicelife:action-token:v1', 'utf8');
@@ -61,9 +59,6 @@ export class AesGcmActionTokenPort implements ActionTokenPort {
             const nonce = decodeBase64Url(pieces[1]!, NONCE_BYTES);
             const encrypted = decodeBase64Url(pieces[2]!);
             const tag = decodeBase64Url(pieces[3]!, TAG_BYTES);
-            if (encrypted.byteLength === 0 || encrypted.byteLength > MAX_TOKEN_BYTES) {
-                throw new Error('invalid ciphertext');
-            }
             const decipher = createDecipheriv('aes-256-gcm', this.encryptionKey, nonce);
             decipher.setAAD(TOKEN_AAD);
             decipher.setAuthTag(tag);
@@ -123,11 +118,7 @@ function parseClaims(value: unknown): ActionTokenClaims {
     ) {
         throw new Error('invalid claims');
     }
-    const claims = {
-        actionId: record.actionId as ActionId,
-        deliveryId: record.deliveryId as DeliveryId,
-        expiresAt: record.expiresAt as IsoDateTime,
-    };
+    const claims = record as unknown as ActionTokenClaims;
     validateClaims(claims);
     return claims;
 }

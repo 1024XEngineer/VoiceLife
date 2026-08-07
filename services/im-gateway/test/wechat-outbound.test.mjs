@@ -124,6 +124,21 @@ test('WeChat outbound rejects unsafe base URLs and template fields', () => {
     }
 });
 
+test('WeChat outbound accepts the runtime fetch fallback and rejects a missing fetch implementation', () => {
+    const originalFetch = globalThis.fetch;
+    try {
+        globalThis.fetch = async () => new globalThis.Response('{}');
+        assert.doesNotThrow(() => outboundAdapter(undefined, { fetch: undefined }));
+        globalThis.fetch = undefined;
+        assert.throws(
+            () => outboundAdapter(undefined, { fetch: undefined }),
+            (error) => error.code === 'invalid_contract',
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test('WeChat outbound validates delivery scope and payload shape before network access', async () => {
     const adapter = outboundAdapter(async () => {
         throw new Error('network must not be called');
@@ -278,7 +293,7 @@ test('WeChat outbound classifies invalid recipients and missing platform message
     });
 
     const missingResponses = [
-        new globalThis.Response(JSON.stringify({ access_token: 'fixture', expires_in: 7200 })),
+        new globalThis.Response(JSON.stringify({ access_token: 'fixture' })),
         new globalThis.Response('{}'),
     ];
     const missingMessageId = outboundAdapter(async () => missingResponses.shift());
@@ -312,6 +327,16 @@ test('WeChat outbound exposes token and response failures without hiding transpo
         retryable: true,
         errorCode: 'wechat_-1',
     });
+
+    const clientFailure = outboundAdapter(async (_url, init) => {
+        if (init?.method === 'POST') return new globalThis.Response('{}', { status: 400 });
+        return new globalThis.Response(JSON.stringify({ access_token: 'fixture' }));
+    });
+    assert.deepEqual(await clientFailure.send(outboundMessage()), {
+        accepted: false,
+        retryable: false,
+        errorCode: 'wechat_400',
+    });
 });
 
 test('WeChat outbound rejects malformed and oversized platform responses', async () => {
@@ -327,6 +352,11 @@ test('WeChat outbound rejects malformed and oversized platform responses', async
         async () => new globalThis.Response(JSON.stringify({ access_token: 'x' }).padEnd(65 * 1024, 'x')),
     );
     await assert.rejects(() => oversized.send(outboundMessage()), /exceeded the size limit/u);
+
+    const oversizedHeader = outboundAdapter(
+        async () => new globalThis.Response('{}', { headers: { 'content-length': String(65 * 1024) } }),
+    );
+    await assert.rejects(() => oversizedHeader.send(outboundMessage()), /exceeded the size limit/u);
 });
 
 test('WeChat access tokens are cached and permanent API rejection is not retried', async () => {
@@ -374,6 +404,10 @@ test('unconfigured or mismatched WeChat outbound refuses to send without network
         retryable: false,
         errorCode: 'wechat_not_configured',
     });
+    await assert.rejects(
+        () => inboundOnly.render({}, {}, {}, {}),
+        (error) => error.code === 'capability_not_supported',
+    );
 
     const adapter = outboundAdapter(async () => {
         throw new Error('network must not be called');

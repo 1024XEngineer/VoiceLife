@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import { createCipheriv, createHash } from 'node:crypto';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -10,6 +11,23 @@ const claims = {
     deliveryId: 'delivery-internal-fixture',
     expiresAt: '2026-08-07T12:00:00.000Z',
 };
+
+function forgeToken(payload) {
+    const nonce = Buffer.alloc(12, 9);
+    const key = createHash('sha256')
+        .update('voicelife:action-token:encryption:', 'utf8')
+        .update(secret, 'utf8')
+        .digest();
+    const cipher = createCipheriv('aes-256-gcm', key, nonce);
+    cipher.setAAD(Buffer.from('voicelife:action-token:v1', 'utf8'));
+    const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
+    return [
+        'v1',
+        nonce.toString('base64url'),
+        encrypted.toString('base64url'),
+        cipher.getAuthTag().toString('base64url'),
+    ].join('.');
+}
 
 test('action tokens are opaque and survive a process restart', async () => {
     const issuer = new AesGcmActionTokenPort(secret, () => Buffer.alloc(12, 7));
@@ -75,12 +93,19 @@ test('action token rejects invalid nonce sources and claim bounds', async () => 
 test('action token rejects malformed envelopes and oversized fingerprints', async () => {
     const tokens = new AesGcmActionTokenPort(secret);
     for (const token of [
+        'x'.repeat(4097),
         'v2.a.b.c',
         'v1.a.b.c',
         'v1.AAAAAAAAAAAAAAAA.AA.AAAAAAAAAAAAAAAAAAAAAA',
         'v1.AAAAAAAAAAAAAAAA..AAAAAAAAAAAAAAAAAAAAAA',
         'v1.AAAAAAAAAAAAAAAA.AA.AA',
     ]) {
+        await assert.rejects(
+            () => tokens.verify(token),
+            (error) => error instanceof ImGatewayError && error.code === 'action_not_found',
+        );
+    }
+    for (const token of [forgeToken([]), forgeToken({ actionId: 'action', deliveryId: 'delivery' })]) {
         await assert.rejects(
             () => tokens.verify(token),
             (error) => error instanceof ImGatewayError && error.code === 'action_not_found',

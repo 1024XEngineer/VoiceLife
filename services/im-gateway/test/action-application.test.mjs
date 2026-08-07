@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createMockImGateway } from '../dist/index.js';
+import { createImGateway, createMockImGateway, mockImGatewayPorts } from '../dist/index.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
+import { InMemoryImUnitOfWork } from '../dist/infrastructure/persistence/in-memory.js';
 import {
     bindFixtureUser,
     buildGateway,
@@ -325,6 +326,33 @@ test('snooze params must match the server-approved option across replays', async
         'Snooze replay silently changed the approved params',
     );
     assert.equal(changedReplay.code, 'action_not_found');
+});
+
+test('malformed persisted action options are rejected instead of becoming executable actions', async () => {
+    for (const actions of [
+        [{ kind: 'command', type: 'acknowledge', label: '' }],
+        [{ kind: 'command', type: 'snooze', label: '推迟', params: { minutes: 0 } }],
+    ]) {
+        const clock = new FixedClock();
+        const unitOfWork = new InMemoryImUnitOfWork();
+        const gateway = createImGateway({
+            unitOfWork,
+            ...mockImGatewayPorts('device-fixture', clock),
+        });
+        const deliveryId = await pendingStrongDelivery(gateway);
+        await unitOfWork.transaction(async (tx) => {
+            const delivery = await tx.deliveries.findById(deliveryId);
+            await tx.deliveries.save({
+                ...delivery,
+                semanticPayload: { ...delivery.semanticPayload, actions },
+            });
+        });
+        const error = await expectRejected(
+            () => gateway.application.actionUi.issue(deliveryId),
+            'Malformed persisted action options were accepted',
+        );
+        assert.equal(error.code, 'action_expired');
+    }
 });
 
 test('a snooze success without nextTriggerAt is rejected', async () => {
