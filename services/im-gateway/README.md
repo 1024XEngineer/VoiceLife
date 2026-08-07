@@ -85,6 +85,52 @@ SSE Hub 等实现。
 
 模板投递结果使用 `channelAccountId + MsgID` 定位 Delivery；`MsgID + Status` 生成稳定的 webhook 事件标识和 Receipt 去重键。重复回调由入站事件与 Receipt 两层幂等保护，迟到回执继续遵循 Application 层状态机，不会让已投递状态倒退。
 
+### 微信测试号联调 harness
+
+`dev:wechat` 是 Issue #131 的本地联调入口，不是生产启动进程。它使用内存 Repository 和真实
+`WechatOfficialAdapter`，仅在 loopback 地址暴露微信 Webhook、H5 Action UI、健康检查以及 Bearer 保护的
+测试投递/状态查询端点。生产监听、PostgreSQL、Koishi 与部署装配仍由 Issue #152 负责。
+
+先在仓库根目录 `.env` 填写测试号配置，并确保 `WECHAT_EXPECTED_TO_USERNAME` 是 `gh_` 开头的公众号原始
+ID，而不是显示名称。`DEVICE_TOKEN` 至少 24 字节，`ACTION_TOKEN_SECRET` 至少 32 字节；两者都可使用
+`openssl rand -hex 32` 生成。不要把 `.env`、AppSecret 或这些令牌提交到仓库或粘贴到日志。
+
+由于 Quick Tunnel 域名在启动后才生成，可以先启动 Tunnel，再把其 HTTPS 域名写入 `.env`：
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:3000
+```
+
+```dotenv
+WECHAT_DEV_HOST=127.0.0.1
+WECHAT_DEV_PORT=3000
+WECHAT_WEBHOOK_PUBLIC_URL=https://example.trycloudflare.com/wechat
+WECHAT_ACTION_UI_BASE_URL=https://example.trycloudflare.com/voicelife/reminder-actions
+```
+
+保持 Tunnel 运行，在另一个终端启动 harness：
+
+```bash
+pnpm --dir services/im-gateway run dev:wechat
+curl https://example.trycloudflare.com/healthz
+```
+
+微信测试号后台的服务器 URL 使用 `WECHAT_WEBHOOK_PUBLIC_URL`，Token 必须与本地
+`WECHAT_WEBHOOK_TOKEN` 完全一致，并选择明文模式。验证成功后，从本机触发一次真实投递：
+
+```bash
+curl -X POST \
+  -H 'Authorization: Bearer <DEVICE_TOKEN>' \
+  http://127.0.0.1:3000/__dev/wechat/send-test
+```
+
+响应中的 `deliveryId` 可用于检查平台回执是否把状态从 `accepted` 推进为 `delivered`：
+
+```bash
+curl -H 'Authorization: Bearer <DEVICE_TOKEN>' \
+  http://127.0.0.1:3000/__dev/wechat/deliveries/<deliveryId>
+```
+
 ## H5 Action UI
 
 生产运行时同时暴露 `runtime.actionUiPageApi`。HTTP 框架将 `GET /voicelife/reminder-actions/:token` 映射到 `get()`，将表单 POST 映射到 `post()`，并原样写回状态码、响应头和 HTML body。页面不运行客户端脚本，只渲染通知意图中服务端批准的动作标签与固定参数；路径 token 由服务端覆盖请求体中的同名字段，浏览器看不到内部身份、Delivery、Action 或 Operation 标识。
