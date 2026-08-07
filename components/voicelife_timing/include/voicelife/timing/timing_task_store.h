@@ -15,6 +15,15 @@ struct TimingTaskUpdateWrite {
     std::vector<TimerInstance> upsert_instances{};
 };
 
+/// 表示一次提醒动作需要与业务事件一并提交的事实。
+struct ReminderTriggerUpdateWrite {
+    ReminderTrigger trigger{};
+    TimingEvent event{};
+    ReminderTriggerStatus expected_status = ReminderTriggerStatus::kPending;
+    int expected_snooze_count = 0;
+    int64_t expected_updated_at = 0;
+};
+
 /// 持久化定时任务的边界。
 class TimingTaskStorePort {
    public:
@@ -87,6 +96,13 @@ class TimingTaskStorePort {
      * @return 提醒触发列表或存储错误；应用服务负责组合筛选、排序和分页。
      */
     virtual Result<std::vector<ReminderTrigger>> ListTriggers() = 0;
+    /**
+     * @brief 原子保存提醒触发状态和对应的待投递事件事实。
+     * @param update 要保存的触发、事件及读取快照；实现必须在同一事务中先匹配 trigger 的状态、snooze
+     * 次数和更新时间，再保存二者。
+     * @return 全部提交成功或完全不写入的结果；快照不匹配或事件标识冲突返回 conflict，关联错误和存储失败返回领域错误。
+     */
+    virtual Status UpdateReminderTriggerWithEvent(const ReminderTriggerUpdateWrite& update) = 0;
 };
 
 /// 提供可替换的当前时间来源。
