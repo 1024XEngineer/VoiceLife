@@ -3,6 +3,7 @@ idf_component_register(
         "src/occurrence_planner.cc"
         "src/timing_policy.cc"
         "src/timing_task_service.cc"
+        "src/timing_task_service_advance.cc"
         "src/timing_task_service_calendar.cc"
         "src/timing_task_service_delete_reminder_rule.cc"
         "src/timing_task_service_reminder_triggers.cc"

@@ -54,6 +54,12 @@ class TimingTaskService {
      */
     virtual Result<ReminderTriggerPage> ListReminderTriggers(const ReminderTriggerQuery& query) = 0;
     /**
+     * @brief 按当前时间物化到期 occurrence 并派生本地提醒事实。
+     * @param now 当前 Unix 秒级时间戳；等于该时间的 occurrence 视为到期。
+     * @return 本次新增实例、提醒触发和事件数量，或领域/存储错误。
+     */
+    virtual Result<AdvanceDueTasksResult> AdvanceDueTasks(int64_t now) = 0;
+    /**
      * @brief 推迟一次强提醒。
      * @param command 提醒标识和推迟分钟数。
      * @return 更新后的提醒触发或领域错误。
@@ -121,6 +127,8 @@ class DefaultTimingTaskService final : public TimingTaskService {
      * @return 分页后的提醒触发或查询错误。
      */
     Result<ReminderTriggerPage> ListReminderTriggers(const ReminderTriggerQuery& query) override;
+    /** @brief 扫描并原子推进当前已到期的任务事实。 @param now 当前 Unix 秒级时间戳。 @return 推进统计或领域错误。 */
+    Result<AdvanceDueTasksResult> AdvanceDueTasks(int64_t now) override;
     /**
      * @brief 推迟一次强提醒。
      * @param command 提醒标识和推迟分钟数。
