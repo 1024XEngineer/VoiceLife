@@ -1,0 +1,14 @@
+{
+  "businessEventId": "event-fixture",
+  "status": "accepted",
+  "deliveries": [
+    {
+      "deliveryId": "delivery-fixture",
+      "bindingId": "binding-fixture",
+      "status": "pending"
+    }
+  ],
+  "actionStream": {
+    "expiresAt": "2026-08-03T00:10:00.000Z"
+  }
+}

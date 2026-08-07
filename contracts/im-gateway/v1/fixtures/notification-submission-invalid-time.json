@@ -1,0 +1,15 @@
+{
+  "businessEventId": "event-fixture",
+  "status": "accepted",
+  "deliveries": [
+    {
+      "deliveryId": "delivery-fixture",
+      "bindingId": "binding-fixture",
+      "status": "pending"
+    }
+  ],
+  "actionStream": {
+    "reminderTriggerId": "trigger-fixture",
+    "expiresAt": "not-a-time"
+  }
+}

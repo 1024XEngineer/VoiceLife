@@ -53,6 +53,18 @@ int main() {
     Check(HasStringField(conflict, "businessEventId", "event-fixture") && conflict != strong,
           "冲突 fixture 必须复用事件 ID 但改变内容");
     Check(HasStringField(schedule, "operationType", "created"), "日程回执 fixture 必须声明操作类型");
+    const std::string action_command = ReadFixture("reminder-action-command.json");
+    Check(HasStringField(action_command, "schemaVersion", kDeviceContractVersion) &&
+              HasStringField(action_command, "action", "snooze") &&
+              HasStringField(action_command, "expiresAt", "2026-08-03T00:05:00.000Z"),
+          "动作命令 fixture 必须共享设备契约版本与动作命令语义");
+    const std::string submission = ReadFixture("notification-submission.json");
+    const std::string weak_submission = ReadFixture("notification-submission-weak.json");
+    Check(HasStringField(submission, "status", "accepted") &&
+              submission.find("\"actionStream\":{\"reminderTriggerId\":\"trigger-fixture\"") != std::string::npos,
+          "强提醒受理结果 fixture 必须携带 actionStream 窗口");
+    Check(weak_submission.find("\"actionStream\"") == std::string::npos,
+          "弱提醒受理结果 fixture 不得携带 actionStream");
 
     Check(HasStringField(invalid_version, "schemaVersion", "999"), "非法版本 fixture 必须偏离当前版本");
     Check(HasStringField(invalid_enum, "reminderType", "urgent"), "非法枚举 fixture 必须包含未知提醒类型");
