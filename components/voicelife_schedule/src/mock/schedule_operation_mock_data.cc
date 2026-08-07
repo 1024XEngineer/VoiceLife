@@ -3,7 +3,6 @@
 #include <chrono>
 #include <deque>
 #include <mutex>
-#include <optional>
 #include <utility>
 
 namespace voicelife::schedule {
@@ -23,7 +22,6 @@ struct MockOperationStore {
     std::mutex mutex;
     std::deque<StoredOperation> operations;
     OperationId next_id = 1;
-    std::optional<Status> next_undo_commit_failure;
 };
 
 /** @brief 返回进程内共享的模拟操作存储。 @return 可变的模拟操作存储。 */
@@ -132,22 +130,10 @@ Result<OperationRecord> InvalidateMockScheduleOperationAndAppendUndo(OperationId
     const Result<OperationRecord> undoable = ValidateUndoableOperation(target, now);
     if (!undoable.ok()) return undoable;
 
-    if (store.next_undo_commit_failure.has_value()) {
-        Status failure = std::move(*store.next_undo_commit_failure);
-        store.next_undo_commit_failure.reset();
-        return Result<OperationRecord>{.status = std::move(failure), .value = std::nullopt};
-    }
-
     // 先完成可能分配内存的追加，再失效原记录，确保追加失败不会消费目标操作。
     OperationRecord appended = AppendOperationLocked(store, std::move(undo_operation), now);
     target->active = false;
     return Result<OperationRecord>::Success(std::move(appended));
-}
-
-void FailNextMockScheduleUndoCommitForTesting(Status status) {
-    MockOperationStore& store = Store();
-    std::lock_guard<std::mutex> lock(store.mutex);
-    store.next_undo_commit_failure = std::move(status);
 }
 
 void ResetMockScheduleOperationsForTesting() {
@@ -155,7 +141,6 @@ void ResetMockScheduleOperationsForTesting() {
     std::lock_guard<std::mutex> lock(store.mutex);
     store.operations.clear();
     store.next_id = 1;
-    store.next_undo_commit_failure.reset();
 }
 
 }  // namespace voicelife::schedule
