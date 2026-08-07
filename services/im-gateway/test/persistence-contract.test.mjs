@@ -178,6 +178,30 @@ describe(
             }
         });
 
+        await test('concurrent action creation converges on one idempotency-key winner', async () => {
+            const [first, second] = await Promise.all([makePostgresUow(), makePostgresUow()]);
+            try {
+                const [a, b] = await Promise.all([
+                    first.transaction((ctx) =>
+                        ctx.actions.createIfAbsent(
+                            action('action-a', { operationId: 'operation-a', actionKeyHash: 'hash-shared' }),
+                        ),
+                    ),
+                    second.transaction((ctx) =>
+                        ctx.actions.createIfAbsent(
+                            action('action-b', { operationId: 'operation-b', actionKeyHash: 'hash-shared' }),
+                        ),
+                    ),
+                ]);
+                assert.equal(a.action.id, b.action.id);
+                assert.equal([a.created, b.created].filter(Boolean).length, 1);
+                const count = await first.runRaw('SELECT COUNT(*)::int AS n FROM im_actions');
+                assert.equal(count[0].n, 1);
+            } finally {
+                await Promise.all([first.close(), second.close()]);
+            }
+        });
+
         await test('concurrent claimForDispatch yields exactly one winner', async () => {
             const [first, second] = await Promise.all([makePostgresUow(), makePostgresUow()]);
             try {

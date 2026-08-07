@@ -43,6 +43,7 @@ function platformEvent(overrides = {}) {
 /** 创建强提醒投递并签发动作令牌。 */
 async function prepareActionTrigger(gateway) {
     const deliveryId = await pendingStrongDelivery(gateway);
+    await gateway.application.deliveryDispatch.dispatch(deliveryId);
     const token = await gateway.application.actionUi.issue(deliveryId);
     return { deliveryId, token };
 }

@@ -265,7 +265,16 @@ export interface TriggerPreparedActionCommand {
 export interface ActionUiView {
     readonly actionId: ActionId;
     readonly actions: readonly ReminderActionKind[];
+    /** 页面可以呈现的服务端批准动作、文案与固定参数。 */
+    readonly options: readonly ActionUiOption[];
     readonly expiresAt: ImAction['expiresAt'];
+}
+
+/** 动作页面可以提交的单个服务端批准选项。 */
+export interface ActionUiOption {
+    readonly action: ReminderActionKind;
+    readonly label: string;
+    readonly params?: { readonly minutes: number };
 }
 
 /** 管理提醒动作准备、触发、回放与结果归并的应用服务。 */
