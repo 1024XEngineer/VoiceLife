@@ -78,8 +78,12 @@ def strip_comments(text: str) -> str:
     """Remove C/JS-style comments from test source.
 
     Coverage is judged by quoted fixture names in code; a mention inside a
-    comment (quoted or not) must never count as a real reference.
+    comment (quoted or not) must never count as a real reference.  C/C++
+    backslash-newline splicing is applied first, so a comment continued onto
+    the next line (``// disabled \\\\`` + newline) cannot smuggle a fixture
+    name out of the comment.
     """
+    text = re.sub(r"\\\r?\n", "", text)
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
     text = re.sub(r"//[^\n]*", "", text)
     return text
@@ -95,6 +99,21 @@ def is_referenced(text: str, fixture_name: str) -> bool:
     return f'"{fixture_name}"' in text or f"'{fixture_name}'" in text
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """``object_pairs_hook``: fail loudly when a JSON object repeats a key.
+
+    A duplicated ``contract``/``valid``/``invalid`` key would otherwise be
+    silently overwritten by the last occurrence, letting a fixture escape its
+    "declared exactly once" invariant.
+    """
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"manifest 含重复键: {key}")
+        result[key] = value
+    return result
+
+
 def load_manifest(path: Path) -> tuple[dict | None, list[str]]:
     """Load and structurally validate the manifest.
 
@@ -104,17 +123,28 @@ def load_manifest(path: Path) -> tuple[dict | None, list[str]]:
     """
     errors: list[str] = []
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
         return None, [f"FAIL manifest 无法解析: {exc}"]
+    try:
+        data = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+    except json.JSONDecodeError as exc:
+        return None, [f"FAIL manifest 无法解析: {exc}"]
+    except ValueError as exc:
+        return None, [f"FAIL {exc}"]
     if not isinstance(data, dict):
         return None, ["FAIL manifest 顶层必须是 JSON 对象"]
     if not isinstance(data.get("contracts"), dict):
         return None, ["FAIL manifest 缺少 contracts 对象"]
+    known_contracts = set(data["contracts"])
     for key in ("versionless", "outbound"):
         entries = data.get(key, [])
         if not isinstance(entries, list) or not all(isinstance(entry, str) for entry in entries):
             errors.append(f"FAIL manifest 的 {key} 必须是合同名列表")
+            continue
+        for contract in entries:
+            if contract not in known_contracts:
+                errors.append(f"FAIL manifest 的 {key} 引用未知合同: {contract}")
     for contract, groups in data["contracts"].items():
         if not isinstance(groups, dict):
             errors.append(f"FAIL manifest 合同 {contract} 的条目必须是对象")
@@ -157,9 +187,12 @@ def check_fixtures(
         for outcome in ("valid", "invalid"):
             for name in groups.get(outcome, []):
                 path = fixtures_dir / name
-                if outcome == "valid" and contract not in versionless and path.is_file():
+                if outcome == "valid" and path.is_file():
                     data = json.loads(path.read_text(encoding="utf-8"))
-                    if data.get("schemaVersion") != expected_version:
+                    if contract in versionless:
+                        if "schemaVersion" in data:
+                            errors.append(f"FAIL 无版本契约 {contract} 的有效 fixture {name} 不应携带 schemaVersion")
+                    elif data.get("schemaVersion") != expected_version:
                         errors.append(f"FAIL 有效 fixture {name} 的 schemaVersion 与双端常量不一致")
                 if not any(is_referenced(text, name) for text in cpp_texts):
                     errors.append(f"FAIL fixture {name} 未接入 C++ 主机测试")

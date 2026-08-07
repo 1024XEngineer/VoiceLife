@@ -221,6 +221,17 @@ class ContractDualEndCheckTest(unittest.TestCase):
 
             shutil.rmtree(directory)
 
+    def test_cpp_continuation_comment_does_not_count_as_coverage(self) -> None:
+        directory, manifest = make_fixture_tree()
+        try:
+            cpp = ['// 禁用引用 \\\n"notification-strong.json"\n']
+            errors = self.check(Path(directory) / "fixtures", manifest, cpp_sources=cpp)
+            self.assertTrue(any("notification-strong.json 未接入 C++ 主机测试" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
     def test_extract_version_parses_marker(self) -> None:
         text = 'inline constexpr const char* kDeviceContractVersion = "7";'
         self.assertEqual(gate.extract_version(text, "kDeviceContractVersion"), "7")
@@ -255,10 +266,12 @@ class ContractDualEndCheckTest(unittest.TestCase):
         directory, manifest = make_fixture_tree()
         try:
             manifest["versionless"] = ["notification"]
-            target = Path(directory) / "fixtures" / "notification-strong.json"
-            target.write_text(json.dumps({"businessEventId": "event"}), encoding="utf-8")
+            for name in ("notification-strong.json", "notification-weak.json"):
+                target = Path(directory) / "fixtures" / name
+                target.write_text(json.dumps({"businessEventId": "event"}), encoding="utf-8")
             errors = self.check(Path(directory) / "fixtures", manifest)
             self.assertFalse(any("schemaVersion 与双端常量不一致" in error for error in errors))
+            self.assertFalse(any("不应携带 schemaVersion" in error for error in errors))
         finally:
             import shutil
 
@@ -271,6 +284,43 @@ class ContractDualEndCheckTest(unittest.TestCase):
             ts = TS_TEST_SOURCE.replace("notification-weak.json", "ignored.json")
             errors = self.check(Path(directory) / "fixtures", manifest, ts_source=ts)
             self.assertFalse(any("notification-weak.json 未接入 TypeScript 测试" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
+    def test_load_manifest_rejects_duplicate_keys(self) -> None:
+        directory, _manifest = make_fixture_tree()
+        try:
+            bad = Path(directory) / "manifest.json"
+            bad.write_text('{"schemaVersion": "1", "contracts": {}, "contracts": {}}', encoding="utf-8")
+            manifest, errors = gate.load_manifest(bad)
+            self.assertIsNone(manifest)
+            self.assertTrue(any("重复键" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
+    def test_load_manifest_rejects_unknown_versionless_contract(self) -> None:
+        directory, manifest = make_fixture_tree()
+        try:
+            bad = Path(directory) / "manifest.json"
+            manifest["versionless"] = ["no-such-contract"]
+            bad.write_text(json.dumps(manifest), encoding="utf-8")
+            _data, errors = gate.load_manifest(bad)
+            self.assertTrue(any("引用未知合同" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
+    def test_versionless_fixture_must_not_carry_schema_version(self) -> None:
+        directory, manifest = make_fixture_tree()
+        try:
+            manifest["versionless"] = ["notification"]
+            errors = self.check(Path(directory) / "fixtures", manifest)
+            self.assertTrue(any("notification-weak.json 不应携带 schemaVersion" in error for error in errors))
         finally:
             import shutil
 
