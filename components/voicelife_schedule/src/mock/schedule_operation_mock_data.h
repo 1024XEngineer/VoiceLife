@@ -47,6 +47,13 @@ Result<OperationRecord> InvalidateMockScheduleOperationAndAppendUndo(OperationId
                                                                      OperationRecord undo_operation, DateTime now);
 
 /**
+ * @brief 注入下一次撤销记录提交失败，供模块测试覆盖当前撤销失败分支。
+ * @param status 下一次提交要返回的失败状态。
+ * @return 无返回值。
+ */
+void FailNextMockScheduleUndoCommitForTesting(Status status);
+
+/**
  * @brief 清空进程内模拟操作存储并重置 ID，供模块测试隔离全局状态。
  * @return 无返回值。
  */

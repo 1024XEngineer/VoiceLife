@@ -57,16 +57,16 @@ add_voicelife_library(im voicelife_im
 target_include_directories(im PUBLIC "${ROOT_DIR}/components/voicelife_im/src/transport")
 target_link_libraries(im PUBLIC contracts)
 add_voicelife_library(schedule voicelife_schedule
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_create_helpers.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_mock_data.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_operation_helpers.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_operation_mock_data.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_operation_query_helpers.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_query_helpers.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_service.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_time_rules.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_undo_helpers.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/schedule_update_helpers.cc")
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_create_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/mock/schedule_mock_data.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_operation_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/mock/schedule_operation_mock_data.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_operation_query_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_query_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_service.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/rules/schedule_time_rules.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_undo_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_update_helpers.cc")
 target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule PUBLIC contracts Threads::Threads)
 add_voicelife_library(timing voicelife_timing

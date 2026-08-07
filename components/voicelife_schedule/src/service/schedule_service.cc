@@ -3,32 +3,22 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
-#include <mutex>
 #include <utility>
 
-#include "schedule_create_helpers.h"
-#include "schedule_mock_data.h"
-#include "schedule_operation_helpers.h"
-#include "schedule_operation_mock_data.h"
-#include "schedule_operation_query_helpers.h"
-#include "schedule_query_helpers.h"
-#include "schedule_time_rules.h"
-#include "schedule_undo_helpers.h"
-#include "schedule_update_helpers.h"
+#include "../helpers/schedule_create_helpers.h"
+#include "../helpers/schedule_operation_helpers.h"
+#include "../helpers/schedule_operation_query_helpers.h"
+#include "../helpers/schedule_query_helpers.h"
+#include "../helpers/schedule_undo_helpers.h"
+#include "../helpers/schedule_update_helpers.h"
+#include "../mock/schedule_mock_data.h"
+#include "../mock/schedule_operation_mock_data.h"
+#include "../rules/schedule_time_rules.h"
 
 namespace voicelife::schedule {
 namespace {
 
 constexpr std::size_t kMaximumEventLength = 100;
-
-/**
- * @brief 返回模拟撤销流程使用的事务互斥量。
- * @return 跨日程状态和操作记录提交共享的互斥量。
- */
-std::mutex& MockUndoTransactionMutex() {
-    static std::mutex mutex;
-    return mutex;
-}
 
 }  // namespace
 
@@ -100,7 +90,7 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
 }
 
 DeleteScheduleResult ScheduleService::delete_schedule(const DeleteScheduleCommand& command) {
-    // 健壮性判断
+    // 健壮性校验
     if (command.schedule_id <= 0) {
         constexpr char kError[] = "日程 ID 必须为正整数";
         return {
@@ -111,7 +101,7 @@ DeleteScheduleResult ScheduleService::delete_schedule(const DeleteScheduleComman
         };
     }
 
-    // mock 删除
+    // 查找并取消模拟日程
     const Result<Schedule> cancelled = CancelMockSchedule(command.schedule_id);
     if (!cancelled.ok()) {
         return {
@@ -131,9 +121,10 @@ DeleteScheduleResult ScheduleService::delete_schedule(const DeleteScheduleComman
 }
 
 UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleCommand& command) {
+    // 健壮性校验
     if (command.schedule_id <= 0) return InvalidUpdateScheduleResult("日程 ID 必须大于零");
 
-    // 根据调用方预先确认的 ID 查询目标日程；数据库接入前暂由固定模拟数据提供。
+    // 查询待修改日程；数据库接入前暂由固定模拟数据提供
     std::vector<Schedule> schedules = LoadMockSchedules();
     auto target = schedules.end();
     for (auto current = schedules.begin(); current != schedules.end(); ++current) {
@@ -153,12 +144,13 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
         };
     }
 
+    // 确认至少提供一个待修改字段
     const bool has_update = command.event.has_value() || command.start_time.has_value() ||
                             command.end_time.has_value() || command.location.has_value() || command.notes.has_value() ||
                             command.reminder_id.has_value() || command.status.has_value();
     if (!has_update) return InvalidUpdateScheduleResult("至少需要提供一个要修改的字段");
 
-    // 在原日程副本上合并本次提供的字段，未提供的字段保持不变，显式空值用于清空字段。
+    // 组装修改后的日程，未提供的字段保持不变，显式空值用于清空字段
     Schedule updated = *target;
     if (command.event.has_value()) {
         updated.event = TrimScheduleText(*command.event);
@@ -177,7 +169,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
         updated.status = *command.status;
     }
 
-    // 字段合并完成后校验完整日程，避免单独校验增量字段时遗漏原有值之间的约束。
+    // 完整校验合并后的日程，避免增量校验遗漏原有字段约束
     if (!updated.start_time.has_value() && updated.end_time.has_value()) {
         return InvalidUpdateScheduleResult("日程提供结束时间时必须同时提供开始时间");
     }
@@ -185,7 +177,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
         return InvalidUpdateScheduleResult("日程结束时间必须晚于开始时间");
     }
 
-    // 仅有效且具有开始时间的日程参与冲突检测，并排除正在修改的日程自身。
+    // 搜集冲突日程；仅有效且有开始时间的日程参与检测，并排除自身
     std::vector<Schedule> conflicts;
     if (updated.status == ScheduleStatus::kActive && updated.start_time.has_value()) {
         for (const Schedule& existing : schedules) {
@@ -207,11 +199,12 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
         };
     }
 
+    // 更新修改时间并准备持久化
     updated.updated_at = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
 
     // TODO(#134): 在数据库适配器中以原子操作持久化日程变更；冲突返回分支不得执行写入。
 
-    // 忽略冲突时仍返回冲突列表，便于调用方在修改成功后向用户说明潜在影响。
+    // 忽略冲突时仍返回冲突列表，便于调用方提示潜在影响
     return {
         .status = Status::Ok(),
         .message = conflicts.empty() ? "日程修改成功" : "日程修改成功，已忽略时间冲突",
@@ -222,17 +215,19 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
 }
 
 QueryScheduleResult ScheduleService::query_schedule(const QueryScheduleCommand& command) const {
+    // 校验筛选条件和分页参数
     const Status validation = ValidateQueryScheduleCommand(command);
     if (!validation.ok()) {
         return {.status = validation, .schedules = {}, .total = 0, .error = validation.message};
     }
 
-    // TODO(#134)：存储接口就绪后，将筛选、排序和分页下推到数据库。
+    // 筛选匹配日程；存储接口就绪后将筛选、排序和分页下推到数据库
     std::vector<Schedule> matches;
     for (const Schedule& schedule : LoadMockSchedulesForQuery()) {
         if (MatchesScheduleQuery(schedule, command)) matches.push_back(schedule);
     }
 
+    // 按开始时间和日程 ID 排序，无开始时间的日程排在末尾
     std::sort(matches.begin(), matches.end(), [](const Schedule& left, const Schedule& right) {
         if (left.start_time != right.start_time) {
             if (!left.start_time.has_value()) return false;
@@ -242,6 +237,7 @@ QueryScheduleResult ScheduleService::query_schedule(const QueryScheduleCommand& 
         return left.id < right.id;
     });
 
+    // 计算总数并截取当前分页
     const int64_t total = static_cast<int64_t>(matches.size());
     const std::size_t begin = command.offset >= total ? matches.size() : static_cast<std::size_t>(command.offset);
     const std::size_t count = std::min(static_cast<std::size_t>(command.limit), matches.size() - begin);
@@ -252,11 +248,11 @@ QueryScheduleResult ScheduleService::query_schedule(const QueryScheduleCommand& 
 
 RecordScheduleOperationResult ScheduleService::record_schedule_operation(
     const RecordScheduleOperationCommand& command) {
-    // 健壮性判断
+    // 健壮性校验
     const Status validation = ValidateRecordScheduleOperationCommand(command);
     if (!validation.ok()) return InvalidRecordScheduleOperationResult(validation.message);
 
-    // 组装实体
+    // 组装操作记录实体
     OperationRecord operation{
         .id = 0,
         .type = command.type,
@@ -266,7 +262,7 @@ RecordScheduleOperationResult ScheduleService::record_schedule_operation(
         .previous = command.previous,
     };
 
-    // mock 存储
+    // 写入模拟操作记录
     const Result<OperationRecord> recorded = AppendMockScheduleOperation(std::move(operation));
     if (!recorded.ok()) {
         return {
@@ -284,9 +280,10 @@ RecordScheduleOperationResult ScheduleService::record_schedule_operation(
 }
 
 QueryRecentScheduleOperationResult ScheduleService::query_recent_schedule_operation() const {
+    // 获取当前时间，作为十五分钟窗口的结束边界
     const DateTime now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
 
-    // TODO(#121)：真实存储接入用户上下文后，由存储层按当前用户和十五分钟时间窗口查询。
+    // 查询近期可撤销操作；真实存储接入用户上下文后由存储层完成筛选
     std::vector<OperationRecord> operations = FilterRecentScheduleOperations(LoadMockScheduleOperations(), now);
     return {
         .status = Status::Ok(),
@@ -296,16 +293,16 @@ QueryRecentScheduleOperationResult ScheduleService::query_recent_schedule_operat
 }
 
 UndoScheduleOperationResult ScheduleService::undo_schedule_operation(const UndoScheduleOperationCommand& command) {
+    // 健壮性校验
     const Status validation = ValidateUndoScheduleOperationCommand(command);
     if (!validation.ok()) return FailedUndoScheduleOperationResult(validation);
 
-    // mock 的日程和操作记录分属两个内存存储；该锁只保证并发 undo 不重复消费同一记录。
-    // 与其他日程写操作的跨存储原子性由下方 TODO(#121) 的真实事务解决。
-    std::lock_guard<std::mutex> transaction_lock(MockUndoTransactionMutex());
+    // 查找窗口内仍可撤销的目标操作
     const DateTime now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
     const Result<OperationRecord> target = FindUndoableMockScheduleOperation(command.operation_id, now);
     if (!target.ok()) return FailedUndoScheduleOperationResult(target.status);
 
+    // TODO：真实存储接入后，在同一事务内完成日程恢复、目标操作失效（不能再撤销至此）和撤销记录写入
     const Result<AppliedScheduleUndo> applied_result = ApplyMockScheduleUndo(*target.value);
     if (!applied_result.ok()) return FailedUndoScheduleOperationResult(applied_result.status);
     const AppliedScheduleUndo& applied = *applied_result.value;
@@ -313,6 +310,7 @@ UndoScheduleOperationResult ScheduleService::undo_schedule_operation(const UndoS
     const std::string event = applied.before.has_value()
                                   ? applied.before->event
                                   : (applied.after.has_value() ? applied.after->event : target.value->schedule_event);
+    // 组装撤销操作记录
     OperationRecord undo_operation{
         .id = 0,
         .type = ScheduleOperationType::kUndo,
@@ -322,18 +320,12 @@ UndoScheduleOperationResult ScheduleService::undo_schedule_operation(const UndoS
         .previous = applied.before,
     };
 
-    // TODO(#121)：真实存储接入后，在同一事务内完成日程恢复、目标操作失效和 undo 记录写入。
+    // 提交撤销记录并使目标操作失效
     const Result<OperationRecord> recorded =
         InvalidateMockScheduleOperationAndAppendUndo(target.value->id, std::move(undo_operation), now);
-    if (!recorded.ok()) {
-        const Status rollback = RollbackMockScheduleUndo(applied);
-        if (!rollback.ok()) {
-            return FailedUndoScheduleOperationResult(
-                Status::Error(ErrorCode::kInternal, "撤销记录提交失败，且日程状态回滚失败"));
-        }
-        return FailedUndoScheduleOperationResult(recorded.status);
-    }
+    if (!recorded.ok()) return FailedUndoScheduleOperationResult(recorded.status);
 
+    // 撤销成功，返回原操作和恢复后的日程
     return {
         .status = Status::Ok(),
         .undone = true,

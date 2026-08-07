@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include "schedule_mock_data.h"
+#include "../mock/schedule_mock_data.h"
 
 namespace voicelife::schedule {
 namespace {
