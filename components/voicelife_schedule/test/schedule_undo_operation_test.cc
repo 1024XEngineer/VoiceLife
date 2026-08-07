@@ -15,6 +15,7 @@
 using voicelife::ErrorCode;
 using voicelife::schedule::AppendMockScheduleOperationForTesting;
 using voicelife::schedule::DateTime;
+using voicelife::schedule::FailNextMockScheduleUndoCommitForTesting;
 using voicelife::schedule::FindMockScheduleById;
 using voicelife::schedule::FindUndoableMockScheduleOperation;
 using voicelife::schedule::LoadMockScheduleOperations;
@@ -258,6 +259,36 @@ void CheckFailureDoesNotConsumeOperation(ScheduleService& service) {
 }
 
 /**
+ * @brief 验证撤销记录提交失败时回滚日程且保留原操作。
+ * @param service 被测试的日程服务。
+ * @return 无返回值；断言失败时终止测试。
+ */
+void CheckCommitFailureRollsBackSchedule(ScheduleService& service) {
+    const Schedule previous = MakeSchedule(7351, "提交失败前");
+    Schedule updated = previous;
+    updated.event = "提交失败后";
+    updated.notes = "必须在失败后恢复的状态";
+    ResetScenario({updated});
+    const OperationRecord operation =
+        RecordOperation(service, ScheduleOperationType::kUpdate, updated.id, updated.event, previous);
+    FailNextMockScheduleUndoCommitForTesting(voicelife::Status::Error(ErrorCode::kInternal, "模拟撤销记录提交失败"));
+
+    const auto failed = service.undo_schedule_operation({.operation_id = operation.id});
+    const auto stored_after_failure = FindMockScheduleById(updated.id);
+    const auto operations_after_failure = LoadMockScheduleOperations();
+    Check(failed.status.code == ErrorCode::kInternal && !failed.undone && !failed.operation.has_value() &&
+              !failed.schedule.has_value() && failed.error == "模拟撤销记录提交失败" && stored_after_failure.ok() &&
+              SameSchedule(*stored_after_failure.value, updated) && operations_after_failure.size() == 1 &&
+              operations_after_failure.front().id == operation.id,
+          "提交失败应回滚日程并保留原操作记录");
+
+    const auto retried = service.undo_schedule_operation({.operation_id = operation.id});
+    Check(retried.status.ok() && retried.undone && retried.schedule.has_value() &&
+              SameSchedule(*retried.schedule, previous),
+          "一次性故障清除后应允许重新撤销原操作");
+}
+
+/**
  * @brief 验证十五分钟闭区间边界与未来操作判断。
  * @return 无返回值；断言失败时终止测试。
  */
@@ -341,6 +372,7 @@ int main() {
     CheckUpdateUndo(service);
     CheckDeleteUndo(service);
     CheckFailureDoesNotConsumeOperation(service);
+    CheckCommitFailureRollsBackSchedule(service);
     CheckUndoWindowBoundary();
     CheckConcurrentUndo(service);
     return 0;
