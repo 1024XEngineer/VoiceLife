@@ -56,7 +56,7 @@ int main() {
     const std::string action_command = ReadFixture("reminder-action-command.json");
     Check(HasStringField(action_command, "schemaVersion", kDeviceContractVersion) &&
               HasStringField(action_command, "action", "snooze") &&
-              HasStringField(action_command, "expiresAt", "2026-08-03T00:05:00.000Z"),
+              HasStringField(action_command, "expiresAt", "2026-08-03T00:10:00.000Z"),
           "动作命令 fixture 必须共享设备契约版本与动作命令语义");
     const std::string submission = ReadFixture("notification-submission.json");
     const std::string weak_submission = ReadFixture("notification-submission-weak.json");

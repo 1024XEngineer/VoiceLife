@@ -178,7 +178,7 @@ int main() {
           "动作命令的绑定/触发标识必须被保留");
     Check(command.action == "snooze" && command.minutes.has_value() && *command.minutes == 10,
           "动作类型与推迟分钟数必须与 TS 语义一致");
-    Check(command.occurredAt == "2026-08-03T00:00:00.000Z" && command.expiresAt == "2026-08-03T00:05:00.000Z",
+    Check(command.occurredAt == "2026-08-03T00:00:00.000Z" && command.expiresAt == "2026-08-03T00:10:00.000Z",
           "动作命令时间字段必须被保留");
 
     // 非法动作命令 fixture：与 TS 一致的拒绝语义
