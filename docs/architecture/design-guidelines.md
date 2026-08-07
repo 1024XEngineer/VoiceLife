@@ -56,11 +56,15 @@ PR 只说“用了某某模式”不算设计依据，必须说明它改善了�
 ```text
 voicelife_runtime                  只组装
 ├── inbound: voicelife_voice, voicelife_mcp
-├── outbound: voicelife_im, voicelife_platform
+├── outbound: voicelife_linx, voicelife_linx_esp, voicelife_im, voicelife_platform
 └── voicelife_application         跨领域用例
     ├── voicelife_schedule        日程事实
     ├── voicelife_timing          调度事实
     └── voicelife_contracts       最小公共类型
+
+语音出站链路再细分一层：`voicelife_linx` 只做 Linx 协议防腐和 Provider，
+`voicelife_linx_esp` 才能依赖 ESP-IDF WebSocket/TLS；Runtime 负责选择并组装，
+核心 Voice Port 不认识这两个组件的 SDK 句柄。
 ```
 
 规则：
@@ -183,7 +187,17 @@ Gateway 内部按能力选择微信、飞书或其他 Adapter：
 | Transport | 连接、消息、重连 | WebSocket、MQTT | `ordered-delivery`、`binary-audio` |
 | Clock | 单调时间、UTC、时区转换 | 系统时钟、测试时钟 | `sntp-synced`、`monotonic` |
 
-### 8.1 SQLite 统一底座，不做通用 CRUD
+### 8.1 语音子架构：实时数据面与会话控制面分离
+
+语音模块采用“实时音频数据面 + 会话控制面 + Provider 防腐层”。ESP32-S3 的 I2S/AFE、Opus/PCM、有界队列和 WSS 连接属于 Adapter；`VoiceSession` 只处理会话状态、generation、帧序列、打断和稳定事件。Linx 的 hello/listen/stt/tts/abort 字段、小智的全局状态和 ESP-IDF 句柄不得进入核心 Port。
+
+本次骨架实际落下了 `AudioInputPort`、`AudioOutputPort`、`VoiceTransportPort`、`CodecStrategy`、`ASRAdapter`、`TTSAdapter`、`RealtimeAdapter`、`SpeechProviderAdapter`、`SpeechProviderRegistry` 和 `VoiceSession`。Registry 使用编译期工厂，启动时按 Provider ID 和能力集合创建实现；未注册或缺能力直接失败，不静默切换。
+
+这组模式有明确边界：Adapter/防腐层隔离 Linx 与小智，Strategy 选择 PCM/Opus 和会话模式，State 拒绝非法迁移，Factory/Registry 完成 Profile 驱动装配，Observer 产出 `VoiceEvidence`。不引入所有模块共用的万能 `Plugin` 基类，也不在 ESP32 上做动态加载。
+
+Linx 官方 WebSocket 需要 Bearer/Device-Id/Client-Id 鉴权、hello 协商音频参数，支持 OPUS/PCM 二进制帧和 listen/stt/tts/abort 控制消息；具体协议映射和 ESP32-S3 真机验收顺序见 [语音模块子架构](./voice-subarchitecture.md)。
+
+### 8.2 SQLite 统一底座，不做通用 CRUD
 
 领域模块继续拥有自己的 Store Port 和 SQL 行映射，但不得各自 mount 文件系统、打开数据库、执行 PRAGMA、维护迁移或解释 SQLite 错误。真实实现统一依赖 `voicelife_storage_sqlite`：
 

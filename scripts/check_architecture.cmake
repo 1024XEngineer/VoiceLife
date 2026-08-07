@@ -6,12 +6,16 @@ endif()
 
 set(known_components
     voicelife_contracts
+    voicelife_im
     voicelife_mcp
     voicelife_runtime
     voicelife_schedule
     voicelife_storage_sqlite
     voicelife_timing
     voicelife_voice
+    voicelife_linx
+    voicelife_linx_esp
+    voicelife_audio_esp
 )
 
 function(idf_component_register)
@@ -76,7 +80,9 @@ foreach(component_name IN LISTS known_components)
 endforeach()
 
 assert_dependencies(voicelife_contracts PUBLIC)
-assert_dependencies(voicelife_contracts PRIVATE)
+assert_dependencies(voicelife_contracts PRIVATE yyjson)
+assert_dependencies(voicelife_im PUBLIC voicelife_contracts)
+assert_dependencies(voicelife_im PRIVATE esp_http_client mbedtls)
 assert_dependencies(voicelife_schedule PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_schedule PRIVATE)
 assert_dependencies(voicelife_storage_sqlite PUBLIC voicelife_contracts)
@@ -87,7 +93,13 @@ assert_dependencies(voicelife_mcp PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_mcp PRIVATE espressif__cjson)
 assert_dependencies(voicelife_voice PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_voice PRIVATE)
+assert_dependencies(voicelife_linx PUBLIC voicelife_contracts voicelife_voice)
+assert_dependencies(voicelife_linx PRIVATE)
+assert_dependencies(voicelife_linx_esp PUBLIC voicelife_contracts voicelife_linx)
+assert_dependencies(voicelife_linx_esp PRIVATE esp_websocket_client esp-tls esp_event esp_timer)
+assert_dependencies(voicelife_audio_esp PUBLIC voicelife_contracts voicelife_voice)
+assert_dependencies(voicelife_audio_esp PRIVATE esp_driver_i2c esp_driver_i2s)
 assert_dependencies(voicelife_runtime PUBLIC voicelife_contracts)
-assert_dependencies(voicelife_runtime PRIVATE voicelife_mcp voicelife_voice)
+assert_dependencies(voicelife_runtime PRIVATE voicelife_linx voicelife_linx_esp voicelife_mcp voicelife_voice voicelife_audio_esp)
 
 message(STATUS "PASS component names, include paths, and dependency graph")

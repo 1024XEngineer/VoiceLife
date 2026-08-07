@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1",
+  "commandId": "command-fixture",
+  "operationId": "operation-fixture",
+  "correlationId": "correlation-fixture",
+  "deviceId": "device-fixture",
+  "actorBindingId": "binding-fixture",
+  "reminderTriggerId": "trigger-fixture",
+  "action": "acknowledge",
+  "params": {
+    "minutes": 5
+  },
+  "occurredAt": "2026-08-03T00:00:00.000Z",
+  "expiresAt": "2026-08-03T00:05:00.000Z"
+}

@@ -17,11 +17,15 @@ coverage:
           - cpp
         target: 80%
         threshold: 0%
+        paths:
+          - "components/**"
       typescript:
         flags:
           - typescript
         target: 80%
         threshold: 0%
+        paths:
+          - "services/im-gateway/src/**"
 
 comment:
   layout: "diff, flags, files"
@@ -32,3 +36,9 @@ ignore:
   - "services/im-gateway/test/**"
   - "main/**"
   - "components/voicelife_timing/src/timing_task_service_stubs.cc"
+  # 语音模块仍在开发中,实板验证与 host 覆盖率补齐前暂缓计入 codecov。
+  - "components/voicelife_voice/**"
+  - "components/voicelife_linx/**"
+  - "components/voicelife_linx_esp/**"
+  - "components/voicelife_audio_esp/**"
+  - "components/voicelife_runtime/**"

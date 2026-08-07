@@ -1,0 +1,248 @@
+#include <fstream>
+#include <sstream>
+#include <string>
+
+#include "support/test_support.h"
+#include "voicelife/contracts/im/notification_intent.h"
+#include "voicelife/contracts/im/notification_submission.h"
+#include "voicelife/contracts/im/reminder_action_command.h"
+#include "voicelife/contracts/im/reminder_action_result.h"
+#include "voicelife/contracts/im/schedule_receipt.h"
+#include "voicelife/contracts/json.h"
+
+using voicelife::ErrorCode;
+using voicelife::JsonValue;
+using voicelife::Status;
+using voicelife::contracts::im::kDeviceContractVersion;
+using voicelife::contracts::im::NotificationIntent;
+using voicelife::contracts::im::NotificationSubmission;
+using voicelife::contracts::im::ParseNotificationIntent;
+using voicelife::contracts::im::ParseNotificationSubmission;
+using voicelife::contracts::im::ParseReminderActionCommand;
+using voicelife::contracts::im::ParseReminderActionResult;
+using voicelife::contracts::im::ParseScheduleReceiptIntent;
+using voicelife::contracts::im::ReminderActionCommand;
+using voicelife::contracts::im::ReminderActionResult;
+using voicelife::contracts::im::ScheduleReceiptIntent;
+using voicelife::test::Check;
+
+namespace {
+
+std::string ReadFixture(const char* name) {
+    std::ifstream input(std::string(VOICELIFE_SOURCE_DIR) + "/contracts/im-gateway/v1/fixtures/" + name);
+    Check(input.good(), "共享 IM fixture 必须存在");
+    std::ostringstream content;
+    content << input.rdbuf();
+    return content.str();
+}
+
+Status ParseFixture(const char* name, NotificationIntent& out) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) {
+        return json_status;
+    }
+    return ParseNotificationIntent(root, out);
+}
+
+Status ParseScheduleReceiptFixture(const char* name, ScheduleReceiptIntent& out) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) {
+        return json_status;
+    }
+    return ParseScheduleReceiptIntent(root, out);
+}
+
+Status ParseActionResultFixture(const char* name, ReminderActionResult& out) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) {
+        return json_status;
+    }
+    return ParseReminderActionResult(root, out);
+}
+
+void RequireRejected(const char* name, const char* message) {
+    NotificationIntent intent;
+    const Status status = ParseFixture(name, intent);
+    Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
+}
+
+void RequireScheduleReceiptRejected(const char* name, const char* message) {
+    ScheduleReceiptIntent intent;
+    const Status status = ParseScheduleReceiptFixture(name, intent);
+    Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
+}
+
+void RequireActionResultRejected(const char* name, const char* message) {
+    ReminderActionResult intent;
+    const Status status = ParseActionResultFixture(name, intent);
+    Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
+}
+
+Status ParseCommandFixture(const char* name, ReminderActionCommand& out) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) {
+        return json_status;
+    }
+    return ParseReminderActionCommand(root, out);
+}
+
+void RequireCommandRejected(const char* name, const char* message) {
+    ReminderActionCommand command;
+    const Status status = ParseCommandFixture(name, command);
+    Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
+}
+
+Status ParseSubmissionFixture(const char* name, NotificationSubmission& out) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) {
+        return json_status;
+    }
+    return ParseNotificationSubmission(root, out);
+}
+
+void RequireSubmissionRejected(const char* name, const char* message) {
+    NotificationSubmission submission;
+    const Status status = ParseSubmissionFixture(name, submission);
+    Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
+}
+
+}  // namespace
+
+int main() {
+    // 强提醒：双端共享版本，字段与 TS 语义一致
+    NotificationIntent strong;
+    Check(ParseFixture("notification-strong.json", strong).ok(), "共享强提醒 fixture 必须被 C++ 解析");
+    Check(strong.schemaVersion == kDeviceContractVersion, "C++ 与 TypeScript 必须共享设备契约版本");
+    Check(strong.reminderType == "strong", "强提醒 fixture 的 reminderType 必须为 strong");
+    Check(strong.actions.size() == 2 && strong.actions[0].type == "acknowledge" && strong.actions[1].type == "snooze" &&
+              strong.actions[1].minutes == 10,
+          "强提醒动作必须与 TS 语义一致");
+    Check(strong.actions[0].label == "知道了" && strong.actions[1].label == "推迟 10 分钟",
+          "UTF-8 动作标签必须被原样保留");
+    Check(strong.content.title == "Fixture reminder", "通知内容标题必须被保留");
+    Check(strong.recipient.deviceId == "device-fixture" && strong.recipient.userId == "user-fixture",
+          "收件人字段必须被保留");
+    Check(strong.reminderTriggerId == "trigger-fixture", "reminderTriggerId 必须被保留");
+
+    // 弱提醒：不得携带动作
+    NotificationIntent weak;
+    Check(ParseFixture("notification-weak.json", weak).ok(), "共享弱提醒 fixture 必须被 C++ 解析");
+    Check(weak.reminderType == "weak" && weak.actions.empty(), "弱提醒 fixture 不得携带动作");
+
+    // 非法 fixture：与 TS 一致的拒绝语义
+    RequireRejected("notification-invalid-version.json", "非法版本 fixture 必须被 C++ 拒绝");
+    RequireRejected("notification-invalid-enum.json", "非法枚举 fixture 必须被 C++ 拒绝");
+    RequireRejected("notification-invalid-time.json", "非法时间 fixture 必须被 C++ 拒绝");
+    RequireRejected("notification-missing-field.json", "缺字段 fixture 必须被 C++ 拒绝");
+
+    // 日程回执：字段与 TS parseScheduleReceiptIntent 一致
+    ScheduleReceiptIntent receipt;
+    Check(ParseScheduleReceiptFixture("schedule-receipt.json", receipt).ok(), "共享日程回执 fixture 必须被 C++ 解析");
+    Check(receipt.schemaVersion == kDeviceContractVersion, "日程回执必须共享设备契约版本");
+    Check(receipt.eventId == "event-schedule-fixture" && receipt.correlationId == "correlation-schedule-fixture",
+          "日程回执事件与关联标识必须被保留");
+    Check(receipt.userId.has_value() && *receipt.userId == "user-fixture", "可选 userId 必须被保留");
+    Check(receipt.deviceId == "device-fixture", "日程回执 deviceId 必须被保留");
+    Check(receipt.operationType == "created" && receipt.result == "succeeded", "日程回执枚举必须与 TS 语义一致");
+    Check(receipt.scheduleId == "schedule-fixture" && receipt.summary == "日程已创建", "日程回执载荷必须被保留");
+
+    // 非法日程回执 fixture：与 TS 一致的拒绝语义
+    RequireScheduleReceiptRejected("schedule-receipt-invalid-version.json", "非法版本日程回执必须被 C++ 拒绝");
+    RequireScheduleReceiptRejected("schedule-receipt-invalid-enum.json", "非法枚举日程回执必须被 C++ 拒绝");
+    RequireScheduleReceiptRejected("schedule-receipt-invalid-time.json", "非法时间日程回执必须被 C++ 拒绝");
+
+    // 动作结果：字段与 TS parseReminderActionResult 一致
+    ReminderActionResult action_result;
+    Check(ParseActionResultFixture("reminder-action-result.json", action_result).ok(),
+          "共享动作结果 fixture 必须被 C++ 解析");
+    Check(action_result.schemaVersion == kDeviceContractVersion, "动作结果必须共享设备契约版本");
+    Check(action_result.operationId == "operation-fixture", "动作结果 operationId 必须被保留");
+    Check(action_result.reminderTriggerId == "trigger-fixture", "动作结果 reminderTriggerId 必须被保留");
+    Check(action_result.status == "succeeded", "动作结果状态枚举必须与 TS 语义一致");
+    Check(action_result.nextTriggerAt.has_value() && *action_result.nextTriggerAt == "2026-08-03T00:10:00.000Z",
+          "可选 nextTriggerAt 必须被保留");
+
+    // 非法动作结果 fixture：与 TS 一致的拒绝语义
+    RequireActionResultRejected("reminder-action-result-invalid-status.json", "非法状态动作结果必须被 C++ 拒绝");
+    RequireActionResultRejected("reminder-action-result-invalid-time.json", "非法时间动作结果必须被 C++ 拒绝");
+
+    // 动作命令：字段与 TS ReminderActionCommand 一致
+    ReminderActionCommand command;
+    Check(ParseCommandFixture("reminder-action-command.json", command).ok(), "共享动作命令 fixture 必须被 C++ 解析");
+    Check(command.schemaVersion == kDeviceContractVersion, "动作命令必须共享设备契约版本");
+    Check(command.commandId == "command-fixture" && command.operationId == "operation-fixture",
+          "动作命令的命令/操作标识必须被保留");
+    Check(command.correlationId == "correlation-fixture" && command.deviceId == "device-fixture",
+          "动作命令的关联/设备标识必须被保留");
+    Check(command.actorBindingId == "binding-fixture" && command.reminderTriggerId == "trigger-fixture",
+          "动作命令的绑定/触发标识必须被保留");
+    Check(command.action == "snooze" && command.minutes.has_value() && *command.minutes == 10,
+          "动作类型与推迟分钟数必须与 TS 语义一致");
+    Check(command.occurredAt == "2026-08-03T00:00:00.000Z" && command.expiresAt == "2026-08-03T00:05:00.000Z",
+          "动作命令时间字段必须被保留");
+
+    // 非法动作命令 fixture：与 TS 一致的拒绝语义
+    RequireCommandRejected("reminder-action-command-invalid-action.json", "非法动作类型命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-time.json", "非法时间命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-missing-field.json", "缺字段命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-acknowledge-params.json",
+                           "acknowledge 命令携带 params 必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-not-object.json", "非对象命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-version.json", "非法版本命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-missing-operation.json", "缺 operationId 命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-missing-correlation.json", "缺 correlationId 命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-missing-device.json", "缺 deviceId 命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-missing-binding.json", "缺 actorBindingId 命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-missing-trigger.json", "缺 reminderTriggerId 命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-params-type.json", "params 非对象命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-params-minutes.json",
+                           "params 缺 minutes 命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-params-fraction.json",
+                           "params 非整数分钟命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-params-overflow.json",
+                           "params 超上限分钟命令必须被 C++ 拒绝");
+    RequireCommandRejected("reminder-action-command-invalid-occurred-at.json", "非法发生时间命令必须被 C++ 拒绝");
+
+    // 通知受理结果：强提醒携带 actionStream 窗口，弱提醒不携带
+    NotificationSubmission strong_submission;
+    Check(ParseSubmissionFixture("notification-submission.json", strong_submission).ok(),
+          "共享强提醒受理结果 fixture 必须被 C++ 解析");
+    Check(strong_submission.businessEventId == "event-fixture" && strong_submission.status == "accepted",
+          "受理结果业务事件标识与状态必须被保留");
+    Check(strong_submission.deliveries.size() == 1 &&
+              strong_submission.deliveries[0].deliveryId == "delivery-fixture" &&
+              strong_submission.deliveries[0].bindingId == "binding-fixture" &&
+              strong_submission.deliveries[0].status == "pending",
+          "受理结果交付行必须被保留");
+    Check(strong_submission.actionStream.has_value() &&
+              strong_submission.actionStream->reminderTriggerId == "trigger-fixture" &&
+              strong_submission.actionStream->expiresAt == "2026-08-03T00:10:00.000Z",
+          "强提醒受理结果必须携带 actionStream 窗口");
+
+    NotificationSubmission weak_submission;
+    Check(ParseSubmissionFixture("notification-submission-weak.json", weak_submission).ok(),
+          "共享弱提醒受理结果 fixture 必须被 C++ 解析");
+    Check(!weak_submission.actionStream.has_value() && weak_submission.deliveries.empty(),
+          "弱提醒受理结果不得携带 actionStream");
+
+    // 非法受理结果 fixture：与 TS 一致的拒绝语义
+    RequireSubmissionRejected("notification-submission-invalid-status.json", "非法状态受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-time.json", "非法时间受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-missing-field.json", "缺字段受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-not-object.json", "非对象受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-deliveries.json",
+                              "deliveries 非数组受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-delivery-shape.json",
+                              "交付行非对象受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-delivery-id.json",
+                              "交付行缺 deliveryId 受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-delivery-binding.json",
+                              "交付行缺 bindingId 受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-delivery-status.json",
+                              "交付行非法状态受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-actionstream-shape.json",
+                              "actionStream 非对象受理结果必须被 C++ 拒绝");
+    RequireSubmissionRejected("notification-submission-invalid-actionstream-field.json",
+                              "actionStream 缺 reminderTriggerId 受理结果必须被 C++ 拒绝");
+    return 0;
+}

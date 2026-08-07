@@ -47,6 +47,7 @@ import type {
 } from '../ports/external.js';
 import type { ImUnitOfWork } from '../ports/repositories.js';
 
+/** 装配生产 Gateway 运行时所需的外部端口。 */
 export interface ImGatewayDependencies {
     readonly unitOfWork: ImUnitOfWork;
     readonly actionStream: ActionCommandStreamPort;
@@ -63,6 +64,7 @@ export interface ImGatewayDependencies {
     readonly ids: IdGenerator;
 }
 
+/** 已装配的应用服务与传输层控制器。 */
 export interface ImGatewayRuntime {
     readonly application: ImGatewayApplication;
     readonly deviceApi: DeviceIntentController;
@@ -71,9 +73,9 @@ export interface ImGatewayRuntime {
 }
 
 /**
- * Composes the production Gateway application and transport controllers.
- * @param dependencies Ports required by the Gateway composition root.
- * @returns Ready-to-serve Gateway runtime.
+ * 装配生产 Gateway 的应用服务与传输层控制器。
+ * @param dependencies Gateway 组合根所需的端口。
+ * @returns 可供传输层承载的 Gateway 运行时。
  */
 export function createImGateway(dependencies: ImGatewayDependencies): ImGatewayRuntime {
     const channels = new DefaultChannelAccountApplication(
@@ -144,19 +146,16 @@ export function createImGateway(dependencies: ImGatewayDependencies): ImGatewayR
 }
 
 /**
- * Composes an in-memory Gateway runtime for tests and local scenarios.
- * @param deviceId Device identity returned by the mock authenticator.
- * @param clock Clock used by mock adapters.
- * @param overrides Ports that replace the default mock implementations.
- * @returns Ready-to-use in-memory Gateway runtime.
+ * 构造面向测试与本地场景的默认 Mock 外部端口，供内存版或 Postgres 版 Gateway 复用。
+ * @param deviceId Mock 认证器返回的设备身份。
+ * @param clock Mock 适配器共用的时钟。
+ * @returns 除 unitOfWork 之外的全部默认端口。
  */
-export function createMockImGateway(
+export function mockImGatewayPorts(
     deviceId: DeviceId = unsafeId<DeviceId>('device-demo'),
     clock: FixedClock = new FixedClock(),
-    overrides: Partial<ImGatewayDependencies> = {},
-): ImGatewayRuntime {
-    return createImGateway({
-        unitOfWork: new InMemoryImUnitOfWork(),
+): Omit<ImGatewayDependencies, 'unitOfWork'> {
+    return {
         actionStream: new InMemoryActionCommandStream(),
         actionTokens: new InMemoryActionTokenPort(),
         authentication: new MockDeviceAuthenticationPort(deviceId),
@@ -169,6 +168,24 @@ export function createMockImGateway(
         identityProtector: new MockExternalIdentityProtector(),
         clock,
         ids: new SequentialIdGenerator(),
+    };
+}
+
+/**
+ * 为测试和本地场景装配内存版 Gateway 运行时。
+ * @param deviceId Mock 认证器返回的设备身份。
+ * @param clock Mock 适配器共用的时钟。
+ * @param overrides 用于替换默认 Mock 实现的端口。
+ * @returns 可直接使用的内存版 Gateway 运行时。
+ */
+export function createMockImGateway(
+    deviceId: DeviceId = unsafeId<DeviceId>('device-demo'),
+    clock: FixedClock = new FixedClock(),
+    overrides: Partial<ImGatewayDependencies> = {},
+): ImGatewayRuntime {
+    return createImGateway({
+        unitOfWork: new InMemoryImUnitOfWork(),
+        ...mockImGatewayPorts(deviceId, clock),
         ...overrides,
     });
 }
