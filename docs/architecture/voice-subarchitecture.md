@@ -64,7 +64,7 @@ VoiceSession -> Application / MCP（只交稳定语义）
 
 本轮 #109 先落下 `voicelife_audio_esp` 的第一阶段，#111 再把 `AudioBoardProfile` 扩展为外部 Codec duplex 与纯 I2S simplex 两种拓扑，并加入独立 RX/TX 端点、wire slot 与 PCM 对齐字段。`Esp32s3AudioProbe` 在 `esp32s3-voicelife-pcb-pcm` Profile 下完成 I2S channel 生命周期、19200 B 采集、960 B 静音写入和 960 B 有界回放；最低空闲堆为 369528 B。探针不会初始化 ES8311/ES7210 寄存器，也不会打开 PCA9557 的功放位，因此这些结果只证明数字 PCM 输入和总线级回放，不替代 Codec 或声学录放验收。主机测试明确拒绝把主机当成真机探针。
 
-来源与当前状态见 [旧 MVP 迁移入口](./xiaozhi-migration.md)、[Linx 接入矩阵](../../research/voice-module-portability-20260804/sources/12_linx_current_access_matrix.md)、[ESP-IDF 6.0.2 I2S 边界](../../research/voice-module-portability-20260804/sources/13_esp_idf_i2s_6_0_2.md)、[跨板能力矩阵](../../research/voice-module-portability-20260804/sources/14_cross_board_audio_capabilities.md) 和 [voicelife-pcb 纯 I2S 对照](../../research/voice-module-portability-20260804/sources/15_voicelife_pcb_i2s_profile.md)。
+来源与当前状态见 [旧 MVP 迁移入口](./xiaozhi-migration.md)、[ESP32-S3 实板变更与恢复](../engineering/esp32-hardware-validation.md) 和 [语音原始研究资料归档 Issue #150](https://github.com/1024XEngineer/VoiceLife/issues/150)。
 
 ### 2.3 证据不能跨层复用
 
@@ -154,7 +154,7 @@ Audio Port 内部保持三条执行路径：I2S capture 只采样和转换，del
 
 SQLite 不作为 `AudioInputPort` 或 `AudioOutputPort` 的同步依赖。MCP/Calendar Application 通过控制面 `StorageTransactionPort` 提交业务命令，Storage Adapter 独占连接并返回 `transaction_id`、提交状态、影响行数、完整性摘要和错误；音频任务只发布异步事件。
 
-Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质、`journal_mode`、`synchronous` 和掉电类型。`commit` 成功只代表该 Profile 的 VFS/同步语义已返回成功，不能替代真实板断电与恢复证据。详见 [语音模块与 SQLite 边界决策](../../research/voice-module-portability-20260804/2026-08-04_decision.md)。
+Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质、`journal_mode`、`synchronous` 和掉电类型。`commit` 成功只代表该 Profile 的 VFS/同步语义已返回成功，不能替代真实板断电与恢复证据。当前边界见 [SQLite 存储子架构](./storage-subarchitecture.md)；原始研究过程归档在 [Issue #150](https://github.com/1024XEngineer/VoiceLife/issues/150)。
 
 ## 4. Linx XRobot WebSocket 防腐层
 
@@ -188,9 +188,8 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 - [Linx WebSocket 协议](https://linx.qiniu.com/docs/xrobot/platform/websocket)
 - [Linx 开源文档仓库](https://github.com/qiniu/Xrobot-docs/blob/main/docs/xrobot/platform/websocket.md)
 - [Linx 小智固件接入指南](https://linx.qiniu.com/docs/xrobot/guide/xiaozhi-firmware)
-- [Linx 当前平台目录与 MQTT 反证](../../research/voice-module-portability-20260804/sources/12_linx_current_access_matrix.md)
-- [Linx WebSocket 与 OTA 线上契约核验](../../research/voice-module-portability-20260804/sources/16_linx_websocket_ota_live_20260804.md)
-- [ESP-IDF 6.0.2 I2S 当前边界](../../research/voice-module-portability-20260804/sources/13_esp_idf_i2s_6_0_2.md)
+- [语音原始研究资料归档 Issue #150](https://github.com/1024XEngineer/VoiceLife/issues/150)
+- [ESP32-S3 实板变更与恢复](../engineering/esp32-hardware-validation.md)
 
 ### 4.2 ESP-IDF Transport 当前实现
 
@@ -251,7 +250,7 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 
 这些候选均不是当前语音支持声明。ESP32-S3 的易用性、可刷写、可回退和真实音频证据优先于扩展板卡数量。
 
-能力矩阵和五步准入顺序见 [跨板音频能力矩阵](../../research/voice-module-portability-20260804/sources/14_cross_board_audio_capabilities.md)。芯片文档证明外设能力，不能替代某块板的 Codec、功放、引脚和声学布局实测。
+跨板音频能力的原始比较归档在 [Issue #150](https://github.com/1024XEngineer/VoiceLife/issues/150)。芯片文档证明外设能力，不能替代某块板的 Codec、功放、引脚和声学布局实测；新增板卡仍按本节的五步顺序准入。
 
 ## 8. TDD 验收
 
