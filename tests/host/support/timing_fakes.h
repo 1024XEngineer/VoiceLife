@@ -275,6 +275,44 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         return Result<std::vector<timing::ReminderTrigger>>::Success(std::move(result));
     }
 
+    Status UpdateReminderTriggerWithEvent(const timing::ReminderTriggerUpdateWrite& update) override {
+        if (!next_trigger_update_failure_.ok()) {
+            Status failure = std::move(next_trigger_update_failure_);
+            next_trigger_update_failure_ = Status::Ok();
+            return failure;
+        }
+        const auto existing = triggers_.find(update.trigger.id);
+        if (existing == triggers_.end()) {
+            return Status::Error(ErrorCode::kNotFound, "reminder trigger not found");
+        }
+        if (update.trigger.id.empty() || update.event.event_id.empty() ||
+            update.event.reminder_trigger_id != update.trigger.id || update.event.task_id != update.trigger.task_id ||
+            update.event.event_type != timing::TimingEventType::kReminderSnoozed ||
+            update.event.status != timing::TimingEventStatus::kSnoozed) {
+            return Status::Error(ErrorCode::kConflict, "invalid reminder trigger event");
+        }
+        if (events_.contains(update.event.event_id)) {
+            return Status::Error(ErrorCode::kConflict, "reminder event exists");
+        }
+        auto next_triggers = triggers_;
+        auto next_events = events_;
+        next_triggers.at(update.trigger.id) = update.trigger;
+        next_events.emplace(update.event.event_id, update.event);
+        triggers_ = std::move(next_triggers);
+        events_ = std::move(next_events);
+        return Status::Ok();
+    }
+
+    void FailNextReminderTriggerUpdate(Status failure) { next_trigger_update_failure_ = std::move(failure); }
+
+    Result<timing::TimingEvent> FindTimingEvent(const std::string& event_id) const {
+        const auto found = events_.find(event_id);
+        if (found == events_.end()) {
+            return Result<timing::TimingEvent>::Failure(ErrorCode::kNotFound, "timing event not found");
+        }
+        return Result<timing::TimingEvent>::Success(found->second);
+    }
+
    private:
     std::optional<Status> next_update_failure_{};
     Status next_rule_list_failure_ = Status::Ok();
@@ -287,6 +325,8 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
     Status next_task_list_failure_ = Status::Ok();
     Status next_instance_list_failure_ = Status::Ok();
     Status next_trigger_list_failure_ = Status::Ok();
+    Status next_trigger_update_failure_ = Status::Ok();
+    std::unordered_map<std::string, timing::TimingEvent> events_;
 };
 
 }  // namespace voicelife::test

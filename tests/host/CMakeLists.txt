@@ -76,6 +76,7 @@ add_voicelife_library(timing voicelife_timing
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_delete_reminder_rule.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_reminder_triggers.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_reminder_rules.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_snooze_reminder_trigger.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_stubs.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_state.cc")
 target_link_libraries(timing PUBLIC contracts)
@@ -170,6 +171,9 @@ target_link_libraries(timing_task_service_test PRIVATE timing)
 
 add_voicelife_test(timing_task_service_reminder_triggers_test "unit;timing" timing_task_service_reminder_triggers_test.cc)
 target_link_libraries(timing_task_service_reminder_triggers_test PRIVATE timing)
+
+add_voicelife_test(timing_task_service_snooze_test "unit;timing" timing_task_service_snooze_test.cc)
+target_link_libraries(timing_task_service_snooze_test PRIVATE timing)
 
 add_voicelife_test(timing_task_store_test "unit;timing" timing_task_store_test.cc)
 target_link_libraries(timing_task_store_test PRIVATE timing)

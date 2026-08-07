@@ -12,10 +12,6 @@ Result<T> NotImplemented(const char* operation) {
 
 }  // namespace
 
-Result<ReminderTrigger> DefaultTimingTaskService::SnoozeReminderTrigger(const SnoozeReminderTriggerCommand&) {
-    return NotImplemented<ReminderTrigger>("SnoozeReminderTrigger");
-}
-
 Result<ReminderTrigger> DefaultTimingTaskService::DismissReminderTrigger(const DismissReminderTriggerCommand&) {
     return NotImplemented<ReminderTrigger>("DismissReminderTrigger");
 }

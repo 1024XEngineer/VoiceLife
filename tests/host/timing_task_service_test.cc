@@ -94,6 +94,10 @@ class LookupFailureStore final : public TimingTaskStorePort {
         return Result<std::vector<voicelife::timing::ReminderTrigger>>::Failure(ErrorCode::kInternal,
                                                                                 "unexpected list triggers");
     }
+
+    Status UpdateReminderTriggerWithEvent(const voicelife::timing::ReminderTriggerUpdateWrite&) override {
+        return Status::Error(ErrorCode::kInternal, "unexpected trigger update");
+    }
 };
 
 class ConcurrentReplayStore final : public TimingTaskStorePort {
@@ -146,6 +150,10 @@ class ConcurrentReplayStore final : public TimingTaskStorePort {
     Result<std::vector<voicelife::timing::ReminderTrigger>> ListTriggers() override {
         return Result<std::vector<voicelife::timing::ReminderTrigger>>::Failure(ErrorCode::kInternal,
                                                                                 "unexpected list triggers");
+    }
+
+    Status UpdateReminderTriggerWithEvent(const voicelife::timing::ReminderTriggerUpdateWrite&) override {
+        return Status::Error(ErrorCode::kInternal, "unexpected trigger update");
     }
 
    private:
@@ -1202,10 +1210,10 @@ int main() {
     }
     Check(retained_previous_rule, "规则写入失败不能改变已保存规则");
 
-    // 尚未实现的提醒 Service 方法应返回统一的 unavailable 错误。
+    // 已实现的提醒 Service 方法先做公开参数校验；尚未实现的关闭方法仍返回 unavailable。
     Check(service.ListReminderTriggers({}).status.code == ErrorCode::kInvalidArgument,
           "没有任何过滤条件的提醒触发查询应返回参数错误");
-    Check(service.SnoozeReminderTrigger({}).status.code == ErrorCode::kUnavailable, "默认提醒推迟接口应明确返回未实现");
+    Check(service.SnoozeReminderTrigger({}).status.code == ErrorCode::kInvalidArgument, "提醒推迟接口应校验请求参数");
     Check(service.DismissReminderTrigger({}).status.code == ErrorCode::kUnavailable,
           "默认提醒关闭接口应明确返回未实现");
 
