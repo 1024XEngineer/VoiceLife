@@ -215,8 +215,7 @@ int main() {
               cancelled_store.ListInstances("skipped-task").value->size() == 1,
           "取消和跳过事实应保持不变");
 
-    Check(service.AdvanceDueTasks(-1).status.code == ErrorCode::kInvalidArgument,
-          "负数推进时间应被拒绝");
+    Check(service.AdvanceDueTasks(-1).status.code == ErrorCode::kInvalidArgument, "负数推进时间应被拒绝");
     Check(service.AdvanceDueTasks(std::numeric_limits<int64_t>::max()).status.code == ErrorCode::kInvalidArgument,
           "最大时间戳推进应被拒绝");
 
@@ -243,15 +242,13 @@ int main() {
 
     InMemoryTimingTaskStore trigger_list_failure_store;
     trigger_list_failure_store.AddTask({.id = "trigger-list-failure", .next_trigger_at = 100});
-    trigger_list_failure_store.FailNextTriggerList(
-        Status::Error(ErrorCode::kUnavailable, "trigger list unavailable"));
+    trigger_list_failure_store.FailNextTriggerList(Status::Error(ErrorCode::kUnavailable, "trigger list unavailable"));
     DefaultTimingTaskService trigger_list_failure_service(trigger_list_failure_store, clock, ids);
     Check(trigger_list_failure_service.AdvanceDueTasks(100).status.code == ErrorCode::kUnavailable,
           "提醒触发列表失败应透传 Store 错误");
 
     InMemoryTimingTaskStore recurrence_store;
-    for (const auto frequency : {RecurrenceFrequency::kWeek, RecurrenceFrequency::kMonth,
-                                 RecurrenceFrequency::kYear}) {
+    for (const auto frequency : {RecurrenceFrequency::kWeek, RecurrenceFrequency::kMonth, RecurrenceFrequency::kYear}) {
         const std::string task_id = "recurrence-" + std::to_string(static_cast<int>(frequency));
         recurrence_store.AddTask({.id = task_id,
                                   .start_at = 100,
@@ -266,12 +263,12 @@ int main() {
 
     InMemoryTimingTaskStore existing_fact_store;
     existing_fact_store.AddTask({.id = "existing-facts", .next_trigger_at = 100});
-    existing_fact_store.AddReminderRule({.id = "existing-rule", .task_id = "existing-facts",
-                                         .status = ReminderRuleStatus::kActive});
+    existing_fact_store.AddReminderRule(
+        {.id = "existing-rule", .task_id = "existing-facts", .status = ReminderRuleStatus::kActive});
     existing_fact_store.AddInstance({.id = "existing-facts@100",
-                                    .task_id = "existing-facts",
-                                    .planned_at = 100,
-                                    .status = voicelife::timing::TimerInstanceStatus::kModified});
+                                     .task_id = "existing-facts",
+                                     .planned_at = 100,
+                                     .status = voicelife::timing::TimerInstanceStatus::kModified});
     existing_fact_store.AddReminderTrigger({.id = "existing-facts@100/existing-rule",
                                             .reminder_rule_id = "existing-rule",
                                             .task_id = "existing-facts",
@@ -306,8 +303,8 @@ int main() {
 
     InMemoryTimingTaskStore trigger_overflow_store;
     trigger_overflow_store.AddTask({.id = "trigger-overflow",
-                                    .next_trigger_at = std::numeric_limits<int64_t>::max() - 1,
-                                    .start_at = std::numeric_limits<int64_t>::max() - 1});
+                                    .start_at = std::numeric_limits<int64_t>::max() - 1,
+                                    .next_trigger_at = std::numeric_limits<int64_t>::max() - 1});
     trigger_overflow_store.AddReminderRule({.id = "overflow-rule",
                                             .task_id = "trigger-overflow",
                                             .offset_minutes = std::numeric_limits<int>::max(),
