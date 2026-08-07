@@ -94,7 +94,16 @@ export class WechatOfficialAdapter
     }
 
     /** {@inheritDoc PlatformCapabilityPort.capabilities} */
-    public capabilities(_account: ChannelAccount): Promise<ChannelCapabilities> {
+    public capabilities(account: ChannelAccount): Promise<ChannelCapabilities> {
+        if (account.id !== this.channelAccountId || account.platform !== this.platform || account.status !== 'active') {
+            return Promise.resolve({
+                proactiveMessage: false,
+                nativeAction: false,
+                actionUi: false,
+                deliveryReceipt: false,
+                presentationTypes: [],
+            });
+        }
         if (this.outbound !== undefined) {
             return Promise.resolve(this.outbound.capabilities());
         }
@@ -109,7 +118,7 @@ export class WechatOfficialAdapter
 
     /** {@inheritDoc ChannelCapabilityResolver.resolve} */
     public resolve(account: ChannelAccount): Promise<ChannelCapabilities> {
-        if (account.id !== this.channelAccountId || account.platform !== this.platform) {
+        if (account.id !== this.channelAccountId || account.platform !== this.platform || account.status !== 'active') {
             return Promise.resolve({
                 proactiveMessage: false,
                 nativeAction: false,

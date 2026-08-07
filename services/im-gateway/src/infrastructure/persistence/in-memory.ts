@@ -106,6 +106,8 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         return Promise.resolve();
     }
 
+    /** {@inheritDoc ActionRepository.createIfAbsent} */
+    public createIfAbsent(action: ImAction): Promise<{ readonly action: ImAction; readonly created: boolean }>;
     /** {@inheritDoc DeliveryRepository.createIfAbsent} */
     public createIfAbsent(delivery: Delivery): Promise<{ id: DeliveryId; created: boolean }>;
     /** {@inheritDoc IntentSubmissionRepository.createIfAbsent} */
@@ -118,8 +120,20 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
      * @returns 投递：权威标识与是否新建；受理记录：是否新建与当前权威记录。
      */
     public createIfAbsent(
-        value: Delivery | IntentSubmissionRecord,
-    ): Promise<{ id: DeliveryId; created: boolean } | { created: boolean; record: IntentSubmissionRecord }> {
+        value: Delivery | IntentSubmissionRecord | ImAction,
+    ): Promise<
+        | { readonly action: ImAction; readonly created: boolean }
+        | { id: DeliveryId; created: boolean }
+        | { created: boolean; record: IntentSubmissionRecord }
+    > {
+        if ('actionKeyHash' in value) {
+            const existing =
+                this.actionRows.get(value.id) ??
+                [...this.actionRows.values()].find((candidate) => candidate.actionKeyHash === value.actionKeyHash);
+            if (existing !== undefined) return Promise.resolve({ action: existing, created: false });
+            this.actionRows.set(value.id, value);
+            return Promise.resolve({ action: value, created: true });
+        }
         if ('requestFingerprint' in value) {
             const existing = this.intentSubmissionRows.get(intentSubmissionKey(value.businessEventId, value.kind));
             if (existing !== undefined) {

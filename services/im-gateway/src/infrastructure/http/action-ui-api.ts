@@ -86,10 +86,12 @@ const PAGE_HEADERS = {
         "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     'referrer-policy': 'no-referrer',
     'x-content-type-options': 'nosniff',
+    'strict-transport-security': 'max-age=31536000; includeSubDomains',
+    'permissions-policy': 'camera=(), microphone=(), geolocation=()',
 } as const;
 
 function htmlResponse(status: ActionUiPageResponse['status'], body: string): ActionUiPageResponse {
-    return { status, headers: PAGE_HEADERS, body };
+    return { status, headers: { ...PAGE_HEADERS }, body };
 }
 
 function actionUiErrorResponse(error: unknown): ActionUiPageResponse {
@@ -152,11 +154,11 @@ function renderActionOption(actionPath: string, option: ActionUiOption): string 
 function renderResultPage(action: ReminderActionCommand['action'], params: ReminderActionCommand['params']): string {
     const detail =
         action === 'snooze' && params !== undefined
-            ? `已推迟 ${String(params.minutes)} 分钟，设备会在新时间再次提醒。`
-            : '设备已收到确认操作。';
+            ? `已提交推迟 ${String(params.minutes)} 分钟的请求，等待设备确认。`
+            : '操作已提交，等待设备确认。';
     return pageShell(
-        '操作已发送',
-        `<main class="result"><div class="check" aria-hidden="true">&#10003;</div><p class="kicker">同步中</p><h1>操作已发送</h1><p class="summary">${escapeHtml(detail)}</p></main>`,
+        '操作已提交',
+        `<main class="result"><div class="check" aria-hidden="true">&#10003;</div><p class="kicker">同步中</p><h1>操作已提交</h1><p class="summary">${escapeHtml(detail)}</p></main>`,
     );
 }
 

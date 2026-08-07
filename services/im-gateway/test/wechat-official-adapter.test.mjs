@@ -73,7 +73,11 @@ test('preserves the zero-argument legacy stub contract', async () => {
 });
 
 test('exposes WeChat capabilities and platform-local renderings', async () => {
-    const capabilities = await adapter().capabilities({});
+    const capabilities = await adapter().capabilities({
+        id: channelAccountId,
+        platform: 'wechat_official',
+        status: 'active',
+    });
     assert.deepEqual(capabilities, {
         proactiveMessage: false,
         nativeAction: false,

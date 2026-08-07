@@ -465,6 +465,27 @@ export async function sharedRepositoryContractSuite(makeUow) {
         });
     });
 
+    await test('createIfAbsent keeps the first action for an idempotency key', async () => {
+        await withUow(makeUow, async (uow) => {
+            await uow.transaction(async (ctx) => {
+                const first = await ctx.actions.createIfAbsent(action());
+                assert.deepEqual(first, { action: action(), created: true });
+                const second = await ctx.actions.createIfAbsent(
+                    action('action-other', {
+                        operationId: 'operation-other',
+                        actionKeyHash: 'hash-action-1',
+                        actionParams: { minutes: 60 },
+                    }),
+                );
+                assert.deepEqual(second, { action: action(), created: false });
+            });
+            const stored = await uow.transaction((ctx) => ctx.actions.findById('action-1'));
+            assert.deepEqual(stored, action());
+            const notInserted = await uow.transaction((ctx) => ctx.actions.findById('action-other'));
+            assert.equal(notInserted, undefined);
+        });
+    });
+
     await test('outbox appends without error', async () => {
         await withUow(makeUow, async (uow) => {
             await uow.transaction((ctx) => ctx.outbox.append(outboxEvent()));

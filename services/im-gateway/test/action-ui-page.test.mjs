@@ -43,6 +43,8 @@ test('H5 page validates the token and renders only server-approved action option
     assert.equal(response.status, 200);
     assert.equal(response.headers['content-type'], 'text/html; charset=utf-8');
     assert.match(response.headers['content-security-policy'], /default-src 'none'/u);
+    assert.equal(response.headers['strict-transport-security'], 'max-age=31536000; includeSubDomains');
+    assert.equal(response.headers['permissions-policy'], 'camera=(), microphone=(), geolocation=()');
     assert.match(response.body, /知道了/u);
     assert.match(response.body, /推迟 10 分钟/u);
     assert.match(response.body, /name="action" value="acknowledge"/u);
@@ -116,8 +118,17 @@ test('H5 result page renders the acknowledge terminal branch without internal id
     const { controller } = pageFixture();
     const response = await controller.post('opaque-token', { action: 'acknowledge' });
     assert.equal(response.status, 200);
-    assert.match(response.body, /设备已收到确认操作/u);
+    assert.match(response.body, /操作已提交，等待设备确认/u);
+    assert.doesNotMatch(response.body, /设备已收到确认操作/u);
     assert.doesNotMatch(response.body, /operation-must-not-render|action-must-not-render/u);
+});
+
+test('H5 snooze result does not claim the device has already applied the delay', async () => {
+    const { controller } = pageFixture();
+    const response = await controller.post('opaque-token', { action: 'snooze', params: { minutes: 10 } });
+    assert.equal(response.status, 200);
+    assert.match(response.body, /已提交推迟 10 分钟的请求，等待设备确认/u);
+    assert.doesNotMatch(response.body, /设备会在新时间再次提醒/u);
 });
 
 test('runtime H5 route validates an opaque token and repeated submission dispatches once', async () => {
@@ -131,6 +142,7 @@ test('runtime H5 route validates an opaque token and repeated submission dispatc
         },
     });
     const deliveryId = await pendingStrongDelivery(gateway);
+    await gateway.application.deliveryDispatch.dispatch(deliveryId);
     const token = await gateway.application.actionUi.issue(deliveryId);
 
     const page = await gateway.actionUiPageApi.get(token);

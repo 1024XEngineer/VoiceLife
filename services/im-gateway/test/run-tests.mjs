@@ -198,6 +198,19 @@ async function runContractFixtureTests() {
         'invalid_contract',
         'NotificationIntent accepted more actions than the device limit',
     );
+    for (const label of ['', '   ', 'bad\nlabel', 'bad\u202Elabel', 'x'.repeat(129)]) {
+        await expectGatewayError(
+            () =>
+                Promise.resolve(
+                    parseNotificationIntent({
+                        ...strong,
+                        actions: [{ kind: 'command', type: 'acknowledge', label }],
+                    }),
+                ),
+            'invalid_contract',
+            `NotificationIntent accepted unsafe action label ${JSON.stringify(label)}`,
+        );
+    }
 
     const { gateway } = await createBoundGateway();
     const first = await submitFixture(gateway, strong);
@@ -245,6 +258,7 @@ async function runFailureStateTests() {
     const actionSubmission = await submitFixture(actionGateway, strong);
     const actionDeliveryId = actionSubmission.deliveries[0]?.deliveryId;
     assert(actionDeliveryId !== undefined, 'Action fixture did not create a Delivery');
+    await actionGateway.application.deliveryDispatch.dispatch(actionDeliveryId);
     const token = await actionGateway.application.actionUi.issue(actionDeliveryId);
     const streamError = await expectRejected(
         () => actionGateway.actionUiApi.post({ token, action: 'acknowledge' }),
@@ -271,6 +285,7 @@ async function runFailureStateTests() {
     const retrySubmission = await submitFixture(retryGateway, strong);
     const retryDeliveryId = retrySubmission.deliveries[0]?.deliveryId;
     assert(retryDeliveryId !== undefined, 'Retry fixture did not create a Delivery');
+    await retryGateway.application.deliveryDispatch.dispatch(retryDeliveryId);
     const retryToken = await retryGateway.application.actionUi.issue(retryDeliveryId);
     const retryCommand = await retryGateway.actionUiApi.post({
         token: retryToken,

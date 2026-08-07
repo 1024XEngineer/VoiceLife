@@ -9,8 +9,10 @@ import type { JsonValue } from '../../shared/types.js';
 const MAX_API_RESPONSE_BYTES = 64 * 1024;
 const ACCESS_TOKEN_REFRESH_MARGIN_SECONDS = 60;
 const WECHAT_TOKEN_ERRORS = new Set([40014, 42001]);
-const WECHAT_RETRYABLE_ERRORS = new Set([-1, 42001, 45009, 45011]);
+const WECHAT_RETRYABLE_ERRORS = new Set([-1, 408, 429, 42001, 45009, 45011, 502, 503, 504]);
 const TEXT_ENCODER = new TextEncoder();
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const MAX_REQUEST_TIMEOUT_MS = 10_000;
 
 /** 微信模板消息字段名配置。 */
 export interface WechatTemplateFields {
@@ -30,10 +32,13 @@ export interface WechatOfficialOutboundOptions {
     readonly revealExternalUserId: (ciphertext: string) => Promise<string>;
     /** 可替换的 Fetch 实现，仅测试或受控运行时注入。 */
     readonly fetch?: typeof fetch;
+    /** 微信 HTTP 请求的截止时间，默认 10 秒。 */
+    readonly requestTimeoutMs?: number;
 }
 
 interface NormalizedWechatOutboundOptions extends Omit<WechatOfficialOutboundOptions, 'fetch'> {
     readonly fetch: typeof fetch;
+    readonly requestTimeoutMs: number;
 }
 
 interface WechatTemplatePayload {
@@ -49,6 +54,8 @@ export class WechatOfficialOutbound {
     private readonly options: NormalizedWechatOutboundOptions;
 
     private accessTokenCache: { readonly value: string; readonly expiresAt: number } | undefined;
+
+    private accessTokenRefresh: Promise<string> | undefined;
 
     /**
      * @param options 部署层从 Secret 引用解析的出站配置。
@@ -137,11 +144,17 @@ export class WechatOfficialOutbound {
         if (message.delivery.channelAccountId !== undefined && message.delivery.channelAccountId !== channelAccountId) {
             return { accepted: false, retryable: false, errorCode: 'wechat_account_mismatch' };
         }
-        const payload = parseTemplatePayload(message.content);
-        const externalUserId = await this.options.revealExternalUserId(
+        const payload = parseTemplatePayload(
+            message.content,
+            this.options.templateId,
+            this.options.templateFields,
+            this.options.actionUiBaseUrl,
+        );
+        const revealedExternalUserId = await this.options.revealExternalUserId(
             message.conversation.externalConversationIdCiphertext,
         );
-        if (externalUserId.trim() === '' || externalUserId.length > 128) {
+        const externalUserId = revealedExternalUserId.trim();
+        if (!/^[A-Za-z0-9_-]{1,128}$/u.test(externalUserId)) {
             return { accepted: false, retryable: false, errorCode: 'wechat_invalid_recipient' };
         }
         let result: WechatApiResult;
@@ -158,6 +171,12 @@ export class WechatOfficialOutbound {
                     retryable: WECHAT_RETRYABLE_ERRORS.has(error.errcode),
                     errorCode: `wechat_${String(error.errcode)}`,
                 };
+            }
+            if (error instanceof WechatProtocolError) {
+                return { accepted: false, retryable: false, errorCode: 'wechat_protocol_error' };
+            }
+            if (isAbortError(error)) {
+                return { accepted: false, retryable: true, errorCode: 'wechat_timeout' };
             }
             throw error;
         }
@@ -200,11 +219,27 @@ export class WechatOfficialOutbound {
         ) {
             return this.accessTokenCache.value;
         }
+        if (this.accessTokenRefresh !== undefined) return this.accessTokenRefresh;
+        const refresh = this.fetchAccessToken();
+        this.accessTokenRefresh = refresh;
+        try {
+            return await refresh;
+        } finally {
+            if (this.accessTokenRefresh === refresh) this.accessTokenRefresh = undefined;
+        }
+    }
+
+    private async fetchAccessToken(): Promise<string> {
         const url = new URL('https://api.weixin.qq.com/cgi-bin/token');
         url.searchParams.set('grant_type', 'client_credential');
         url.searchParams.set('appid', this.options.appId);
         url.searchParams.set('secret', this.options.appSecret);
-        const response = await this.options.fetch(url, { headers: { accept: 'application/json' } });
+        const response = await fetchWithTimeout(
+            this.options.fetch,
+            url,
+            { headers: { accept: 'application/json' } },
+            this.options.requestTimeoutMs,
+        );
         const result = await readWechatApiResponse(response);
         if (
             !response.ok ||
@@ -228,16 +263,21 @@ export class WechatOfficialOutbound {
     ): Promise<WechatApiResult> {
         const url = new URL('https://api.weixin.qq.com/cgi-bin/message/template/send');
         url.searchParams.set('access_token', await this.accessToken(forceRefresh));
-        const response = await this.options.fetch(url, {
-            method: 'POST',
-            headers: { accept: 'application/json', 'content-type': 'application/json; charset=utf-8' },
-            body: JSON.stringify({
-                touser: externalUserId,
-                template_id: payload.templateId,
-                data: payload.data,
-                ...(payload.url === undefined ? {} : { url: payload.url }),
-            }),
-        });
+        const response = await fetchWithTimeout(
+            this.options.fetch,
+            url,
+            {
+                method: 'POST',
+                headers: { accept: 'application/json', 'content-type': 'application/json; charset=utf-8' },
+                body: JSON.stringify({
+                    touser: externalUserId,
+                    template_id: payload.templateId,
+                    data: payload.data,
+                    ...(payload.url === undefined ? {} : { url: payload.url }),
+                }),
+            },
+            this.options.requestTimeoutMs,
+        );
         const result = await readWechatApiResponse(response);
         return !response.ok && result.errcode === 0
             ? { errcode: response.status >= 500 ? -1 : response.status }
@@ -255,6 +295,13 @@ interface WechatApiResult {
 class WechatAccessTokenError extends Error {
     public constructor(public readonly errcode: number) {
         super('WeChat access token request was rejected');
+    }
+}
+
+class WechatProtocolError extends Error {
+    public constructor(message: string) {
+        super(message);
+        this.name = 'WechatProtocolError';
     }
 }
 
@@ -295,6 +342,10 @@ function normalizeOptions(options: WechatOfficialOutboundOptions): NormalizedWec
     if (typeof fetchImpl !== 'function') {
         throw new ImGatewayError('invalid_contract', 'WeChat outbound delivery requires Fetch');
     }
+    const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1 || requestTimeoutMs > MAX_REQUEST_TIMEOUT_MS) {
+        throw new ImGatewayError('invalid_contract', 'WeChat outbound request timeout is invalid');
+    }
     return {
         appId,
         appSecret,
@@ -303,6 +354,7 @@ function normalizeOptions(options: WechatOfficialOutboundOptions): NormalizedWec
         actionUiBaseUrl: actionUiUrl.toString().replace(/\/$/u, ''),
         revealExternalUserId: options.revealExternalUserId,
         fetch: fetchImpl,
+        requestTimeoutMs,
     };
 }
 
@@ -314,16 +366,32 @@ function templateField(value: string): string {
     return field;
 }
 
-function parseTemplatePayload(value: JsonValue): WechatTemplatePayload {
+function parseTemplatePayload(
+    value: JsonValue,
+    expectedTemplateId: string,
+    expectedTemplateFields: WechatTemplateFields,
+    actionUiBaseUrl: string,
+): WechatTemplatePayload {
     if (!isRecord(value) || value.type !== 'wechat_template') {
         throw new ImGatewayError('invalid_contract', 'WeChat outbound payload is invalid');
     }
     const templateId = requiredString(value.templateId, 'templateId');
-    if (!isRecord(value.data) || Object.keys(value.data).length === 0) {
+    if (templateId !== expectedTemplateId) {
+        throw new ImGatewayError('invalid_contract', 'WeChat outbound template id does not match configuration');
+    }
+    const expectedFields = Object.values(expectedTemplateFields);
+    const payloadData = value.data;
+    if (!isRecord(payloadData)) {
+        throw new ImGatewayError('invalid_contract', 'WeChat outbound template data is invalid');
+    }
+    if (
+        Object.keys(payloadData).length !== expectedFields.length ||
+        !expectedFields.every((field) => Object.hasOwn(payloadData, field))
+    ) {
         throw new ImGatewayError('invalid_contract', 'WeChat outbound template data is invalid');
     }
     const data: Record<string, { readonly value: string }> = {};
-    for (const [field, item] of Object.entries(value.data)) {
+    for (const [field, item] of Object.entries(payloadData)) {
         if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(field) || !isRecord(item) || typeof item.value !== 'string') {
             throw new ImGatewayError('invalid_contract', 'WeChat outbound template data is invalid');
         }
@@ -332,7 +400,19 @@ function parseTemplatePayload(value: JsonValue): WechatTemplatePayload {
     const url = value.url === undefined ? undefined : requiredString(value.url, 'url');
     if (url !== undefined) {
         try {
-            if (new URL(url).protocol !== 'https:') throw new Error('not https');
+            const parsed = new URL(url);
+            const base = new URL(actionUiBaseUrl);
+            if (
+                parsed.protocol !== 'https:' ||
+                parsed.username !== '' ||
+                parsed.password !== '' ||
+                parsed.search !== '' ||
+                parsed.hash !== '' ||
+                parsed.origin !== base.origin ||
+                !parsed.pathname.startsWith(`${base.pathname.replace(/\/$/u, '')}/`)
+            ) {
+                throw new Error('unsafe action UI URL');
+            }
         } catch {
             throw new ImGatewayError('invalid_contract', 'WeChat outbound Action UI URL must use HTTPS');
         }
@@ -350,25 +430,39 @@ function requiredString(value: unknown, field: string): string {
 async function readWechatApiResponse(response: Response): Promise<WechatApiResult> {
     const contentLength = response.headers.get('content-length');
     if (contentLength !== null && Number(contentLength) > MAX_API_RESPONSE_BYTES) {
-        throw new Error('WeChat API response exceeded the size limit');
+        throw new WechatProtocolError('WeChat API response exceeded the size limit');
     }
     const raw = await response.text();
     if (TEXT_ENCODER.encode(raw).byteLength > MAX_API_RESPONSE_BYTES) {
-        throw new Error('WeChat API response exceeded the size limit');
+        throw new WechatProtocolError('WeChat API response exceeded the size limit');
     }
     let parsed: unknown;
     try {
         parsed = JSON.parse(raw);
     } catch {
-        throw new Error('WeChat API returned invalid JSON');
+        throw new WechatProtocolError('WeChat API returned invalid JSON');
     }
-    if (!isRecord(parsed)) throw new Error('WeChat API returned an invalid object');
+    if (!isRecord(parsed)) throw new WechatProtocolError('WeChat API returned an invalid object');
     const errcode = parsed.errcode === undefined ? 0 : parsed.errcode;
     if (typeof errcode !== 'number' || !Number.isSafeInteger(errcode)) {
-        throw new Error('WeChat API returned an invalid error code');
+        throw new WechatProtocolError('WeChat API returned an invalid error code');
     }
-    const exactMessageId = /"msgid"\s*:\s*(?:"([0-9]{1,64})"|([0-9]{1,64}))/u.exec(raw);
-    const msgid = exactMessageId?.[1] ?? exactMessageId?.[2];
+    const rawMessageId = topLevelJsonProperty(raw, 'msgid');
+    let msgid: string | undefined;
+    if (rawMessageId !== undefined) {
+        if (rawMessageId.startsWith('"')) {
+            const stringValue = JSON.parse(rawMessageId) as unknown;
+            if (typeof stringValue !== 'string' || !/^[0-9]{1,64}$/u.test(stringValue)) {
+                throw new WechatProtocolError('WeChat API returned an invalid message id');
+            }
+            msgid = stringValue;
+        } else if (/^[0-9]{1,64}$/u.test(rawMessageId)) {
+            // Preserve large numeric msgid values exactly instead of passing through JS Number.
+            msgid = rawMessageId;
+        } else {
+            throw new WechatProtocolError('WeChat API returned an invalid message id');
+        }
+    }
     const accessToken = typeof parsed.access_token === 'string' ? parsed.access_token : undefined;
     const expiresIn =
         typeof parsed.expires_in === 'number' && Number.isSafeInteger(parsed.expires_in) && parsed.expires_in > 0
@@ -382,6 +476,86 @@ async function readWechatApiResponse(response: Response): Promise<WechatApiResul
     };
 }
 
+/** 读取 JSON 根对象的指定属性原文，保留微信大整数 msgid 的精确十进制表示。 */
+function topLevelJsonProperty(raw: string, property: string): string | undefined {
+    let index = skipWhitespace(raw, 0);
+    if (raw[index] !== '{') return undefined;
+    index = skipWhitespace(raw, index + 1);
+    while (index < raw.length && raw[index] !== '}') {
+        if (raw[index] !== '"') throw new WechatProtocolError('WeChat API returned an invalid object');
+        const keyEnd = readJsonStringEnd(raw, index);
+        const key = JSON.parse(raw.slice(index, keyEnd)) as unknown;
+        index = skipWhitespace(raw, keyEnd);
+        if (raw[index] !== ':') throw new WechatProtocolError('WeChat API returned an invalid object');
+        const valueStart = skipWhitespace(raw, index + 1);
+        const valueEnd = skipJsonValue(raw, valueStart);
+        if (key === property) return raw.slice(valueStart, valueEnd).trim();
+        index = skipWhitespace(raw, valueEnd);
+        if (raw[index] === ',') index = skipWhitespace(raw, index + 1);
+    }
+    return undefined;
+}
+
+function skipJsonValue(raw: string, start: number): number {
+    if (raw[start] === '"') return readJsonStringEnd(raw, start);
+    if (raw[start] !== '{' && raw[start] !== '[') {
+        let index = start;
+        while (index < raw.length && raw[index] !== ',' && raw[index] !== '}') index += 1;
+        return index;
+    }
+    const stack: string[] = [raw[start]!];
+    let index = start + 1;
+    while (index < raw.length && stack.length > 0) {
+        if (raw[index] === '"') {
+            index = readJsonStringEnd(raw, index);
+            continue;
+        }
+        if (raw[index] === '{' || raw[index] === '[') stack.push(raw[index]!);
+        if (raw[index] === '}' || raw[index] === ']') stack.pop();
+        index += 1;
+    }
+    if (stack.length > 0) throw new WechatProtocolError('WeChat API returned an invalid JSON value');
+    return index;
+}
+
+function readJsonStringEnd(raw: string, start: number): number {
+    let index = start + 1;
+    while (index < raw.length) {
+        if (raw[index] === '\\') {
+            index += 2;
+            continue;
+        }
+        if (raw[index] === '"') return index + 1;
+        index += 1;
+    }
+    throw new WechatProtocolError('WeChat API returned an invalid JSON string');
+}
+
+function skipWhitespace(raw: string, start: number): number {
+    let index = start;
+    while (index < raw.length && /\s/u.test(raw[index]!)) index += 1;
+    return index;
+}
+
+async function fetchWithTimeout(
+    fetchImpl: typeof fetch,
+    url: URL,
+    init: RequestInit,
+    timeoutMs: number,
+): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetchImpl(url, { ...init, signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === 'AbortError';
 }

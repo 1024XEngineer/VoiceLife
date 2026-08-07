@@ -43,6 +43,7 @@ function actionGateway(overrides = {}) {
 /** 提交一条强提醒投递并签发动作令牌。 */
 async function prepareAction(gateway) {
     const deliveryId = await pendingStrongDelivery(gateway);
+    await gateway.application.deliveryDispatch.dispatch(deliveryId);
     const token = await gateway.application.actionUi.issue(deliveryId);
     return { deliveryId, token };
 }
@@ -112,6 +113,28 @@ test('a token executed by the wrong identity is rejected', async () => {
         'A token executed by the wrong identity was not rejected',
     );
     assert.equal(error.code, 'action_expired');
+});
+
+test('action tokens cannot be shown or executed after delivery enters a terminal failure', async () => {
+    const gateway = createMockImGateway('device-fixture', undefined, {
+        imChannel: {
+            send: async () => ({ accepted: false, retryable: false, errorCode: 'blocked' }),
+        },
+    });
+    const deliveryId = await pendingStrongDelivery(gateway);
+    const token = await gateway.application.actionUi.issue(deliveryId);
+    await gateway.application.deliveryDispatch.dispatch(deliveryId);
+
+    const showError = await expectRejected(
+        () => gateway.application.actionUi.show(token),
+        'An action page remained available after permanent delivery failure',
+    );
+    assert.equal(showError.code, 'action_expired');
+    const executeError = await expectRejected(
+        () => gateway.application.actionUi.execute({ token, action: 'acknowledge' }),
+        'An action remained executable after permanent delivery failure',
+    );
+    assert.equal(executeError.code, 'action_expired');
 });
 
 test('preparing a token for a delivery without an action window is rejected', async () => {
@@ -190,14 +213,33 @@ test('resolveActionWindow accepts only the matching active strong-reminder windo
     assert.equal(error.code, 'action_expired');
 });
 
-test('triggering the same token twice is idempotent and dispatches once', async () => {
+test('concurrently triggering the same token is idempotent and dispatches once', async () => {
     const { gateway, stream } = actionGateway();
     const { token } = await prepareAction(gateway);
 
-    const first = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
-    const second = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+    const [first, second] = await Promise.all([
+        gateway.application.actionUi.execute({ token, action: 'acknowledge' }),
+        gateway.application.actionUi.execute({ token, action: 'acknowledge' }),
+    ]);
 
     assert.equal(first.commandId, second.commandId);
+    assert.equal(stream.commands.length, 1);
+    assert.equal(stream.commands[0].commandId, first.commandId);
+});
+
+test('an idempotent replay is rejected after its binding is revoked', async () => {
+    const { gateway, stream } = actionGateway();
+    const { deliveryId, token } = await prepareAction(gateway);
+    const first = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+    const details = await gateway.application.deliveries.find(deliveryId);
+    await gateway.application.bindings.revoke(details.delivery.bindingId);
+
+    const error = await expectRejected(
+        () => gateway.application.actionUi.execute({ token, action: 'acknowledge' }),
+        'A revoked binding replayed an existing action',
+    );
+
+    assert.equal(error.code, 'action_expired');
     assert.equal(stream.commands.length, 1);
     assert.equal(stream.commands[0].commandId, first.commandId);
 });
@@ -241,6 +283,7 @@ test('Last-Event-ID does not exclude earlier unconfirmed commands in the same wi
     assert.equal(submission.deliveries.length, 2);
     const commands = [];
     for (const delivery of submission.deliveries) {
+        await gateway.application.deliveryDispatch.dispatch(delivery.deliveryId);
         const token = await gateway.application.actionUi.issue(delivery.deliveryId);
         commands.push(await gateway.application.actionUi.execute({ token, action: 'acknowledge' }));
     }
@@ -332,6 +375,10 @@ test('malformed persisted action options are rejected instead of becoming execut
     for (const actions of [
         [{ kind: 'command', type: 'acknowledge', label: '' }],
         [{ kind: 'command', type: 'snooze', label: '推迟', params: { minutes: 0 } }],
+        [{ kind: 'command', type: 'snooze', label: '推\n迟', params: { minutes: 10 } }],
+        [{ kind: 'command', type: 'snooze', label: '推\u202E迟', params: { minutes: 10 } }],
+        [{ kind: 'command', type: 'snooze', label: '推'.repeat(129), params: { minutes: 10 } }],
+        [{ kind: 'command', type: 'snooze', label: '推迟', params: { minutes: 1441 } }],
     ]) {
         const clock = new FixedClock();
         const unitOfWork = new InMemoryImUnitOfWork();
