@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "schedule_operation_query_helpers.h"
+#include "../src/helpers/schedule_operation_query_helpers.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_service.h"
 

@@ -6,15 +6,15 @@
 #include <mutex>
 #include <utility>
 
-#include "schedule_create_helpers.h"
-#include "schedule_mock_data.h"
-#include "schedule_operation_helpers.h"
-#include "schedule_operation_mock_data.h"
-#include "schedule_operation_query_helpers.h"
-#include "schedule_query_helpers.h"
-#include "schedule_time_rules.h"
-#include "schedule_undo_helpers.h"
-#include "schedule_update_helpers.h"
+#include "../helpers/schedule_create_helpers.h"
+#include "../helpers/schedule_operation_helpers.h"
+#include "../helpers/schedule_operation_query_helpers.h"
+#include "../helpers/schedule_query_helpers.h"
+#include "../helpers/schedule_undo_helpers.h"
+#include "../helpers/schedule_update_helpers.h"
+#include "../mock/schedule_mock_data.h"
+#include "../mock/schedule_operation_mock_data.h"
+#include "../rules/schedule_time_rules.h"
 
 namespace voicelife::schedule {
 namespace {

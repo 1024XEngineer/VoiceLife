@@ -1,7 +1,7 @@
 #include <optional>
 #include <string>
 
-#include "schedule_operation_mock_data.h"
+#include "../src/mock/schedule_operation_mock_data.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_service.h"
 
