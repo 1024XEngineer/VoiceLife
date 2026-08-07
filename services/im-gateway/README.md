@@ -1,6 +1,6 @@
-# VoiceLife IM Gateway skeleton
+# VoiceLife IM Gateway
 
-这是 VoiceLife IM Gateway 的独立服务模块。它用代码表达模块边界、跨端契约和依赖方向，并以 Issue #95 作为当前交付与验收基线；目前包含 PostgreSQL 持久化和微信公众号 Webhook Adapter，但仍不包含真实 Koishi Bot。
+这是 VoiceLife IM Gateway 的独立服务模块。它用代码表达模块边界、跨端契约和依赖方向，并以 Issue #95 作为当前交付与验收基线；目前包含 PostgreSQL 持久化、真实 Koishi Core Runtime、实时 SSE Hub 和微信公众号 Webhook Adapter。具体平台 Bot、公开 HTTP 监听与 Secret 装配仍由生产部署组合根提供。
 
 ## 边界
 
@@ -32,7 +32,7 @@ src/
 └── index.ts          # 公共导出
 ```
 
-## 骨架验证
+## 验证
 
 仓库已安装 TypeScript 时执行：
 
@@ -68,10 +68,29 @@ PostgreSQL 16，确保契约套件在真实数据库上通过。
 `createMockImGateway()` 使用内存 Repository 和 Mock 通道，可用于测试与本地串联。生产装配使用
 `createPostgresImGateway({ databaseUrl?, ports })`：连接地址优先取入参，其次 `DATABASE_URL` 环境变量，
 缺省回落本地 docker-compose 地址；组合根自动执行 schema 迁移并托管连接池，返回 `{ runtime, close() }`，
-进程退出或优雅停机前调用 `close()` 释放连接池。`ports` 需替换为 Koishi、微信 Capability Plugin 和真实
-SSE Hub 等实现。
+进程退出或优雅停机前调用 `close()` 释放连接池。`ports` 需替换为平台 Capability、设备认证和 Secret
+实现；Koishi 与 SSE 的同进程装配由下述 Runtime 组合根完成。
 
 当前 mock 场景覆盖：PairingSession 绑定/过期、强弱提醒分流、DeliveryAttempt 与 H5 Token 渲染、复合入站幂等键、`externalMessageId` 回执归并、Receipt 去重及迟到回执不倒退、H5/平台 Action 入口合流、SSE 持久化回放、HTTPS Result 回传与 Action 过期关闭。
+
+## Koishi Runtime 与 SSE Hub
+
+`createKoishiGatewayRuntime()` 使用真实 `@koishijs/core` `Context`，将 `VoiceLifeKoishiPlugin`、
+`KoishiChannelAdapter`、`SseActionCommandHub` 与 Gateway Application 装配在同一进程。`start()` 启动
+Koishi 生命周期，`close()` 注销插件监听并停止 Context；重复调用不会重复启动或释放。
+
+`KoishiChannelAdapter` 在发送时从 `ChannelAccount` 解析 `koishiBotId`，只允许同账号私聊，并通过部署层
+注入的身份解密函数取得短时平台用户标识。`KoishiContextBotFacade` 从真实 Context 选择 active Bot，调用
+`sendPrivateMessage()` 并把首个平台消息 ID 返回给 DeliveryAttempt。平台 Bot 不存在或离线时返回可重试的
+`koishi_bot_unavailable`，不会伪造平台受理。
+
+`VoiceLifeKoishiPlugin` 直接监听 Koishi 的 `message` 与 `interaction/button` 事件，平台 Capability 在
+Infrastructure 内完成归一化后直接调用 `PlatformEventApplication`，中间不经过内部管理 HTTP。
+
+`SseActionCommandHub` 为设备的实时 SSE 连接按 `deviceId + reminderTriggerId` 隔离命令，并在 Action 完成、
+订阅取消或窗口过期时关闭。Hub 不把 `Last-Event-ID` 当作业务 ACK，也不承担持久化；断线和进程重启后的
+未确认命令始终从 Action Repository 回放。#152 的公开监听进程负责把该异步流序列化为真正的 SSE 响应，
+并注入平台 Bot、PostgreSQL、Secret 与健康检查。
 
 ## 微信公众号 Webhook
 

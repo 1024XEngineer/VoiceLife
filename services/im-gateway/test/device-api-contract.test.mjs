@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import {
     DEVICE_API_ENDPOINTS,
     DEVICE_API_ROUTES,
+    ReminderActionStreamController,
     SSE_HEARTBEAT_INTERVAL_SECONDS,
     SSE_RESPONSE_HEADERS,
+    SseActionCommandHub,
 } from '../dist/index.js';
 import { buildGateway, expectGatewayError, strongIntent } from './helpers.mjs';
 
@@ -148,4 +150,62 @@ test('action stream rejects a path for another device principal', async () => {
         'invalid_transition',
         'A device principal established another device action stream',
     );
+});
+
+test('action stream does not lose a command published between persistent replay and live delivery', async () => {
+    const hub = new SseActionCommandHub();
+    let markProcessingCalls = 0;
+    let releaseReplay;
+    let reportReplayStarted;
+    const replayGate = new Promise((resolve) => {
+        releaseReplay = resolve;
+    });
+    const replayStarted = new Promise((resolve) => {
+        reportReplayStarted = resolve;
+    });
+    const command = {
+        schemaVersion: '1',
+        commandId: 'action-race',
+        operationId: 'operation-race',
+        correlationId: 'correlation-race',
+        deviceId: 'device-fixture',
+        reminderTriggerId: 'trigger-fixture',
+        action: 'acknowledge',
+        issuedAt: '2026-08-07T00:00:00.000Z',
+        expiresAt: '2099-08-07T00:10:00.000Z',
+    };
+    const controller = new ReminderActionStreamController(
+        hub,
+        { authenticate: async () => ({ deviceId: 'device-fixture' }) },
+        {
+            expireDue: async () => 0,
+            resolveActionWindow: async () => command.expiresAt,
+            replayPending: async () => {
+                reportReplayStarted();
+                await replayGate;
+                return [];
+            },
+            markProcessing: async () => {
+                markProcessingCalls += 1;
+            },
+        },
+    );
+    const connecting = controller.connect({
+        authorization: 'Bearer fixture-device-token',
+        deviceId: 'device-fixture',
+        reminderType: 'strong',
+        reminderTriggerId: 'trigger-fixture',
+        signal: globalThis.AbortSignal.timeout(50),
+    });
+
+    await replayStarted;
+    await hub.publish(command);
+    releaseReplay();
+    const stream = await connecting;
+
+    assert.deepEqual(await stream[Symbol.asyncIterator]().next(), {
+        done: false,
+        value: { id: command.commandId, event: 'reminder.action', data: command },
+    });
+    assert.equal(markProcessingCalls, 1);
 });

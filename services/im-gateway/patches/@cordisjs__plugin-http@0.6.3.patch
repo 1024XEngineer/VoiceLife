@@ -1,0 +1,65 @@
+diff --git a/lib/adapter/node.cjs b/lib/adapter/node.cjs
+index 7b4301505d522dcb3e197b97c090f4d97067e54e..93765f2ed75f1eee4241cd60e0b609f2d1635cec 100644
+--- a/lib/adapter/node.cjs
++++ b/lib/adapter/node.cjs
+@@ -38,7 +38,6 @@ __export(node_exports, {
+ module.exports = __toCommonJS(node_exports);
+ var import_node_url = require("node:url");
+ var import_node_path = require("node:path");
+-var import_file_type = __toESM(require("file-type"), 1);
+ var import_promises = require("node:fs/promises");
+ var import_cosmokit = require("cosmokit");
+ var import_promises2 = require("node:dns/promises");
+@@ -46,7 +45,8 @@ var import_ws = require("ws");
+ async function loadFile(url) {
+   if (url.startsWith("file://")) {
+     const data = await (0, import_promises.readFile)((0, import_node_url.fileURLToPath)(url));
+-    const result = await import_file_type.default.fromBuffer(data);
++    const { fileTypeFromBuffer } = await import("file-type");
++    const result = await fileTypeFromBuffer(data);
+     return {
+       type: result?.mime,
+       mime: result?.mime,
+diff --git a/lib/adapter/node.js b/lib/adapter/node.js
+index 53c2991961e73cea30b5634e6cde310def5eecee..92c26cf2afb62923e3848aed2b5e5b5963f99c5a 100644
+--- a/lib/adapter/node.js
++++ b/lib/adapter/node.js
+@@ -4,7 +4,7 @@ var __name = (target, value) => __defProp(target, "name", { value, configurable:
+ // src/adapter/node.ts
+ import { fileURLToPath } from "node:url";
+ import { basename } from "node:path";
+-import FileType from "file-type";
++import { fileTypeFromBuffer } from "file-type";
+ import { readFile } from "node:fs/promises";
+ import { Binary } from "cosmokit";
+ import { lookup } from "node:dns/promises";
+@@ -12,7 +12,7 @@ import { WebSocket } from "ws";
+ async function loadFile(url) {
+   if (url.startsWith("file://")) {
+     const data = await readFile(fileURLToPath(url));
+-    const result = await FileType.fromBuffer(data);
++    const result = await fileTypeFromBuffer(data);
+     return {
+       type: result?.mime,
+       mime: result?.mime,
+diff --git a/src/adapter/node.ts b/src/adapter/node.ts
+index 46dd0ec9892687f0e30dd41f6b7da86e629422bb..1b1a029ff378d8131915a1e1f656b7aa36188466 100644
+--- a/src/adapter/node.ts
++++ b/src/adapter/node.ts
+@@ -1,6 +1,6 @@
+ import { fileURLToPath } from 'node:url'
+ import { basename } from 'node:path'
+-import FileType from 'file-type'
++import { fileTypeFromBuffer } from 'file-type'
+ import { FileResponse } from '../index.js'
+ import { readFile } from 'node:fs/promises'
+ import { Binary } from 'cosmokit'
+@@ -10,7 +10,7 @@ export { lookup } from 'node:dns/promises'
+ export async function loadFile(url: string): Promise<FileResponse | undefined> {
+   if (url.startsWith('file://')) {
+     const data = await readFile(fileURLToPath(url))
+-    const result = await FileType.fromBuffer(data)
++    const result = await fileTypeFromBuffer(data)
+     return {
+       type: result?.mime!,
+       mime: result?.mime,

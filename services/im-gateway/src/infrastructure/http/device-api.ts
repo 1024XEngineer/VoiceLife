@@ -204,15 +204,20 @@ export class ReminderActionStreamController {
         }
         await this.actions.expireDue();
         const expiresAt = await this.actions.resolveActionWindow(input.deviceId, input.reminderTriggerId);
-        const replay = await this.actions.replayPending(input.deviceId, input.reminderTriggerId, input.lastEventId);
-        const replayCursor = replay.at(-1)?.commandId ?? input.lastEventId;
         const live = this.stream.subscribe({
             deviceId: input.deviceId,
             reminderTriggerId: input.reminderTriggerId,
             expiresAt,
-            ...(replayCursor === undefined ? {} : { lastEventId: replayCursor }),
+            ...(input.lastEventId === undefined ? {} : { lastEventId: input.lastEventId }),
             ...(input.signal === undefined ? {} : { signal: input.signal }),
         });
+        let replay: readonly ReminderActionCommand[];
+        try {
+            replay = await this.actions.replayPending(input.deviceId, input.reminderTriggerId, input.lastEventId);
+        } catch (error) {
+            await live[Symbol.asyncIterator]().return?.();
+            throw error;
+        }
         return markCommandsProcessing(concatenateCommands(replay, live), this.actions);
     }
 }
@@ -221,8 +226,16 @@ async function* concatenateCommands(
     replay: readonly ReminderActionCommand[],
     live: AsyncIterable<ReminderActionCommand>,
 ): AsyncIterable<ReminderActionCommand> {
-    for (const command of replay) yield command;
-    for await (const command of live) yield command;
+    const seen = new Set<ActionId>();
+    for (const command of replay) {
+        seen.add(command.commandId);
+        yield command;
+    }
+    for await (const command of live) {
+        if (seen.has(command.commandId)) continue;
+        seen.add(command.commandId);
+        yield command;
+    }
 }
 
 async function* markCommandsProcessing(

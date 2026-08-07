@@ -16,6 +16,7 @@ import { unsafeId } from '../contracts/ids.js';
 import type { ReminderActionCommand } from '../contracts/device-gateway.js';
 import type {
     ActionCommandStreamPort,
+    ActionStreamCloseScope,
     ActionStreamSubscription,
     ActionTokenClaims,
     ActionTokenPort,
@@ -246,7 +247,7 @@ export class InMemoryActionCommandStream implements ActionCommandStreamPort {
     }
 
     /** {@inheritDoc ActionCommandStreamPort.close} */
-    public close(actionId: ActionId): Promise<void> {
+    public close(actionId: ActionId, _scope: ActionStreamCloseScope): Promise<void> {
         for (let index = this.commands.length - 1; index >= 0; index -= 1) {
             if (this.commands[index]?.commandId === actionId) this.commands.splice(index, 1);
         }

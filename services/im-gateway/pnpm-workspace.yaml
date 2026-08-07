@@ -1,0 +1,5 @@
+overrides:
+  file-type@>=13.0.0 <21.3.2: 21.3.2
+
+patchedDependencies:
+  '@cordisjs/plugin-http@0.6.3': patches/@cordisjs__plugin-http@0.6.3.patch

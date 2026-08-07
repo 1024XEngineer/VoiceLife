@@ -1196,7 +1196,11 @@ export class DefaultActionApplication implements ActionApplication {
         if (result.status === 'retryable_failed') {
             await this.dispatch(toCommand(updated));
         } else {
-            await this.stream.close(updated.id);
+            await this.stream.close(updated.id, {
+                deviceId: updated.deviceId,
+                reminderTriggerId: updated.reminderTriggerId,
+                expiresAt: updated.expiresAt,
+            });
         }
         return updated;
     }
@@ -1214,7 +1218,13 @@ export class DefaultActionApplication implements ActionApplication {
             }
             return actions;
         });
-        for (const action of expired) await this.stream.close(action.id);
+        for (const action of expired) {
+            await this.stream.close(action.id, {
+                deviceId: action.deviceId,
+                reminderTriggerId: action.reminderTriggerId,
+                expiresAt: action.expiresAt,
+            });
+        }
         return expired.length;
     }
 
