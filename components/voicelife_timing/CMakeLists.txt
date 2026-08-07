@@ -4,6 +4,7 @@ idf_component_register(
         "src/timing_task_service.cc"
         "src/timing_task_service_calendar.cc"
         "src/timing_task_service_delete_reminder_rule.cc"
+        "src/timing_task_service_reminder_triggers.cc"
         "src/timing_task_service_reminder_rules.cc"
         "src/timing_task_service_stubs.cc"
         "src/timing_task_state.cc"

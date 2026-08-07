@@ -66,6 +66,10 @@ class LookupFailureStore final : public TimingTaskStorePort {
         });
     }
 
+    Result<TimerInstance> FindInstance(const std::string&) override {
+        return Result<TimerInstance>::Failure(ErrorCode::kInternal, "unexpected find instance");
+    }
+
     Result<std::vector<TimingTask>> ListTasks() override {
         return Result<std::vector<TimingTask>>::Failure(ErrorCode::kInternal, "unexpected list tasks");
     }
@@ -84,6 +88,11 @@ class LookupFailureStore final : public TimingTaskStorePort {
 
     Result<std::vector<TimerInstance>> ListInstances(const TimingTaskId&) override {
         return Result<std::vector<TimerInstance>>::Failure(ErrorCode::kInternal, "unexpected list instances");
+    }
+
+    Result<std::vector<voicelife::timing::ReminderTrigger>> ListTriggers() override {
+        return Result<std::vector<voicelife::timing::ReminderTrigger>>::Failure(ErrorCode::kInternal,
+                                                                                "unexpected list triggers");
     }
 };
 
@@ -110,6 +119,10 @@ class ConcurrentReplayStore final : public TimingTaskStorePort {
         return Result<TimingTask>::Failure(ErrorCode::kInternal, "unexpected find");
     }
 
+    Result<TimerInstance> FindInstance(const std::string&) override {
+        return Result<TimerInstance>::Failure(ErrorCode::kInternal, "unexpected find instance");
+    }
+
     Result<std::vector<TimingTask>> ListTasks() override {
         return Result<std::vector<TimingTask>>::Failure(ErrorCode::kInternal, "unexpected list tasks");
     }
@@ -128,6 +141,11 @@ class ConcurrentReplayStore final : public TimingTaskStorePort {
 
     Result<std::vector<TimerInstance>> ListInstances(const TimingTaskId&) override {
         return Result<std::vector<TimerInstance>>::Failure(ErrorCode::kInternal, "unexpected list instances");
+    }
+
+    Result<std::vector<voicelife::timing::ReminderTrigger>> ListTriggers() override {
+        return Result<std::vector<voicelife::timing::ReminderTrigger>>::Failure(ErrorCode::kInternal,
+                                                                                "unexpected list triggers");
     }
 
    private:
@@ -1185,8 +1203,8 @@ int main() {
     Check(retained_previous_rule, "规则写入失败不能改变已保存规则");
 
     // 尚未实现的提醒 Service 方法应返回统一的 unavailable 错误。
-    Check(service.ListReminderTriggers({}).status.code == ErrorCode::kUnavailable,
-          "默认提醒触发查询接口应明确返回未实现");
+    Check(service.ListReminderTriggers({}).status.code == ErrorCode::kInvalidArgument,
+          "没有任何过滤条件的提醒触发查询应返回参数错误");
     Check(service.SnoozeReminderTrigger({}).status.code == ErrorCode::kUnavailable, "默认提醒推迟接口应明确返回未实现");
     Check(service.DismissReminderTrigger({}).status.code == ErrorCode::kUnavailable,
           "默认提醒关闭接口应明确返回未实现");
