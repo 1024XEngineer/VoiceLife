@@ -70,6 +70,7 @@ add_voicelife_library(schedule voicelife_schedule
 target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule PUBLIC contracts Threads::Threads)
 add_voicelife_library(timing voicelife_timing
+    "${ROOT_DIR}/components/voicelife_timing/src/occurrence_planner.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service.cc"
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_calendar.cc"
@@ -173,6 +174,9 @@ target_link_libraries(timing_task_service_test PRIVATE timing)
 
 add_voicelife_test(timing_task_calendar_test "unit;timing" timing_task_calendar_test.cc)
 target_link_libraries(timing_task_calendar_test PRIVATE timing)
+
+add_voicelife_test(timing_occurrence_planner_test "unit;timing" timing_occurrence_planner_test.cc)
+target_link_libraries(timing_occurrence_planner_test PRIVATE timing)
 
 add_voicelife_test(timing_task_service_reminder_triggers_test "unit;timing" timing_task_service_reminder_triggers_test.cc)
 target_link_libraries(timing_task_service_reminder_triggers_test PRIVATE timing)

@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS
+        "src/occurrence_planner.cc"
         "src/timing_policy.cc"
         "src/timing_task_service.cc"
         "src/timing_task_service_calendar.cc"
