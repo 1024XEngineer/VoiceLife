@@ -985,6 +985,10 @@ export class DefaultReceiptApplication implements ReceiptApplication {
             if (receipt.attemptId !== undefined && receiptAttempt === undefined) {
                 throw new ImGatewayError('invalid_contract', 'Receipt attempt does not match its platform message');
             }
+            const detail =
+                receipt.retryable === true
+                    ? { ...(isJsonObject(receipt.detail) ? receipt.detail : {}), retryable: true }
+                    : receipt.detail;
             await tx.deliveries.saveReceipt({
                 id: this.ids.nextDeliveryReceiptId(),
                 deliveryId: delivery.id,
@@ -992,7 +996,7 @@ export class DefaultReceiptApplication implements ReceiptApplication {
                 stage: receipt.stage,
                 dedupeKey: receipt.dedupeKey,
                 externalEventId: receipt.externalEventId,
-                ...(receipt.detail === undefined ? {} : { detail: receipt.detail }),
+                ...(detail === undefined ? {} : { detail }),
                 occurredAt: receipt.occurredAt,
                 receivedAt: this.clock.now(),
             });
@@ -1005,7 +1009,7 @@ export class DefaultReceiptApplication implements ReceiptApplication {
             ) {
                 return;
             }
-            const status = advanceDeliveryStatus(delivery.status, receipt.stage);
+            const status = advanceDeliveryStatus(delivery.status, receipt);
             if (status !== delivery.status) {
                 await tx.deliveries.save({
                     ...delivery,
@@ -1500,15 +1504,19 @@ function withoutDeliveryAttemptOutcome(delivery: Delivery): Delivery {
     return cleared;
 }
 
+function isJsonObject(value: JsonValue | undefined): value is { readonly [key: string]: JsonValue } {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
  * 推进交付状态。
  * @param current 当前状态。
  * @param receipt 接收状态。
  * @returns 推进后的状态。
  */
-function advanceDeliveryStatus(current: DeliveryStatus, receipt: NormalizedDeliveryReceipt['stage']): DeliveryStatus {
+function advanceDeliveryStatus(current: DeliveryStatus, receipt: NormalizedDeliveryReceipt): DeliveryStatus {
     if (current === 'delivered') return current;
-    if (receipt === 'delivered') return 'delivered';
+    if (receipt.stage === 'delivered') return 'delivered';
     if (current === 'dead_letter' || current === 'permanent_failed') return current;
-    return 'permanent_failed';
+    return receipt.retryable === true ? 'retryable_failed' : 'permanent_failed';
 }
