@@ -252,6 +252,29 @@ int main() {
           "周期任务应使用命令开始时间作为唯一锚点");
     Check(stored_recurring.ok() && stored_recurring.value->time_zone == "+08:00", "周期任务应使用命令顶层时区");
 
+    InMemoryTimingTaskStore legacy_replay_store;
+    legacy_replay_store.AddTask({
+        .id = "task-legacy-replay",
+        .schedule_id = "schedule-legacy-replay",
+        .request_id = "request-legacy-replay",
+        .start_at = 1785834000,
+        .next_trigger_at = 1785834000,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kWeek},
+        .status = TimingTaskStatus::kActive,
+    });
+    FixedTimingIdGenerator legacy_replay_ids;
+    DefaultTimingTaskService legacy_replay_service(legacy_replay_store, clock, legacy_replay_ids);
+    const auto legacy_replay = legacy_replay_service.RegisterTimerTask({
+        .request_id = "request-legacy-replay",
+        .schedule_id = "schedule-legacy-replay",
+        .start_at = 1785834000,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kWeek},
+    });
+    Check(legacy_replay.ok() && legacy_replay.value->task_id == "task-legacy-replay",
+          "历史非固定 UTC+8 周期任务重放应返回原任务，不受新写入约束影响");
+
     const auto invalid_day = recurring_service.RegisterTimerTask({
         .request_id = "request-invalid-day",
         .schedule_id = "invalid-day",

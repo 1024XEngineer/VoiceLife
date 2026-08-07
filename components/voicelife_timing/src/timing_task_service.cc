@@ -213,11 +213,6 @@ Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(cons
         return Result<RegisterTimerTaskResult>::Failure(policy_status.code, policy_status.message);
     }
 
-    const Status recurrence_status = ValidateRecurrenceTimeZone(command.recurrence, command.time_zone);
-    if (!recurrence_status.ok()) {
-        return Result<RegisterTimerTaskResult>::Failure(recurrence_status.code, recurrence_status.message);
-    }
-
     const auto existing = store_.FindTaskByRequestId(command.request_id);
     if (existing.ok()) {
         if (!MatchesRegistration(*existing.value, command)) {
@@ -227,6 +222,11 @@ Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(cons
     }
     if (existing.status.code != ErrorCode::kNotFound) {
         return Result<RegisterTimerTaskResult>::Failure(existing.status.code, existing.status.message);
+    }
+
+    const Status recurrence_status = ValidateRecurrenceTimeZone(command.recurrence, command.time_zone);
+    if (!recurrence_status.ok()) {
+        return Result<RegisterTimerTaskResult>::Failure(recurrence_status.code, recurrence_status.message);
     }
 
     auto task = TimingPolicy{}.Register(policy_command, ids_.NextTaskId(), clock_.Now());
