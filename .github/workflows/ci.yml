@@ -115,12 +115,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: 安装 C++ 构建与覆盖率工具
+      - name: 安装覆盖率工具
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes libcjson-dev
           python -m pip install --disable-pip-version-check "gcovr==8.5"
       - name: 生成 C++ 覆盖率报告
         shell: bash
@@ -170,10 +168,6 @@ jobs:
           echo "runner=${RUNNER_NAME} os=${RUNNER_OS} arch=${RUNNER_ARCH}"
           cmake --version | head -n 1
           python3 --version
-      - name: 安装 C++ 构建依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes libcjson-dev
       - name: 检查提交描述
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
         run: python3 scripts/check_commit_message.py --range "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"

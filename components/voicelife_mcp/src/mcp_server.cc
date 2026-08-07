@@ -4,7 +4,7 @@
 #include <unordered_set>
 #include <utility>
 
-#include "cJSON.h"
+#include "mcp_json_writer.h"
 
 namespace voicelife::mcp {
 namespace {
@@ -89,44 +89,7 @@ ListToolsResult McpServer::list_tools() const {
     return result;
 }
 
-std::string McpServer::list_tools_json() const {
-    cJSON* result = cJSON_CreateObject();
-    cJSON* tools = cJSON_AddArrayToObject(result, "tools");
-    for (const auto& definition : list_tools().tools) {
-        cJSON* tool = cJSON_CreateObject();
-        cJSON_AddStringToObject(tool, "name", definition.name.c_str());
-        cJSON_AddStringToObject(tool, "description", definition.description.c_str());
-        cJSON* schema = cJSON_AddObjectToObject(tool, "inputSchema");
-        cJSON_AddStringToObject(schema, "type", definition.input_schema.type.c_str());
-        cJSON* properties = cJSON_AddObjectToObject(schema, "properties");
-        for (const auto& [name, field] : definition.input_schema.properties) {
-            cJSON* property = cJSON_AddObjectToObject(properties, name.c_str());
-            const char* type = field.type == ToolInputType::kInteger   ? "integer"
-                               : field.type == ToolInputType::kBoolean ? "boolean"
-                                                                       : "string";
-            cJSON_AddStringToObject(property, "type", type);
-            if (!field.description.empty()) {
-                cJSON_AddStringToObject(property, "description", field.description.c_str());
-            }
-            if (field.minimum.has_value()) {
-                cJSON_AddNumberToObject(property, "minimum", static_cast<double>(*field.minimum));
-            }
-            if (field.maximum.has_value()) {
-                cJSON_AddNumberToObject(property, "maximum", static_cast<double>(*field.maximum));
-            }
-        }
-        cJSON* required = cJSON_AddArrayToObject(schema, "required");
-        for (const auto& name : definition.input_schema.required) {
-            cJSON_AddItemToArray(required, cJSON_CreateString(name.c_str()));
-        }
-        cJSON_AddItemToArray(tools, tool);
-    }
-    char* text = cJSON_Print(result);
-    std::string output = text == nullptr ? "{}" : text;
-    cJSON_free(text);
-    cJSON_Delete(result);
-    return output;
-}
+std::string McpServer::list_tools_json() const { return SerializeListToolsResult(list_tools()); }
 
 PropertyList PropertyList::with_values(const ToolArguments& arguments) const {
     PropertyList result = *this;
@@ -136,12 +99,17 @@ PropertyList PropertyList::with_values(const ToolArguments& arguments) const {
 
 Status McpServer::add_tool(std::string name, std::string description, PropertyList properties,
                            PropertyHandler handler) {
+    // 工具定义完整性校验
     if (name.empty() || description.empty() || !handler) {
         return Status::Error(ErrorCode::kInvalidArgument, "工具定义不完整");
     }
+
+    // 工具名称不能重复注册
     if (tools_.contains(name)) {
         return Status::Error(ErrorCode::kAlreadyExists, "工具已注册：" + name);
     }
+
+    // 校验参数默认值、类型和整数取值范围
     for (const auto& property : properties) {
         const ToolInputType input_type = ToInputType(property.type());
         if ((property.default_value().has_value() && !MatchesType(*property.default_value(), input_type)) ||
@@ -152,6 +120,8 @@ Status McpServer::add_tool(std::string name, std::string description, PropertyLi
             return Status::Error(ErrorCode::kInvalidArgument, "工具参数定义无效：" + property.name());
         }
     }
+
+    // 保存工具定义，并在调用时注入已校验的参数
     const std::string registered_name = name;
     tools_.emplace(registered_name, RegisteredTool{.definition = {.name = std::move(name),
                                                                   .description = std::move(description),
@@ -165,6 +135,7 @@ Status McpServer::add_tool(std::string name, std::string description, PropertyLi
 }
 
 ToolResult McpServer::call(const ToolCall& call) const {
+    // 校验调用标识并查找已注册工具
     if (call.request_id.empty()) {
         return Failure(Status::Error(ErrorCode::kInvalidArgument, "工具调用缺少 request_id"));
     }
@@ -172,6 +143,8 @@ ToolResult McpServer::call(const ToolCall& call) const {
     if (registered == tools_.end()) {
         return Failure(Status::Error(ErrorCode::kNotFound, "工具不存在：" + call.name));
     }
+
+    // 按工具声明补充默认值，并校验必填参数和参数类型
     ToolCall normalized_call = call;
     std::unordered_set<std::string> defined_names;
     for (const auto& [name, field] : registered->second.definition.input_schema.properties) {
@@ -197,12 +170,16 @@ ToolResult McpServer::call(const ToolCall& call) const {
             }
         }
     }
+
+    // 拒绝工具声明之外的未知参数
     for (const auto& [name, value] : call.arguments) {
         (void)value;
         if (!defined_names.contains(name)) {
             return Failure(Status::Error(ErrorCode::kInvalidArgument, "不支持的参数：" + name));
         }
     }
+
+    // 执行业务回调并返回执行结果
     return registered->second.handler(normalized_call);
 }
 

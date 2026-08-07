@@ -5,7 +5,7 @@
 `third_party/yyjson/yyjson.c` 与 `third_party/yyjson/yyjson.h` 原样来自
 [`ibireme/yyjson`](https://github.com/ibireme/yyjson) `0.12.0`，固定上游 commit
 `8b4a38dc994a110abaec8a400615567bd996105f`。VoiceLife 使用其严格 RFC 8259
-读取模式构建临时 DOM，再映射为平台无关的契约值对象；第三方类型不进入公共 API。
+读取模式构建临时 DOM，并使用可变文档生成 MCP JSON；第三方类型不进入公共 API。
 
 | 文件 | SHA-256 |
 | --- | --- |

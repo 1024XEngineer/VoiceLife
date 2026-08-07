@@ -1,9 +1,12 @@
 #include "voicelife/mcp/mcp_server.h"
 
+#include <cstdint>
 #include <iostream>
+#include <limits>
 #include <string>
 
 #include "support/test_support.h"
+#include "yyjson.h"
 
 using voicelife::ErrorCode;
 using voicelife::Status;
@@ -153,17 +156,55 @@ void TestToolListing() {
     McpServer server;
     int64_t captured_value = 0;
     Check(server.list_tools().total == 0, "MCP 服务初始不应包含工具");
+    const std::string empty_json = server.list_tools_json();
+    yyjson_doc* empty_document = yyjson_read(empty_json.data(), empty_json.size(), YYJSON_READ_NOFLAG);
+    Check(empty_document != nullptr, "空工具列表应序列化为合法 JSON");
+    yyjson_val* empty_tools = yyjson_obj_get(yyjson_doc_get_root(empty_document), "tools");
+    Check(yyjson_is_arr(empty_tools) && yyjson_arr_size(empty_tools) == 0, "空工具列表应包含空 tools 数组");
+    yyjson_doc_free(empty_document);
+
     Check(RegisterTypedTool(server, captured_value).ok(), "列表测试工具应注册成功");
+    const PropertyHandler handler = [](const PropertyList&) {
+        return ToolResult{.status = Status::Ok(), .output = {}};
+    };
+    Check(server
+              .add_tool("self.device.boundary", "整数范围\"测试\\路径",
+                        PropertyList({Property("value", PropertyType::kInteger, std::numeric_limits<int64_t>::min(),
+                                               std::numeric_limits<int64_t>::max())}),
+                        handler)
+              .ok(),
+          "整数边界工具应注册成功");
 
     const auto listed = server.list_tools();
-    Check(listed.total == 1 && listed.tools.front().name == "self.device.configure", "工具列表应返回注册结果");
+    Check(listed.total == 2 && listed.tools.front().name == "self.device.configure", "工具列表应返回注册结果");
     const std::string json = server.list_tools_json();
     std::cout << json << '\n';
-    Check(json.find("self.device.configure") != std::string::npos && json.find("inputSchema") != std::string::npos &&
-              json.find("\"boolean\"") != std::string::npos && json.find("\"integer\"") != std::string::npos &&
-              json.find("\"string\"") != std::string::npos && json.find("\"minimum\"") != std::string::npos &&
-              json.find("\"maximum\"") != std::string::npos,
+    yyjson_doc* document = yyjson_read(json.data(), json.size(), YYJSON_READ_NOFLAG);
+    Check(document != nullptr, "tools/list 应序列化为合法 JSON");
+    yyjson_val* tools = yyjson_obj_get(yyjson_doc_get_root(document), "tools");
+    Check(yyjson_is_arr(tools) && yyjson_arr_size(tools) == 2, "tools/list JSON 应包含全部工具");
+
+    yyjson_val* configure = yyjson_arr_get(tools, 0);
+    yyjson_val* configure_schema = yyjson_obj_get(configure, "inputSchema");
+    yyjson_val* properties = yyjson_obj_get(configure_schema, "properties");
+    yyjson_val* level = yyjson_obj_get(properties, "level");
+    Check(yyjson_equals_str(yyjson_obj_get(configure, "name"), "self.device.configure") &&
+              yyjson_equals_str(yyjson_obj_get(level, "type"), "integer") &&
+              yyjson_get_sint(yyjson_obj_get(level, "minimum")) == 0 &&
+              yyjson_get_sint(yyjson_obj_get(level, "maximum")) == 100,
           "tools/list JSON 应包含完整的工具输入 Schema");
+
+    yyjson_val* boundary = yyjson_arr_get(tools, 1);
+    yyjson_val* boundary_schema = yyjson_obj_get(boundary, "inputSchema");
+    yyjson_val* boundary_properties = yyjson_obj_get(boundary_schema, "properties");
+    yyjson_val* value = yyjson_obj_get(boundary_properties, "value");
+    Check(yyjson_equals_str(yyjson_obj_get(boundary, "description"), "整数范围\"测试\\路径") &&
+              yyjson_is_sint(yyjson_obj_get(value, "minimum")) &&
+              yyjson_get_sint(yyjson_obj_get(value, "minimum")) == std::numeric_limits<int64_t>::min() &&
+              yyjson_is_int(yyjson_obj_get(value, "maximum")) &&
+              yyjson_get_sint(yyjson_obj_get(value, "maximum")) == std::numeric_limits<int64_t>::max(),
+          "tools/list JSON 应保留特殊字符和完整 int64_t 边界");
+    yyjson_doc_free(document);
 }
 
 }  // namespace
