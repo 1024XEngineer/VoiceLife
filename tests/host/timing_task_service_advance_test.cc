@@ -1,4 +1,6 @@
 #include <cstdint>
+#include <limits>
+#include <string>
 
 #include "support/test_support.h"
 #include "support/timing_fakes.h"
@@ -212,6 +214,108 @@ int main() {
     Check(cancelled_store.ListInstances("cancelled-task").value->empty() &&
               cancelled_store.ListInstances("skipped-task").value->size() == 1,
           "取消和跳过事实应保持不变");
+
+    Check(service.AdvanceDueTasks(-1).status.code == ErrorCode::kInvalidArgument,
+          "负数推进时间应被拒绝");
+    Check(service.AdvanceDueTasks(std::numeric_limits<int64_t>::max()).status.code == ErrorCode::kInvalidArgument,
+          "最大时间戳推进应被拒绝");
+
+    InMemoryTimingTaskStore task_list_failure_store;
+    task_list_failure_store.FailNextTaskList(Status::Error(ErrorCode::kUnavailable, "task list unavailable"));
+    DefaultTimingTaskService task_list_failure_service(task_list_failure_store, clock, ids);
+    Check(task_list_failure_service.AdvanceDueTasks(100).status.code == ErrorCode::kUnavailable,
+          "任务列表失败应透传 Store 错误");
+
+    InMemoryTimingTaskStore instance_list_failure_store;
+    instance_list_failure_store.AddTask({.id = "instance-list-failure", .next_trigger_at = 100});
+    instance_list_failure_store.FailNextInstanceList(
+        Status::Error(ErrorCode::kUnavailable, "instance list unavailable"));
+    DefaultTimingTaskService instance_list_failure_service(instance_list_failure_store, clock, ids);
+    Check(instance_list_failure_service.AdvanceDueTasks(100).status.code == ErrorCode::kUnavailable,
+          "实例列表失败应透传 Store 错误");
+
+    InMemoryTimingTaskStore rule_list_failure_store;
+    rule_list_failure_store.AddTask({.id = "rule-list-failure", .next_trigger_at = 100});
+    rule_list_failure_store.FailNextRuleList(Status::Error(ErrorCode::kUnavailable, "rule list unavailable"));
+    DefaultTimingTaskService rule_list_failure_service(rule_list_failure_store, clock, ids);
+    Check(rule_list_failure_service.AdvanceDueTasks(100).status.code == ErrorCode::kUnavailable,
+          "提醒规则列表失败应透传 Store 错误");
+
+    InMemoryTimingTaskStore trigger_list_failure_store;
+    trigger_list_failure_store.AddTask({.id = "trigger-list-failure", .next_trigger_at = 100});
+    trigger_list_failure_store.FailNextTriggerList(
+        Status::Error(ErrorCode::kUnavailable, "trigger list unavailable"));
+    DefaultTimingTaskService trigger_list_failure_service(trigger_list_failure_store, clock, ids);
+    Check(trigger_list_failure_service.AdvanceDueTasks(100).status.code == ErrorCode::kUnavailable,
+          "提醒触发列表失败应透传 Store 错误");
+
+    InMemoryTimingTaskStore recurrence_store;
+    for (const auto frequency : {RecurrenceFrequency::kWeek, RecurrenceFrequency::kMonth,
+                                 RecurrenceFrequency::kYear}) {
+        const std::string task_id = "recurrence-" + std::to_string(static_cast<int>(frequency));
+        recurrence_store.AddTask({.id = task_id,
+                                  .start_at = 100,
+                                  .next_trigger_at = 100,
+                                  .recurrence = {.frequency = frequency},
+                                  .status = TimingTaskStatus::kActive});
+    }
+    DefaultTimingTaskService recurrence_service(recurrence_store, clock, ids);
+    const auto recurrence_advanced = recurrence_service.AdvanceDueTasks(100);
+    Check(recurrence_advanced.ok() && recurrence_advanced.value->materialized_instance_count == 3,
+          "周月年周期都应能计算下一次 occurrence");
+
+    InMemoryTimingTaskStore existing_fact_store;
+    existing_fact_store.AddTask({.id = "existing-facts", .next_trigger_at = 100});
+    existing_fact_store.AddReminderRule({.id = "existing-rule", .task_id = "existing-facts",
+                                         .status = ReminderRuleStatus::kActive});
+    existing_fact_store.AddInstance({.id = "existing-facts@100",
+                                    .task_id = "existing-facts",
+                                    .planned_at = 100,
+                                    .status = voicelife::timing::TimerInstanceStatus::kModified});
+    existing_fact_store.AddReminderTrigger({.id = "existing-facts@100/existing-rule",
+                                            .reminder_rule_id = "existing-rule",
+                                            .task_id = "existing-facts",
+                                            .instance_id = "existing-facts@100"});
+    DefaultTimingTaskService existing_fact_service(existing_fact_store, clock, ids);
+    const auto existing_facts = existing_fact_service.AdvanceDueTasks(100);
+    Check(existing_facts.ok() && existing_facts.value->materialized_instance_count == 0 &&
+              existing_facts.value->derived_trigger_count == 0,
+          "已有实例和提醒触发应保持幂等");
+
+    InMemoryTimingTaskStore completed_store;
+    completed_store.AddTask({.id = "completed-fact", .next_trigger_at = 100});
+    completed_store.AddInstance({.id = "completed-fact@100",
+                                 .task_id = "completed-fact",
+                                 .planned_at = 100,
+                                 .status = voicelife::timing::TimerInstanceStatus::kCompleted});
+    DefaultTimingTaskService completed_service(completed_store, clock, ids);
+    Check(completed_service.AdvanceDueTasks(100).ok() &&
+              completed_store.ListInstances("completed-fact").value->front().status ==
+                  voicelife::timing::TimerInstanceStatus::kCompleted,
+          "已完成实例不应被重新触发");
+
+    InMemoryTimingTaskStore timezone_failure_store;
+    timezone_failure_store.AddTask({.id = "timezone-failure",
+                                    .start_at = 100,
+                                    .next_trigger_at = 100,
+                                    .time_zone = "UTC",
+                                    .recurrence = {.frequency = RecurrenceFrequency::kDay}});
+    DefaultTimingTaskService timezone_failure_service(timezone_failure_store, clock, ids);
+    Check(timezone_failure_service.AdvanceDueTasks(100).status.code == ErrorCode::kUnavailable,
+          "不支持的周期时区应返回领域错误");
+
+    InMemoryTimingTaskStore trigger_overflow_store;
+    trigger_overflow_store.AddTask({.id = "trigger-overflow",
+                                    .next_trigger_at = std::numeric_limits<int64_t>::max() - 1,
+                                    .start_at = std::numeric_limits<int64_t>::max() - 1});
+    trigger_overflow_store.AddReminderRule({.id = "overflow-rule",
+                                            .task_id = "trigger-overflow",
+                                            .offset_minutes = std::numeric_limits<int>::max(),
+                                            .status = ReminderRuleStatus::kActive});
+    DefaultTimingTaskService trigger_overflow_service(trigger_overflow_store, clock, ids);
+    Check(trigger_overflow_service.AdvanceDueTasks(std::numeric_limits<int64_t>::max() - 1).status.code ==
+              ErrorCode::kInvalidArgument,
+          "提醒触发时间溢出应返回参数错误");
 
     return 0;
 }
