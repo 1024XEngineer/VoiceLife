@@ -217,6 +217,13 @@ export interface ActionStreamSubscription {
     readonly signal?: AbortSignal;
 }
 
+/** 关闭已完成动作流所需的服务端持久化作用域。 */
+export interface ActionStreamCloseScope {
+    readonly deviceId: DeviceId;
+    readonly reminderTriggerId: ReminderTriggerId;
+    readonly expiresAt: IsoDateTime;
+}
+
 /** 发布并订阅设备提醒动作命令的流端口。 */
 export interface ActionCommandStreamPort {
     /**
@@ -234,9 +241,10 @@ export interface ActionCommandStreamPort {
     /**
      * 从命令流中关闭指定动作。
      * @param actionId 动作标识。
+     * @param scope 持久化 Action 所属的设备、提醒窗口和截止时间。
      * @returns 关闭完成后兑现的 Promise。
      */
-    close(actionId: ActionId): Promise<void>;
+    close(actionId: ActionId, scope: ActionStreamCloseScope): Promise<void>;
 }
 
 /** 动作令牌中经过服务端签名保护的声明。 */
