@@ -330,6 +330,38 @@ int main() {
                   .status.code == ErrorCode::kInvalidArgument,
           "非 UTC 单次任务不能通过修改转为无法展开的周期任务");
 
+    timezone_store.AddTask({
+        .id = "calendar-legacy-zone",
+        .schedule_id = "schedule-legacy-zone",
+        .request_id = "request-legacy-zone",
+        .start_at = kStartAt,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kWeek},
+        .status = TimingTaskStatus::kActive,
+    });
+    Check(timezone_service.ListCalendarView({.range_start = kStartAt, .range_end = kStartAt + kDay}).status.code ==
+              ErrorCode::kUnavailable,
+          "历史非固定 UTC+8 周期任务应在日历查询阶段明确返回不可用");
+
+    InMemoryTimingTaskStore overflow_store;
+    FixedTimingIdGenerator overflow_ids;
+    DefaultTimingTaskService overflow_service(overflow_store, clock, overflow_ids);
+    overflow_store.AddTask({
+        .id = "calendar-overflow-zone",
+        .schedule_id = "schedule-overflow-zone",
+        .request_id = "request-overflow-zone",
+        .start_at = std::numeric_limits<int64_t>::max(),
+        .time_zone = "+08:00",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+        .status = TimingTaskStatus::kActive,
+    });
+    const auto overflow_calendar = overflow_service.ListCalendarView({
+        .range_start = std::numeric_limits<int64_t>::max() - 100,
+        .range_end = std::numeric_limits<int64_t>::max(),
+    });
+    Check(overflow_calendar.ok() && overflow_calendar.value->total == 0,
+          "UTC+8 偏移溢出时应返回空展开而不是产生非法时间戳");
+
     constexpr int64_t kLocalMidnightStartAt = 1785688200;  // 2026-08-03 00:30 +08:00
     InMemoryTimingTaskStore local_weekday_store;
     FixedTimingIdGenerator local_weekday_ids;
