@@ -89,6 +89,14 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         return Result<timing::TimingTask>::Success(found->second);
     }
 
+    Result<timing::TimerInstance> FindInstance(const std::string& instance_id) override {
+        const auto found = instances_.find(instance_id);
+        if (found == instances_.end() || found->second.deleted_at != 0) {
+            return Result<timing::TimerInstance>::Failure(ErrorCode::kNotFound, "instance not found");
+        }
+        return Result<timing::TimerInstance>::Success(found->second);
+    }
+
     Result<std::vector<timing::TimingTask>> ListTasks() override {
         if (!next_task_list_failure_.ok()) {
             Status failure = std::move(next_task_list_failure_);
@@ -180,6 +188,8 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
 
     void FailNextInstanceList(Status failure) { next_instance_list_failure_ = std::move(failure); }
 
+    void FailNextTriggerList(Status failure) { next_trigger_list_failure_ = std::move(failure); }
+
     Result<timing::ReminderTrigger> FindReminderTrigger(const std::string& trigger_id) const {
         const auto found = triggers_.find(trigger_id);
         if (found == triggers_.end()) {
@@ -248,6 +258,69 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         return Result<std::vector<timing::TimerInstance>>::Success(std::move(result));
     }
 
+    Result<std::vector<timing::ReminderTrigger>> ListTriggers() override {
+        if (!next_trigger_list_failure_.ok()) {
+            Status failure = std::move(next_trigger_list_failure_);
+            next_trigger_list_failure_ = Status::Ok();
+            return Result<std::vector<timing::ReminderTrigger>>::Failure(failure.code, failure.message);
+        }
+        std::vector<timing::ReminderTrigger> result;
+        result.reserve(triggers_.size());
+        for (const auto& [_, trigger] : triggers_) {
+            if (trigger.deleted_at == 0) {
+                result.push_back(trigger);
+            }
+        }
+        std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) { return left.id < right.id; });
+        return Result<std::vector<timing::ReminderTrigger>>::Success(std::move(result));
+    }
+
+    Status UpdateReminderTriggerWithEvent(const timing::ReminderTriggerUpdateWrite& update) override {
+        const auto existing = triggers_.find(update.trigger.id);
+        if (existing == triggers_.end()) {
+            return Status::Error(ErrorCode::kNotFound, "reminder trigger not found");
+        }
+        const bool is_snooze_event = update.event.event_type == timing::TimingEventType::kReminderSnoozed &&
+                                     update.event.status == timing::TimingEventStatus::kSnoozed;
+        const bool is_dismiss_event = update.event.event_type == timing::TimingEventType::kReminderDismissed &&
+                                      update.event.status == timing::TimingEventStatus::kDismissed;
+        if (update.trigger.id.empty() || update.event.event_id.empty() ||
+            update.event.reminder_trigger_id != update.trigger.id || update.event.task_id != update.trigger.task_id ||
+            (!is_snooze_event && !is_dismiss_event)) {
+            return Status::Error(ErrorCode::kConflict, "invalid reminder trigger event");
+        }
+        if (events_.contains(update.event.event_id)) {
+            return Status::Error(ErrorCode::kConflict, "reminder event exists");
+        }
+        if (existing->second.status != update.expected_status ||
+            existing->second.snooze_count != update.expected_snooze_count ||
+            existing->second.updated_at != update.expected_updated_at) {
+            return Status::Error(ErrorCode::kConflict, "reminder trigger has changed");
+        }
+        if (!next_trigger_update_failure_.ok()) {
+            Status failure = std::move(next_trigger_update_failure_);
+            next_trigger_update_failure_ = Status::Ok();
+            return failure;
+        }
+        auto next_triggers = triggers_;
+        auto next_events = events_;
+        next_triggers.at(update.trigger.id) = update.trigger;
+        next_events.emplace(update.event.event_id, update.event);
+        triggers_ = std::move(next_triggers);
+        events_ = std::move(next_events);
+        return Status::Ok();
+    }
+
+    void FailNextReminderTriggerUpdate(Status failure) { next_trigger_update_failure_ = std::move(failure); }
+
+    Result<timing::TimingEvent> FindTimingEvent(const std::string& event_id) const {
+        const auto found = events_.find(event_id);
+        if (found == events_.end()) {
+            return Result<timing::TimingEvent>::Failure(ErrorCode::kNotFound, "timing event not found");
+        }
+        return Result<timing::TimingEvent>::Success(found->second);
+    }
+
    private:
     std::optional<Status> next_update_failure_{};
     Status next_rule_list_failure_ = Status::Ok();
@@ -259,6 +332,9 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
     std::unordered_map<std::string, timing::TimerInstance> instances_;
     Status next_task_list_failure_ = Status::Ok();
     Status next_instance_list_failure_ = Status::Ok();
+    Status next_trigger_list_failure_ = Status::Ok();
+    Status next_trigger_update_failure_ = Status::Ok();
+    std::unordered_map<std::string, timing::TimingEvent> events_;
 };
 
 }  // namespace voicelife::test
