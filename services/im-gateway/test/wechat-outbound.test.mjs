@@ -37,11 +37,26 @@ function outboundAdapter(fetchImpl, overrides = {}) {
     });
 }
 
+function outboundMessage(overrides = {}) {
+    return {
+        delivery: { id: 'delivery-1' },
+        conversation: { externalConversationIdCiphertext: 'ciphertext:fixture-open-id' },
+        content: {
+            type: 'wechat_template',
+            templateId: 'fixture-template',
+            data: { thing1: { value: 'Reminder' } },
+        },
+        ...overrides,
+    };
+}
+
 test('configured WeChat outbound advertises template + H5 fallback and renders an opaque action URL', async () => {
     const adapter = outboundAdapter(async () => {
         throw new Error('fetch is not expected while rendering');
     });
     const capabilities = await adapter.capabilities({});
+    assert.equal((await adapter.resolve({ id: 'channel-1', platform: 'wechat_official' })).proactiveMessage, true);
+    assert.equal((await adapter.resolve({ id: 'channel-1', platform: 'feishu' })).proactiveMessage, false);
 
     assert.deepEqual(capabilities, {
         proactiveMessage: true,
@@ -80,6 +95,81 @@ test('WeChat outbound rejects invalid deployment configuration before making a r
     ]) {
         assert.throws(
             () => outboundAdapter(fetchImpl, override),
+            (error) => error.code === 'invalid_contract',
+        );
+    }
+});
+
+test('WeChat outbound rejects unsafe base URLs and template fields', () => {
+    const fetchImpl = async () => new globalThis.Response('{}');
+    for (const actionUiBaseUrl of [
+        'not-a-url',
+        'https://user:password@gateway.example/actions',
+        'https://gateway.example/actions?debug=1',
+        'https://gateway.example/actions#fragment',
+    ]) {
+        assert.throws(
+            () => outboundAdapter(fetchImpl, { actionUiBaseUrl }),
+            (error) => error.code === 'invalid_contract',
+        );
+    }
+    for (const templateFields of [
+        { title: '1title', body: 'body', time: 'time' },
+        { title: 'title', body: 'body', time: 'time-value' },
+    ]) {
+        assert.throws(
+            () => outboundAdapter(fetchImpl, { templateFields }),
+            (error) => error.code === 'invalid_contract',
+        );
+    }
+});
+
+test('WeChat outbound validates delivery scope and payload shape before network access', async () => {
+    const adapter = outboundAdapter(async () => {
+        throw new Error('network must not be called');
+    });
+    const capabilities = await adapter.capabilities({});
+    const account = { id: 'channel-1', platform: 'wechat_official' };
+    const validDelivery = {
+        channelAccountId: 'channel-1',
+        presentationType: 'template',
+        kind: 'schedule_receipt',
+        semanticPayload: scheduleReceiptIntent(),
+    };
+    assert.deepEqual(await adapter.render(validDelivery, account, capabilities, {}), {
+        type: 'wechat_template',
+        templateId: 'fixture-template',
+        data: {
+            thing1: { value: '日程已更新' },
+            thing2: { value: 'created a schedule' },
+            time3: { value: '2026-08-03T00:00:00.000Z' },
+        },
+    });
+    for (const delivery of [
+        { ...validDelivery, channelAccountId: 'channel-other' },
+        { ...validDelivery, presentationType: 'text' },
+    ]) {
+        await assert.rejects(
+            () => adapter.render(delivery, account, capabilities, {}),
+            (error) => error.code === 'capability_not_supported',
+        );
+    }
+    for (const content of [
+        null,
+        { type: 'text', text: 'invalid' },
+        { type: 'wechat_template', templateId: '', data: { thing1: { value: 'x' } } },
+        { type: 'wechat_template', templateId: 'fixture-template', data: {} },
+        { type: 'wechat_template', templateId: 'fixture-template', data: { '1bad': { value: 'x' } } },
+        { type: 'wechat_template', templateId: 'fixture-template', data: { thing1: { value: 1 } } },
+        {
+            type: 'wechat_template',
+            templateId: 'fixture-template',
+            data: { thing1: { value: 'x' } },
+            url: 'http://gateway.example/action',
+        },
+    ]) {
+        await assert.rejects(
+            () => adapter.send(outboundMessage({ content })),
             (error) => error.code === 'invalid_contract',
         );
     }
@@ -170,6 +260,73 @@ test('expired access tokens are refreshed once and platform failures keep retry 
         errorCode: 'wechat_-1',
     });
     assert.equal(responses.length, 0);
+});
+
+test('WeChat outbound classifies invalid recipients and missing platform message ids', async () => {
+    const invalidRecipient = outboundAdapter(
+        async () => {
+            throw new Error('network must not be called');
+        },
+        {
+            revealExternalUserId: async () => '   ',
+        },
+    );
+    assert.deepEqual(await invalidRecipient.send(outboundMessage()), {
+        accepted: false,
+        retryable: false,
+        errorCode: 'wechat_invalid_recipient',
+    });
+
+    const missingResponses = [
+        new globalThis.Response(JSON.stringify({ access_token: 'fixture', expires_in: 7200 })),
+        new globalThis.Response('{}'),
+    ];
+    const missingMessageId = outboundAdapter(async () => missingResponses.shift());
+    assert.deepEqual(await missingMessageId.send(outboundMessage()), {
+        accepted: false,
+        retryable: true,
+        errorCode: 'wechat_missing_msgid',
+    });
+});
+
+test('WeChat outbound exposes token and response failures without hiding transport errors', async () => {
+    const rejectedToken = outboundAdapter(async () => new globalThis.Response(JSON.stringify({ errcode: 45009 })));
+    assert.deepEqual(await rejectedToken.send(outboundMessage()), {
+        accepted: false,
+        retryable: true,
+        errorCode: 'wechat_45009',
+    });
+
+    const transportFailure = outboundAdapter(async (_url, init) => {
+        if (init?.method === 'POST') throw new Error('transport failed');
+        return new globalThis.Response(JSON.stringify({ access_token: 'fixture', expires_in: 7200 }));
+    });
+    await assert.rejects(() => transportFailure.send(outboundMessage()), /transport failed/u);
+
+    const serverFailure = outboundAdapter(async (_url, init) => {
+        if (init?.method === 'POST') return new globalThis.Response('{}', { status: 503 });
+        return new globalThis.Response(JSON.stringify({ access_token: 'fixture', expires_in: 7200 }));
+    });
+    assert.deepEqual(await serverFailure.send(outboundMessage()), {
+        accepted: false,
+        retryable: true,
+        errorCode: 'wechat_-1',
+    });
+});
+
+test('WeChat outbound rejects malformed and oversized platform responses', async () => {
+    for (const response of [
+        new globalThis.Response('not-json'),
+        new globalThis.Response('[]'),
+        new globalThis.Response(JSON.stringify({ errcode: 'bad' })),
+    ]) {
+        const adapter = outboundAdapter(async () => response);
+        await assert.rejects(() => adapter.send(outboundMessage()), /WeChat API/u);
+    }
+    const oversized = outboundAdapter(
+        async () => new globalThis.Response(JSON.stringify({ access_token: 'x' }).padEnd(65 * 1024, 'x')),
+    );
+    await assert.rejects(() => oversized.send(outboundMessage()), /exceeded the size limit/u);
 });
 
 test('WeChat access tokens are cached and permanent API rejection is not retried', async () => {

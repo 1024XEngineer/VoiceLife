@@ -11,6 +11,7 @@ function pageFixture() {
         show: async (token) => {
             calls.push(['show', token]);
             if (token === 'expired') throw new ImGatewayError('action_expired', 'expired');
+            if (token === 'missing') throw new ImGatewayError('action_not_found', 'missing');
             return {
                 actionId: 'action-must-not-render',
                 actions: ['acknowledge', 'snooze'],
@@ -23,6 +24,7 @@ function pageFixture() {
         },
         execute: async (input) => {
             calls.push(['execute', input]);
+            if (input.token === 'explode') throw new Error('unexpected action failure');
             return {
                 commandId: 'action-must-not-render',
                 operationId: 'operation-must-not-render',
@@ -85,6 +87,37 @@ test('H5 page returns a safe terminal view for an expired token', async () => {
     assert.equal(response.status, 410);
     assert.match(response.body, /链接已过期/u);
     assert.doesNotMatch(response.body, /expired|action_expired/u);
+});
+
+test('H5 page maps invalid and missing tokens to safe HTTP responses', async () => {
+    const { controller } = pageFixture();
+    const invalid = await controller.get('');
+    assert.equal(invalid.status, 400);
+    assert.match(invalid.body, /无法处理/u);
+    const missing = await controller.get('missing');
+    assert.equal(missing.status, 404);
+    assert.match(missing.body, /链接不可用/u);
+    assert.doesNotMatch(missing.body, /missing|action_not_found/u);
+});
+
+test('H5 submission accepts form-encoded params and keeps unexpected failures visible', async () => {
+    const { controller, calls } = pageFixture();
+    const nested = await controller.post('opaque-token', { action: 'snooze', 'params.minutes': '10' });
+    assert.equal(nested.status, 200);
+    assert.deepEqual(calls.at(-1), ['execute', { token: 'opaque-token', action: 'snooze', params: { minutes: 10 } }]);
+
+    const invalid = await controller.post('opaque-token', null);
+    assert.equal(invalid.status, 400);
+    const unexpected = controller.post('explode', { action: 'acknowledge' });
+    await assert.rejects(unexpected, /unexpected action failure/u);
+});
+
+test('H5 result page renders the acknowledge terminal branch without internal ids', async () => {
+    const { controller } = pageFixture();
+    const response = await controller.post('opaque-token', { action: 'acknowledge' });
+    assert.equal(response.status, 200);
+    assert.match(response.body, /设备已收到确认操作/u);
+    assert.doesNotMatch(response.body, /operation-must-not-render|action-must-not-render/u);
 });
 
 test('runtime H5 route validates an opaque token and repeated submission dispatches once', async () => {

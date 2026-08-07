@@ -49,3 +49,49 @@ test('action token configuration and claims are validated before use', async () 
         (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
     );
 });
+
+test('action token rejects invalid nonce sources and claim bounds', async () => {
+    const invalidNonce = new AesGcmActionTokenPort(secret, () => Buffer.alloc(11));
+    await assert.rejects(
+        () => invalidNonce.issue(claims),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+
+    const tokens = new AesGcmActionTokenPort(secret);
+    for (const invalidClaims of [
+        { ...claims, actionId: '' },
+        { ...claims, deliveryId: '' },
+        { ...claims, actionId: 'a'.repeat(257) },
+        { ...claims, deliveryId: 'd'.repeat(257) },
+        { ...claims, expiresAt: '2026-08-07T12:00:00Z' },
+    ]) {
+        await assert.rejects(
+            () => tokens.issue(invalidClaims),
+            (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+        );
+    }
+});
+
+test('action token rejects malformed envelopes and oversized fingerprints', async () => {
+    const tokens = new AesGcmActionTokenPort(secret);
+    for (const token of [
+        'v2.a.b.c',
+        'v1.a.b.c',
+        'v1.AAAAAAAAAAAAAAAA.AA.AAAAAAAAAAAAAAAAAAAAAA',
+        'v1.AAAAAAAAAAAAAAAA..AAAAAAAAAAAAAAAAAAAAAA',
+        'v1.AAAAAAAAAAAAAAAA.AA.AA',
+    ]) {
+        await assert.rejects(
+            () => tokens.verify(token),
+            (error) => error instanceof ImGatewayError && error.code === 'action_not_found',
+        );
+    }
+    await assert.rejects(
+        () => tokens.fingerprint(''),
+        (error) => error instanceof ImGatewayError && error.code === 'action_not_found',
+    );
+    await assert.rejects(
+        () => tokens.fingerprint('x'.repeat(4097)),
+        (error) => error instanceof ImGatewayError && error.code === 'action_not_found',
+    );
+});
