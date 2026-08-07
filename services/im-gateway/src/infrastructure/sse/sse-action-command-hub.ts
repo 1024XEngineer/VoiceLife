@@ -10,6 +10,7 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 interface ActionScope {
     readonly expiresAt: number;
+    readonly key: string;
 }
 
 /** 为设备 SSE 连接提供实时命令扇出、作用域隔离与生命周期关闭的 Hub。 */
@@ -17,6 +18,8 @@ export class SseActionCommandHub implements ActionCommandStreamPort {
     private readonly subscriptions = new Set<HubSubscription>();
 
     private readonly actionScopes = new Map<ActionId, ActionScope>();
+
+    private readonly scopeActions = new Map<string, Set<ActionId>>();
 
     private readonly closedActions = new Map<ActionId, number>();
 
@@ -28,7 +31,15 @@ export class SseActionCommandHub implements ActionCommandStreamPort {
             return Promise.resolve();
         }
         const key = scopeKey(command.deviceId, command.reminderTriggerId);
-        this.actionScopes.set(command.commandId, { expiresAt });
+        const previous = this.actionScopes.get(command.commandId);
+        if (previous !== undefined) this.removeActionFromScope(command.commandId, previous.key);
+        this.actionScopes.set(command.commandId, { expiresAt, key });
+        let actions = this.scopeActions.get(key);
+        if (actions === undefined) {
+            actions = new Set<ActionId>();
+            this.scopeActions.set(key, actions);
+        }
+        actions.add(command.commandId);
         for (const subscription of this.subscriptions) {
             if (subscription.key === key && expiresAt <= subscription.expiresAt) subscription.push(command);
         }
@@ -45,20 +56,37 @@ export class SseActionCommandHub implements ActionCommandStreamPort {
     /** {@inheritDoc ActionCommandStreamPort.close} */
     public close(actionId: ActionId, scope: ActionStreamCloseScope): Promise<void> {
         this.cleanExpiredActions();
-        this.actionScopes.delete(actionId);
+        const actionScope = this.actionScopes.get(actionId);
+        if (actionScope !== undefined) {
+            this.actionScopes.delete(actionId);
+            this.removeActionFromScope(actionId, actionScope.key);
+        }
         const expiresAt = Date.parse(scope.expiresAt);
         this.closedActions.set(actionId, Number.isFinite(expiresAt) ? expiresAt : Date.now() + 60_000);
         const key = scopeKey(scope.deviceId, scope.reminderTriggerId);
-        for (const subscription of [...this.subscriptions]) {
-            if (subscription.key === key) subscription.finish();
+        const pendingActions = this.scopeActions.get(key);
+        if (pendingActions === undefined || pendingActions.size === 0) {
+            for (const subscription of [...this.subscriptions]) {
+                if (subscription.key === key) subscription.finish();
+            }
         }
         return Promise.resolve();
+    }
+
+    private removeActionFromScope(actionId: ActionId, key: string): void {
+        const actions = this.scopeActions.get(key);
+        if (actions === undefined) return;
+        actions.delete(actionId);
+        if (actions.size === 0) this.scopeActions.delete(key);
     }
 
     private cleanExpiredActions(): void {
         const now = Date.now();
         for (const [actionId, scope] of this.actionScopes) {
-            if (scope.expiresAt <= now) this.actionScopes.delete(actionId);
+            if (scope.expiresAt <= now) {
+                this.actionScopes.delete(actionId);
+                this.removeActionFromScope(actionId, scope.key);
+            }
         }
         for (const [actionId, expiresAt] of this.closedActions) {
             if (expiresAt <= now) this.closedActions.delete(actionId);

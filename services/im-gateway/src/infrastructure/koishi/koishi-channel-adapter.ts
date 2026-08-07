@@ -1,5 +1,6 @@
 import { type Context, type Fragment } from '@koishijs/core';
 
+import type { ChannelAccount } from '../../domain/models.js';
 import type { ImChannelPort, ImSendAcceptance, OutboundImMessage } from '../../ports/external.js';
 import type { ImUnitOfWork } from '../../ports/repositories.js';
 import type { JsonValue } from '../../shared/types.js';
@@ -12,6 +13,7 @@ export interface KoishiBotFacade {
      * @returns 平台生成的消息标识。
      */
     sendPrivateMessage(input: {
+        readonly platform: ChannelAccount['platform'];
         readonly koishiBotId: string;
         readonly platformUserId: string;
         readonly content: JsonValue;
@@ -51,6 +53,7 @@ export class KoishiChannelAdapter implements ImChannelPort {
         if (account === undefined || account.status !== 'active' || account.koishiBotId.trim() === '') {
             return { accepted: false, retryable: false, errorCode: 'koishi_channel_account_unavailable' };
         }
+        const koishiBotId = account.koishiBotId.trim();
         const platformUserId = (
             await this.options.revealExternalUserId(message.conversation.externalConversationIdCiphertext)
         ).trim();
@@ -59,7 +62,8 @@ export class KoishiChannelAdapter implements ImChannelPort {
         }
         try {
             const result = await this.options.bot.sendPrivateMessage({
-                koishiBotId: account.koishiBotId,
+                platform: account.platform,
+                koishiBotId,
                 platformUserId,
                 content: message.content,
             });
@@ -70,6 +74,9 @@ export class KoishiChannelAdapter implements ImChannelPort {
         } catch (error) {
             if (error instanceof KoishiBotUnavailableError) {
                 return { accepted: false, retryable: true, errorCode: 'koishi_bot_unavailable' };
+            }
+            if (error instanceof KoishiBotPlatformMismatchError) {
+                return { accepted: false, retryable: false, errorCode: 'koishi_bot_platform_mismatch' };
             }
             throw error;
         }
@@ -83,6 +90,7 @@ export class KoishiContextBotFacade implements KoishiBotFacade {
 
     /** {@inheritDoc KoishiBotFacade.sendPrivateMessage} */
     public async sendPrivateMessage(input: {
+        readonly platform: ChannelAccount['platform'];
         readonly koishiBotId: string;
         readonly platformUserId: string;
         readonly content: JsonValue;
@@ -91,6 +99,7 @@ export class KoishiContextBotFacade implements KoishiBotFacade {
             this.context.bots[input.koishiBotId] ??
             this.context.bots.find((candidate) => candidate.sid === input.koishiBotId);
         if (bot === undefined || !bot.isActive) throw new KoishiBotUnavailableError();
+        if (bot.platform !== input.platform) throw new KoishiBotPlatformMismatchError();
         const messageIds = await bot.sendPrivateMessage(input.platformUserId, toKoishiFragment(input.content));
         return { platformMessageId: messageIds[0] ?? '' };
     }
@@ -100,6 +109,13 @@ class KoishiBotUnavailableError extends Error {
     public constructor() {
         super('The configured Koishi Bot is unavailable');
         this.name = 'KoishiBotUnavailableError';
+    }
+}
+
+class KoishiBotPlatformMismatchError extends Error {
+    public constructor() {
+        super('The configured Koishi Bot belongs to another platform');
+        this.name = 'KoishiBotPlatformMismatchError';
     }
 }
 

@@ -81,6 +81,24 @@ test('SSE action hub closes an action scope after result acknowledgement', async
     assert.deepEqual(await reconnect.next(), { done: true, value: undefined });
 });
 
+test('SSE action hub closes only one action while other actions share the window', async () => {
+    const hub = new SseActionCommandHub();
+    const stream = iterator(hub.subscribe(subscription()));
+    const first = command();
+    const second = command({ commandId: 'action-second', operationId: 'operation-second' });
+
+    await hub.publish(first);
+    await hub.publish(second);
+    assert.equal((await stream.next()).value.commandId, first.commandId);
+
+    await hub.close(first.commandId, subscription());
+    assert.equal((await stream.next()).value.commandId, second.commandId);
+
+    const closed = stream.next();
+    await hub.close(second.commandId, subscription());
+    assert.deepEqual(await closed, { done: true, value: undefined });
+});
+
 test('SSE action hub closes a persistently replayed action that was never published in this process', async () => {
     const hub = new SseActionCommandHub();
     const stream = iterator(hub.subscribe(subscription()));

@@ -54,6 +54,53 @@ test('VoiceLife Koishi plugin receives real Context events and calls Application
     assert.equal(posted.length, 1);
 });
 
+test('VoiceLife Koishi plugin isolates async handler failures and reports them', async () => {
+    const context = new Context();
+    const normalizeFailure = new Error('fixture normalize failure');
+    const postFailure = new Error('fixture post failure');
+    const errors = [];
+    let failNormalize = true;
+    const plugin = new VoiceLifeKoishiPlugin(
+        context,
+        {
+            platform: 'wechat_official',
+            capabilities: async () => ({}),
+            renderScheduleReceipt: async () => ({}),
+            renderNotification: async () => ({}),
+            normalizeInbound: async () => {
+                if (failNormalize) throw normalizeFailure;
+                return {};
+            },
+        },
+        {
+            postEvent: async () => {
+                throw postFailure;
+            },
+        },
+        (error, session) => errors.push({ error, platform: session.platform }),
+    );
+
+    plugin.start();
+    await context.emit({ platform: 'wechat_official' }, 'message', {
+        platform: 'wechat_official',
+        messageId: 'message-failure',
+    });
+    await new Promise((resolve) => globalThis.setImmediate(resolve));
+
+    failNormalize = false;
+    await context.emit({ platform: 'wechat_official' }, 'message', {
+        platform: 'wechat_official',
+        messageId: 'message-post-failure',
+    });
+    await new Promise((resolve) => globalThis.setImmediate(resolve));
+
+    assert.deepEqual(errors, [
+        { error: normalizeFailure, platform: 'wechat_official' },
+        { error: postFailure, platform: 'wechat_official' },
+    ]);
+    plugin.stop();
+});
+
 test('Koishi composition root owns a real Context and has idempotent start/close lifecycle', async () => {
     const ports = mockImGatewayPorts();
     const lifecycle = [];
@@ -127,6 +174,27 @@ test('Koishi composition root unregisters plugins when Context startup fails', a
         messageId: 'message-after-failure',
     });
     assert.equal(normalized, 0);
+});
+
+test('Koishi composition root rejects duplicate platform capabilities', () => {
+    const ports = mockImGatewayPorts();
+    const capability = {
+        platform: 'wechat_official',
+        capabilities: async () => ({}),
+        renderScheduleReceipt: async () => ({}),
+        renderNotification: async () => ({}),
+        normalizeInbound: async () => ({}),
+    };
+
+    assert.throws(
+        () =>
+            createKoishiGatewayRuntime({
+                dependencies: { ...ports, unitOfWork: new InMemoryImUnitOfWork() },
+                capabilities: [capability, { ...capability }],
+                revealExternalUserId: async (value) => value,
+            }),
+        (error) => error.code === 'invalid_contract',
+    );
 });
 
 test('Koishi composition root stops a Context when close races with startup', async () => {

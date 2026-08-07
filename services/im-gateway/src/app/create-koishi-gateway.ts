@@ -46,6 +46,7 @@ export interface KoishiGatewayRuntime {
  * @returns 托管 Koishi 生命周期的同进程 Runtime。
  */
 export function createKoishiGatewayRuntime(options: KoishiGatewayOptions): KoishiGatewayRuntime {
+    const capabilities = validateCapabilities(options.capabilities);
     const context = options.context ?? new Context();
     const actionStream = options.dependencies.actionStream ?? new SseActionCommandHub();
     const channel = new KoishiChannelAdapter({
@@ -58,7 +59,7 @@ export function createKoishiGatewayRuntime(options: KoishiGatewayOptions): Koish
         actionStream,
         imChannel: channel,
     });
-    const plugins = options.capabilities.map(
+    const plugins = capabilities.map(
         (capability) => new VoiceLifeKoishiPlugin(context, capability, runtime.application.platformEvents),
     );
     let started = false;
@@ -103,6 +104,20 @@ export function createKoishiGatewayRuntime(options: KoishiGatewayOptions): Koish
             return attempt;
         },
     };
+}
+
+function validateCapabilities(capabilities: readonly PlatformCapabilityPort[]): readonly PlatformCapabilityPort[] {
+    const platforms = new Set<PlatformCapabilityPort['platform']>();
+    for (const capability of capabilities) {
+        if (platforms.has(capability.platform)) {
+            throw new ImGatewayError(
+                'invalid_contract',
+                `Only one platform capability may be registered for ${capability.platform}`,
+            );
+        }
+        platforms.add(capability.platform);
+    }
+    return capabilities;
 }
 
 async function startKoishiContext(context: Context, plugins: readonly VoiceLifeKoishiPlugin[]): Promise<void> {

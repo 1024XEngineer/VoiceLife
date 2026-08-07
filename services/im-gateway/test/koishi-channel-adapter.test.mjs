@@ -76,6 +76,7 @@ test('Koishi channel adapter resolves the account and sends a direct message thr
     });
     assert.deepEqual(calls, [
         {
+            platform: 'wechat_official',
             koishiBotId: 'wechat:bot-fixture',
             platformUserId: 'openid-fixture',
             content: { type: 'text', text: 'Reminder fixture' },
@@ -172,6 +173,7 @@ test('Koishi Context facade selects an active real-runtime Bot and maps text pay
     const calls = [];
     const bot = {
         sid: 'wechat:bot-fixture',
+        platform: 'wechat_official',
         isActive: true,
         sendPrivateMessage: async (...args) => {
             calls.push(args);
@@ -184,6 +186,7 @@ test('Koishi Context facade selects an active real-runtime Bot and maps text pay
 
     assert.deepEqual(
         await facade.sendPrivateMessage({
+            platform: 'wechat_official',
             koishiBotId: bot.sid,
             platformUserId: 'openid-fixture',
             content: { type: 'text', text: 'Reminder fixture' },
@@ -227,6 +230,7 @@ test('Koishi Context facade preserves string content and serializes structured f
     const contents = [];
     const bot = {
         sid: 'wechat:bot-fixture',
+        platform: 'wechat_official',
         isActive: true,
         sendPrivateMessage: async (_userId, content) => {
             contents.push(content);
@@ -237,15 +241,39 @@ test('Koishi Context facade preserves string content and serializes structured f
     const facade = new KoishiContextBotFacade(context);
 
     await facade.sendPrivateMessage({
+        platform: 'wechat_official',
         koishiBotId: bot.sid,
         platformUserId: 'openid-fixture',
         content: 'plain text',
     });
     await facade.sendPrivateMessage({
+        platform: 'wechat_official',
         koishiBotId: bot.sid,
         platformUserId: 'openid-fixture',
         content: { type: 'card', title: 'Reminder fixture' },
     });
 
     assert.deepEqual(contents, ['plain text', '{"type":"card","title":"Reminder fixture"}']);
+});
+
+test('Koishi channel adapter rejects a Bot registered for another platform', async () => {
+    const context = new Context();
+    const bot = {
+        sid: 'wechat:bot-fixture',
+        platform: 'onebot',
+        isActive: true,
+        sendPrivateMessage: async () => ['unexpected'],
+    };
+    context.bots[bot.sid] = bot;
+    const adapter = new KoishiChannelAdapter({
+        unitOfWork: unitOfWork(),
+        revealExternalUserId: async () => 'openid-fixture',
+        bot: new KoishiContextBotFacade(context),
+    });
+
+    assert.deepEqual(await adapter.send(outboundMessage()), {
+        accepted: false,
+        retryable: false,
+        errorCode: 'koishi_bot_platform_mismatch',
+    });
 });
