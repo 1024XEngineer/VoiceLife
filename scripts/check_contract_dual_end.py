@@ -8,13 +8,18 @@ wire contract.  This check fails the build if:
 - any valid fixture does not carry the current schemaVersion;
 - any fixture on disk is missing from the manifest, or any manifest entry
   refers to a missing file (every fixture must be declared exactly once);
-- any declared fixture is not referenced by BOTH the C++ host tests and the
-  TypeScript tests (a static reference check, not an execution-coverage
-  proof), so a fixture change always breaks both ends together.
+- any declared fixture is not referenced by the C++ host tests (and by the
+  TypeScript tests for inbound contracts) — a static reference check, not an
+  execution-coverage proof, so a fixture change always breaks its consumers.
 
 The manifest (``contracts/im-gateway/v1/fixtures/manifest.json``) annotates
 each fixture's contract and expected outcome, instead of relying on the
-``*-invalid-*`` filename convention.
+``*-invalid-*`` filename convention.  Two optional top-level keys refine the
+checks: ``versionless`` lists contracts whose fixtures intentionally carry no
+``schemaVersion`` (e.g. the gateway→device ``notification-submission``
+response), and ``outbound`` lists gateway→device contracts consumed only by
+the C++ host tests (the TypeScript gateway generates them and is covered by
+runtime tests, not fixture parsers).
 """
 
 from __future__ import annotations
@@ -106,6 +111,10 @@ def load_manifest(path: Path) -> tuple[dict | None, list[str]]:
         return None, ["FAIL manifest 顶层必须是 JSON 对象"]
     if not isinstance(data.get("contracts"), dict):
         return None, ["FAIL manifest 缺少 contracts 对象"]
+    for key in ("versionless", "outbound"):
+        entries = data.get(key, [])
+        if not isinstance(entries, list) or not all(isinstance(entry, str) for entry in entries):
+            errors.append(f"FAIL manifest 的 {key} 必须是合同名列表")
     for contract, groups in data["contracts"].items():
         if not isinstance(groups, dict):
             errors.append(f"FAIL manifest 合同 {contract} 的条目必须是对象")
@@ -132,6 +141,8 @@ def check_fixtures(
     on_disk = {path.name for path in fixtures_dir.glob("*.json") if path.name != "manifest.json"}
     by_name, duplicates = manifest_fixture_names(manifest)
     declared = set(by_name)
+    versionless = set(manifest.get("versionless", []))
+    outbound = set(manifest.get("outbound", []))
 
     for name, first, second in sorted(duplicates):
         errors.append(f"FAIL fixture {name} 在 manifest 中重复声明（首次 {first}，再次 {second}）")
@@ -140,20 +151,20 @@ def check_fixtures(
     for name in sorted(declared - on_disk):
         errors.append(f"FAIL manifest 声明的 fixture 缺失: {name}")
 
-    for name, outcome in by_name.items():
-        path = fixtures_dir / name
-        if outcome == "valid" and path.is_file():
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if data.get("schemaVersion") != expected_version:
-                errors.append(f"FAIL 有效 fixture {name} 的 schemaVersion 与双端常量不一致")
-
     cpp_texts = [strip_comments(text) for text in cpp_test_sources]
     ts_text = strip_comments(ts_test_source)
-    for name in sorted(declared):
-        if not any(is_referenced(text, name) for text in cpp_texts):
-            errors.append(f"FAIL fixture {name} 未接入 C++ 主机测试")
-        if not is_referenced(ts_text, name):
-            errors.append(f"FAIL fixture {name} 未接入 TypeScript 测试")
+    for contract, groups in manifest.get("contracts", {}).items():
+        for outcome in ("valid", "invalid"):
+            for name in groups.get(outcome, []):
+                path = fixtures_dir / name
+                if outcome == "valid" and contract not in versionless and path.is_file():
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    if data.get("schemaVersion") != expected_version:
+                        errors.append(f"FAIL 有效 fixture {name} 的 schemaVersion 与双端常量不一致")
+                if not any(is_referenced(text, name) for text in cpp_texts):
+                    errors.append(f"FAIL fixture {name} 未接入 C++ 主机测试")
+                if contract not in outbound and not is_referenced(ts_text, name):
+                    errors.append(f"FAIL fixture {name} 未接入 TypeScript 测试")
 
     return errors
 

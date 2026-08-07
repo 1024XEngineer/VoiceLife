@@ -251,6 +251,31 @@ class ContractDualEndCheckTest(unittest.TestCase):
 
             shutil.rmtree(directory)
 
+    def test_versionless_valid_fixture_skips_version_check(self) -> None:
+        directory, manifest = make_fixture_tree()
+        try:
+            manifest["versionless"] = ["notification"]
+            target = Path(directory) / "fixtures" / "notification-strong.json"
+            target.write_text(json.dumps({"businessEventId": "event"}), encoding="utf-8")
+            errors = self.check(Path(directory) / "fixtures", manifest)
+            self.assertFalse(any("schemaVersion 与双端常量不一致" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
+    def test_outbound_contract_requires_only_cpp_coverage(self) -> None:
+        directory, manifest = make_fixture_tree()
+        try:
+            manifest["outbound"] = ["notification"]
+            ts = TS_TEST_SOURCE.replace("notification-weak.json", "ignored.json")
+            errors = self.check(Path(directory) / "fixtures", manifest, ts_source=ts)
+            self.assertFalse(any("notification-weak.json 未接入 TypeScript 测试" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
 
 if __name__ == "__main__":
     unittest.main()

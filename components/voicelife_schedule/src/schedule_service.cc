@@ -3,18 +3,32 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <mutex>
 #include <utility>
 
 #include "schedule_create_helpers.h"
 #include "schedule_mock_data.h"
+#include "schedule_operation_helpers.h"
+#include "schedule_operation_mock_data.h"
+#include "schedule_operation_query_helpers.h"
 #include "schedule_query_helpers.h"
 #include "schedule_time_rules.h"
+#include "schedule_undo_helpers.h"
 #include "schedule_update_helpers.h"
 
 namespace voicelife::schedule {
 namespace {
 
 constexpr std::size_t kMaximumEventLength = 100;
+
+/**
+ * @brief 返回模拟撤销流程使用的事务互斥量。
+ * @return 跨日程状态和操作记录提交共享的互斥量。
+ */
+std::mutex& MockUndoTransactionMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
 
 }  // namespace
 
@@ -234,6 +248,99 @@ QueryScheduleResult ScheduleService::query_schedule(const QueryScheduleCommand& 
     std::vector<Schedule> page(matches.begin() + static_cast<std::ptrdiff_t>(begin),
                                matches.begin() + static_cast<std::ptrdiff_t>(begin + count));
     return {.status = Status::Ok(), .schedules = std::move(page), .total = total, .error = {}};
+}
+
+RecordScheduleOperationResult ScheduleService::record_schedule_operation(
+    const RecordScheduleOperationCommand& command) {
+    // 健壮性判断
+    const Status validation = ValidateRecordScheduleOperationCommand(command);
+    if (!validation.ok()) return InvalidRecordScheduleOperationResult(validation.message);
+
+    // 组装实体
+    OperationRecord operation{
+        .id = 0,
+        .type = command.type,
+        .schedule_id = command.schedule_id,
+        .schedule_event = TrimScheduleText(command.schedule_event),
+        .operated_at = {},
+        .previous = command.previous,
+    };
+
+    // mock 存储
+    const Result<OperationRecord> recorded = AppendMockScheduleOperation(std::move(operation));
+    if (!recorded.ok()) {
+        return {
+            .status = recorded.status,
+            .operation = std::nullopt,
+            .error = recorded.status.message,
+        };
+    }
+
+    return {
+        .status = Status::Ok(),
+        .operation = recorded.value,
+        .error = {},
+    };
+}
+
+QueryRecentScheduleOperationResult ScheduleService::query_recent_schedule_operation() const {
+    const DateTime now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
+
+    // TODO(#121)：真实存储接入用户上下文后，由存储层按当前用户和十五分钟时间窗口查询。
+    std::vector<OperationRecord> operations = FilterRecentScheduleOperations(LoadMockScheduleOperations(), now);
+    return {
+        .status = Status::Ok(),
+        .operations = std::move(operations),
+        .error = {},
+    };
+}
+
+UndoScheduleOperationResult ScheduleService::undo_schedule_operation(const UndoScheduleOperationCommand& command) {
+    const Status validation = ValidateUndoScheduleOperationCommand(command);
+    if (!validation.ok()) return FailedUndoScheduleOperationResult(validation);
+
+    // mock 的日程和操作记录分属两个内存存储；该锁只保证并发 undo 不重复消费同一记录。
+    // 与其他日程写操作的跨存储原子性由下方 TODO(#121) 的真实事务解决。
+    std::lock_guard<std::mutex> transaction_lock(MockUndoTransactionMutex());
+    const DateTime now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
+    const Result<OperationRecord> target = FindUndoableMockScheduleOperation(command.operation_id, now);
+    if (!target.ok()) return FailedUndoScheduleOperationResult(target.status);
+
+    const Result<AppliedScheduleUndo> applied_result = ApplyMockScheduleUndo(*target.value);
+    if (!applied_result.ok()) return FailedUndoScheduleOperationResult(applied_result.status);
+    const AppliedScheduleUndo& applied = *applied_result.value;
+
+    const std::string event = applied.before.has_value()
+                                  ? applied.before->event
+                                  : (applied.after.has_value() ? applied.after->event : target.value->schedule_event);
+    OperationRecord undo_operation{
+        .id = 0,
+        .type = ScheduleOperationType::kUndo,
+        .schedule_id = target.value->schedule_id,
+        .schedule_event = event,
+        .operated_at = {},
+        .previous = applied.before,
+    };
+
+    // TODO(#121)：真实存储接入后，在同一事务内完成日程恢复、目标操作失效和 undo 记录写入。
+    const Result<OperationRecord> recorded =
+        InvalidateMockScheduleOperationAndAppendUndo(target.value->id, std::move(undo_operation), now);
+    if (!recorded.ok()) {
+        const Status rollback = RollbackMockScheduleUndo(applied);
+        if (!rollback.ok()) {
+            return FailedUndoScheduleOperationResult(
+                Status::Error(ErrorCode::kInternal, "撤销记录提交失败，且日程状态回滚失败"));
+        }
+        return FailedUndoScheduleOperationResult(recorded.status);
+    }
+
+    return {
+        .status = Status::Ok(),
+        .undone = true,
+        .operation = target.value,
+        .schedule = applied.after,
+        .error = {},
+    };
 }
 
 }  // namespace voicelife::schedule

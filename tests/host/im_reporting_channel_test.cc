@@ -14,6 +14,7 @@
 
 #include "support/test_support.h"
 #include "voicelife/contracts/im/notification_intent.h"
+#include "voicelife/contracts/im/reminder_action_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/im/im_credentials.h"
@@ -23,6 +24,7 @@
 using voicelife::contracts::im::NotificationIntent;
 using voicelife::contracts::im::ParseNotificationIntent;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
+using voicelife::contracts::im::ReminderActionResult;
 using voicelife::contracts::im::ScheduleReceiptIntent;
 using voicelife::im::ImCredentialProvider;
 using voicelife::im::ImHttpHeader;
@@ -54,6 +56,7 @@ class FakeTransport : public ImTransport {
     std::vector<ImHttpRequest> requests;
     ImTransportStatus next_status = ImTransportStatus::kSuccess;
     int next_status_code = 200;
+    std::string next_body;
 
     ImHttpResponse Post(const ImHttpRequest& request) override {
         requests.push_back(request);
@@ -61,6 +64,7 @@ class FakeTransport : public ImTransport {
         response.status = next_status;
         response.status_code = next_status_code;
         response.message = "fake";
+        response.body = next_body;
         return response;
     }
 };
@@ -175,6 +179,19 @@ void TestNotificationSuccess() {
     Check(request.path.find("/v1/notification-intents") == std::string::npos,
           "不得再使用旧的 notification-intents 路径");
     CheckBodyRoundTrips(request, intent);
+}
+
+void TestSubmitNotificationSurfacesResponseBody() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    const std::string submission = ReadFixture("notification-submission.json");
+    transport.next_body = submission;
+    ImReportingChannel channel(transport, credentials);
+
+    const ReportResult result = channel.SubmitNotification(MakeNotification());
+
+    Check(result.status == ReportStatus::kSubmitted, "受理成功状态必须保留");
+    Check(result.response_body == submission, "网关受理结果响应体必须原样透传");
 }
 
 void TestMissingCredentialIsLocal() {
@@ -298,6 +315,26 @@ void TestInvalidTransportConfigIsRejected() {
     Check(transport.requests.size() == 1, "传输配置错误仍应被通道映射");
 }
 
+void TestActionResultPathEncodesSegments() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    credentials.device_id = "dev/ice?x=1";
+    ImReportingChannel channel(transport, credentials);
+
+    ReminderActionResult result;
+    result.schemaVersion = "1";
+    result.operationId = "operation-1";
+    result.reminderTriggerId = "trigger-fixture";
+    result.status = "succeeded";
+    result.occurredAt = "2026-08-03T00:01:00.000Z";
+    const ReportResult report = channel.SubmitReminderActionResult(result, credentials.device_id, "cmd/1#x");
+
+    Check(report.status == ReportStatus::kSubmitted, "编码路径段后提交应成功");
+    Check(transport.requests.size() == 1, "编码路径段后应发起一次传输");
+    Check(transport.requests[0].path == "/v1/devices/dev%2Fice%3Fx%3D1/reminder-actions/cmd%2F1%23x/result",
+          "deviceId 与 commandId 必须按 path 段百分号编码，不得改写路径");
+}
+
 void TestGatewayUrlScheme() {
     Check(voicelife::im::IsHttpsGatewayUrl("https://im.example.com"), "https 基地址必须通过");
     Check(!voicelife::im::IsHttpsGatewayUrl("http://im.example.com"), "http 基地址必须拒绝");
@@ -312,6 +349,7 @@ void TestGatewayUrlScheme() {
 int main() {
     TestScheduleReceiptSuccess();
     TestNotificationSuccess();
+    TestSubmitNotificationSurfacesResponseBody();
     TestMissingCredentialIsLocal();
     TestDeviceIdMismatchIsLocal();
     TestCredentialRejectedByServer();
@@ -319,6 +357,7 @@ int main() {
     TestInvalidIntentRejectedLocally();
     TestStatusCodeMapping();
     TestInvalidTransportConfigIsRejected();
+    TestActionResultPathEncodesSegments();
     TestGatewayUrlScheme();
     return 0;
 }

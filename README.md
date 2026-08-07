@@ -2,17 +2,16 @@
 
 <h1>VoiceLife 声活</h1>
 
-<p><strong>语音优先、IM 辅助的本地日程与提醒系统</strong></p>
+<p><strong>面向本地日程、提醒、存储、语音和消息渠道的设备端系统</strong></p>
 
 <p>
-把安排说出来。本地可靠记住，到点通过语音和消息把你叫回来。
+几个模块一起交付：日程负责记录安排，定时任务负责触发，设备运行时负责组装，语音、存储和 IM 通过适配器接入。
 </p>
 
 <p>
 <a href="#快速开始">快速开始</a> ·
-<a href="#架构">架构</a> ·
-<a href="#适配器">适配器</a> ·
-<a href="#开发工具">开发工具</a> ·
+<a href="#模块边界">模块边界</a> ·
+<a href="#开发方式">开发方式</a> ·
 <a href="./CONTRIBUTING.md">参与开发</a>
 </p>
 
@@ -25,125 +24,84 @@
 
 </div>
 
-<details>
-<summary>查看图片</summary>
 <p align="center">
-  <img src="./docs/assets/concept.png" alt="VoiceLife 声活设备概念图" width="720" /><br />
-  <sub>产品概念图（非当前交付固件）</sub>
+  <img src="./docs/assets/concept.png" alt="VoiceLife 声活产品概念图" width="47%" />
+  <img src="./docs/assets/牛牛_三视图总图_厚牛头.png" alt="牛牛设备三视图" width="47%" />
 </p>
-</details>
 
 > [!IMPORTANT]
-> 当前仓库交付的是可编译、可串联、可验证的架构主干。日程创建链路已经通过内存适配器跑通；真实音频、XRobot、持久化和 IM 平台适配器仍待后续 Issue 填实，不能当作可用产品固件。
+> 当前仓库是可编译、可测试的设备端架构主干，不是已经完成所有外部接入的成品。日程和定时任务可以用内存适配器串联；真实设备存储、语音服务和 IM 平台仍按各自 Issue 验收。
 
-## SQLite 不是“能跑就算过”
+## 项目在解决什么问题
 
-我们在目标 ESP32-S3 上验证了 SQLite 与实际文件系统的事务行为，而不是只跑一条增删改查。结果很明确：`SQLite 3.53.4 + FATFS/Wear Levelling` 在四轮外部 EN 复位实验中通过；`LittleFS + SQLite` 的三组配置都在显式回滚后留下表记录、丢失索引记录，因此被否决。
+VoiceLife 把安排、触发和通知拆开，让它们可以分别演进：
 
-当前合格基线固定为 4 KiB FATFS/WL 扇区、`journal_mode=DELETE`、`synchronous=EXTRA`、`psow=0`、单连接和单写者。四轮平均提交耗时的中位数是 `1,162,373 us`，最慢一次 `1,518,898 us`，所以数据库提交不会进入音频实时路径。
+- 日程记录“要做什么”。
+- 定时任务记录“什么时候触发哪一次”。
+- 存储模块负责原子写入、重启恢复和健康指标。
+- 语音与 IM 模块把外部平台转换成稳定的领域事件。
+- Runtime 只负责把选定的实现组装起来，不承载业务规则。
 
-> [!NOTE]
-> 当前故障注入是串口控制线触发的外部 EN 复位，设备报告 `rst:0x1 (POWERON)`。它证明了重启恢复，不等于真实电源轨断电；断电、棕断、满容量和长期磨损仍在正式 Adapter 的验收清单中。
-
-这里真正可复用的能力不是“ESP32 能运行 SQLite”，而是一套面向目标板的存储资格测试：显式回滚、跨表原子提交、表/索引一致性、关闭重开、故障点复位、资源水位，以及可恢复的 Flash 备份与回读校验。完整步骤见 [SQLite 实板验证与 Flash 恢复手册](./docs/engineering/board-storage-validation.md)，去掉 VoiceLife 业务表后的通用版本维护在 [`esp32-sqlite-durability-lab`](https://github.com/ZhaoXingPeng/esp32-sqlite-durability-lab)。
+这套拆分是为了让不同模块可以并行开发，也让某个外部平台暂时不可用时不影响其他模块的主机测试。
 
 ## 快速开始
 
-需要 CMake，以及构建设备固件时所需的 ESP-IDF 6.0.2。Ninja 可选；未安装时主机测试会使用 CMake 默认生成器。
+需要 CMake。构建设备固件时还需要 ESP-IDF 6.0.2；Ninja 可选。
 
 ```bash
-# 提交前完整门禁，不需要 ESP-IDF
+# 提交前完整检查，不需要 ESP-IDF
 ./scripts/run_pre_submit_checks.sh
 
-# TDD 内循环：只运行当前模块测试
+# 运行指定的主机测试
 ./scripts/run_host_tests.sh -R schedule_policy_test
 
-# 查看并校验可用适配器 Profile
+# 查看和校验固件 Profile
 python3 scripts/firmware.py list
 python3 scripts/firmware.py validate
 ```
 
-构建 ESP32-S3 架构固件：
+IM Gateway 的 PostgreSQL 契约测试使用仓库根目录的 Compose 配置：
+
+```bash
+docker compose up -d postgres
+pnpm --dir services/im-gateway test
+```
+
+没有 PostgreSQL 时，相关契约测试会跳过，其余测试仍可运行。
+
+构建设备固件：
 
 ```bash
 source /path/to/esp-idf-v6.0.2/export.sh
 python3 scripts/firmware.py build esp32s3-dev
-```
-
-需要合并烧录镜像时：
-
-```bash
 python3 scripts/firmware.py package esp32s3-dev
 ```
 
-## 架构
+## 模块边界
 
-VoiceLife 是一个 ESP-IDF 组件化模块单体。业务核心使用纯 C++，外部世界只能通过 Port 进入；XRobot、微信、飞书、Koishi、网络库、存储格式和具体板卡都留在 Adapter 一侧。
+VoiceLife 使用 ESP-IDF 组件化模块单体。核心代码使用 C++，外部 SDK、网络库、平台格式和板卡驱动只能通过 Port 或 Adapter 进入。
 
-![架构图](./docs/assets/架构图.png)
-
-依赖只有一个方向：适配器依赖用例，用例依赖领域，领域不反向认识 ESP-IDF、HTTP 或平台 SDK。`scripts/check_architecture.sh` 会在 CI 中检查这条规则。
-
-### 五个刻意做出的设计
-
-| 设计 | 解决的问题 |
-| --- | --- |
-| **日程与定时任务分开建模** | Schedule 回答“安排了什么”，TimingTask 回答“何时触发哪一次”；周期、推迟不会污染日程主记录 |
-| **一次 Port 完成原子写入** | 创建日程时，Schedule 与 TimingTask 要么一起成功，要么都不出现；底层可以从内存平滑迁移到 SQLite 或其他本地库 |
-| **IM 只接收语义意图** | 核心发送 `schedule.created`、`reminder.due`，不出现“微信模板 ID”或“飞书卡片 JSON” |
-| **能力声明代替平台分支** | 适配器声明 `rich-card`、`interactive-action`、`delivery-receipt` 等能力，配置选择实现，核心不写 `if platform == wechat` |
-| **小智放在防腐层外侧** | 逐步迁移小智的音频、唤醒和 WebSocket 能力，不把它的全局状态机和板型矩阵带进业务核心 |
-
-## 组件
-
-| Component | 职责 | 允许依赖 |
+| 组件 | 负责什么 | 主要依赖 |
 | --- | --- | --- |
-| `voicelife_contracts` | 错误、结果和工具调用公共契约 | 无 |
-| `voicelife_schedule` | 日程实体、命令、结果和服务接口骨架 | contracts |
+| `voicelife_contracts` | Status、Result、事件和跨模块公共契约 | 无 |
+| `voicelife_schedule` | 日程实体、命令、结果和服务接口 | contracts |
 | `voicelife_timing` | 定时任务、实例和提醒规则 | contracts |
-| `voicelife_mcp` | Tool Schema、注册中心与调用路由 | contracts |
-| `voicelife_voice` | 会话、音频和工具调用编排 | contracts |
-| `voicelife_storage_sqlite` | SQLite 生命周期、命名语句、事务回执与健康指标底座 | contracts |
-| `voicelife_runtime` | 唯一组装入口，不承载业务规则 | contracts、mcp、voice |
+| `voicelife_storage_sqlite` | SQLite 生命周期、事务和健康指标 | contracts |
+| `voicelife_im` | 平台无关的 IM 事件、上报和传输契约 | contracts |
+| `voicelife_voice` | 语音会话、音频/传输 Port 和 Provider Registry | contracts |
+| `voicelife_linx` | Linx/XRobot 协议和 Provider Adapter | contracts、voice |
+| `voicelife_linx_esp` | ESP32-S3 WSS/TLS Transport 和分片重组 | contracts、linx |
+| `voicelife_audio_esp` | ESP32-S3 音频 Profile、探针和设备端 Port | contracts、voice |
+| `voicelife_mcp` | 工具 Schema、注册中心和调用路由 | contracts |
+| `voicelife_runtime` | 唯一组装入口 | contracts、mcp、voice、linx |
 
-### 文件树
+依赖方向只有一条：适配器依赖用例，用例依赖领域，领域不认识 ESP-IDF、HTTP 或平台 SDK。CI 会运行 `scripts/check_architecture.sh` 检查组件清单、命名空间和依赖图。
 
-```text
-VoiceLife/
-├── .github/
-│   ├── ISSUE_TEMPLATE/          # Bug、功能、设计和工程任务入口
-│   ├── workflows/ci.yml         # 提交、主机测试、架构和 ESP-IDF 构建检查
-│   └── pull_request_template.md # PR 结论、验证、风险和 Review 清单
-├── components/
-│   ├── voicelife_contracts/     # 最小公共契约，不放业务工具箱
-│   ├── voicelife_schedule/      # 日程领域结构与服务接口骨架
-│   ├── voicelife_timing/        # 定时任务与触发规则
-│   ├── voicelife_mcp/           # MCP 工具注册中心
-│   ├── voicelife_voice/         # 语音会话协调器与 Port
-│   ├── voicelife_storage_sqlite/ # SQLite 单连接、事务协议与健康指标底座
-│   └── voicelife_runtime/       # Composition Root
-├── config/
-│   ├── adapter-profile.schema.json
-│   └── profiles/                # 板卡与 Adapter 选择，不保存凭据
-├── docs/
-│   ├── adr/                     # 一次只记录一个重大架构决定
-│   ├── architecture/            # 架构规范与小智迁移方案
-│   ├── engineering/             # 协作、Review 和提交规范
-│   └── assets/                  # README 素材
-├── main/                        # ESP-IDF app_main，仅启动 Runtime
-├── scripts/                     # 构建、诊断、边界检查与实板恢复工具
-├── tests/
-│   ├── board/                   # SQLite 等必须上板验证的故障探针
-│   ├── host/                    # 按组件拆分的纯 C++ 单元与串联测试
-│   └── python/                  # 构建工具与错误输入测试
-├── third_party/licenses/        # 迁移代码与工具的第三方许可原文
-├── CMakeLists.txt               # ESP-IDF 工程入口
-└── sdkconfig.defaults           # 受版本控制的公共默认配置
-```
+## 开发方式
 
-## 适配器
+每个模块先写稳定契约，再接入真实实现。主机测试覆盖状态、错误和跨模块串联；设备测试只验证设备才能证明的内容，例如分区恢复、I2S 生命周期和资源水位。
 
-Profile 把“这次固件使用哪些实现”写成可审查配置：
+Profile 描述一次固件选择哪些实现，不保存凭据：
 
 ```json
 {
@@ -158,48 +116,47 @@ Profile 把“这次固件使用哪些实现”写成可审查配置：
 }
 ```
 
-当前已经实现 Profile Schema 校验、`sdkconfig` 选择和按 Profile 构建；Runtime 仍使用 `scaffold`、内存存储和禁用 IM 的固定装配。编译期工厂注册、能力核对和凭据引用解析尚未实现，真实 Adapter 接入前必须补齐，不能把 Profile 文件存在等同于运行时已经支持热切换。
+凭据只使用 `secret://`、`nvs://` 或 `env://` 引用，不写进 Profile、日志或 Git。新增平台时，实现 Adapter、声明能力、补契约测试，再修改部署配置；业务模块不写平台判断。
 
-例如接入飞书时，日程和提醒代码不需要修改。新增适配器实现、声明能力、补契约测试，再在部署配置中把 `driver` 从 `koishi-wechat` 换成 `koishi-feishu`。凭据只使用 `secret://`、`nvs://` 或 `env://` 引用，不进入 Profile 和 Git。
+## 当前状态
 
-完整规则见 [架构与适配器设计规范](./docs/architecture/design-guidelines.md)。
-
-## 开发工具
-
-从 [`78/xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32) 迁移并收敛了两项工具能力：
-
-- `scripts/firmware.py`：Profile 校验、ESP-IDF 构建、合并镜像和可追溯打包。
-- `scripts/audio_debug_server.py`：抓取设备通过 UDP 发出的原始 PCM，保存为 WAV，供音频链路诊断。
-- `scripts/sqlite_board_probe.py`：按分区表备份、写入非活动槽、注入 EN 复位、逐段回读校验并恢复原始数据。
-
-上游来源和改造范围记录在 [THIRD_PARTY.md](./THIRD_PARTY.md)，后续源码迁移策略见 [小智能力迁移方案](./docs/architecture/xiaozhi-migration.md)。
-
-## 当前进度
-
-| 能力 | 状态 | 说明 |
+| 方向 | 状态 | 说明 |
 | --- | --- | --- |
-| 组件边界与依赖检查 | 已完成 | 主机与 CI 可验证 |
-| 分组件 TDD 主机测试 | 已完成 | 6 个单元测试与 1 个串联测试，可按名称筛选 |
-| MCP → 日程 → 定时任务串联 | 已完成 | 使用内存适配器，仅证明架构 |
-| ESP32-S3 固件构建 | 已完成 | ESP-IDF 6.0.2 已验证 |
-| SQLite 存储资格测试 | 已完成基线验证 | FATFS/WL 四轮通过；LittleFS 路线已否决；真实断电与寿命测试待补 |
-| Profile 驱动 Runtime 装配 | 待开发 | 当前只完成 Schema、构建选择和设计契约 |
-| 小智音频与 XRobot Adapter | 待开发 | 从上游能力逐段迁移 |
-| 持久化 Adapter | 待开发 | 只允许基于已验证底座实现，并复用单连接、迁移和事务生命周期 |
-| 微信 / 飞书 IM Adapter | 待开发 | 先稳定平台无关语义契约 |
-| 真机闭环与用户试用 | 待开发 | 属于 MS3 功能 Issue |
+| 组件边界和依赖检查 | 已完成 | 主机与 CI 可验证 |
+| 日程模块 | 主机契约已覆盖 | 已支持创建、查询、修改、取消和撤销，持久化接入仍在推进 |
+| 定时任务模块 | 主机契约已覆盖 | 已支持创建、更新、取消和提醒规则，注册与唯一性语义已固定 |
+| SQLite 存储资格测试 | 已完成基线 | FATFS/WL 路线通过，断电和长期磨损仍待补测 |
+| IM Gateway | 开发中 | 已接入 PostgreSQL 持久化与重启恢复，平台渠道仍在补齐 |
+| 语音、音频和 Linx 适配器 | 开发中 | WSS Transport 可构建并有主机契约，真实云端与声学闭环未完成 |
+| Profile 驱动 Runtime | 开发中 | Schema 和构建选择已有，完整运行时切换继续补齐 |
+| 真机闭环与用户试用 | 未开始 | 进入对应功能 Issue 后再验收 |
 
-## 文档
+## 仓库结构
+
+```text
+VoiceLife/
+├── components/       # C++ 组件
+├── config/            # Profile 和 Schema，不放凭据
+├── docs/              # 架构、工程和协作文档
+├── main/              # ESP-IDF app_main
+├── scripts/           # 构建、测试、检查和设备恢复工具
+├── services/          # 设备外的服务，例如 IM Gateway
+├── tests/              # 主机、Python 和必须上板的测试
+└── third_party/       # 第三方源码和许可证
+```
+
+README 只保留项目入口和跨模块信息。语音架构、语音迁移研究、官方资料核对和实板细节分别维护在对应文档与研究目录中，避免把某一个模块的过程材料当成整个项目的产品说明。
+
+## 相关入口
 
 - [架构与适配器设计规范](./docs/architecture/design-guidelines.md)
-- [ADR 0001：采用组件化模块单体与 Ports/Adapters](./docs/adr/0001-component-modular-hexagonal.md)
-- [ADR 0002：采用能力驱动的适配器 Profile](./docs/adr/0002-capability-driven-adapters.md)
-- [小智能力迁移方案](./docs/architecture/xiaozhi-migration.md)
-- [提交描述规范](./docs/engineering/commit-convention.md)
-- [协同开发规范](./docs/engineering/collaboration.md)
+- [ADR 0001：组件化模块单体与 Ports/Adapters](./docs/adr/0001-component-modular-hexagonal.md)
+- [ADR 0002：能力驱动的适配器 Profile](./docs/adr/0002-capability-driven-adapters.md)
 - [SQLite 实板验证与 Flash 恢复手册](./docs/engineering/board-storage-validation.md)
+- [协同开发规范](./docs/engineering/collaboration.md)
+- [提交描述规范](./docs/engineering/commit-convention.md)
 - [参与开发](./CONTRIBUTING.md)
 
 ## 致谢
 
-VoiceLife 的设备侧语音能力建立在小智项目的工程经验之上。感谢 [`78/xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32) 及其贡献者开放音频、唤醒、协议和构建工具实现。
+设备侧部分实现参考了 [`78/xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32) 的音频、协议和构建经验。具体迁移范围和许可证记录在 [THIRD_PARTY.md](./THIRD_PARTY.md)。

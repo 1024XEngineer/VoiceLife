@@ -6,9 +6,9 @@ VoiceLife 迁移小智已经验证且难以重写正确的设备能力，但不�
 
 | 小智能力 | 决定 | VoiceLife 落点 | 原因 |
 | --- | --- | --- | --- |
-| Audio Codec / Audio Service | 迁移 | `AudioDevicePort` Adapter | I2S、Codec、Opus 和队列已有大量硬件细节 |
+| Audio Codec / Audio Service | 迁移 | `AudioInputPort` / `AudioOutputPort` / `CodecStrategy` | I2S、Codec、Opus 和队列已有大量硬件细节 |
 | ESP-SR AFE / Wake Word | 迁移 | Audio Adapter 子能力 | 唤醒、AEC 和模型配置适合复用 |
-| WebSocket Protocol | 迁移并包裹 | `SpeechProviderPort` Adapter | 保留 XRobot 协议兼容，不让协议消息进入 Voice 核心 |
+| WebSocket Protocol | 迁移并包裹 | `VoiceTransportPort` + `SpeechProviderAdapter` | 保留 XRobot 协议兼容，不让协议消息进入 Voice 核心 |
 | MCP `tools/list` / `tools/call` | 参考协议，重写边界 | `voicelife_mcp` | 注册和路由可复用思想，业务 Tool 与状态重新实现 |
 | Settings / OTA 基础能力 | 后续迁移 | Platform Adapter | 先审计凭据、升级签名和回滚契约 |
 | Board 注册与 `config.json` | 收敛迁移 | Adapter Profile | 保留配置构建，移除 138 块板历史矩阵 |
@@ -19,6 +19,8 @@ VoiceLife 迁移小智已经验证且难以重写正确的设备能力，但不�
 ## 已迁移工具
 
 调研基线为 `78/xiaozhi-esp32@dd99da00dc4c89ed4ab07fcec038c03f13f4de50`。
+
+迁移时同时对照历史实验包 `voicelife-pcb-native-mvp`。上游小智回答“通用能力原本怎么实现”，PCB MVP 回答“这块板上改过什么、哪些测试真的跑过”。两者冲突时不凭文档猜：先读实际源码和测试 manifest，再在当前 ESP32-S3 Profile 上复测。历史包不是构建依赖，也不允许通过相对路径参与正式固件编译。
 
 - `scripts/firmware.py`：从小智 Profile 构建思路收敛而来，支持校验、构建、合并和带 manifest 打包。
 - `scripts/audio_debug_server.py`：从 UDP PCM 抓取工具改写而来，显式配置采样率、声道、位宽和输出。
@@ -36,6 +38,8 @@ VoiceLife 迁移小智已经验证且难以重写正确的设备能力，但不�
 
 每一步单独 Issue、单独 PR，可以构建、回退和在真机上验收。迁移 PR 必须列出上游 commit、文件清单、改写点、许可和未迁移依赖。
 
+旧 PCB MVP 的优先参考入口为 `firmware/main/audio/audio_service.*`、`firmware/main/audio/engines/afe_audio_engine.*`、`firmware/main/protocols/websocket_protocol.*` 和 `test-evidence/*/manifest.json`。只迁移被当前板卡 Profile 使用的代码；`Application`、显示资源、多板条件编译和历史凭据读取路径不进入新主干。
+
 ## 对照测试
 
 - 同一 PCM 输入下，编码格式、采样率、帧长一致。
@@ -45,3 +49,5 @@ VoiceLife 迁移小智已经验证且难以重写正确的设备能力，但不�
 - 资源预算记录固件大小、IRAM/DRAM/PSRAM、任务栈和实时丢帧。
 
 不满足这些检查时，迁移只算“代码搬过来”，不算能力迁移完成。
+
+Port、状态、Linx 协议映射和 ESP32-S3 真机验收顺序见 [语音模块子架构](./voice-subarchitecture.md)。

@@ -1,4 +1,5 @@
 export * from './app/create-im-gateway.js';
+export * from './app/create-postgres-gateway.js';
 export * from './app/mock-scenario.js';
 export * from './application/api.js';
 export * from './application/services.js';

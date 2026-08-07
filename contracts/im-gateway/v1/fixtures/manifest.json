@@ -1,5 +1,7 @@
 {
   "schemaVersion": "1",
+  "versionless": ["notification-submission"],
+  "outbound": ["notification-submission", "reminder-action-command"],
   "contracts": {
     "notification": {
       "valid": [
@@ -32,6 +34,48 @@
       "invalid": [
         "reminder-action-result-invalid-status.json",
         "reminder-action-result-invalid-time.json"
+      ]
+    },
+    "notification-submission": {
+      "valid": [
+        "notification-submission.json",
+        "notification-submission-weak.json"
+      ],
+      "invalid": [
+        "notification-submission-invalid-actionstream-field.json",
+        "notification-submission-invalid-actionstream-shape.json",
+        "notification-submission-invalid-deliveries.json",
+        "notification-submission-invalid-delivery-binding.json",
+        "notification-submission-invalid-delivery-id.json",
+        "notification-submission-invalid-delivery-shape.json",
+        "notification-submission-invalid-delivery-status.json",
+        "notification-submission-invalid-not-object.json",
+        "notification-submission-invalid-status.json",
+        "notification-submission-invalid-time.json",
+        "notification-submission-missing-field.json"
+      ]
+    },
+    "reminder-action-command": {
+      "valid": [
+        "reminder-action-command.json"
+      ],
+      "invalid": [
+        "reminder-action-command-invalid-acknowledge-params.json",
+        "reminder-action-command-invalid-action.json",
+        "reminder-action-command-invalid-not-object.json",
+        "reminder-action-command-invalid-occurred-at.json",
+        "reminder-action-command-invalid-params-fraction.json",
+        "reminder-action-command-invalid-params-minutes.json",
+        "reminder-action-command-invalid-params-overflow.json",
+        "reminder-action-command-invalid-params-type.json",
+        "reminder-action-command-invalid-time.json",
+        "reminder-action-command-invalid-version.json",
+        "reminder-action-command-missing-binding.json",
+        "reminder-action-command-missing-correlation.json",
+        "reminder-action-command-missing-device.json",
+        "reminder-action-command-missing-field.json",
+        "reminder-action-command-missing-operation.json",
+        "reminder-action-command-missing-trigger.json"
       ]
     }
   }
