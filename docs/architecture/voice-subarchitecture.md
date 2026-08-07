@@ -1,7 +1,7 @@
 # 语音模块子架构
 
-一句话结论：VoiceLife 的语音模块采用“实时音频数据面 + 会话控制面 + Provider 防腐层”的三段式结构，ESP32-S3 是本期唯一主验证平台，Linx XRobot WebSocket 是首个真实 Provider，小智协议作为可回退迁移来源。
-下一步动作：按 TDD 实现 ESP32-S3 的 PCM I2S 数据面，再接入已核对的 Codec/PCA9557 板级控制，最后才打开 AFE、Opus 和真实 Linx 云端闭环；其他 MCU 只进入 Profile 与能力调研，不提前宣称可用。
+一句话结论：VoiceLife 的语音模块采用“实时音频数据面 + 会话控制面 + Provider 防腐层”的三段式结构，ESP32-S3 是本期唯一主验证平台；#113 已把 Profile 驱动的 PCM Audio Port 跑到非活动 OTA 槽并完成可回退验证。
+下一步动作：把 Audio Port 接入 Linx WSS 会话，再做 Opus、受控声学录放和有 playback reference 证据的 AFE/AEC；其他 MCU 只进入 Profile 与能力调研，不提前宣称可用。
 
 ## 1. 为什么单独拆语音
 
@@ -47,18 +47,24 @@ VoiceSession -> Application / MCP（只交稳定语义）
 
 旧 MVP 自带的 `audio/README.md` 写的是低成本 AEC 配置，但同一份源码实际创建的是 `AFE_MODE_HIGH_PERF` 和 `AEC_MODE_VOIP_HIGH_PERF`。这类说明与代码不一致的参数不进入新 Profile；迁移 PR 必须记录上游 commit、实际宏值、最低空闲堆和丢帧结果，以实测选择配置。
 
-### 2.2 当前立创板的迁移输入
+### 2.2 立创 Codec 板与当前验证板必须分开
 
-旧 MVP 的 `firmware/main/boards/lckfb/szpi-esp32s3/config.h` 和 `lichuang_dev_board.cc` 给出了当前实板的可核对输入：I2S `MCLK=38`、`WS=13`、`BCLK=14`、`DIN=12`、`DOUT=45`；Codec I2C `SDA=1`、`SCL=2`；ES8311 使用默认地址，ES7210 地址为 `0x82`，音频电源/功放由 PCA9557 `0x19` 控制。旧板级源码还把原生输入/输出采样率设为 24 kHz，并启用了物理 MIC1 增益和 MIC3 播放 reference。
+旧 MVP 的 `firmware/main/boards/lckfb/szpi-esp32s3/config.h` 和 `lichuang_dev_board.cc` 给出了 **目标 Lichuang Codec 板** 的迁移输入：I2S `MCLK=38`、`WS=13`、`BCLK=14`、`DIN=12`、`DOUT=45`；Codec I2C `SDA=1`、`SCL=2`；ES8311 使用默认地址，ES7210 地址为 `0x82`，音频电源/功放由 PCA9557 `0x19` 控制。旧板级源码还把原生输入/输出采样率设为 24 kHz，并启用了物理 MIC1 增益和 MIC3 播放 reference。
 
-这些值现在只作为 `esp32s3-lichuang` Adapter/Profile 的输入，不进入 `VoiceSession`，也不等于新工程已经能录放：新工程尚未迁移 `BoxAudioCodec`、PCA9557 控制和 I2C 初始化，当前 `esp32s3-dev` 仍是 scaffold。实现顺序固定为：
+本次连接的实板并不是上述 Lichuang Codec 板，而是原固件报告 `SKU=voicelife-pcb`、`NoAudioCodec` 的纯 I2S 板，其 GPIO/拓扑与小智 `bread-compact-wifi` Profile 一致：麦克风 `SCK=5/WS=4/DIN=6`，扬声器 `BCLK=15/LRCK=16/DOUT=7`，显示屏另占 I2C `SDA=41/SCL=42`。在这块板上运行 Lichuang Profile 的真实日志为 `I2C=1 ES8311=0 ES7210=0 PCA9557=0 I2S_READY=1 I2S_STARTED=1 write=480 read=480`。这不是 Codec 连线失败的证据，而是板型与 Profile 不匹配的证据；不能为取得绿色结果而放宽地址或强行打开功放。
+
+`VoiceLifePcbEsp32s3Profile` 现在单独表达这块板：采集端是 I2S1、16 kHz、32-bit wire slot、PCM 右移 14 bit；播放端是 I2S0、24 kHz、32-bit wire slot、PCM 左移 16 bit。旧 MVP 的 `NoAudioCodecSimplex` 使用右移 12 bit，相当于额外增加四位数字增益。#111 在同一块板、同一 300 ms 探针下对照了两种移位：`12` 的削波为 `383/4800`（79791 ppm），`14` 为 `1/4800`（208 ppm），最终镜像启动时样本变化为 `4716/4800`。因此新 Profile 采用 `14`，这是一项有实测依据的迁移修正，不是为了兼容旧宏而照抄参数。
+
+这些值现在只作为 `esp32s3-lichuang` Adapter/Profile 的输入，不进入 `VoiceSession`，也不等于新工程已经能录放：新工程尚未迁移 `BoxAudioCodec`、PCA9557 控制和 I2C 初始化，当前 `esp32s3-dev` 仍是 scaffold。`bread-compact-wifi` 必须另建纯 I2S Profile，不能复用 Codec 地址字段。实现顺序固定为：
 
 1. 先用无 AFE 的 PCM I2S 读写验证 pin/slot/DMA/最低堆；
 2. 再迁移 ES8311/ES7210/PCA9557 的最小控制面并做 codec 寄存器回读；
 3. 录放通过后才验证 24 kHz 原生链路到 16 kHz Linx 上行的重采样；
 4. 最后根据真实 playback reference 决定是否打开 AEC/Wake，不能从旧 MVP 的 `CONFIG_USE_DEVICE_AEC` 直接继承能力。
 
-来源与当前状态见 [旧 MVP 迁移入口](./xiaozhi-migration.md)、[Linx 接入矩阵](../../research/voice-module-portability-20260804/sources/12_linx_current_access_matrix.md)、[ESP-IDF 6.0.2 I2S 边界](../../research/voice-module-portability-20260804/sources/13_esp_idf_i2s_6_0_2.md) 和 [跨板能力矩阵](../../research/voice-module-portability-20260804/sources/14_cross_board_audio_capabilities.md)。
+本轮 #109 先落下 `voicelife_audio_esp` 的第一阶段，#111 再把 `AudioBoardProfile` 扩展为外部 Codec duplex 与纯 I2S simplex 两种拓扑，并加入独立 RX/TX 端点、wire slot 与 PCM 对齐字段。`Esp32s3AudioProbe` 在 `esp32s3-voicelife-pcb-pcm` Profile 下完成 I2S channel 生命周期、19200 B 采集、960 B 静音写入和 960 B 有界回放；最低空闲堆为 369528 B。探针不会初始化 ES8311/ES7210 寄存器，也不会打开 PCA9557 的功放位，因此这些结果只证明数字 PCM 输入和总线级回放，不替代 Codec 或声学录放验收。主机测试明确拒绝把主机当成真机探针。
+
+来源与当前状态见 [旧 MVP 迁移入口](./xiaozhi-migration.md)、[Linx 接入矩阵](../../research/voice-module-portability-20260804/sources/12_linx_current_access_matrix.md)、[ESP-IDF 6.0.2 I2S 边界](../../research/voice-module-portability-20260804/sources/13_esp_idf_i2s_6_0_2.md)、[跨板能力矩阵](../../research/voice-module-portability-20260804/sources/14_cross_board_audio_capabilities.md) 和 [voicelife-pcb 纯 I2S 对照](../../research/voice-module-portability-20260804/sources/15_voicelife_pcb_i2s_profile.md)。
 
 ### 2.3 证据不能跨层复用
 
@@ -71,7 +77,7 @@ VoiceSession -> Application / MCP（只交稳定语义）
 3. 板上录放：真实 I2S、AFE、Codec、扬声器、队列水位和资源预算；
 4. 物理闭环：人在设备前完成唤醒、讲话、工具调用、播报、打断和断网恢复。
 
-PR 只能声明已经拿到证据的层级。#107 已完成第 1 层、ESP-IDF 构建和受控 `ota_1` 启动/恢复验证，但不能继承旧 MVP 的第 2/3 层结果来宣称新 Linx Transport 已完成云端或物理音频闭环。
+PR 只能声明已经拿到证据的层级。#111 完成了第 1 层主机契约、ESP-IDF 构建和第 3 层中的“数字 I2S PCM 探针”子集，并完成受控 `ota_1` 启动/恢复；它没有完成 Codec、AFE、Opus、云端或物理声学闭环，不能把有限回放写成“扬声器已听见”。
 
 ## 3. 代码契约
 
@@ -88,8 +94,8 @@ PR 只能声明已经拿到证据的层级。#107 已完成第 1 层、ESP-IDF �
 
 | Port | 责任 | ESP32-S3 首个实现 | 其他实现策略 |
 | --- | --- | --- | --- |
-| `AudioInputPort` | 绑定采集 sink、打开输入、开始/停止采集、关闭 | ESP-IDF I2S + AFE/Wake Adapter | Zephyr I2S、厂商 HAL，先做能力探针 |
-| `AudioOutputPort` | 接收解码帧、刷新缓冲、关闭 | ESP-IDF I2S/DAC Adapter | 各板 Codec/扬声器驱动 |
+| `AudioInputPort` | 绑定采集 sink、打开输入、开始/停止采集、关闭 | ESP32-S3 PCM/I2S Adapter（先探针，后 Codec） | Zephyr I2S、厂商 HAL，先做能力探针 |
+| `AudioOutputPort` | 接收解码帧、刷新缓冲、关闭 | ESP32-S3 PCM/I2S Adapter（先探针，后 Codec） | 各板 Codec/扬声器驱动 |
 | `VoiceTransportPort` | 连接、文本帧、二进制音频帧、关闭 | TLS WebSocket Adapter | MQTT/UDP 仅在契约满足时接入 |
 | `CodecStrategy` | PCM/Opus 编解码 | 小智 Opus 参数迁移 | PCM 直通或其他硬件 Codec |
 | `BoundedAudioFrameQueue` | 固定容量、generation 隔离、满载策略和水位统计 | FreeRTOS queue/deque Adapter | Zephyr/NuttX/主机实现，必须复用同一契约 |
@@ -134,7 +140,17 @@ Transport worker 的回调可以与控制任务并发到达：`VoiceSession` 用
 
 这套契约来自旧 MVP 的 `AudioService` 队列和 `ResetDecoder` 行为，代码位于 [`audio_frame_queue.h`](../../components/voicelife_voice/include/voicelife/voice/audio_frame_queue.h)，主机契约测试位于 [`audio_frame_queue_contract_test.cc`](../../tests/host/audio_frame_queue_contract_test.cc)。
 
-### 3.5 SQLite 与实时音频的边界
+### 3.5 硬件 period 与传输帧分离
+
+`VoiceLifePcbEsp32s3Profile` 的采集和播放硬件 period 都是 10 ms；Linx hello 协商的是 20/40/60 ms 传输帧，两者不能共用一个“frame size”字段。`PcmFrameAssembler` 只负责把若干完整硬件 period 组装为 PCM S16LE 传输帧，时长不是整数倍、样本数不是完整声道或计算溢出时立即拒绝。
+
+Audio Port 内部保持三条执行路径：I2S capture 只采样和转换，delivery task 只把完整帧交给 `VoiceSession`，output task 只拆成硬件 period 写回 I2S。上行队列满时丢最旧帧，下行队列满时拒绝新帧；网络回调不会堵住 I2S 采集。这个边界来自旧 MVP 的任务拆分，但不迁移其全局 `Application` 状态机。
+
+2026-08-04 的真实 ESP32-S3 smoke 使用 60 ms PCM 传输帧，采集 4 帧、播放 1 帧，输入丢帧、输出拒绝、短读和短写均为 0，最低空闲堆 358016 B，`AUDIO_PORT_SIGNAL=1`。镜像只写入 `ota_1@0x410000`，回读一致；测试后恢复原 `otadata`，原固件从 `ota_0` 启动并加载 7 个事件、8 个提醒、0 条笔记。
+
+同次探针出现 `228/4800` 个削波样本（47500 ppm），高于 #111 的静态对照。它不否定总线和任务生命周期通过，但表明输入增益仍需在受控声源下复测；当前能力声明不包含声学质量、AFE、AEC 或 Opus。
+
+### 3.6 SQLite 与实时音频的边界
 
 SQLite 不作为 `AudioInputPort` 或 `AudioOutputPort` 的同步依赖。MCP/Calendar Application 通过控制面 `StorageTransactionPort` 提交业务命令，Storage Adapter 独占连接并返回 `transaction_id`、提交状态、影响行数、完整性摘要和错误；音频任务只发布异步事件。
 
@@ -173,6 +189,7 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 - [Linx 开源文档仓库](https://github.com/qiniu/Xrobot-docs/blob/main/docs/xrobot/platform/websocket.md)
 - [Linx 小智固件接入指南](https://linx.qiniu.com/docs/xrobot/guide/xiaozhi-firmware)
 - [Linx 当前平台目录与 MQTT 反证](../../research/voice-module-portability-20260804/sources/12_linx_current_access_matrix.md)
+- [Linx WebSocket 与 OTA 线上契约核验](../../research/voice-module-portability-20260804/sources/16_linx_websocket_ota_live_20260804.md)
 - [ESP-IDF 6.0.2 I2S 当前边界](../../research/voice-module-portability-20260804/sources/13_esp_idf_i2s_6_0_2.md)
 
 ### 4.2 ESP-IDF Transport 当前实现
@@ -185,7 +202,7 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 - `WebSocketFragmentAssembler` 在主机和 ESP32-S3 共用，处理 text/binary/continuation、非法 offset、消息大小上限、连接关闭清理和 generation 隔离；完整消息才交给 `LinxTransportSink`。
 - Transport 显式上报 connected/disconnected；Provider 在每次 connected 后发送一次 hello。超时、未配置的编码变化或 Transport error 都以 `Status`/`VoiceEvent` 返回，不把半连接状态交给 `VoiceSession`。
 
-这层现在是“可构建、可单测、已完成受控启动、未完成云端闭环”的状态。物理板身份、16 MB Flash、8 MB PSRAM、双 OTA 与数据分区已经在 115200 下读取并备份；新语音固件只写入过 `ota_1@0x410000`，启动成功后已恢复 `otadata` 并确认原固件从 `ota_0` 启动。真实 Linx 凭据、WSS、ASR、TTS 和 I2S/AFE/Opus 仍是下一步。详细守则见 [ESP32-S3 实板变更与恢复](../engineering/esp32-hardware-validation.md)。
+这层现在是“可构建、可单测、纯 I2S 数字 PCM 已完成受控启动和回退、未完成云端闭环”的状态。物理板身份、16 MB Flash、8 MB PSRAM、双 OTA 与数据分区已经在 115200 下读取并备份；测试固件只写入过 `ota_1@0x410000`，每轮均在结束后恢复 `otadata` 并确认原固件从 `ota_0` 启动，SQLite 仍加载 7 个事件、8 个提醒、0 条笔记。真实 Linx 凭据、WSS、ASR、TTS、Codec 录放、AFE、Opus 和外部听感证据仍是下一步。详细守则见 [ESP32-S3 实板变更与恢复](../engineering/esp32-hardware-validation.md)。
 
 ## 5. 小智迁移边界
 
@@ -215,7 +232,7 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 
 在接入破坏性测试前，按以下顺序完成真实板验证：
 
-1. 设备身份、I2S 麦克风和扬声器输出 smoke；
+1. 设备身份、I2S 麦克风和扬声器总线输出 smoke（#111 已完成数字层，尚缺外部声学观察）；
 2. 录制 16 kHz PCM，验证帧大小、sequence、generation 和队列水位；同时确认 24 kHz 下行不会改变上行采集格式；
 3. WSS hello、listen、ASR（stt）、TTS（tts）和正常 stop；
 4. TTS 播放中唤醒/按键打断，确认旧帧不再播放；
@@ -245,4 +262,4 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 - Integration：Linx/xiaozhi Adapter 解析测试不依赖网络；
 - Hardware：ESP32-S3 真机验证采集、上行、ASR、TTS、打断、重连和资源预算，主机绿灯不能代替这些证据。
 
-当前 #106 完成 Port、状态、Provider Registry 和 Linx 协议防腐层；#107 已补上可主机测试、可 ESP-IDF 构建、可在非活动 OTA 槽启动并可恢复的 WSS Transport 外壳。真实 Linx 云端、Opus、AEC、Wake 和板上音频闭环仍是明确待办，不能把构建或启动通过写成语音功能已完成。
+当前 #106 完成 Port、状态、Provider Registry 和 Linx 协议防腐层；#107 完成 WSS Transport 外壳；#111 完成纯 I2S 数字 PCM 探针；#113 完成 10 ms period 到 60 ms 帧的组装、独立采集/投递/播放任务和真实板可回退 smoke。真实 Linx 云端、Opus、AEC、Wake、Codec 录放和物理声学闭环仍是明确待办。

@@ -15,6 +15,7 @@ set(known_components
     voicelife_voice
     voicelife_linx
     voicelife_linx_esp
+    voicelife_audio_esp
 )
 
 function(idf_component_register)
@@ -96,7 +97,9 @@ assert_dependencies(voicelife_linx PUBLIC voicelife_contracts voicelife_voice)
 assert_dependencies(voicelife_linx PRIVATE)
 assert_dependencies(voicelife_linx_esp PUBLIC voicelife_contracts voicelife_linx)
 assert_dependencies(voicelife_linx_esp PRIVATE esp_websocket_client esp-tls esp_event esp_timer)
+assert_dependencies(voicelife_audio_esp PUBLIC voicelife_contracts voicelife_voice)
+assert_dependencies(voicelife_audio_esp PRIVATE esp_driver_i2c esp_driver_i2s)
 assert_dependencies(voicelife_runtime PUBLIC voicelife_contracts)
-assert_dependencies(voicelife_runtime PRIVATE voicelife_linx voicelife_linx_esp voicelife_mcp voicelife_voice)
+assert_dependencies(voicelife_runtime PRIVATE voicelife_linx voicelife_linx_esp voicelife_mcp voicelife_voice voicelife_audio_esp)
 
 message(STATUS "PASS component names, include paths, and dependency graph")
