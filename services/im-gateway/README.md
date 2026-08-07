@@ -1,6 +1,6 @@
 # VoiceLife IM Gateway skeleton
 
-这是 VoiceLife IM 模块的可编译空骨架。它用代码表达模块边界、跨端契约和依赖方向，并以 Issue #95 作为当前交付与验收基线；本目录不包含生产数据库、真实 Koishi Bot 或微信验签实现。
+这是 VoiceLife IM Gateway 的独立服务模块。它用代码表达模块边界、跨端契约和依赖方向，并以 Issue #95 作为当前交付与验收基线；目前包含 PostgreSQL 持久化和微信公众号 Webhook Adapter，但仍不包含真实 Koishi Bot。
 
 ## 边界
 
@@ -27,7 +27,7 @@ src/
 ├── domain/          # IM 领域模型
 ├── application/     # 入站用例接口与应用服务
 ├── ports/           # Repository、通道、动作流、时钟等 Port
-├── infrastructure/  # 设备/Action UI HTTP、Koishi、微信和持久化适配器桩
+├── infrastructure/  # 设备/Action UI HTTP、Koishi、微信公众号和持久化适配器
 ├── app/             # 组合根
 └── index.ts          # 公共导出
 ```
@@ -44,9 +44,42 @@ pnpm --dir services/im-gateway test
 
 跨端 JSON fixture 位于 `contracts/im-gateway/v1/fixtures`，由 C++ 主机测试与 TypeScript 测试共同消费。
 
-`createMockImGateway()` 使用内存 Repository 和 Mock 通道，可用于后续主干串联测试。生产装配应替换为 PostgreSQL、Koishi、微信 Capability Plugin 和真实 SSE Hub。
+## PostgreSQL 持久化
+
+持久化契约测试（`test/persistence-contract.test.mjs`）会用同一套断言分别跑内存实现与
+`PostgresImUnitOfWork`，覆盖投递、尝试、回执、用户动作和事务性发件箱的跨聚合事务。
+
+本地用 Docker 启动 PostgreSQL：
+
+```bash
+docker compose up -d postgres
+```
+
+连接参数默认取 `postgres://voicelife:voicelife@localhost:5432/voicelife`，可通过环境变量覆盖：
+
+```bash
+DATABASE_URL=postgres://voicelife:voicelife@localhost:5432/voicelife \
+  node --test test/persistence-contract.test.mjs
+```
+
+PostgreSQL 不可用时对应测试自动跳过，其余断言照常执行；CI 通过 service container 提供相同的
+PostgreSQL 16，确保契约套件在真实数据库上通过。
+
+`createMockImGateway()` 使用内存 Repository 和 Mock 通道，可用于测试与本地串联。生产装配使用
+`createPostgresImGateway({ databaseUrl?, ports })`：连接地址优先取入参，其次 `DATABASE_URL` 环境变量，
+缺省回落本地 docker-compose 地址；组合根自动执行 schema 迁移并托管连接池，返回 `{ runtime, close() }`，
+进程退出或优雅停机前调用 `close()` 释放连接池。`ports` 需替换为 Koishi、微信 Capability Plugin 和真实
+SSE Hub 等实现。
 
 当前 mock 场景覆盖：PairingSession 绑定/过期、强弱提醒分流、DeliveryAttempt 与 H5 Token 渲染、复合入站幂等键、`externalMessageId` 回执归并、Receipt 去重及迟到回执不倒退、H5/平台 Action 入口合流、SSE 持久化回放、HTTPS Result 回传与 Action 过期关闭。
+
+## 微信公众号 Webhook
+
+`WechatOfficialAdapter` 按渠道账号实例化，构造时必须接收 `channelAccountId`、公众号原始 ID `expectedToUserName` 和由部署环境解析后的微信 Token。真实 Token 不写入 `ChannelAccount.capabilityConfig`、Profile、日志或测试 fixture；测试仅使用无效固定值。`verifyWebhook()` 处理服务器配置的 `echostr` 验签和五分钟重放窗口，`normalizeInbound()` 校验 POST 签名、`ToUserName` 账号归属并将明文模式的微信 XML 转换为 `NormalizedImEvent`。
+
+生产组合根通过 `wechatAdapter` 注入 Adapter 后暴露 `runtime.wechatApi`，HTTP 框架将微信 GET/POST 请求映射到 `WechatWebhookController.verify()`/`post()`；框架仍必须在读取请求体前配置 64 KiB 流式限制。当前不支持 AES 加密模式，也未配置真实模板消息出站能力，因此 `proactiveMessage` 为 `false`，`renderNotification()` 明确返回 `capability_not_supported`。
+
+模板投递结果使用 `channelAccountId + MsgID` 定位 Delivery；`MsgID + Status` 生成稳定的 webhook 事件标识和 Receipt 去重键。重复回调由入站事件与 Receipt 两层幂等保护，迟到回执继续遵循 Application 层状态机，不会让已投递状态倒退。
 
 ## TSDoc 规范
 

@@ -16,6 +16,8 @@ import type { DeviceId } from '../contracts/ids.js';
 import { unsafeId } from '../contracts/ids.js';
 import { ActionUiController } from '../infrastructure/http/action-ui-api.js';
 import { DeviceIntentController, ReminderActionStreamController } from '../infrastructure/http/device-api.js';
+import { WechatWebhookController } from '../infrastructure/http/wechat-api.js';
+import type { WechatOfficialAdapter } from '../infrastructure/wechat/wechat-official-adapter.js';
 import {
     FixedClock,
     InMemoryActionCommandStream,
@@ -62,6 +64,8 @@ export interface ImGatewayDependencies {
     readonly identityProtector: ExternalIdentityProtector;
     readonly clock: Clock;
     readonly ids: IdGenerator;
+    /** 可选的微信公众号 Adapter；注入后暴露 Webhook Controller。 */
+    readonly wechatAdapter?: WechatOfficialAdapter;
 }
 
 /** 已装配的应用服务与传输层控制器。 */
@@ -70,6 +74,7 @@ export interface ImGatewayRuntime {
     readonly deviceApi: DeviceIntentController;
     readonly actionStreamApi: ReminderActionStreamController;
     readonly actionUiApi: ActionUiController;
+    readonly wechatApi?: WechatWebhookController;
 }
 
 /**
@@ -142,6 +147,35 @@ export function createImGateway(dependencies: ImGatewayDependencies): ImGatewayR
             actions,
         ),
         actionUiApi: new ActionUiController(actionUi),
+        ...(dependencies.wechatAdapter === undefined
+            ? {}
+            : { wechatApi: new WechatWebhookController(dependencies.wechatAdapter, platformEvents) }),
+    };
+}
+
+/**
+ * 构造面向测试与本地场景的默认 Mock 外部端口，供内存版或 Postgres 版 Gateway 复用。
+ * @param deviceId Mock 认证器返回的设备身份。
+ * @param clock Mock 适配器共用的时钟。
+ * @returns 除 unitOfWork 之外的全部默认端口。
+ */
+export function mockImGatewayPorts(
+    deviceId: DeviceId = unsafeId<DeviceId>('device-demo'),
+    clock: FixedClock = new FixedClock(),
+): Omit<ImGatewayDependencies, 'unitOfWork'> {
+    return {
+        actionStream: new InMemoryActionCommandStream(),
+        actionTokens: new InMemoryActionTokenPort(),
+        authentication: new MockDeviceAuthenticationPort(deviceId),
+        channelCapabilities: new MockChannelCapabilities(),
+        channelHealth: new MockChannelHealthPort(clock),
+        conversations: new MockConversationResolver(),
+        deliveryRenderer: new MockDeliveryRenderer(),
+        imChannel: new MockImChannel(),
+        pairingCodes: new MockPairingCodePort(),
+        identityProtector: new MockExternalIdentityProtector(),
+        clock,
+        ids: new SequentialIdGenerator(),
     };
 }
 
@@ -159,18 +193,7 @@ export function createMockImGateway(
 ): ImGatewayRuntime {
     return createImGateway({
         unitOfWork: new InMemoryImUnitOfWork(),
-        actionStream: new InMemoryActionCommandStream(),
-        actionTokens: new InMemoryActionTokenPort(),
-        authentication: new MockDeviceAuthenticationPort(deviceId),
-        channelCapabilities: new MockChannelCapabilities(),
-        channelHealth: new MockChannelHealthPort(clock),
-        conversations: new MockConversationResolver(),
-        deliveryRenderer: new MockDeliveryRenderer(),
-        imChannel: new MockImChannel(),
-        pairingCodes: new MockPairingCodePort(),
-        identityProtector: new MockExternalIdentityProtector(),
-        clock,
-        ids: new SequentialIdGenerator(),
+        ...mockImGatewayPorts(deviceId, clock),
         ...overrides,
     });
 }

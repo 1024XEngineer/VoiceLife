@@ -1,0 +1,18 @@
+id,title,url,retrieved,type,credibility,used_for
+01,Linx XRobot WebSocket 协议,https://raw.githubusercontent.com/qiniu/Xrobot-docs/main/docs/xrobot/platform/websocket.md,2026-08-04,primary vendor documentation,high,握手头和hello/音频/tts生命周期
+02,xiaozhi AudioService 头文件,https://raw.githubusercontent.com/78/xiaozhi-esp32/main/main/audio/audio_service.h,2026-08-04,open-source implementation,high,音频任务和有界队列基线
+03,xiaozhi ESP-SR AFE 实现,https://raw.githubusercontent.com/78/xiaozhi-esp32/main/main/audio/engines/afe_audio_engine.cc,2026-08-04,open-source implementation,high,单一AFE所有者和控制代次
+04,ESP-IDF I2S 官方文档,https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-reference/peripherals/i2s.html,2026-08-04,primary vendor documentation,high,ESP32-S3 RX/TX和时钟边界
+05,ESP-SR AFE 官方文档,https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/audio_front_end/README.html,2026-07-29,primary vendor documentation,high,16kHz交错PCM和AEC reference要求
+06,SQLite Atomic Commit,https://www.sqlite.org/atomiccommit.html,2026-08-04,primary project documentation,high,事务同步和断电语义
+07,SQLite WAL,https://www.sqlite.org/wal.html,2026-08-04,primary project documentation,high,WAL/同步模式取舍
+08,Zephyr 文件系统 VFS,https://docs.zephyrproject.org/latest/services/file_system/index.html,2026-08-04,primary RTOS documentation,high,跨FS抽象边界
+09,旧 MVP AudioService,local:/Users/mac/Desktop/project/voicelife-pcb-native-mvp/firmware/main/audio/audio_service.cc,2026-08-04,local implementation evidence,high,实测迁移约束和反例
+10,旧 MVP AFE engine,local:/Users/mac/Desktop/project/voicelife-pcb-native-mvp/firmware/main/audio/engines/afe_audio_engine.cc,2026-08-04,local implementation evidence,high,AFE共享和迟到fetch处理
+11,旧 MVP wake cache,local:/Users/mac/Desktop/project/voicelife-pcb-native-mvp/firmware/main/audio/wake_words/wake_word_audio_cache.cc,2026-08-04,local implementation evidence,high,固定容量PSRAM环形缓冲
+12,Linx 当前设备接入目录,https://api.github.com/repos/qiniu/Xrobot-docs/git/trees/main?recursive=1,2026-08-04,primary vendor repository index,high,MQTT/HTTP/UDP公开资料核对与反证
+13,ESP-IDF 6.0.2 I2S 官方文档,https://raw.githubusercontent.com/espressif/esp-idf/v6.0.2/docs/en/api-reference/peripherals/i2s.rst,2026-08-04,primary vendor documentation,high,S3的PDM/DMA/PM/通道生命周期边界
+14,ESP32跨板音频能力矩阵,https://raw.githubusercontent.com/espressif/esp-idf/v6.0.2/docs/en/api-reference/peripherals/i2s.rst,2026-08-04,primary vendor documentation,medium,C3/C6/S3/P4准入矩阵
+15,voicelife-pcb纯I2S Profile与实板对照,local:/Users/mac/Desktop/project/XE6-15-voice-pcm/research/voice-module-portability-20260804/sources/15_voicelife_pcb_i2s_profile.md,2026-08-04,local implementation and hardware evidence,high,旧MVP拓扑迁移、PCM对齐对照和回退验证
+16,Linx WebSocket与OTA线上契约核验,https://github.com/qiniu/Xrobot-docs/tree/1b2530022e693ca1a392e6b85b9db1b12c941e49/docs/xrobot/platform,2026-08-04,primary vendor documentation and synthetic live observation,high,WebSocket hello协商、OTA双层状态和MQTT反证
+17,跨MCU音频与存储候选矩阵,https://docs.zephyrproject.org/latest/boards/index.html,2026-08-04,primary board and RTOS documentation,medium,ESP32优先及GIGA/Pico2/iMXRT/STM32/nRF准入顺序

@@ -12,18 +12,6 @@ Result<T> NotImplemented(const char* operation) {
 
 }  // namespace
 
-Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const UpdateTimerTaskCommand&) {
-    return NotImplemented<UpdateTimerTaskResult>("UpdateTimerTask");
-}
-
-Result<CancelTimerTaskResult> DefaultTimingTaskService::CancelTimerTask(const CancelTimerTaskCommand&) {
-    return NotImplemented<CancelTimerTaskResult>("CancelTimerTask");
-}
-
-Result<DeleteReminderRuleResult> DefaultTimingTaskService::DeleteReminderRule(const DeleteReminderRuleCommand&) {
-    return NotImplemented<DeleteReminderRuleResult>("DeleteReminderRule");
-}
-
 Result<ReminderTrigger> DefaultTimingTaskService::SnoozeReminderTrigger(const SnoozeReminderTriggerCommand&) {
     return NotImplemented<ReminderTrigger>("SnoozeReminderTrigger");
 }

@@ -2,6 +2,7 @@ local/
 
 # ESP-IDF generated files
 build/
+build-*/
 sdkconfig
 sdkconfig.old
 managed_components/

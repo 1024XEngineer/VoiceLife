@@ -19,6 +19,11 @@ CPP_VERSION_HEADER = ROOT / "components/voicelife_contracts/include/voicelife/co
 TS_VERSION_SOURCE = ROOT / "services/im-gateway/src/contracts/device-gateway.ts"
 FIXTURES_DIR = ROOT / "contracts/im-gateway/v1/fixtures"
 
+# 网关下发响应中唯一不带 schemaVersion 的契约：NotificationSubmission 的 TS
+# 接口与运行时响应均无版本字段（见 device-gateway.ts 与 services.ts 的
+# submission 对象），因此其全部 fixture 不参与版本一致性检查。
+VERSIONLESS_FIXTURE_PREFIX = "notification-submission"
+
 
 def extract_version(text: str, marker: str) -> str:
     pattern = re.escape(marker) + r'\s*=\s*["\']([^"\']+)["\']'
@@ -35,7 +40,7 @@ def main() -> int:
         sys.exit(f"FAIL 双端契约版本不一致: C++={cpp_version}, TypeScript={ts_version}")
 
     for fixture in sorted(FIXTURES_DIR.glob("*.json")):
-        if "-invalid-" in fixture.name:
+        if "-invalid-" in fixture.name or fixture.name.startswith(VERSIONLESS_FIXTURE_PREFIX):
             continue
         data = json.loads(fixture.read_text(encoding="utf-8"))
         if data.get("schemaVersion") != ts_version:

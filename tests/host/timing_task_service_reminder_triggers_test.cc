@@ -61,24 +61,24 @@ int main() {
     store.AddInstance({.id = "instance-a", .task_id = "task-a"});
     store.AddInstance({.id = "instance-empty", .task_id = "task-a"});
 
-    store.AddTrigger(Trigger("trigger-a-01-pending", "task-a", "instance-a", ReminderType::kWeak,
-                             ReminderTriggerStatus::kPending, 200, 100));
-    store.AddTrigger(Trigger("trigger-a-02-triggered", "task-a", "instance-a", ReminderType::kStrong,
-                             ReminderTriggerStatus::kTriggered, 200, 200));
-    store.AddTrigger(Trigger("trigger-a-03-delivered", "task-a", "instance-a", ReminderType::kWeak,
-                             ReminderTriggerStatus::kDelivered, 300, 300));
-    store.AddTrigger(Trigger("trigger-a-04-skipped", "task-a", "instance-a", ReminderType::kStrong,
-                             ReminderTriggerStatus::kSkipped, 400, 400));
-    store.AddTrigger(Trigger("trigger-a-05-failed", "task-a", "instance-a", ReminderType::kWeak,
-                             ReminderTriggerStatus::kFailed, 500, 500));
-    store.AddTrigger(Trigger("trigger-a-06-snoozed", "task-a", "instance-a", ReminderType::kStrong,
-                             ReminderTriggerStatus::kSnoozed, 600, 600));
-    store.AddTrigger(Trigger("trigger-a-07-dismissed", "task-a", "instance-a", ReminderType::kStrong,
-                             ReminderTriggerStatus::kDismissed, 700, 700));
-    store.AddTrigger(Trigger("trigger-a-08-cancelled", "task-a", "instance-a", ReminderType::kWeak,
-                             ReminderTriggerStatus::kCancelled, 800, 800));
-    store.AddTrigger(Trigger("trigger-b-01", "task-b", "instance-b", ReminderType::kStrong,
-                             ReminderTriggerStatus::kDelivered, 250, 900));
+    store.AddReminderTrigger(Trigger("trigger-a-01-pending", "task-a", "instance-a", ReminderType::kWeak,
+                                     ReminderTriggerStatus::kPending, 200, 100));
+    store.AddReminderTrigger(Trigger("trigger-a-02-triggered", "task-a", "instance-a", ReminderType::kStrong,
+                                     ReminderTriggerStatus::kTriggered, 200, 200));
+    store.AddReminderTrigger(Trigger("trigger-a-03-delivered", "task-a", "instance-a", ReminderType::kWeak,
+                                     ReminderTriggerStatus::kDelivered, 300, 300));
+    store.AddReminderTrigger(Trigger("trigger-a-04-skipped", "task-a", "instance-a", ReminderType::kStrong,
+                                     ReminderTriggerStatus::kSkipped, 400, 400));
+    store.AddReminderTrigger(Trigger("trigger-a-05-failed", "task-a", "instance-a", ReminderType::kWeak,
+                                     ReminderTriggerStatus::kFailed, 500, 500));
+    store.AddReminderTrigger(Trigger("trigger-a-06-snoozed", "task-a", "instance-a", ReminderType::kStrong,
+                                     ReminderTriggerStatus::kSnoozed, 600, 600));
+    store.AddReminderTrigger(Trigger("trigger-a-07-dismissed", "task-a", "instance-a", ReminderType::kStrong,
+                                     ReminderTriggerStatus::kDismissed, 700, 700));
+    store.AddReminderTrigger(Trigger("trigger-a-08-cancelled", "task-a", "instance-a", ReminderType::kWeak,
+                                     ReminderTriggerStatus::kCancelled, 800, 800));
+    store.AddReminderTrigger(Trigger("trigger-b-01", "task-b", "instance-b", ReminderType::kStrong,
+                                     ReminderTriggerStatus::kDelivered, 250, 900));
 
     const auto range = service.ListReminderTriggers({.range_start = 200, .range_end = 800});
     Check(range.ok() && range.value->total == 8, "时间范围自身应作为合法查询条件并遵守左闭右开语义");

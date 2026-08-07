@@ -22,6 +22,7 @@ export interface NormalizedDeliveryReceipt {
     readonly attemptId?: DeliveryAttemptId;
     readonly dedupeKey: string;
     readonly stage: 'delivered' | 'failed';
+    readonly retryable?: boolean;
     readonly occurredAt: IsoDateTime;
     readonly platformCode?: string;
     readonly detail?: JsonValue;

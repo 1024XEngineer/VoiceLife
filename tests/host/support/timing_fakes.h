@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -11,6 +12,8 @@ namespace voicelife::test {
 
 class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
    public:
+    void FailNextUpdate(Status status) { next_update_failure_ = std::move(status); }
+
     Status RegisterTaskWithRules(const timing::TimingTask& task,
                                  const std::vector<timing::ReminderRule>& rules) override {
         if (task.id.empty() || task.request_id.empty()) {
@@ -50,6 +53,32 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
             }
         }
         return Result<timing::TimingTask>::Failure(ErrorCode::kNotFound, "request not found");
+    }
+
+    Status UpdateTaskWithInstances(const timing::TimingTaskUpdateWrite& update) override {
+        if (next_update_failure_.has_value()) {
+            const Status failure = *next_update_failure_;
+            next_update_failure_.reset();
+            return failure;
+        }
+        if (update.task.id.empty() || !tasks_.contains(update.task.id)) {
+            return Status::Error(ErrorCode::kNotFound, "task not found");
+        }
+
+        std::unordered_set<std::string> incoming_instance_ids;
+        for (const auto& instance : update.upsert_instances) {
+            if (instance.id.empty() || instance.task_id != update.task.id ||
+                !incoming_instance_ids.insert(instance.id).second ||
+                (instances_.contains(instance.id) && instances_.at(instance.id).task_id != update.task.id)) {
+                return Status::Error(ErrorCode::kConflict, "invalid timer instance");
+            }
+        }
+
+        tasks_[update.task.id] = update.task;
+        for (const auto& instance : update.upsert_instances) {
+            instances_[instance.id] = instance;
+        }
+        return Status::Ok();
     }
 
     Result<timing::TimingTask> FindTask(const timing::TimingTaskId& task_id) override {
@@ -100,44 +129,58 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         return Result<std::vector<timing::ReminderRule>>::Success(std::move(result));
     }
 
-    Result<std::vector<timing::TimerInstance>> ListInstances(const timing::TimingTaskId& task_id) override {
-        if (!next_instance_list_failure_.ok()) {
-            Status failure = std::move(next_instance_list_failure_);
-            next_instance_list_failure_ = Status::Ok();
-            return Result<std::vector<timing::TimerInstance>>::Failure(failure.code, failure.message);
+    Result<int> DisableReminderRule(const std::string& reminder_rule_id, int64_t now) override {
+        const auto existing = rules_.find(reminder_rule_id);
+        if (existing == rules_.end()) {
+            return Result<int>::Failure(ErrorCode::kNotFound, "reminder rule not found");
         }
-        std::vector<timing::TimerInstance> result;
-        for (const auto& [_, instance] : instances_) {
-            if (instance.task_id == task_id) {
-                result.push_back(instance);
+        if (existing->second.status == timing::ReminderRuleStatus::kDisabled) {
+            return Result<int>::Failure(ErrorCode::kConflict, "reminder rule already disabled");
+        }
+        if (!tasks_.contains(existing->second.task_id)) {
+            return Result<int>::Failure(ErrorCode::kConflict, "reminder rule task relation is invalid");
+        }
+
+        auto next_rules = rules_;
+        auto next_triggers = triggers_;
+        auto& rule = next_rules.at(reminder_rule_id);
+        rule.status = timing::ReminderRuleStatus::kDisabled;
+        rule.updated_at = now;
+        rule.deleted_at = now;
+        int affected_trigger_count = 0;
+        for (auto& [_, trigger] : next_triggers) {
+            if (trigger.reminder_rule_id != reminder_rule_id) {
+                continue;
+            }
+            if (trigger.task_id != rule.task_id) {
+                return Result<int>::Failure(ErrorCode::kConflict, "reminder trigger task relation is invalid");
+            }
+            if (trigger.status == timing::ReminderTriggerStatus::kPending && trigger.planned_trigger_at >= now) {
+                trigger.status = timing::ReminderTriggerStatus::kCancelled;
+                trigger.updated_at = now;
+                trigger.last_action_at = now;
+                ++affected_trigger_count;
             }
         }
-        std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
-            return left.planned_at != right.planned_at ? left.planned_at < right.planned_at : left.id < right.id;
-        });
-        return Result<std::vector<timing::TimerInstance>>::Success(std::move(result));
+        if (!next_rule_disable_failure_.ok()) {
+            Status failure = std::move(next_rule_disable_failure_);
+            next_rule_disable_failure_ = Status::Ok();
+            return Result<int>::Failure(failure.code, failure.message);
+        }
+        rules_ = std::move(next_rules);
+        triggers_ = std::move(next_triggers);
+        return Result<int>::Success(affected_trigger_count);
     }
 
-    Result<std::vector<timing::ReminderTrigger>> ListTriggers() override {
-        if (!next_trigger_list_failure_.ok()) {
-            Status failure = std::move(next_trigger_list_failure_);
-            next_trigger_list_failure_ = Status::Ok();
-            return Result<std::vector<timing::ReminderTrigger>>::Failure(failure.code, failure.message);
-        }
-        std::vector<timing::ReminderTrigger> result;
-        result.reserve(triggers_.size());
-        for (const auto& [_, trigger] : triggers_) {
-            if (trigger.deleted_at == 0) {
-                result.push_back(trigger);
-            }
-        }
-        std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) { return left.id < right.id; });
-        return Result<std::vector<timing::ReminderTrigger>>::Success(std::move(result));
+    void FailNextRuleDisable(Status failure) { next_rule_disable_failure_ = std::move(failure); }
+
+    void AddReminderRule(timing::ReminderRule rule) { rules_.insert_or_assign(rule.id, std::move(rule)); }
+
+    void AddReminderTrigger(timing::ReminderTrigger trigger) {
+        triggers_.insert_or_assign(trigger.id, std::move(trigger));
     }
 
     void AddInstance(timing::TimerInstance instance) { instances_.insert_or_assign(instance.id, std::move(instance)); }
-
-    void AddTrigger(timing::ReminderTrigger trigger) { triggers_.insert_or_assign(trigger.id, std::move(trigger)); }
 
     void AddTask(timing::TimingTask task) { tasks_.insert_or_assign(task.id, std::move(task)); }
 
@@ -146,6 +189,14 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
     void FailNextInstanceList(Status failure) { next_instance_list_failure_ = std::move(failure); }
 
     void FailNextTriggerList(Status failure) { next_trigger_list_failure_ = std::move(failure); }
+
+    Result<timing::ReminderTrigger> FindReminderTrigger(const std::string& trigger_id) const {
+        const auto found = triggers_.find(trigger_id);
+        if (found == triggers_.end()) {
+            return Result<timing::ReminderTrigger>::Failure(ErrorCode::kNotFound, "reminder trigger not found");
+        }
+        return Result<timing::ReminderTrigger>::Success(found->second);
+    }
 
     Status UpsertRules(const timing::TimingTaskId& task_id, const std::vector<timing::ReminderRule>& rules) override {
         if (!tasks_.contains(task_id)) {
@@ -186,16 +237,56 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
 
     void FailNextRuleList(Status failure) { next_rule_list_failure_ = std::move(failure); }
 
+    Result<std::vector<timing::TimerInstance>> ListInstances(const timing::TimingTaskId& task_id) override {
+        if (!next_instance_list_failure_.ok()) {
+            Status failure = std::move(next_instance_list_failure_);
+            next_instance_list_failure_ = Status::Ok();
+            return Result<std::vector<timing::TimerInstance>>::Failure(failure.code, failure.message);
+        }
+        std::vector<timing::TimerInstance> result;
+        for (const auto& [_, instance] : instances_) {
+            if (instance.task_id == task_id) {
+                result.push_back(instance);
+            }
+        }
+        std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
+            if (left.planned_at == right.planned_at) {
+                return left.id < right.id;
+            }
+            return left.planned_at < right.planned_at;
+        });
+        return Result<std::vector<timing::TimerInstance>>::Success(std::move(result));
+    }
+
+    Result<std::vector<timing::ReminderTrigger>> ListTriggers() override {
+        if (!next_trigger_list_failure_.ok()) {
+            Status failure = std::move(next_trigger_list_failure_);
+            next_trigger_list_failure_ = Status::Ok();
+            return Result<std::vector<timing::ReminderTrigger>>::Failure(failure.code, failure.message);
+        }
+        std::vector<timing::ReminderTrigger> result;
+        result.reserve(triggers_.size());
+        for (const auto& [_, trigger] : triggers_) {
+            if (trigger.deleted_at == 0) {
+                result.push_back(trigger);
+            }
+        }
+        std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) { return left.id < right.id; });
+        return Result<std::vector<timing::ReminderTrigger>>::Success(std::move(result));
+    }
+
    private:
+    std::optional<Status> next_update_failure_{};
+    Status next_rule_list_failure_ = Status::Ok();
+    Status next_rule_upsert_failure_ = Status::Ok();
     std::unordered_map<timing::TimingTaskId, timing::TimingTask> tasks_;
     std::unordered_map<std::string, timing::ReminderRule> rules_;
-    std::unordered_map<std::string, timing::TimerInstance> instances_;
     std::unordered_map<std::string, timing::ReminderTrigger> triggers_;
+    Status next_rule_disable_failure_ = Status::Ok();
+    std::unordered_map<std::string, timing::TimerInstance> instances_;
     Status next_task_list_failure_ = Status::Ok();
     Status next_instance_list_failure_ = Status::Ok();
     Status next_trigger_list_failure_ = Status::Ok();
-    Status next_rule_list_failure_ = Status::Ok();
-    Status next_rule_upsert_failure_ = Status::Ok();
 };
 
 }  // namespace voicelife::test

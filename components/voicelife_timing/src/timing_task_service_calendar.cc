@@ -11,6 +11,7 @@ namespace voicelife::timing {
 namespace {
 
 constexpr int64_t kSecondsPerDay = 24 * 60 * 60;
+constexpr int64_t kMinimumRangeStart = (std::numeric_limits<int64_t>::min() / kSecondsPerDay) * kSecondsPerDay;
 
 int64_t FloorDiv(int64_t value, int64_t divisor) {
     const int64_t quotient = value / divisor;
@@ -144,7 +145,8 @@ bool InRange(const CalendarOccurrence& occurrence, const CalendarViewQuery& quer
 }  // namespace
 
 Result<CalendarView> DefaultTimingTaskService::ListCalendarView(const CalendarViewQuery& query) {
-    if (query.range_start >= query.range_end || query.page < 1 || query.page_size < 1) {
+    if (query.range_start < kMinimumRangeStart || query.range_start >= query.range_end || query.page < 1 ||
+        query.page_size < 1) {
         return Result<CalendarView>::Failure(ErrorCode::kInvalidArgument, "日历查询范围或分页参数无效");
     }
 
@@ -155,7 +157,7 @@ Result<CalendarView> DefaultTimingTaskService::ListCalendarView(const CalendarVi
 
     std::vector<CalendarOccurrence> occurrences;
     for (const auto& task : *tasks.value) {
-        if (task.status != TimingTaskStatus::kActive ||
+        if (task.status != TimingTaskStatus::kActive || task.deleted_at != 0 ||
             (!query.schedule_id.empty() && task.schedule_id != query.schedule_id)) {
             continue;
         }
