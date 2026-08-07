@@ -8,8 +8,9 @@ wire contract.  This check fails the build if:
 - any valid fixture does not carry the current schemaVersion;
 - any fixture on disk is missing from the manifest, or any manifest entry
   refers to a missing file (every fixture must be declared exactly once);
-- any declared fixture is not exercised by BOTH the C++ host tests and the
-  TypeScript tests, so a fixture change always breaks both ends together.
+- any declared fixture is not referenced by BOTH the C++ host tests and the
+  TypeScript tests (a static reference check, not an execution-coverage
+  proof), so a fixture change always breaks both ends together.
 
 The manifest (``contracts/im-gateway/v1/fixtures/manifest.json``) annotates
 each fixture's contract and expected outcome, instead of relying on the
@@ -44,34 +45,78 @@ def extract_version(text: str, marker: str) -> str:
     return match.group(1)
 
 
-def manifest_fixture_names(manifest: dict) -> tuple[dict[str, str], list[str]]:
+def manifest_fixture_names(manifest: dict) -> tuple[dict[str, str], list[tuple[str, str, str]]]:
     """Flatten the manifest into ``{fixture_name: expected_outcome}``.
 
     Expected outcomes are ``valid`` or ``invalid``.  A fixture declared more
-    than once (across contracts or across outcomes) is reported as a
-    duplicate, because the manifest must pin each fixture to exactly one
-    contract and outcome.
+    than once (across contracts or across outcomes) is reported with its two
+    declaring ``contract/outcome`` locations, because the manifest must pin
+    each fixture to exactly one contract and outcome.
     """
     by_name: dict[str, str] = {}
-    duplicates: list[str] = []
-    for _contract, groups in manifest.get("contracts", {}).items():
+    first_seen: dict[str, tuple[str, str]] = {}
+    duplicates: list[tuple[str, str, str]] = []
+    for contract, groups in manifest.get("contracts", {}).items():
         for outcome in ("valid", "invalid"):
             for name in groups.get(outcome, []):
                 if name in by_name:
-                    duplicates.append(name)
+                    first = f"{first_seen[name][0]}/{first_seen[name][1]}"
+                    second = f"{contract}/{outcome}"
+                    duplicates.append((name, first, second))
                 else:
                     by_name[name] = outcome
+                    first_seen[name] = (contract, outcome)
     return by_name, duplicates
 
 
+def strip_comments(text: str) -> str:
+    """Remove C/JS-style comments from test source.
+
+    Coverage is judged by quoted fixture names in code; a mention inside a
+    comment (quoted or not) must never count as a real reference.
+    """
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    text = re.sub(r"//[^\n]*", "", text)
+    return text
+
+
 def is_referenced(text: str, fixture_name: str) -> bool:
-    """Whether a test source actually references the fixture.
+    """Whether a comment-stripped test source references the fixture.
 
     Matches only the name as a quoted string literal (``"name"`` or
-    ``'name'``), so a bare mention in a comment or a longer identifier is
-    not mistaken for coverage.
+    ``'name'``).  The caller strips comments first, so a mention inside a
+    comment is never mistaken for coverage.
     """
     return f'"{fixture_name}"' in text or f"'{fixture_name}'" in text
+
+
+def load_manifest(path: Path) -> tuple[dict | None, list[str]]:
+    """Load and structurally validate the manifest.
+
+    Returns ``(manifest, errors)``; ``manifest`` is ``None`` when the file is
+    unreadable or fatally malformed, so ``main`` can fail with a controlled
+    message instead of a Python traceback.
+    """
+    errors: list[str] = []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return None, [f"FAIL manifest 无法解析: {exc}"]
+    if not isinstance(data, dict):
+        return None, ["FAIL manifest 顶层必须是 JSON 对象"]
+    if not isinstance(data.get("contracts"), dict):
+        return None, ["FAIL manifest 缺少 contracts 对象"]
+    for contract, groups in data["contracts"].items():
+        if not isinstance(groups, dict):
+            errors.append(f"FAIL manifest 合同 {contract} 的条目必须是对象")
+            continue
+        for outcome in ("valid", "invalid"):
+            names = groups.get(outcome)
+            if names is None:
+                errors.append(f"FAIL manifest 合同 {contract} 缺少 {outcome} 列表")
+            elif not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+                errors.append(f"FAIL manifest 合同 {contract} 的 {outcome} 必须是字符串列表")
+    return data, errors
 
 
 def check_fixtures(
@@ -88,8 +133,8 @@ def check_fixtures(
     by_name, duplicates = manifest_fixture_names(manifest)
     declared = set(by_name)
 
-    for name in sorted(duplicates):
-        errors.append(f"FAIL fixture {name} 在 manifest 中重复声明")
+    for name, first, second in sorted(duplicates):
+        errors.append(f"FAIL fixture {name} 在 manifest 中重复声明（首次 {first}，再次 {second}）")
     for name in sorted(on_disk - declared):
         errors.append(f"FAIL fixture {name} 未在 manifest 中声明")
     for name in sorted(declared - on_disk):
@@ -102,10 +147,12 @@ def check_fixtures(
             if data.get("schemaVersion") != expected_version:
                 errors.append(f"FAIL 有效 fixture {name} 的 schemaVersion 与双端常量不一致")
 
+    cpp_texts = [strip_comments(text) for text in cpp_test_sources]
+    ts_text = strip_comments(ts_test_source)
     for name in sorted(declared):
-        if not any(is_referenced(text, name) for text in cpp_test_sources):
+        if not any(is_referenced(text, name) for text in cpp_texts):
             errors.append(f"FAIL fixture {name} 未接入 C++ 主机测试")
-        if not is_referenced(ts_test_source, name):
+        if not is_referenced(ts_text, name):
             errors.append(f"FAIL fixture {name} 未接入 TypeScript 测试")
 
     return errors
@@ -117,7 +164,9 @@ def main() -> int:
     if cpp_version != ts_version:
         sys.exit(f"FAIL 双端契约版本不一致: C++={cpp_version}, TypeScript={ts_version}")
 
-    manifest = json.loads(MANIFEST_FILE.read_text(encoding="utf-8"))
+    manifest, manifest_errors = load_manifest(MANIFEST_FILE)
+    if manifest_errors:
+        sys.exit("\n".join(manifest_errors))
     if manifest.get("schemaVersion") != ts_version:
         sys.exit("FAIL manifest 声明的 schemaVersion 与双端常量不一致")
 

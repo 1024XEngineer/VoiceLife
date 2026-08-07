@@ -128,6 +128,32 @@ class ContractDualEndCheckTest(unittest.TestCase):
             }
             errors = self.check(Path(directory) / "fixtures", manifest)
             self.assertTrue(any("notification-strong.json 在 manifest 中重复声明" in error for error in errors))
+            self.assertTrue(
+                any(
+                    "notification-strong.json 在 manifest 中重复声明" in error
+                    and "notification/valid" in error
+                    and "duplicate-scenario/valid" in error
+                    for error in errors
+                )
+            )
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
+    def test_detects_duplicate_within_same_contract(self) -> None:
+        directory, manifest = make_fixture_tree()
+        try:
+            manifest["contracts"]["notification"]["invalid"].append("notification-strong.json")
+            errors = self.check(Path(directory) / "fixtures", manifest)
+            self.assertTrue(
+                any(
+                    "notification-strong.json 在 manifest 中重复声明" in error
+                    and "notification/valid" in error
+                    and "notification/invalid" in error
+                    for error in errors
+                )
+            )
         finally:
             import shutil
 
@@ -182,9 +208,48 @@ class ContractDualEndCheckTest(unittest.TestCase):
 
             shutil.rmtree(directory)
 
+    def test_quoted_comment_does_not_count_as_coverage(self) -> None:
+        directory, manifest = make_fixture_tree()
+        try:
+            cpp = ['// 参见 "notification-strong.json" 但这不是真实引用\n']
+            ts = '// 同上 "notification-strong.json"\n'
+            errors = self.check(Path(directory) / "fixtures", manifest, cpp_sources=cpp, ts_source=ts)
+            self.assertTrue(any("notification-strong.json 未接入 C++ 主机测试" in error for error in errors))
+            self.assertTrue(any("notification-strong.json 未接入 TypeScript 测试" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
     def test_extract_version_parses_marker(self) -> None:
         text = 'inline constexpr const char* kDeviceContractVersion = "7";'
         self.assertEqual(gate.extract_version(text, "kDeviceContractVersion"), "7")
+
+    def test_load_manifest_rejects_malformed_json(self) -> None:
+        directory, _manifest = make_fixture_tree()
+        try:
+            bad = Path(directory) / "manifest.json"
+            bad.write_text("{ not json", encoding="utf-8")
+            manifest, errors = gate.load_manifest(bad)
+            self.assertIsNone(manifest)
+            self.assertTrue(any("manifest 无法解析" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
+    def test_load_manifest_rejects_missing_contracts(self) -> None:
+        directory, _manifest = make_fixture_tree()
+        try:
+            bad = Path(directory) / "manifest.json"
+            bad.write_text(json.dumps({"schemaVersion": VERSION}), encoding="utf-8")
+            manifest, errors = gate.load_manifest(bad)
+            self.assertIsNone(manifest)
+            self.assertTrue(any("缺少 contracts" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
 
 
 if __name__ == "__main__":
