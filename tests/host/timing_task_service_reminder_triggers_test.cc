@@ -58,8 +58,10 @@ int main() {
 
     store.AddTask({.id = "task-a", .schedule_id = "schedule-a"});
     store.AddTask({.id = "task-b", .schedule_id = "schedule-b"});
+    store.AddTask({.id = "task-epoch", .schedule_id = "schedule-epoch"});
     store.AddInstance({.id = "instance-a", .task_id = "task-a"});
     store.AddInstance({.id = "instance-empty", .task_id = "task-a"});
+    store.AddInstance({.id = "instance-epoch", .task_id = "task-epoch"});
 
     store.AddReminderTrigger(Trigger("trigger-a-01-pending", "task-a", "instance-a", ReminderType::kWeak,
                                      ReminderTriggerStatus::kPending, 200, 100));
@@ -79,6 +81,13 @@ int main() {
                                      ReminderTriggerStatus::kCancelled, 800, 800));
     store.AddReminderTrigger(Trigger("trigger-b-01", "task-b", "instance-b", ReminderType::kStrong,
                                      ReminderTriggerStatus::kDelivered, 250, 900));
+    store.AddReminderTrigger(Trigger("trigger-epoch", "task-epoch", "instance-epoch", ReminderType::kWeak,
+                                     ReminderTriggerStatus::kPending, 0, 0));
+
+    const auto epoch_range = service.ListReminderTriggers({.range_start = 0, .range_end = 1});
+    Check(epoch_range.ok() && epoch_range.value->total == 1 &&
+              epoch_range.value->reminder_triggers.front().id == "trigger-epoch",
+          "Unix epoch 0 应作为合法时间范围边界参与查询");
 
     const auto range = service.ListReminderTriggers({.range_start = 200, .range_end = 800});
     Check(range.ok() && range.value->total == 8, "时间范围自身应作为合法查询条件并遵守左闭右开语义");

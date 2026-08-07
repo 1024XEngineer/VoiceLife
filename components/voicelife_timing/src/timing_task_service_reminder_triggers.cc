@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -10,7 +11,7 @@ namespace voicelife::timing {
 namespace {
 
 bool InRange(const ReminderTrigger& trigger, const ReminderTriggerQuery& query) {
-    return trigger.actual_trigger_at >= query.range_start && trigger.actual_trigger_at < query.range_end;
+    return trigger.actual_trigger_at >= *query.range_start && trigger.actual_trigger_at < *query.range_end;
 }
 
 int64_t SortKey(const ReminderTrigger& trigger, TriggerSortBy sort_by) {
@@ -28,12 +29,12 @@ int64_t SortKey(const ReminderTrigger& trigger, TriggerSortBy sort_by) {
 }  // namespace
 
 Result<ReminderTriggerPage> DefaultTimingTaskService::ListReminderTriggers(const ReminderTriggerQuery& query) {
-    const bool has_time_range = query.range_start != 0 || query.range_end != 0;
+    const bool has_time_range = query.range_start.has_value() || query.range_end.has_value();
     const bool has_filter = !query.task_id.empty() || !query.instance_id.empty() || !query.schedule_id.empty() ||
                             query.type.has_value() || query.status.has_value() || has_time_range;
-    if (!has_filter ||
-        (has_time_range && (query.range_start == 0 || query.range_end == 0 || query.range_start >= query.range_end)) ||
-        query.page < 1 || query.page_size < 1 || query.page_size > 100) {
+    if (!has_filter || !query.range_start.has_value() != !query.range_end.has_value() ||
+        (has_time_range && *query.range_start >= *query.range_end) || query.page < 1 || query.page_size < 1 ||
+        query.page_size > 100) {
         return Result<ReminderTriggerPage>::Failure(ErrorCode::kInvalidArgument, "提醒触发查询条件或分页参数无效");
     }
 

@@ -164,8 +164,8 @@ struct ReminderTriggerQuery {
     ScheduleId schedule_id{};
     std::optional<ReminderType> type{};
     std::optional<ReminderTriggerStatus> status{};
-    int64_t range_start = 0;
-    int64_t range_end = 0;
+    std::optional<int64_t> range_start{};
+    std::optional<int64_t> range_end{};
     int page = 1;
     int page_size = 20;
     TriggerSortBy sort_by = TriggerSortBy::kActualTriggerAt;
