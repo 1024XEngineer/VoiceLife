@@ -116,7 +116,10 @@ jobs:
         with:
           node-version: 24
       - name: 安装覆盖率工具
-        run: python -m pip install --disable-pip-version-check "gcovr==8.5"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check "gcovr==8.5"
       - name: 生成 C++ 覆盖率报告
         shell: bash
         run: |

@@ -28,7 +28,7 @@ target_include_directories(yyjson PUBLIC "${ROOT_DIR}/third_party/yyjson")
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(yyjson PRIVATE -w)
 endif()
-# Portable cJSON for host tests. ESP-IDF uses its own built-in json component.
+# Linx 主机测试使用仓库内固定版本的 cJSON。
 add_library(cjson STATIC "${ROOT_DIR}/third_party/cjson/cJSON.c")
 target_include_directories(cjson PUBLIC "${ROOT_DIR}/third_party/cjson")
 set_target_properties(cjson PROPERTIES LINKER_LANGUAGE C)
@@ -81,8 +81,10 @@ add_voicelife_library(timing voicelife_timing
     "${ROOT_DIR}/components/voicelife_timing/src/timing_task_state.cc")
 target_link_libraries(timing PUBLIC contracts)
 add_voicelife_library(mcp voicelife_mcp
-    "${ROOT_DIR}/components/voicelife_mcp/src/mcp_tool_gateway.cc")
+    "${ROOT_DIR}/components/voicelife_mcp/src/mcp_server.cc"
+    "${ROOT_DIR}/components/voicelife_mcp/src/mcp_json_writer.cc")
 target_link_libraries(mcp PUBLIC contracts)
+target_link_libraries(mcp PRIVATE yyjson)
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/audio_frame_queue.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_provider_registry.cc"
@@ -184,8 +186,10 @@ target_link_libraries(timing_task_store_test PRIVATE timing)
 add_voicelife_test(timing_task_service_contract_test "unit;timing" timing_task_service_contract_test.cc)
 target_link_libraries(timing_task_service_contract_test PRIVATE timing)
 
-add_voicelife_test(mcp_tool_gateway_test "unit;mcp" mcp_tool_gateway_test.cc)
-target_link_libraries(mcp_tool_gateway_test PRIVATE mcp)
+add_voicelife_test(mcp_server_test "unit;mcp"
+    "${ROOT_DIR}/components/voicelife_mcp/test/mcp_server_test.cc")
+target_include_directories(mcp_server_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
+target_link_libraries(mcp_server_test PRIVATE mcp)
 
 add_voicelife_test(voice_session_coordinator_test "unit;voice" voice_session_coordinator_test.cc)
 target_link_libraries(voice_session_coordinator_test PRIVATE voice)
