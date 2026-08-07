@@ -280,10 +280,13 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         if (existing == triggers_.end()) {
             return Status::Error(ErrorCode::kNotFound, "reminder trigger not found");
         }
+        const bool is_snooze_event = update.event.event_type == timing::TimingEventType::kReminderSnoozed &&
+                                     update.event.status == timing::TimingEventStatus::kSnoozed;
+        const bool is_dismiss_event = update.event.event_type == timing::TimingEventType::kReminderDismissed &&
+                                      update.event.status == timing::TimingEventStatus::kDismissed;
         if (update.trigger.id.empty() || update.event.event_id.empty() ||
             update.event.reminder_trigger_id != update.trigger.id || update.event.task_id != update.trigger.task_id ||
-            update.event.event_type != timing::TimingEventType::kReminderSnoozed ||
-            update.event.status != timing::TimingEventStatus::kSnoozed) {
+            (!is_snooze_event && !is_dismiss_event)) {
             return Status::Error(ErrorCode::kConflict, "invalid reminder trigger event");
         }
         if (events_.contains(update.event.event_id)) {

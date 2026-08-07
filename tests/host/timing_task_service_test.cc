@@ -1210,12 +1210,11 @@ int main() {
     }
     Check(retained_previous_rule, "规则写入失败不能改变已保存规则");
 
-    // 已实现的提醒 Service 方法先做公开参数校验；尚未实现的关闭方法仍返回 unavailable。
+    // 已实现的提醒 Service 方法先做公开参数校验。
     Check(service.ListReminderTriggers({}).status.code == ErrorCode::kInvalidArgument,
           "没有任何过滤条件的提醒触发查询应返回参数错误");
     Check(service.SnoozeReminderTrigger({}).status.code == ErrorCode::kInvalidArgument, "提醒推迟接口应校验请求参数");
-    Check(service.DismissReminderTrigger({}).status.code == ErrorCode::kUnavailable,
-          "默认提醒关闭接口应明确返回未实现");
+    Check(service.DismissReminderTrigger({}).status.code == ErrorCode::kInvalidArgument, "提醒关闭接口应校验请求参数");
 
     const auto rules_before_delete = store.ListRules(registered.value->task_id);
     std::string rule_to_delete;
