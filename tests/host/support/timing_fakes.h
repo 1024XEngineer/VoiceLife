@@ -276,11 +276,6 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
     }
 
     Status UpdateReminderTriggerWithEvent(const timing::ReminderTriggerUpdateWrite& update) override {
-        if (!next_trigger_update_failure_.ok()) {
-            Status failure = std::move(next_trigger_update_failure_);
-            next_trigger_update_failure_ = Status::Ok();
-            return failure;
-        }
         const auto existing = triggers_.find(update.trigger.id);
         if (existing == triggers_.end()) {
             return Status::Error(ErrorCode::kNotFound, "reminder trigger not found");
@@ -293,6 +288,16 @@ class InMemoryTimingTaskStore final : public timing::TimingTaskStorePort {
         }
         if (events_.contains(update.event.event_id)) {
             return Status::Error(ErrorCode::kConflict, "reminder event exists");
+        }
+        if (existing->second.status != update.expected_status ||
+            existing->second.snooze_count != update.expected_snooze_count ||
+            existing->second.updated_at != update.expected_updated_at) {
+            return Status::Error(ErrorCode::kConflict, "reminder trigger has changed");
+        }
+        if (!next_trigger_update_failure_.ok()) {
+            Status failure = std::move(next_trigger_update_failure_);
+            next_trigger_update_failure_ = Status::Ok();
+            return failure;
         }
         auto next_triggers = triggers_;
         auto next_events = events_;

@@ -6,6 +6,11 @@
 #include "voicelife/timing/timing_task_service.h"
 
 namespace voicelife::timing {
+namespace {
+
+constexpr int64_t kSecondsPerMinute = 60;
+
+}  // namespace
 
 Result<ReminderTrigger> DefaultTimingTaskService::SnoozeReminderTrigger(const SnoozeReminderTriggerCommand& command) {
     if (command.reminder_trigger_id.empty() || command.delay_minutes <= 0) {
@@ -26,7 +31,7 @@ Result<ReminderTrigger> DefaultTimingTaskService::SnoozeReminderTrigger(const Sn
     if (found->type != ReminderType::kStrong) {
         return Result<ReminderTrigger>::Failure(ErrorCode::kInvalidArgument, "弱提醒不能推迟");
     }
-    if (found->status != ReminderTriggerStatus::kTriggered) {
+    if (!CanTransition(found->type, found->status, ReminderTriggerStatus::kSnoozed)) {
         return Result<ReminderTrigger>::Failure(ErrorCode::kConflict, "只有 triggered 状态的提醒可以推迟");
     }
     if (found->snooze_count >= found->max_snooze_count) {
@@ -34,7 +39,7 @@ Result<ReminderTrigger> DefaultTimingTaskService::SnoozeReminderTrigger(const Sn
     }
 
     const int64_t now = clock_.Now();
-    const int64_t delay_seconds = static_cast<int64_t>(command.delay_minutes) * 60;
+    const int64_t delay_seconds = static_cast<int64_t>(command.delay_minutes) * kSecondsPerMinute;
     if (now > std::numeric_limits<int64_t>::max() - delay_seconds) {
         return Result<ReminderTrigger>::Failure(ErrorCode::kInvalidArgument, "提醒推迟时间超出范围");
     }
@@ -59,7 +64,13 @@ Result<ReminderTrigger> DefaultTimingTaskService::SnoozeReminderTrigger(const Sn
         .payload = updated.payload,
         .occurred_at = now,
     };
-    const Status saved = store_.UpdateReminderTriggerWithEvent({.trigger = updated, .event = event});
+    const Status saved = store_.UpdateReminderTriggerWithEvent({
+        .trigger = updated,
+        .event = event,
+        .expected_status = found->status,
+        .expected_snooze_count = found->snooze_count,
+        .expected_updated_at = found->updated_at,
+    });
     if (!saved.ok()) {
         return Result<ReminderTrigger>::Failure(saved.code, saved.message);
     }
