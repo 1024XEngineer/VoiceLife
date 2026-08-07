@@ -314,5 +314,36 @@ int main() {
               ErrorCode::kInvalidArgument,
           "提醒触发时间溢出应返回参数错误");
 
+    const int64_t minimum_plannable_time = (std::numeric_limits<int64_t>::min() / 86400) * 86400;
+    InMemoryTimingTaskStore negative_overflow_store;
+    negative_overflow_store.AddTask(
+        {.id = "negative-overflow", .start_at = minimum_plannable_time, .next_trigger_at = minimum_plannable_time});
+    negative_overflow_store.AddReminderRule({.id = "negative-overflow-rule",
+                                             .task_id = "negative-overflow",
+                                             .offset_minutes = std::numeric_limits<int>::min(),
+                                             .status = ReminderRuleStatus::kActive});
+    DefaultTimingTaskService negative_overflow_service(negative_overflow_store, clock, ids);
+    Check(negative_overflow_service.AdvanceDueTasks(0).status.code == ErrorCode::kInvalidArgument,
+          "负向提醒触发时间溢出应返回参数错误");
+
+    InMemoryTimingTaskStore max_recurrence_store;
+    max_recurrence_store.AddTask({.id = "max-recurrence",
+                                  .start_at = std::numeric_limits<int64_t>::max() - 1,
+                                  .next_trigger_at = std::numeric_limits<int64_t>::max() - 1,
+                                  .recurrence = {.frequency = RecurrenceFrequency::kDay}});
+    DefaultTimingTaskService max_recurrence_service(max_recurrence_store, clock, ids);
+    Check(max_recurrence_service.AdvanceDueTasks(std::numeric_limits<int64_t>::max() - 1).status.code ==
+              ErrorCode::kInvalidArgument,
+          "接近时间戳上限的周期规划应返回参数错误");
+
+    InMemoryTimingTaskStore no_match_store;
+    no_match_store.AddTask({.id = "no-match",
+                            .start_at = 100,
+                            .next_trigger_at = 100,
+                            .recurrence = {.frequency = RecurrenceFrequency::kWeek, .by_weekdays = {8}}});
+    DefaultTimingTaskService no_match_service(no_match_store, clock, ids);
+    Check(no_match_service.AdvanceDueTasks(100).ok() && no_match_store.FindTask("no-match").value->next_trigger_at == 0,
+          "没有匹配星期的周期应在有限窗口后结束扫描");
+
     return 0;
 }
