@@ -985,6 +985,10 @@ export class DefaultReceiptApplication implements ReceiptApplication {
             if (receipt.attemptId !== undefined && receiptAttempt === undefined) {
                 throw new ImGatewayError('invalid_contract', 'Receipt attempt does not match its platform message');
             }
+            const detail =
+                receipt.retryable === true
+                    ? { ...(isJsonObject(receipt.detail) ? receipt.detail : {}), retryable: true }
+                    : receipt.detail;
             await tx.deliveries.saveReceipt({
                 id: this.ids.nextDeliveryReceiptId(),
                 deliveryId: delivery.id,
@@ -992,7 +996,7 @@ export class DefaultReceiptApplication implements ReceiptApplication {
                 stage: receipt.stage,
                 dedupeKey: receipt.dedupeKey,
                 externalEventId: receipt.externalEventId,
-                ...(receipt.detail === undefined ? {} : { detail: receipt.detail }),
+                ...(detail === undefined ? {} : { detail }),
                 occurredAt: receipt.occurredAt,
                 receivedAt: this.clock.now(),
             });
@@ -1498,6 +1502,10 @@ function withoutDeliveryAttemptOutcome(delivery: Delivery): Delivery {
     delete cleared.claimedAt;
     delete cleared.claimToken;
     return cleared;
+}
+
+function isJsonObject(value: JsonValue | undefined): value is { readonly [key: string]: JsonValue } {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**

@@ -113,6 +113,7 @@ test('a retryable failed receipt keeps an accepted delivery eligible for retry',
     const details = await gateway.application.deliveries.find(ctx.deliveryId);
     assert.equal(details.delivery.status, 'retryable_failed');
     assert.equal(details.receipts[0].stage, 'failed');
+    assert.deepEqual(details.receipts[0].detail, { retryable: true });
 });
 
 test('a permanent_failed delivery does not regress on further failed receipts', async () => {

@@ -50,6 +50,13 @@ test('rejects an adapter without an account or token', () => {
     );
 });
 
+test('requires the configured WeChat original account id', () => {
+    assert.throws(
+        () => new WechatOfficialAdapter({ channelAccountId: 'channel-wechat', token }),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+});
+
 test('rejects whitespace-only adapter credentials', () => {
     assert.throws(
         () => new WechatOfficialAdapter({ channelAccountId: '   ', token: '   ' }),
@@ -68,16 +75,16 @@ test('preserves the zero-argument legacy stub contract', async () => {
 test('exposes WeChat capabilities and platform-local renderings', async () => {
     const capabilities = await adapter().capabilities({});
     assert.deepEqual(capabilities, {
-        proactiveMessage: true,
+        proactiveMessage: false,
         nativeAction: false,
-        actionUi: true,
+        actionUi: false,
         deliveryReceipt: true,
-        presentationTypes: ['template', 'text_with_action_ui'],
+        presentationTypes: [],
     });
     assert.deepEqual(await adapter().renderScheduleReceipt({ summary: 'saved' }), { type: 'text', text: 'saved' });
-    assert.deepEqual(
-        await adapter().renderNotification({ content: { title: 'Reminder' }, reminderTriggerId: 'trigger-1' }),
-        { type: 'wechat_template', title: 'Reminder', reminderTriggerId: 'trigger-1' },
+    await assert.rejects(
+        () => adapter().renderNotification({ content: { title: 'Reminder' }, reminderTriggerId: 'trigger-1' }),
+        (error) => error instanceof ImGatewayError && error.code === 'capability_not_supported',
     );
 });
 
@@ -222,6 +229,11 @@ test('rejects unsafe message ids and statuses', async () => {
     const statusXml = `<xml><ToUserName>gh_fixture</ToUserName><FromUserName>open_fixture</FromUserName><CreateTime>1722643200</CreateTime><MsgType>event</MsgType><Event>TEMPLATESENDJOBFINISH</Event><MsgID>20001</MsgID><Status>${longStatus}</Status></xml>`;
     await assert.rejects(
         () => adapter().normalizeInbound(request(statusXml)),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+    const eventIdXml = `<xml><ToUserName>gh_fixture</ToUserName><FromUserName>open_fixture</FromUserName><CreateTime>1722643200</CreateTime><MsgType>event</MsgType><Event>subscribe</Event><MsgId>${longId}</MsgId></xml>`;
+    await assert.rejects(
+        () => adapter().normalizeInbound(request(eventIdXml)),
         (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
     );
 });

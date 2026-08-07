@@ -40,8 +40,8 @@ export interface WechatOfficialAdapterOptions {
     readonly channelAccountId: ChannelAccountId;
     /** 微信公众平台后台配置的 Token；只能由部署配置注入。 */
     readonly token: string;
-    /** 微信 XML 中 ToUserName 的公众号原始 ID；配置后强制校验账号归属。 */
-    readonly expectedToUserName?: string;
+    /** 微信 XML 中 ToUserName 的公众号原始 ID。 */
+    readonly expectedToUserName: string;
     /** 返回当前 Unix 秒的时钟，仅用于测试或受控部署。 */
     readonly now?: () => number;
 }
@@ -54,7 +54,7 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
 
     private readonly token: string;
 
-    private readonly expectedToUserName: string | undefined;
+    private readonly expectedToUserName: string;
 
     private readonly now: () => number;
 
@@ -67,19 +67,22 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
         }
         this.channelAccountId = channelAccountId as ChannelAccountId;
         this.token = token;
-        const expectedToUserName = options.expectedToUserName?.trim();
-        this.expectedToUserName = expectedToUserName === '' ? undefined : expectedToUserName;
+        const expectedToUserName = options.expectedToUserName;
+        if (typeof expectedToUserName !== 'string' || expectedToUserName.trim() === '') {
+            throw new ImGatewayError('invalid_contract', 'WeChat adapter requires the original account id');
+        }
+        this.expectedToUserName = expectedToUserName.trim();
         this.now = options.now ?? (() => Math.floor(Date.now() / 1000));
     }
 
     /** {@inheritDoc PlatformCapabilityPort.capabilities} */
     public capabilities(_account: ChannelAccount): Promise<ChannelCapabilities> {
         return Promise.resolve({
-            proactiveMessage: true,
+            proactiveMessage: false,
             nativeAction: false,
-            actionUi: true,
+            actionUi: false,
             deliveryReceipt: true,
-            presentationTypes: ['template', 'text_with_action_ui'],
+            presentationTypes: [],
         });
     }
 
@@ -90,11 +93,10 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
 
     /** {@inheritDoc PlatformCapabilityPort.renderNotification} */
     public renderNotification(intent: NotificationIntent): Promise<JsonValue> {
-        return Promise.resolve({
-            type: 'wechat_template',
-            title: intent.content.title,
-            reminderTriggerId: intent.reminderTriggerId,
-        });
+        void intent;
+        return Promise.reject(
+            new ImGatewayError('capability_not_supported', 'WeChat outbound template delivery is not configured'),
+        );
     }
 
     /**
@@ -129,7 +131,7 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
         this.verifyWebhook(request);
         const xml = await readBody(request);
         const fields = parseWechatXml(xml);
-        if (this.expectedToUserName !== undefined && fields.ToUserName !== this.expectedToUserName) {
+        if (fields.ToUserName !== this.expectedToUserName) {
             throw new ImGatewayError('invalid_contract', 'WeChat webhook account does not match the adapter');
         }
         const externalUserId = requiredField(fields, 'FromUserName');
@@ -237,10 +239,9 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
             };
         }
 
+        const messageId = optionalMessageId(fields.MsgID ?? fields.MsgId);
         const externalEventId =
-            fields.MsgId === undefined
-                ? stableEventId(`event:${eventName}`, fields)
-                : `event:${eventName}:${fields.MsgId}`;
+            messageId === undefined ? stableEventId(`event:${eventName}`, fields) : `event:${eventName}:${messageId}`;
         const event =
             eventName === 'subscribe' ? 'subscribed' : eventName === 'unsubscribe' ? 'unsubscribed' : eventName;
         return {

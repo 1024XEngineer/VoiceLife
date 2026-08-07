@@ -10,6 +10,7 @@ export * from './contracts/platform-events.js';
 export * from './domain/models.js';
 export * from './infrastructure/http/action-ui-api.js';
 export * from './infrastructure/http/device-api.js';
+export * from './infrastructure/http/wechat-api.js';
 export * from './infrastructure/wechat/wechat-official-adapter.js';
 export * from './ports/external.js';
 export * from './ports/repositories.js';
