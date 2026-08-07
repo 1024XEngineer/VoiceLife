@@ -32,9 +32,9 @@
 
 - `scripts/check_contract_dual_end.py` 强制双端版本常量一致，并按 manifest 做静态引用核对：
   1. 所有**有效** fixture 必须携带当前 `schemaVersion`（`versionless` 标记的契约如 `notification-submission` 在线上无版本字段，跳过此项）；
-  2. 每个 fixture（含非法用例）必须以引号字符串形式出现在 C++ 主机测试源码中；非 `outbound` 契约还要求出现在 TypeScript 测试源码中（注释内提及不计入）；
+  2. 每个 fixture（含非法用例）必须以引号字符串形式出现在 C++ 主机测试源码中；非 `outbound` 契约的全部 fixture、以及 `outbound` 契约的有效 fixture，还要求出现在 TypeScript 测试源码中（注释内提及不计入）；
   3. fixtures 目录与 manifest 双向一致——未声明的 fixture、manifest 中缺失的文件，都使门禁失败。
-- `outbound` 标记的契约（`notification-submission`、`reminder-action-command`）是网关下发到设备的方向，由 C++ 设备主机测试解析消费；TypeScript 网关只生成不解析，故其 fixture 只要求 C++ 端引用，TS 端由运行时测试而非 fixture 解析器覆盖。
+- `outbound` 是网关下发到设备方向的契约（`notification-submission`、`reminder-action-command`），由 C++ 设备主机测试解析消费；TypeScript 网关生成这些契约但无解析器。`outbound` 受脚本内固定白名单约束（`OUTBOUND_CONTRACTS`），不得任意声明；其**有效** fixture 必须接入 TypeScript 生成测试（`run-tests.mjs` 加载并核对产出结构），**非法** fixture 只由 C++ 拒绝测试消费。
 - 门禁只做静态引用核对，不执行测试、不校验解析/拒绝语义；字段级正确性与拒绝语义由双端测试自身保证（它们消费同一批 fixture，任一 fixture 变化会同时破坏对应端测试）。
 - 非法 fixture 故意偏离版本或语义，用于双端拒绝语义测试；新增 `*-invalid-*` 用例必须声明进 manifest 并接入双端测试，门禁才会通过。
 

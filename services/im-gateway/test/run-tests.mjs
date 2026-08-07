@@ -335,8 +335,62 @@ async function runIssue65TransportBoundaryTests() {
     );
 }
 
+async function runOutboundGenerationTests() {
+    // 生成测试：网关产出（NotificationSubmission / ReminderActionCommand）必须符合
+    // 共享 outbound fixture 的结构；generated 的 deliveryId/bindingId 仅断言类型，
+    // 其余字段与 fixture 逐项对齐（见 manifest 的 outbound 契约）。
+    const submissionSpec = await readFixture('notification-submission.json');
+    const weakSubmissionSpec = await readFixture('notification-submission-weak.json');
+    const commandSpec = await readFixture('reminder-action-command.json');
+
+    const strong = await readFixture('notification-strong.json');
+    const weak = await readFixture('notification-weak.json');
+    const { gateway } = await createBoundGateway();
+
+    const submission = await submitFixture(gateway, strong);
+    assert(
+        submission.businessEventId === submissionSpec.businessEventId &&
+            submission.status === submissionSpec.status &&
+            submission.deliveries.length === submissionSpec.deliveries.length &&
+            submission.deliveries.every((delivery) => delivery.status === 'pending') &&
+            typeof submission.deliveries[0].bindingId === 'string' &&
+            typeof submission.deliveries[0].deliveryId === 'string' &&
+            JSON.stringify(submission.actionStream) === JSON.stringify(submissionSpec.actionStream),
+        'NotificationSubmission 生成与 notification-submission.json 结构不一致',
+    );
+
+    // 弱提醒受理结果无 actionStream；deliveries 取决于绑定情况（fixture 的空数组建模未绑定场景）。
+    const weakSubmission = await submitFixture(gateway, weak);
+    assert(
+        weakSubmission.status === weakSubmissionSpec.status && weakSubmission.actionStream === undefined,
+        'NotificationSubmission 生成与 notification-submission-weak.json 结构不一致',
+    );
+
+    const publishedCommands = [];
+    const recordingStream = {
+        publish: async (command) => {
+            publishedCommands.push(command);
+        },
+        subscribe: () => (async function* emptyStream() {})(),
+        close: async () => {},
+    };
+    const { gateway: actionGateway } = await createBoundGateway({ actionStream: recordingStream });
+    const actionSubmission = await submitFixture(actionGateway, strong);
+    const actionDeliveryId = actionSubmission.deliveries[0]?.deliveryId;
+    assert(actionDeliveryId !== undefined, 'Outbound action fixture did not create a Delivery');
+    const token = await actionGateway.application.actionUi.issue(actionDeliveryId);
+    await actionGateway.actionUiApi.post({ token, action: 'acknowledge' });
+    const command = publishedCommands[0];
+    const requiredKeys = Object.keys(commandSpec).filter((key) => key !== 'params');
+    assert(
+        command && requiredKeys.every((key) => key in command) && command.schemaVersion === commandSpec.schemaVersion,
+        'ReminderActionCommand 生成与 reminder-action-command.json 结构不一致',
+    );
+}
+
 await runMockNotificationScenario();
 await runContractFixtureTests();
 await runFailureStateTests();
 await runIssue65TransportBoundaryTests();
+await runOutboundGenerationTests();
 console.log('IM Gateway Issue #65/#95 contract and regression tests passed');

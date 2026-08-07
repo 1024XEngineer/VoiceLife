@@ -277,13 +277,42 @@ class ContractDualEndCheckTest(unittest.TestCase):
 
             shutil.rmtree(directory)
 
-    def test_outbound_contract_requires_only_cpp_coverage(self) -> None:
+    def test_outbound_invalid_fixture_skips_ts_coverage_but_valid_required(self) -> None:
         directory, manifest = make_fixture_tree()
         try:
             manifest["outbound"] = ["notification"]
-            ts = TS_TEST_SOURCE.replace("notification-weak.json", "ignored.json")
+            ts = TS_TEST_SOURCE.replace("notification-invalid-enum.json", "ignored.json").replace(
+                "notification-weak.json", "ignored.json"
+            )
             errors = self.check(Path(directory) / "fixtures", manifest, ts_source=ts)
-            self.assertFalse(any("notification-weak.json 未接入 TypeScript 测试" in error for error in errors))
+            self.assertFalse(any("notification-invalid-enum.json 未接入 TypeScript 测试" in error for error in errors))
+            self.assertTrue(any("notification-weak.json 未接入 TypeScript 测试" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
+    def test_load_manifest_rejects_outbound_not_in_allowlist(self) -> None:
+        directory, manifest = make_fixture_tree()
+        try:
+            bad = Path(directory) / "manifest.json"
+            manifest["outbound"] = ["notification"]
+            bad.write_text(json.dumps(manifest), encoding="utf-8")
+            _data, errors = gate.load_manifest(bad)
+            self.assertTrue(any("不允许" in error and "notification" in error for error in errors))
+        finally:
+            import shutil
+
+            shutil.rmtree(directory)
+
+    def test_load_manifest_rejects_invalid_utf8(self) -> None:
+        directory, _manifest = make_fixture_tree()
+        try:
+            bad = Path(directory) / "manifest.json"
+            bad.write_bytes(b'{"schemaVersion": "\xff\xfe"}')
+            manifest, errors = gate.load_manifest(bad)
+            self.assertIsNone(manifest)
+            self.assertTrue(any("manifest 无法解析" in error for error in errors))
         finally:
             import shutil
 

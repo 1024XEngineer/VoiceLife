@@ -9,17 +9,21 @@ wire contract.  This check fails the build if:
 - any fixture on disk is missing from the manifest, or any manifest entry
   refers to a missing file (every fixture must be declared exactly once);
 - any declared fixture is not referenced by the C++ host tests (and by the
-  TypeScript tests for inbound contracts) — a static reference check, not an
-  execution-coverage proof, so a fixture change always breaks its consumers.
+  TypeScript tests for inbound contracts and for outbound *valid* fixtures) —
+  a static reference check, not an execution-coverage proof, so a fixture
+  change always breaks its consumers.
 
 The manifest (``contracts/im-gateway/v1/fixtures/manifest.json``) annotates
 each fixture's contract and expected outcome, instead of relying on the
 ``*-invalid-*`` filename convention.  Two optional top-level keys refine the
 checks: ``versionless`` lists contracts whose fixtures intentionally carry no
 ``schemaVersion`` (e.g. the gateway→device ``notification-submission``
-response), and ``outbound`` lists gateway→device contracts consumed only by
-the C++ host tests (the TypeScript gateway generates them and is covered by
-runtime tests, not fixture parsers).
+response), and ``outbound`` lists gateway→device contracts.  ``outbound`` is
+restricted to the fixed allowlist ``OUTBOUND_CONTRACTS`` (the TypeScript
+gateway produces these, the C++ device parses them); their valid fixtures must
+still be referenced by the TypeScript generation tests, while their invalid
+fixtures are consumed only by the C++ rejection tests because the TypeScript
+producer never emits an invalid payload.
 """
 
 from __future__ import annotations
@@ -39,6 +43,10 @@ CPP_TEST_FILES = [
     ROOT / "tests/host/im_contract_parser_test.cc",
     ROOT / "tests/host/im_gateway_contract_test.cc",
 ]
+TS_TEST_FILE = ROOT / "services/im-gateway/test/run-tests.mjs"
+# 网关下发到设备方向的契约：TS 网关生成、C++ 设备解析。仅这些合同可标记为
+# outbound；新增此类契约必须同步补 TS 生成测试（其有效 fixture 要求 TS 引用）。
+OUTBOUND_CONTRACTS = frozenset({"notification-submission", "reminder-action-command"})
 TS_TEST_FILE = ROOT / "services/im-gateway/test/run-tests.mjs"
 
 
@@ -124,7 +132,7 @@ def load_manifest(path: Path) -> tuple[dict | None, list[str]]:
     errors: list[str] = []
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         return None, [f"FAIL manifest 无法解析: {exc}"]
     try:
         data = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
@@ -145,6 +153,8 @@ def load_manifest(path: Path) -> tuple[dict | None, list[str]]:
         for contract in entries:
             if contract not in known_contracts:
                 errors.append(f"FAIL manifest 的 {key} 引用未知合同: {contract}")
+            elif key == "outbound" and contract not in OUTBOUND_CONTRACTS:
+                errors.append(f"FAIL 不允许将合同 {contract} 标记为 outbound（仅 {sorted(OUTBOUND_CONTRACTS)}）")
     for contract, groups in data["contracts"].items():
         if not isinstance(groups, dict):
             errors.append(f"FAIL manifest 合同 {contract} 的条目必须是对象")
@@ -196,7 +206,8 @@ def check_fixtures(
                         errors.append(f"FAIL 有效 fixture {name} 的 schemaVersion 与双端常量不一致")
                 if not any(is_referenced(text, name) for text in cpp_texts):
                     errors.append(f"FAIL fixture {name} 未接入 C++ 主机测试")
-                if contract not in outbound and not is_referenced(ts_text, name):
+                ts_required = not (contract in outbound and outcome == "invalid")
+                if ts_required and not is_referenced(ts_text, name):
                     errors.append(f"FAIL fixture {name} 未接入 TypeScript 测试")
 
     return errors
