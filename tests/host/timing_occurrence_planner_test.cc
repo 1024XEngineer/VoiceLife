@@ -97,6 +97,11 @@ int main() {
     const auto monthly = PlanOccurrences(monthly_task, month_end, month_end + 70 * kDay);
     Check(monthly.ok() && monthly.value->size() == 2 && monthly.value->at(1) == UtcAtLocal(2026, 10, 31, 0, 30),
           "每月任务应按本地月日展开并保留月末锚点语义");
+    monthly_task.recurrence.by_month_days = {30};
+    const auto monthly_filtered = PlanOccurrences(monthly_task, month_end, month_end + 70 * kDay);
+    Check(monthly_filtered.ok() && *monthly_filtered.value == std::vector<int64_t>{UtcAtLocal(2026, 9, 30, 0, 30),
+                                                                                   UtcAtLocal(2026, 10, 30, 0, 30)},
+          "每月任务应按指定本地日期筛选");
 
     const int64_t leap_day = UtcAtLocal(2028, 2, 29, 9, 15);
     TimingTask yearly_task{
@@ -109,6 +114,11 @@ int main() {
     const auto yearly = PlanOccurrences(yearly_task, leap_day, UtcAtLocal(2033, 3, 1, 0));
     Check(yearly.ok() && *yearly.value == std::vector<int64_t>{leap_day, UtcAtLocal(2032, 2, 29, 9, 15)},
           "每年任务应正确处理闰年日期");
+    yearly_task.recurrence = {.frequency = RecurrenceFrequency::kYear, .by_month_days = {5}, .by_months = {3, 4}};
+    const auto yearly_filtered = PlanOccurrences(yearly_task, leap_day, UtcAtLocal(2029, 1, 1, 0));
+    Check(yearly_filtered.ok() && *yearly_filtered.value == std::vector<int64_t>{UtcAtLocal(2028, 3, 5, 9, 15),
+                                                                                 UtcAtLocal(2028, 4, 5, 9, 15)},
+          "每年任务应按指定本地月份和日期筛选");
 
     TimingTask bounded_task = daily_task;
     bounded_task.id = "planner-effective-until";
@@ -122,6 +132,10 @@ int main() {
     const auto overflow =
         PlanOccurrences(daily_task, std::numeric_limits<int64_t>::max() - 100, std::numeric_limits<int64_t>::max());
     Check(overflow.ok() && overflow.value->empty(), "UTC+8 偏移溢出时应返回空展开");
+    TimingTask overflow_anchor = daily_task;
+    overflow_anchor.start_at = std::numeric_limits<int64_t>::max();
+    const auto overflow_start = PlanOccurrences(overflow_anchor, kLocalMonday, kLocalMonday + kDay);
+    Check(overflow_start.ok() && overflow_start.value->empty(), "周期锚点的 UTC+8 偏移溢出时应返回空展开");
     Check(PlanOccurrences(daily_task, 10, 10).status.code == ErrorCode::kInvalidArgument, "空规划范围应返回参数错误");
 
     return 0;
