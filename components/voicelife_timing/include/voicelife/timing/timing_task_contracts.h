@@ -28,12 +28,12 @@ enum class TriggerSortBy {
     kCreatedAt,
 };
 
-/// 提供注册定时任务所需的数据；request_id 非空且用于重试幂等，MVP 周期任务仅接受 UTC 时区。
+/// 提供注册定时任务所需的数据；request_id 非空且用于重试幂等，MVP 周期任务使用固定 +08:00 时区。
 struct RegisterTimerTaskCommand {
     std::string request_id{};
     ScheduleId schedule_id{};
     int64_t start_at = 0;
-    std::string time_zone = "Asia/Shanghai";
+    std::string time_zone = "+08:00";
     RecurrenceRule recurrence{};
 };
 

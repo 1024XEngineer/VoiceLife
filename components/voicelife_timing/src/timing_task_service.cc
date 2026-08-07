@@ -104,8 +104,8 @@ Status ValidateRecurrence(const RecurrenceRule& recurrence) {
 }
 
 Status ValidateRecurrenceTimeZone(const RecurrenceRule& recurrence, const std::string& time_zone) {
-    if (recurrence.frequency != RecurrenceFrequency::kNone && time_zone != "UTC") {
-        return Status::Error(ErrorCode::kInvalidArgument, "MVP 周期任务仅支持 UTC 时区");
+    if (recurrence.frequency != RecurrenceFrequency::kNone && time_zone != "+08:00") {
+        return Status::Error(ErrorCode::kInvalidArgument, "MVP 周期任务仅支持 +08:00 时区");
     }
     return ValidateRecurrence(recurrence);
 }

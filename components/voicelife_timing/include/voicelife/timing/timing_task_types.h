@@ -101,7 +101,7 @@ struct TimingTask {
     std::string request_id{};
     int64_t start_at = 0;
     int64_t next_trigger_at = 0;
-    std::string time_zone = "Asia/Shanghai";
+    std::string time_zone = "+08:00";
     RecurrenceRule recurrence{};
     TimingTaskStatus status = TimingTaskStatus::kActive;
     int64_t created_at = 0;
