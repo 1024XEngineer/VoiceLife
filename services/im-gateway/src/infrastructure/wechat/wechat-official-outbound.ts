@@ -235,12 +235,11 @@ export class WechatOfficialOutbound {
             this.options.requestTimeoutMs,
         );
         const result = await readWechatApiResponse(response);
-        if (
-            !response.ok ||
-            result.errcode !== 0 ||
-            result.accessToken === undefined ||
-            result.accessToken.trim() === ''
-        ) {
+        // 与发送端点一致：非 2xx 且未携带有效微信 errcode 时按 HTTP 状态归类（5xx→-1 重试，429/408→对应码重试，其余→HTTP 状态码永久）。
+        if (!response.ok && result.errcode === 0) {
+            throw new WechatAccessTokenError(response.status >= 500 ? -1 : response.status);
+        }
+        if (result.errcode !== 0 || result.accessToken === undefined || result.accessToken.trim() === '') {
             throw new WechatAccessTokenError(result.errcode);
         }
         this.accessTokenCache = {

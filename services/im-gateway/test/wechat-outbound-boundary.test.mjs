@@ -122,6 +122,40 @@ test('WeChat access-token refresh is single-flight for concurrent sends', async 
     assert.equal(requests.filter((requestUrl) => requestUrl.includes('/cgi-bin/token?')).length, 1);
 });
 
+test('WeChat access-token HTTP errors map to the send-endpoint retry semantics', async () => {
+    // 非 2xx + 无有效 errcode：5xx→-1 重试、429/408→对应码重试、其余→HTTP 状态码永久；
+    // 空 body 仍按协议错误处理，与发送端点一致。
+    const cases = [
+        { status: 503, body: '{}', expected: { accepted: false, retryable: true, errorCode: 'wechat_-1' } },
+        { status: 429, body: '{}', expected: { accepted: false, retryable: true, errorCode: 'wechat_429' } },
+        { status: 408, body: '{}', expected: { accepted: false, retryable: true, errorCode: 'wechat_408' } },
+        { status: 400, body: '{}', expected: { accepted: false, retryable: false, errorCode: 'wechat_400' } },
+        { status: 503, body: '', expected: { accepted: false, retryable: false, errorCode: 'wechat_protocol_error' } },
+    ];
+    for (const { status, body, expected } of cases) {
+        const adapter = outboundAdapter(async () => new globalThis.Response(body, { status }));
+        assert.deepEqual(
+            await adapter.send(outboundMessage()),
+            expected,
+            `token endpoint status ${status} with body ${JSON.stringify(body)}`,
+        );
+    }
+});
+
+test('WeChat access-token non-2xx responses still preserve a valid JSON errcode', async () => {
+    const adapter = outboundAdapter(
+        async () =>
+            new globalThis.Response(JSON.stringify({ errcode: 45009, errmsg: 'api freq out of limit' }), {
+                status: 500,
+            }),
+    );
+    assert.deepEqual(await adapter.send(outboundMessage()), {
+        accepted: false,
+        retryable: true,
+        errorCode: 'wechat_45009',
+    });
+});
+
 test('WeChat outbound reads only the top-level platform message id', async () => {
     const responses = [
         new globalThis.Response(JSON.stringify({ access_token: 'fixture', expires_in: 7200 })),
