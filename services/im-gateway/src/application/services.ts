@@ -15,6 +15,7 @@ import {
     MAX_PAIRING_SESSION_MINUTES,
     MIN_PAIRING_SESSION_MINUTES,
     type NotificationIntent,
+    type NotificationActionOption,
     type NotificationSubmission,
     type ReminderActionCommand,
     type ReminderActionResult,
@@ -1074,7 +1075,12 @@ export class DefaultActionApplication implements ActionApplication {
             }
             return {
                 actionId: claims.actionId,
-                actions: metadata.actions,
+                actions: metadata.options.map((option) => option.type),
+                options: metadata.options.map((option) => ({
+                    action: option.type,
+                    label: option.label,
+                    ...(option.params === undefined ? {} : { params: option.params }),
+                })),
                 expiresAt: claims.expiresAt,
             };
         });
@@ -1089,6 +1095,7 @@ export class DefaultActionApplication implements ActionApplication {
                 if (
                     existing.deliveryId !== command.claims.deliveryId ||
                     existing.actionType !== command.actionType ||
+                    !sameActionParams(existing.actionParams, actionParams) ||
                     (command.actualIdentityId !== undefined && command.actualIdentityId !== existing.expectedIdentityId)
                 ) {
                     throw new ImGatewayError('action_not_found', 'Action token was already used for another action');
@@ -1115,7 +1122,7 @@ export class DefaultActionApplication implements ActionApplication {
                 binding.status !== 'active' ||
                 (command.actualIdentityId !== undefined && command.actualIdentityId !== binding.externalIdentityId) ||
                 metadata === undefined ||
-                !metadata.actions.includes(command.actionType) ||
+                !hasApprovedActionOption(metadata.options, command.actionType, actionParams) ||
                 delivery.expiresAt !== command.claims.expiresAt ||
                 command.claims.expiresAt <= this.clock.now()
             ) {
@@ -1425,7 +1432,7 @@ function readStrongReminderMetadata(payload: JsonValue):
     | {
           readonly deviceId: DeviceId;
           readonly reminderTriggerId: ReminderTriggerId;
-          readonly actions: readonly ReminderActionCommand['action'][];
+          readonly options: readonly NotificationActionOption[];
       }
     | undefined {
     if (
@@ -1442,7 +1449,7 @@ function readStrongReminderMetadata(payload: JsonValue):
     ) {
         return undefined;
     }
-    const actions: ReminderActionCommand['action'][] = [];
+    const options: NotificationActionOption[] = [];
     for (const candidate of payload.actions) {
         if (
             typeof candidate !== 'object' ||
@@ -1452,13 +1459,50 @@ function readStrongReminderMetadata(payload: JsonValue):
         ) {
             continue;
         }
-        actions.push(candidate.type);
+        if (typeof candidate.label !== 'string' || candidate.label.trim() === '') continue;
+        const params =
+            candidate.params !== undefined &&
+            typeof candidate.params === 'object' &&
+            candidate.params !== null &&
+            !Array.isArray(candidate.params) &&
+            typeof candidate.params.minutes === 'number' &&
+            Number.isInteger(candidate.params.minutes) &&
+            candidate.params.minutes > 0
+                ? { minutes: candidate.params.minutes }
+                : undefined;
+        if (candidate.type === 'snooze' && params === undefined) continue;
+        options.push({
+            kind: 'command',
+            type: candidate.type,
+            label: candidate.label,
+            ...(params === undefined ? {} : { params }),
+        });
     }
+    if (options.length === 0) return undefined;
     return {
         deviceId: payload.recipient.deviceId as DeviceId,
         reminderTriggerId: payload.reminderTriggerId as ReminderTriggerId,
-        actions,
+        options,
     };
+}
+
+function hasApprovedActionOption(
+    options: readonly NotificationActionOption[],
+    action: ReminderActionCommand['action'],
+    params: JsonValue | undefined,
+): boolean {
+    return options.some(
+        (option) =>
+            option.type === action &&
+            (option.params === undefined
+                ? params === undefined
+                : isJsonObject(params) && params.minutes === option.params.minutes),
+    );
+}
+
+function sameActionParams(left: JsonValue | undefined, right: JsonValue | undefined): boolean {
+    if (left === undefined || right === undefined) return left === right;
+    return canonicalizeJson(left) === canonicalizeJson(right);
 }
 
 /**

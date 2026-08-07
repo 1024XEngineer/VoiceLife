@@ -137,6 +137,19 @@ test('preparing a token for an active strong delivery returns the action window 
     assert.equal(claims.expiresAt, clock.addMinutes(clock.now(), 10));
 });
 
+test('Action UI exposes only the labels and fixed params approved by the notification', async () => {
+    const { gateway } = buildGateway();
+    const { token } = await prepareAction(gateway);
+
+    const view = await gateway.application.actionUi.show(token);
+
+    assert.deepEqual(view.actions, ['acknowledge', 'snooze']);
+    assert.deepEqual(view.options, [
+        { action: 'acknowledge', label: '知道了' },
+        { action: 'snooze', label: '推迟 10 分钟', params: { minutes: 10 } },
+    ]);
+});
+
 test('triggering a prepared acknowledge publishes a well-formed command', async () => {
     const { gateway, stream } = actionGateway();
     const { deliveryId, token } = await prepareAction(gateway);
@@ -294,6 +307,24 @@ test('snooze params must be a positive integer minutes', async () => {
         );
         assert.equal(error.code, 'invalid_transition');
     }
+});
+
+test('snooze params must match the server-approved option across replays', async () => {
+    const { gateway } = actionGateway();
+    const { token } = await prepareAction(gateway);
+
+    const unapproved = await expectRejected(
+        () => gateway.application.actionUi.execute({ token, action: 'snooze', params: { minutes: 11 } }),
+        'Snooze accepted params that were not rendered by the server',
+    );
+    assert.equal(unapproved.code, 'action_expired');
+
+    await gateway.application.actionUi.execute({ token, action: 'snooze', params: { minutes: 10 } });
+    const changedReplay = await expectRejected(
+        () => gateway.application.actionUi.execute({ token, action: 'snooze', params: { minutes: 11 } }),
+        'Snooze replay silently changed the approved params',
+    );
+    assert.equal(changedReplay.code, 'action_not_found');
 });
 
 test('a snooze success without nextTriggerAt is rejected', async () => {

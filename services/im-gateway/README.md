@@ -1,6 +1,6 @@
-# VoiceLife IM Gateway skeleton
+# VoiceLife IM Gateway
 
-这是 VoiceLife IM Gateway 的独立服务模块。它用代码表达模块边界、跨端契约和依赖方向，并以 Issue #95 作为当前交付与验收基线；目前包含 PostgreSQL 持久化和微信公众号 Webhook Adapter，但仍不包含真实 Koishi Bot。
+这是 VoiceLife IM Gateway 的独立服务模块。它用代码表达模块边界、跨端契约和依赖方向，并以 Issue #95 作为当前交付与验收基线；目前包含 PostgreSQL 持久化、微信公众号 Webhook/模板投递 Adapter 和服务端渲染的 H5 Action UI，但仍不包含真实 Koishi Bot。
 
 ## 边界
 
@@ -73,13 +73,23 @@ SSE Hub 等实现。
 
 当前 mock 场景覆盖：PairingSession 绑定/过期、强弱提醒分流、DeliveryAttempt 与 H5 Token 渲染、复合入站幂等键、`externalMessageId` 回执归并、Receipt 去重及迟到回执不倒退、H5/平台 Action 入口合流、SSE 持久化回放、HTTPS Result 回传与 Action 过期关闭。
 
-## 微信公众号 Webhook
+## 微信公众号 Adapter
 
 `WechatOfficialAdapter` 按渠道账号实例化，构造时必须接收 `channelAccountId`、公众号原始 ID `expectedToUserName` 和由部署环境解析后的微信 Token。真实 Token 不写入 `ChannelAccount.capabilityConfig`、Profile、日志或测试 fixture；测试仅使用无效固定值。`verifyWebhook()` 处理服务器配置的 `echostr` 验签和五分钟重放窗口，`normalizeInbound()` 校验 POST 签名、`ToUserName` 账号归属并将明文模式的微信 XML 转换为 `NormalizedImEvent`。
 
-生产组合根通过 `wechatAdapter` 注入 Adapter 后暴露 `runtime.wechatApi`，HTTP 框架将微信 GET/POST 请求映射到 `WechatWebhookController.verify()`/`post()`；框架仍必须在读取请求体前配置 64 KiB 流式限制。当前不支持 AES 加密模式，也未配置真实模板消息出站能力，因此 `proactiveMessage` 为 `false`，`renderNotification()` 明确返回 `capability_not_supported`。
+生产组合根通过 `wechatAdapter` 注入 Adapter 后暴露 `runtime.wechatApi`，HTTP 框架将微信 GET/POST 请求映射到 `WechatWebhookController.verify()`/`post()`；框架仍必须在读取请求体前配置 64 KiB 流式限制。当前不支持微信 Webhook AES 加密模式。
+
+配置 `outbound` 后，同一个 `WechatOfficialAdapter` 同时实现 `ChannelCapabilityResolver`、`DeliveryRendererPort` 和 `ImChannelPort`。组合根应把同一实例注入 `channelCapabilities`、`deliveryRenderer`、`imChannel` 与 `wechatAdapter`。Adapter 获取并缓存 `access_token`，通过微信模板消息接口发送通知；强提醒模板的详情地址只携带 URL 编码后的动作 token。模板接口成功只记录 `accepted` 和精确字符串 `msgid`，后续 `TEMPLATESENDJOBFINISH` 回调才把 Delivery 推进为 `delivered`。
+
+`ChannelAccount.credentialRef` 只保存 `secret://...` 引用。部署层负责解析并注入 Webhook Token、App ID/AppSecret、模板 ID/字段映射、H5 HTTPS 基础地址以及外部身份解密函数；这些值不得写入 `capabilityConfig`、Profile、日志或 fixture。未配置 `outbound` 时 Adapter 继续只提供入站能力，并如实返回 `proactiveMessage: false`。
 
 模板投递结果使用 `channelAccountId + MsgID` 定位 Delivery；`MsgID + Status` 生成稳定的 webhook 事件标识和 Receipt 去重键。重复回调由入站事件与 Receipt 两层幂等保护，迟到回执继续遵循 Application 层状态机，不会让已投递状态倒退。
+
+## H5 Action UI
+
+生产运行时同时暴露 `runtime.actionUiPageApi`。HTTP 框架将 `GET /voicelife/reminder-actions/:token` 映射到 `get()`，将表单 POST 映射到 `post()`，并原样写回状态码、响应头和 HTML body。页面不运行客户端脚本，只渲染通知意图中服务端批准的动作标签与固定参数；路径 token 由服务端覆盖请求体中的同名字段，浏览器看不到内部身份、Delivery、Action 或 Operation 标识。
+
+生产部署使用 `AesGcmActionTokenPort`。它以部署 Secret 派生 AES-256-GCM 密钥，令牌内容不可读且可在进程重启后校验；应用层继续检查动作窗口、绑定和 token + 动作幂等。Secret 必须由安全引用解析后注入，不能使用示例值或持久化到数据库。
 
 ## TSDoc 规范
 
