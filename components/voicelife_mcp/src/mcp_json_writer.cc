@@ -139,6 +139,10 @@ bool AppendTool(yyjson_mut_doc* document, yyjson_mut_val* tools, const ToolDefin
             (field.maximum.has_value() && !AddInteger(document, property, "maximum", *field.maximum))) {
             return false;
         }
+        if ((field.min_length.has_value() && !AddInteger(document, property, "minLength", *field.min_length)) ||
+            (field.max_length.has_value() && !AddInteger(document, property, "maxLength", *field.max_length))) {
+            return false;
+        }
     }
 
     yyjson_mut_val* required = AddArray(document, schema, "required");

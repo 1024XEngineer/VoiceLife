@@ -30,7 +30,7 @@ Status RegisterTypedTool(McpServer& server, int64_t& captured_value) {
     return server.add_tool("self.device.configure", "配置设备",
                            PropertyList({Property("enabled", PropertyType::kBoolean, true),
                                          Property("level", PropertyType::kInteger, 0, 100),
-                                         Property("label", PropertyType::kString, std::string("default"))}),
+                                         Property::WithStringLength("label", 1, 10, std::string("default"))}),
                            [&captured_value](const PropertyList& properties) {
                                captured_value = properties.value<int64_t>("level").value_or(-1);
                                return ToolResult{.status = Status::Ok(), .output = {}};
@@ -83,6 +83,14 @@ void TestRegistrationValidation() {
                           handler)
                   .code == ErrorCode::kInvalidArgument,
           "整数参数最小值大于最大值时应拒绝注册");
+    Check(server.add_tool("invalid.string_length", "描述", PropertyList({Property::WithStringLength("label", 10, 1)}),
+                          handler)
+                  .code == ErrorCode::kInvalidArgument,
+          "字符串最小长度大于最大长度时应拒绝注册");
+    Check(server.add_tool("invalid.string_default", "描述",
+                          PropertyList({Property::WithStringLength("label", 1, 3, std::string("默认值过长"))}), handler)
+                  .code == ErrorCode::kInvalidArgument,
+          "字符串默认值超出长度范围时应拒绝注册");
 }
 
 /**
@@ -146,6 +154,28 @@ void TestToolCalls() {
                       })
                   .status.code == ErrorCode::kInvalidArgument,
           "未定义参数应被拒绝");
+    Check(server.call({
+                          .request_id = "request-9",
+                          .name = "self.device.configure",
+                          .arguments = {{"level", int64_t{10}}, {"label", std::string("01234567890")}},
+                      })
+                  .status.code == ErrorCode::kInvalidArgument,
+          "字符串参数超过长度上限时应拒绝调用");
+    Check(server.call({
+                          .request_id = "request-10",
+                          .name = "self.device.configure",
+                          .arguments = {{"level", int64_t{10}}, {"label", std::string()}},
+                      })
+                  .status.code == ErrorCode::kInvalidArgument,
+          "字符串参数低于长度下限时应拒绝调用");
+    Check(server
+              .call({
+                  .request_id = "request-11",
+                  .name = "self.device.configure",
+                  .arguments = {{"level", int64_t{10}}, {"label", std::string("中文标签")}},
+              })
+              .status.ok(),
+          "UTF-8 字符串长度应按字符数校验");
 }
 
 /**
@@ -188,11 +218,15 @@ void TestToolListing() {
     yyjson_val* configure_schema = yyjson_obj_get(configure, "inputSchema");
     yyjson_val* properties = yyjson_obj_get(configure_schema, "properties");
     yyjson_val* level = yyjson_obj_get(properties, "level");
+    yyjson_val* label = yyjson_obj_get(properties, "label");
     Check(yyjson_equals_str(yyjson_obj_get(configure, "name"), "self.device.configure") &&
               yyjson_equals_str(yyjson_obj_get(level, "type"), "integer") &&
               yyjson_get_sint(yyjson_obj_get(level, "minimum")) == 0 &&
               yyjson_get_sint(yyjson_obj_get(level, "maximum")) == 100,
           "tools/list JSON 应包含完整的工具输入 Schema");
+    Check(yyjson_get_sint(yyjson_obj_get(label, "minLength")) == 1 &&
+              yyjson_get_sint(yyjson_obj_get(label, "maxLength")) == 10,
+          "字符串长度范围应序列化到 Schema");
 
     yyjson_val* boundary = yyjson_arr_get(tools, 1);
     yyjson_val* boundary_schema = yyjson_obj_get(boundary, "inputSchema");

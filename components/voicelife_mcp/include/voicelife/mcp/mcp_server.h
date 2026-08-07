@@ -20,6 +20,8 @@ struct ToolInputField {
     std::string description;
     std::optional<int64_t> minimum;
     std::optional<int64_t> maximum;
+    std::optional<std::size_t> min_length;
+    std::optional<std::size_t> max_length;
 };
 
 /// MCP 工具输入参数的 JSON Schema。
@@ -77,6 +79,17 @@ class Property {
     Property(std::string name, PropertyType type, int64_t minimum, int64_t maximum);
 
     /**
+     * @brief 创建带字符串长度约束的参数声明。
+     * @param name 参数名称。
+     * @param minimum 最小字符数。
+     * @param maximum 最大字符数。
+     * @param default_value 默认值；未设置时该参数为必填。
+     * @return 参数声明。
+     */
+    static Property WithStringLength(std::string name, std::size_t minimum, std::size_t maximum,
+                                     std::optional<ToolValue> default_value = std::nullopt);
+
+    /**
      * @brief 获取参数名称。
      * @return 参数名称。
      */
@@ -101,6 +114,10 @@ class Property {
      * @return 最大值；未设置时为空。
      */
     [[nodiscard]] std::optional<int64_t> maximum() const { return maximum_; }
+    /** @brief 获取字符串最小长度。 @return 最小长度；未设置时为空。 */
+    [[nodiscard]] std::optional<std::size_t> min_length() const { return min_length_; }
+    /** @brief 获取字符串最大长度。 @return 最大长度；未设置时为空。 */
+    [[nodiscard]] std::optional<std::size_t> max_length() const { return max_length_; }
 
    private:
     std::string name_;
@@ -108,6 +125,8 @@ class Property {
     std::optional<ToolValue> default_value_;
     std::optional<int64_t> minimum_;
     std::optional<int64_t> maximum_;
+    std::optional<std::size_t> min_length_;
+    std::optional<std::size_t> max_length_;
 };
 
 /// 工具参数声明及调用值的集合。

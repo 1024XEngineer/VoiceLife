@@ -51,6 +51,16 @@ ToolInputType ToInputType(PropertyType type) {
     return ToolInputType::kString;
 }
 
+/**
+ * @brief 计算 UTF-8 字符串的字符数量。
+ * @param value 待统计的 UTF-8 字符串。
+ * @return 不单独计算延续字节的字符数量。
+ */
+std::size_t Utf8Length(const std::string& value) {
+    return static_cast<std::size_t>(
+        std::count_if(value.begin(), value.end(), [](unsigned char byte) { return (byte & 0xC0U) != 0x80U; }));
+}
+
 }  // namespace
 
 Property::Property(std::string name, PropertyType type) : name_(std::move(name)), type_(type) {}
@@ -61,6 +71,15 @@ Property::Property(std::string name, PropertyType type, ToolValue default_value)
 Property::Property(std::string name, PropertyType type, int64_t minimum, int64_t maximum)
     : name_(std::move(name)), type_(type), minimum_(minimum), maximum_(maximum) {}
 
+Property Property::WithStringLength(std::string name, std::size_t minimum, std::size_t maximum,
+                                    std::optional<ToolValue> default_value) {
+    Property property(std::move(name), PropertyType::kString);
+    property.default_value_ = std::move(default_value);
+    property.min_length_ = minimum;
+    property.max_length_ = maximum;
+    return property;
+}
+
 void PropertyList::add_property(Property property) { properties_.push_back(std::move(property)); }
 
 ToolInputSchema PropertyList::to_schema() const {
@@ -70,7 +89,9 @@ ToolInputSchema PropertyList::to_schema() const {
                              .default_value = property.default_value(),
                              .description = {},
                              .minimum = property.minimum(),
-                             .maximum = property.maximum()};
+                             .maximum = property.maximum(),
+                             .min_length = property.min_length(),
+                             .max_length = property.max_length()};
         schema.properties.emplace(property.name(), std::move(field));
         if (!property.default_value().has_value()) {
             schema.required.push_back(property.name());
@@ -109,14 +130,26 @@ Status McpServer::add_tool(std::string name, std::string description, PropertyLi
         return Status::Error(ErrorCode::kAlreadyExists, "工具已注册：" + name);
     }
 
-    // 校验参数默认值、类型和整数取值范围
+    // 校验参数默认值、类型及取值约束
     for (const auto& property : properties) {
         const ToolInputType input_type = ToInputType(property.type());
+        bool default_string_length_invalid = false;
+        if (property.default_value().has_value() && input_type == ToolInputType::kString &&
+            std::holds_alternative<std::string>(*property.default_value())) {
+            const std::size_t length = Utf8Length(std::get<std::string>(*property.default_value()));
+            default_string_length_invalid = (property.min_length().has_value() && length < *property.min_length()) ||
+                                            (property.max_length().has_value() && length > *property.max_length());
+        }
         if ((property.default_value().has_value() && !MatchesType(*property.default_value(), input_type)) ||
+            default_string_length_invalid ||
             ((property.minimum().has_value() || property.maximum().has_value()) &&
              property.type() != PropertyType::kInteger) ||
+            ((property.min_length().has_value() || property.max_length().has_value()) &&
+             property.type() != PropertyType::kString) ||
             (property.minimum().has_value() && property.maximum().has_value() &&
-             *property.minimum() > *property.maximum())) {
+             *property.minimum() > *property.maximum()) ||
+            (property.min_length().has_value() && property.max_length().has_value() &&
+             *property.min_length() > *property.max_length())) {
             return Status::Error(ErrorCode::kInvalidArgument, "工具参数定义无效：" + property.name());
         }
     }
@@ -167,6 +200,13 @@ ToolResult McpServer::call(const ToolCall& call) const {
             if ((field.minimum.has_value() && value < *field.minimum) ||
                 (field.maximum.has_value() && value > *field.maximum)) {
                 return Failure(Status::Error(ErrorCode::kInvalidArgument, "工具整数参数超出范围：" + name));
+            }
+        } else if (field.type == ToolInputType::kString) {
+            const auto& value = std::get<std::string>(argument->second);
+            const std::size_t length = Utf8Length(value);
+            if ((field.min_length.has_value() && length < *field.min_length) ||
+                (field.max_length.has_value() && length > *field.max_length)) {
+                return Failure(Status::Error(ErrorCode::kInvalidArgument, "工具字符串参数长度超出范围：" + name));
             }
         }
     }
