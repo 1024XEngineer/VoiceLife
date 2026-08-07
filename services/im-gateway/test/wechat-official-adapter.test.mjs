@@ -8,6 +8,8 @@ import { pendingStrongDelivery } from './helpers.mjs';
 
 const token = 'fixture-wechat-token';
 const channelAccountId = 'channel-wechat-fixture';
+const expectedToUserName = 'gh_fixture';
+const fixtureNowSeconds = 1722643260;
 const fixtureRoot = new URL('./fixtures/wechat/', import.meta.url);
 
 function signature(timestamp, nonce) {
@@ -26,7 +28,12 @@ function request(xml, overrides = {}) {
 }
 
 function adapter(accountId = channelAccountId) {
-    return new WechatOfficialAdapter({ channelAccountId: accountId, token });
+    return new WechatOfficialAdapter({
+        channelAccountId: accountId,
+        token,
+        expectedToUserName,
+        now: () => fixtureNowSeconds,
+    });
 }
 
 test('rejects a webhook with an invalid signature', async () => {
@@ -39,6 +46,13 @@ test('rejects a webhook with an invalid signature', async () => {
 test('rejects an adapter without an account or token', () => {
     assert.throws(
         () => new WechatOfficialAdapter({ channelAccountId: '', token: '' }),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+});
+
+test('rejects whitespace-only adapter credentials', () => {
+    assert.throws(
+        () => new WechatOfficialAdapter({ channelAccountId: '   ', token: '   ' }),
         (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
     );
 });
@@ -90,6 +104,14 @@ test('rejects a signed webhook with an invalid event timestamp', async () => {
     );
 });
 
+test('rejects an event timestamp too far in the future', async () => {
+    const xml = `<xml><ToUserName>gh_fixture</ToUserName><FromUserName>open_fixture</FromUserName><CreateTime>${fixtureNowSeconds + 301}</CreateTime><MsgType>text</MsgType><Content>hello</Content></xml>`;
+    await assert.rejects(
+        () => adapter().normalizeInbound(request(xml, { timestamp: String(fixtureNowSeconds) })),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+});
+
 test('rejects malformed XML instead of accepting parser recovery', async () => {
     const xml = `
       <xml>
@@ -133,6 +155,7 @@ test('normalizes a text message and derives a stable event id', async () => {
 
     assert.equal(first.type, 'message.received');
     assert.equal(first.externalEventId, 'message:10001');
+    assert.equal(first.id, 'channel-wechat-fixture:wechat:message:10001');
     assert.equal(first.id, second.id);
     assert.deepEqual(first.payload, {
         externalUserId: 'open_fixture',
@@ -142,9 +165,113 @@ test('normalizes a text message and derives a stable event id', async () => {
     assert.equal(first.occurredAt, '2024-08-03T00:00:00.000Z');
 });
 
+test('isolates the normalized event id by channel account', async () => {
+    const xml = `
+      <xml>
+        <ToUserName>gh_fixture</ToUserName>
+        <FromUserName>open_fixture</FromUserName>
+        <CreateTime>1722643200</CreateTime>
+        <MsgType>text</MsgType>
+        <Content>hello</Content>
+        <MsgId>10001</MsgId>
+      </xml>`;
+    const first = await adapter('channel-a').normalizeInbound(request(xml));
+    const second = await adapter('channel-b').normalizeInbound(request(xml));
+    assert.notEqual(first.id, second.id);
+});
+
+test('rejects replayed and future webhook timestamps', () => {
+    const oldTimestamp = String(fixtureNowSeconds - 301);
+    assert.throws(
+        () =>
+            adapter().verifyWebhook({
+                timestamp: oldTimestamp,
+                nonce: 'old',
+                signature: signature(oldTimestamp, 'old'),
+            }),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+    assert.throws(
+        () =>
+            adapter().verifyWebhook({
+                timestamp: String(fixtureNowSeconds + 301),
+                nonce: 'future',
+                signature: signature(String(fixtureNowSeconds + 301), 'future'),
+            }),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+});
+
+test('rejects a signed webhook addressed to a different WeChat account', async () => {
+    const xml =
+        '<xml><ToUserName>other_account</ToUserName><FromUserName>open_fixture</FromUserName><CreateTime>1722643200</CreateTime><MsgType>text</MsgType><Content>hello</Content></xml>';
+    await assert.rejects(
+        () => adapter().normalizeInbound(request(xml)),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+});
+
+test('rejects unsafe message ids and statuses', async () => {
+    const longId = '1'.repeat(65);
+    const idXml = `<xml><ToUserName>gh_fixture</ToUserName><FromUserName>open_fixture</FromUserName><CreateTime>1722643200</CreateTime><MsgType>text</MsgType><Content>hello</Content><MsgId>${longId}</MsgId></xml>`;
+    await assert.rejects(
+        () => adapter().normalizeInbound(request(idXml)),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+    const longStatus = 'x'.repeat(65);
+    const statusXml = `<xml><ToUserName>gh_fixture</ToUserName><FromUserName>open_fixture</FromUserName><CreateTime>1722643200</CreateTime><MsgType>event</MsgType><Event>TEMPLATESENDJOBFINISH</Event><MsgID>20001</MsgID><Status>${longStatus}</Status></xml>`;
+    await assert.rejects(
+        () => adapter().normalizeInbound(request(statusXml)),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+});
+
+test('rejects invalid UTF-8, entities, encrypted mode, and ambiguous body input', async () => {
+    const metadata = { timestamp: String(fixtureNowSeconds), nonce: 'binary' };
+    const binary = new Uint8Array([0x3c, 0x78, 0x6d, 0x6c, 0x3e, 0xc3, 0x28, 0x3c, 0x2f, 0x78, 0x6d, 0x6c, 0x3e]);
+    await assert.rejects(
+        () =>
+            adapter().normalizeInbound({
+                ...metadata,
+                signature: signature(metadata.timestamp, metadata.nonce),
+                body: binary,
+            }),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+    const entityXml = '<!DOCTYPE xml [<!ENTITY x "boom">]><xml><ToUserName>gh_fixture</ToUserName></xml>';
+    await assert.rejects(
+        () => adapter().normalizeInbound(request(entityXml)),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+    const plainXml =
+        '<xml><ToUserName>gh_fixture</ToUserName><FromUserName>open_fixture</FromUserName><CreateTime>1722643200</CreateTime><MsgType>text</MsgType><Content>hello</Content></xml>';
+    await assert.rejects(
+        () => adapter().normalizeInbound({ ...request(plainXml), encrypt_type: 'aes' }),
+        (error) => error instanceof ImGatewayError && error.code === 'capability_not_supported',
+    );
+    await assert.rejects(
+        () => adapter().normalizeInbound({ ...request(plainXml), xml: plainXml }),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+    assert.equal(
+        (
+            await adapter().normalizeInbound({
+                query: {
+                    signature: [signature(metadata.timestamp, metadata.nonce)],
+                    timestamp: [metadata.timestamp],
+                    nonce: [metadata.nonce],
+                },
+                body: plainXml,
+            })
+        ).type,
+        'message.received',
+    );
+});
+
 test('normalizes media messages and hashes an event without MsgId', async () => {
     const xml = `
       <xml>
+        <ToUserName>gh_fixture</ToUserName>
         <FromUserName>open_media</FromUserName>
         <CreateTime>1722643200</CreateTime>
         <MsgType>image</MsgType>
@@ -156,9 +283,28 @@ test('normalizes media messages and hashes an event without MsgId', async () => 
     assert.deepEqual(event.payload, { externalUserId: 'open_media', messageType: 'image' });
 });
 
+test('normalizes unsupported standard message types for audit without retrying the webhook', async () => {
+    const xml = `
+      <xml>
+        <ToUserName>gh_fixture</ToUserName>
+        <FromUserName>open_location</FromUserName>
+        <CreateTime>1722643200</CreateTime>
+        <MsgType>location</MsgType>
+        <MsgId>10003</MsgId>
+      </xml>`;
+    const event = await adapter().normalizeInbound(request(xml));
+    assert.equal(event.type, 'message.received');
+    assert.deepEqual(event.payload, {
+        externalUserId: 'open_location',
+        messageId: '10003',
+        messageType: 'location',
+    });
+});
+
 test('normalizes a subscribe event without MsgId using its stable event digest', async () => {
     const xml = `
       <xml>
+        <ToUserName>gh_fixture</ToUserName>
         <FromUserName>open_subscribe</FromUserName>
         <CreateTime>1722643200</CreateTime>
         <MsgType>event</MsgType>
@@ -174,6 +320,7 @@ test('normalizes a subscribe event without MsgId using its stable event digest',
 test('normalizes a binding code message without leaking WeChat fields', async () => {
     const xml = `
       <xml>
+        <ToUserName>gh_fixture</ToUserName>
         <FromUserName><![CDATA[open_bind]]></FromUserName>
         <CreateTime>1722643200</CreateTime>
         <MsgType>text</MsgType>
@@ -192,6 +339,7 @@ test('normalizes a binding code message without leaking WeChat fields', async ()
 test('normalizes template delivery callbacks and deduplicates them by platform event', async () => {
     const xml = `
       <xml>
+        <ToUserName><![CDATA[gh_fixture]]></ToUserName>
         <FromUserName><![CDATA[gh_fixture]]></FromUserName>
         <CreateTime>1722643260</CreateTime>
         <MsgType><![CDATA[event]]></MsgType>
@@ -209,16 +357,34 @@ test('normalizes template delivery callbacks and deduplicates them by platform e
         externalEventId: 'template:20001:success',
         channelAccountId,
         externalMessageId: '20001',
-        dedupeKey: 'wechat:template:20001:success',
+        dedupeKey: 'channel-wechat-fixture:wechat:template:20001:success',
         stage: 'delivered',
         occurredAt: '2024-08-03T00:01:00.000Z',
         platformCode: 'success',
     });
 });
 
+test('marks WeChat system delivery failures as retryable', async () => {
+    const xml = `
+      <xml>
+        <ToUserName>gh_fixture</ToUserName>
+        <FromUserName>gh_fixture</FromUserName>
+        <CreateTime>1722643260</CreateTime>
+        <MsgType>event</MsgType>
+        <Event>TEMPLATESENDJOBFINISH</Event>
+        <MsgID>20002</MsgID>
+        <Status>failed: system failed</Status>
+      </xml>`;
+    const event = await adapter().normalizeInbound(request(xml));
+    assert.equal(event.type, 'delivery.updated');
+    assert.equal(event.payload.stage, 'failed');
+    assert.equal(event.payload.retryable, true);
+});
+
 test('rejects a template callback without MsgID', async () => {
     const xml = `
       <xml>
+        <ToUserName>gh_fixture</ToUserName>
         <FromUserName>gh_fixture</FromUserName>
         <CreateTime>1722643260</CreateTime>
         <MsgType>event</MsgType>
@@ -233,7 +399,7 @@ test('rejects a template callback without MsgID', async () => {
 
 test('accepts query-wrapped webhook metadata and rejects oversized bodies', async () => {
     const xml =
-        '<xml><FromUserName>open_fixture</FromUserName><CreateTime>1722643200</CreateTime><MsgType>text</MsgType><Content>hello</Content></xml>';
+        '<xml><ToUserName>gh_fixture</ToUserName><FromUserName>open_fixture</FromUserName><CreateTime>1722643200</CreateTime><MsgType>text</MsgType><Content>hello</Content></xml>';
     const timestamp = '1722643200';
     const nonce = 'query-fixture';
     const valid = {

@@ -9,7 +9,7 @@ importers:
   .:
     dependencies:
       fast-xml-parser:
-        specifier: ^5.10.1
+        specifier: 5.10.1
         version: 5.10.1
       pg:
         specifier: ^8.22.0

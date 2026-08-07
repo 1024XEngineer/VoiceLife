@@ -1,4 +1,5 @@
 <xml>
+  <ToUserName><![CDATA[gh_fixture]]></ToUserName>
   <FromUserName><![CDATA[gh_fixture]]></FromUserName>
   <CreateTime>1722643260</CreateTime>
   <MsgType><![CDATA[event]]></MsgType>

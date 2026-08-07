@@ -11,11 +11,16 @@ import type { IsoDateTime, JsonValue } from '../../shared/types.js';
 import type { ChannelAccount, ChannelCapabilities } from '../../domain/models.js';
 
 const MAX_WEBHOOK_BYTES = 64 * 1024;
+const MAX_TIMESTAMP_SKEW_SECONDS = 300;
+const MAX_MESSAGE_ID_LENGTH = 64;
+const MAX_STATUS_LENGTH = 64;
+const TEXT_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
 const BINDING_CODE = /^(?:绑定|bind)\s*[:：]?\s*([0-9]{4,12})$/iu;
 const XML_PARSER = new XMLParser({
     ignoreAttributes: true,
     parseTagValue: false,
-    processEntities: true,
+    processEntities: false,
     trimValues: true,
 });
 
@@ -27,6 +32,7 @@ export interface WechatWebhookRequest {
     readonly echostr?: string;
     readonly body?: string | Uint8Array;
     readonly xml?: string;
+    readonly encrypt_type?: string;
 }
 
 /** 创建微信公众号能力适配器所需的账号级配置。 */
@@ -34,6 +40,10 @@ export interface WechatOfficialAdapterOptions {
     readonly channelAccountId: ChannelAccountId;
     /** 微信公众平台后台配置的 Token；只能由部署配置注入。 */
     readonly token: string;
+    /** 微信 XML 中 ToUserName 的公众号原始 ID；配置后强制校验账号归属。 */
+    readonly expectedToUserName?: string;
+    /** 返回当前 Unix 秒的时钟，仅用于测试或受控部署。 */
+    readonly now?: () => number;
 }
 
 /** 微信公众号能力、Webhook 验签和入站事件归一化适配器。 */
@@ -44,13 +54,22 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
 
     private readonly token: string;
 
+    private readonly expectedToUserName: string | undefined;
+
+    private readonly now: () => number;
+
     /** @param options 账号标识与部署注入的微信公众号 Token。 */
     public constructor(options: WechatOfficialAdapterOptions) {
-        if (options.channelAccountId.trim() === '' || options.token === '') {
+        const channelAccountId = options.channelAccountId.trim();
+        const token = options.token.trim();
+        if (channelAccountId === '' || token === '') {
             throw new ImGatewayError('invalid_contract', 'WeChat adapter requires a channel account and token');
         }
-        this.channelAccountId = options.channelAccountId;
-        this.token = options.token;
+        this.channelAccountId = channelAccountId as ChannelAccountId;
+        this.token = token;
+        const expectedToUserName = options.expectedToUserName?.trim();
+        this.expectedToUserName = expectedToUserName === '' ? undefined : expectedToUserName;
+        this.now = options.now ?? (() => Math.floor(Date.now() / 1000));
     }
 
     /** {@inheritDoc PlatformCapabilityPort.capabilities} */
@@ -84,9 +103,16 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
      * @returns 验证请求的 echostr；普通 POST 请求没有 echostr 时返回 undefined。
      */
     public verifyWebhook(request: WechatWebhookRequest): string | undefined {
+        if (request.encrypt_type !== undefined && request.encrypt_type.toLowerCase() !== 'plain') {
+            throw new ImGatewayError('capability_not_supported', 'Encrypted WeChat webhooks are not supported');
+        }
         const signature = requiredString(request.signature, 'signature');
         const timestamp = requiredString(request.timestamp, 'timestamp');
         const nonce = requiredString(request.nonce, 'nonce');
+        const timestampSeconds = parseUnixSeconds(timestamp, 'WeChat webhook timestamp');
+        if (Math.abs(this.now() - timestampSeconds) > MAX_TIMESTAMP_SKEW_SECONDS) {
+            throw new ImGatewayError('invalid_contract', 'WeChat webhook timestamp is outside the replay window');
+        }
         if (!isSha1(signature) || !constantTimeEqual(signature, sha1([this.token, timestamp, nonce].sort().join('')))) {
             throw new ImGatewayError('invalid_contract', 'WeChat webhook signature is invalid');
         }
@@ -103,9 +129,12 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
         this.verifyWebhook(request);
         const xml = await readBody(request);
         const fields = parseWechatXml(xml);
+        if (this.expectedToUserName !== undefined && fields.ToUserName !== this.expectedToUserName) {
+            throw new ImGatewayError('invalid_contract', 'WeChat webhook account does not match the adapter');
+        }
         const externalUserId = requiredField(fields, 'FromUserName');
         const msgType = requiredField(fields, 'MsgType').toLowerCase();
-        const occurredAt = eventTime(fields.CreateTime, request.timestamp);
+        const occurredAt = eventTime(fields.CreateTime, request.timestamp, this.now());
 
         if (msgType === 'event') {
             return this.normalizeEvent(fields, externalUserId, occurredAt);
@@ -113,11 +142,11 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
         if (msgType === 'text') {
             return this.normalizeText(fields, externalUserId, occurredAt);
         }
-        if (msgType === 'image' || msgType === 'voice' || msgType === 'video' || msgType === 'shortvideo') {
-            const messageId = fields.MsgId;
+        if (/^[a-z]{1,32}$/u.test(msgType)) {
+            const messageId = optionalMessageId(fields.MsgId);
             const externalEventId = messageId === undefined ? stableEventId(msgType, fields) : `message:${messageId}`;
             return {
-                id: unsafeId(`wechat:${externalEventId}`),
+                id: this.eventId(externalEventId),
                 externalEventId,
                 platform: this.platform,
                 channelAccountId: this.channelAccountId,
@@ -130,7 +159,11 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
                 },
             };
         }
-        throw new ImGatewayError('capability_not_supported', `Unsupported WeChat message type: ${msgType}`);
+        throw new ImGatewayError('invalid_contract', 'WeChat message type is invalid');
+    }
+
+    private eventId(externalEventId: string): NormalizedImEvent['id'] {
+        return unsafeId<NormalizedImEvent['id']>(`${this.channelAccountId}:wechat:${externalEventId}`);
     }
 
     private normalizeText(
@@ -139,12 +172,12 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
         occurredAt: IsoDateTime,
     ): NormalizedImEvent {
         const text = requiredField(fields, 'Content');
-        const messageId = fields.MsgId;
+        const messageId = optionalMessageId(fields.MsgId);
         const externalEventId = messageId === undefined ? stableEventId('text', fields) : `message:${messageId}`;
         const binding = BINDING_CODE.exec(text.trim());
         if (binding !== null) {
             return {
-                id: unsafeId(`wechat:${externalEventId}`),
+                id: this.eventId(externalEventId),
                 externalEventId,
                 platform: this.platform,
                 channelAccountId: this.channelAccountId,
@@ -154,7 +187,7 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
             };
         }
         return {
-            id: unsafeId(`wechat:${externalEventId}`),
+            id: this.eventId(externalEventId),
             externalEventId,
             platform: this.platform,
             channelAccountId: this.channelAccountId,
@@ -175,24 +208,26 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
     ): NormalizedImEvent {
         const eventName = requiredField(fields, 'Event').toLowerCase();
         if (eventName === 'templatesendjobfinish') {
-            const messageId = fields.MsgID ?? fields.MsgId;
+            const messageId = optionalMessageId(fields.MsgID ?? fields.MsgId);
             if (messageId === undefined) {
                 throw new ImGatewayError('invalid_contract', 'WeChat template callback is missing MsgID');
             }
-            const status = requiredField(fields, 'Status');
-            const externalEventId = `template:${messageId}:${status.toLowerCase()}`;
-            const stage = status.toLowerCase() === 'success' ? 'delivered' : 'failed';
+            const status = normalizedStatus(requiredField(fields, 'Status'));
+            const externalEventId = `template:${messageId}:${status}`;
+            const stage = status === 'success' ? 'delivered' : 'failed';
+            const retryable = status === 'failed:system failed' || status === 'failed:system_failure';
             const receipt = {
                 externalEventId,
                 channelAccountId: this.channelAccountId,
                 externalMessageId: messageId,
-                dedupeKey: `wechat:${externalEventId}`,
+                dedupeKey: `${this.channelAccountId}:wechat:${externalEventId}`,
                 stage,
+                ...(retryable ? { retryable: true } : {}),
                 occurredAt,
                 platformCode: status,
             } as const;
             return {
-                id: unsafeId(`wechat:${externalEventId}`),
+                id: this.eventId(externalEventId),
                 externalEventId,
                 platform: this.platform,
                 channelAccountId: this.channelAccountId,
@@ -209,7 +244,7 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
         const event =
             eventName === 'subscribe' ? 'subscribed' : eventName === 'unsubscribe' ? 'unsubscribed' : eventName;
         return {
-            id: unsafeId(`wechat:${externalEventId}`),
+            id: this.eventId(externalEventId),
             externalEventId,
             platform: this.platform,
             channelAccountId: this.channelAccountId,
@@ -224,41 +259,67 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
 export const WechatCapabilityAdapter = WechatOfficialAdapter;
 
 /** @deprecated 使用 {@link WechatOfficialAdapter}；保留旧导出避免破坏已有装配代码。 */
-export class WechatCapabilityStub extends WechatOfficialAdapter {
-    private readonly legacyStub: boolean;
+export class WechatCapabilityStub implements PlatformCapabilityPort {
+    public readonly platform = 'wechat_official' as const;
+
+    private readonly delegate: WechatOfficialAdapter | undefined;
 
     /** @param options 账号标识与部署注入的微信公众号 Token。 */
     public constructor(options?: WechatOfficialAdapterOptions) {
-        super(
-            options ?? {
-                channelAccountId: unsafeId<ChannelAccountId>('legacy-wechat-stub'),
-                token: 'legacy-wechat-stub-token',
-            },
-        );
-        this.legacyStub = options === undefined;
+        this.delegate = options === undefined ? undefined : new WechatOfficialAdapter(options);
+    }
+
+    /** {@inheritDoc PlatformCapabilityPort.capabilities} */
+    public capabilities(account: ChannelAccount): Promise<ChannelCapabilities> {
+        if (this.delegate !== undefined) return this.delegate.capabilities(account);
+        return Promise.resolve({
+            proactiveMessage: true,
+            nativeAction: false,
+            actionUi: true,
+            deliveryReceipt: true,
+            presentationTypes: ['template', 'text_with_action_ui'],
+        });
+    }
+
+    /** {@inheritDoc PlatformCapabilityPort.renderScheduleReceipt} */
+    public renderScheduleReceipt(intent: ScheduleReceiptIntent): Promise<JsonValue> {
+        if (this.delegate !== undefined) return this.delegate.renderScheduleReceipt(intent);
+        return Promise.resolve({ type: 'text', text: intent.summary });
+    }
+
+    /** {@inheritDoc PlatformCapabilityPort.renderNotification} */
+    public renderNotification(intent: NotificationIntent): Promise<JsonValue> {
+        if (this.delegate !== undefined) return this.delegate.renderNotification(intent);
+        return Promise.resolve({
+            type: 'wechat_template',
+            title: intent.content.title,
+            reminderTriggerId: intent.reminderTriggerId,
+        });
     }
 
     /** {@inheritDoc PlatformCapabilityPort.normalizeInbound} */
-    public override normalizeInbound(rawEvent: unknown): Promise<NormalizedImEvent> {
-        if (this.legacyStub) {
-            void rawEvent;
-            return Promise.reject(
-                new ImGatewayError('not_implemented', 'Use WechatOfficialAdapter for configured WeChat webhooks'),
-            );
-        }
-        return super.normalizeInbound(rawEvent);
+    public normalizeInbound(rawEvent: unknown): Promise<NormalizedImEvent> {
+        if (this.delegate !== undefined) return this.delegate.normalizeInbound(rawEvent);
+        void rawEvent;
+        return Promise.reject(
+            new ImGatewayError('not_implemented', 'Use WechatOfficialAdapter for configured WeChat webhooks'),
+        );
     }
 }
 
 function asWebhookRequest(value: unknown): WechatWebhookRequest {
     if (!isRecord(value)) throw new ImGatewayError('invalid_contract', 'WeChat webhook request must be an object');
     const query = isRecord(value.query) ? value.query : value;
-    const signature = stringValue(query.signature);
-    const timestamp = stringValue(query.timestamp);
-    const nonce = stringValue(query.nonce);
-    const echostr = stringValue(query.echostr);
+    const signature = singleQueryString(query.signature);
+    const timestamp = singleQueryString(query.timestamp);
+    const nonce = singleQueryString(query.nonce);
+    const echostr = singleQueryString(query.echostr);
+    const encryptType = singleQueryString(query.encrypt_type);
     const body = typeof value.body === 'string' || value.body instanceof Uint8Array ? value.body : undefined;
     const xml = stringValue(value.xml);
+    if (body !== undefined && xml !== undefined) {
+        throw new ImGatewayError('invalid_contract', 'WeChat webhook must provide only one body representation');
+    }
     return {
         ...(signature === undefined ? {} : { signature }),
         ...(timestamp === undefined ? {} : { timestamp }),
@@ -266,6 +327,7 @@ function asWebhookRequest(value: unknown): WechatWebhookRequest {
         ...(echostr === undefined ? {} : { echostr }),
         ...(body === undefined ? {} : { body }),
         ...(xml === undefined ? {} : { xml }),
+        ...(encryptType === undefined ? {} : { encrypt_type: encryptType }),
     };
 }
 
@@ -273,11 +335,15 @@ async function readBody(request: WechatWebhookRequest): Promise<string> {
     if (request.body instanceof Uint8Array) {
         if (request.body.byteLength > MAX_WEBHOOK_BYTES)
             throw new ImGatewayError('invalid_contract', 'WeChat webhook is too large');
-        return new TextDecoder().decode(request.body);
+        try {
+            return UTF8_DECODER.decode(request.body);
+        } catch {
+            throw new ImGatewayError('invalid_contract', 'WeChat webhook body is not valid UTF-8');
+        }
     }
     const body = request.body ?? request.xml;
     if (body === undefined) throw new ImGatewayError('invalid_contract', 'WeChat webhook body is missing');
-    if (new TextEncoder().encode(body).byteLength > MAX_WEBHOOK_BYTES) {
+    if (TEXT_ENCODER.encode(body).byteLength > MAX_WEBHOOK_BYTES) {
         throw new ImGatewayError('invalid_contract', 'WeChat webhook is too large');
     }
     return body;
@@ -330,6 +396,12 @@ function stringValue(value: unknown): string | undefined {
     return typeof value === 'string' ? value : undefined;
 }
 
+function singleQueryString(value: unknown): string | undefined {
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value) && value.length === 1 && typeof value[0] === 'string') return value[0];
+    return undefined;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -340,7 +412,35 @@ function isSha1(value: string): boolean {
 
 function constantTimeEqual(left: string, right: string): boolean {
     if (left.length !== right.length) return false;
-    return timingSafeEqual(new TextEncoder().encode(left), new TextEncoder().encode(right));
+    return timingSafeEqual(TEXT_ENCODER.encode(left), TEXT_ENCODER.encode(right));
+}
+
+function parseUnixSeconds(value: string, field: string): number {
+    if (!/^[0-9]{1,12}$/u.test(value)) {
+        throw new ImGatewayError('invalid_contract', `${field} is invalid`);
+    }
+    const seconds = Number(value);
+    if (!Number.isSafeInteger(seconds)) throw new ImGatewayError('invalid_contract', `${field} is invalid`);
+    return seconds;
+}
+
+function optionalMessageId(value: string | undefined): string | undefined {
+    if (value === undefined) return undefined;
+    if (value.length > MAX_MESSAGE_ID_LENGTH || !/^[A-Za-z0-9_-]+$/u.test(value)) {
+        throw new ImGatewayError('invalid_contract', 'WeChat message id is invalid');
+    }
+    return value;
+}
+
+function normalizedStatus(value: string): string {
+    const status = value
+        .trim()
+        .toLowerCase()
+        .replace(/\s*:\s*/gu, ':');
+    if (status.length > MAX_STATUS_LENGTH || !/^[a-z0-9_.: -]+$/u.test(status)) {
+        throw new ImGatewayError('invalid_contract', 'WeChat template status is invalid');
+    }
+    return status;
 }
 
 function sha1(value: string): string {
@@ -348,8 +448,14 @@ function sha1(value: string): string {
     return createHash('sha1').update(value, 'utf8').digest('hex');
 }
 
-function eventTime(createTime: string | undefined, requestTimestamp: string | undefined): IsoDateTime {
-    const seconds = Number(createTime ?? requestTimestamp);
+function eventTime(createTime: string | undefined, requestTimestamp: string | undefined, now: number): IsoDateTime {
+    const seconds = parseUnixSeconds(
+        requiredString(createTime ?? requestTimestamp, 'event timestamp'),
+        'WeChat event timestamp',
+    );
+    if (seconds - now > MAX_TIMESTAMP_SKEW_SECONDS) {
+        throw new ImGatewayError('invalid_contract', 'WeChat event timestamp is too far in the future');
+    }
     const milliseconds = seconds * 1000;
     if (!Number.isSafeInteger(seconds) || seconds < 0 || !Number.isFinite(milliseconds)) {
         throw new ImGatewayError('invalid_contract', 'WeChat event timestamp is invalid');

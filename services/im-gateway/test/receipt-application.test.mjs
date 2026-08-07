@@ -102,6 +102,19 @@ test('a failed receipt on an accepted delivery marks it permanent_failed', async
     assert.equal(details.receipts[0].stage, 'failed');
 });
 
+test('a retryable failed receipt keeps an accepted delivery eligible for retry', async () => {
+    const { gateway, clock } = buildGateway();
+    const ctx = await acceptedDelivery(gateway);
+
+    await gateway.application.receipts.record(
+        receipt(ctx, clock.addMinutes(clock.now(), 1), { stage: 'failed', retryable: true }),
+    );
+
+    const details = await gateway.application.deliveries.find(ctx.deliveryId);
+    assert.equal(details.delivery.status, 'retryable_failed');
+    assert.equal(details.receipts[0].stage, 'failed');
+});
+
 test('a permanent_failed delivery does not regress on further failed receipts', async () => {
     const { gateway, clock } = buildGateway();
     const ctx = await acceptedDelivery(gateway);

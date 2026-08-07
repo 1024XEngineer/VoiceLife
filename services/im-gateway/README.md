@@ -75,7 +75,7 @@ SSE Hub 等实现。
 
 ## 微信公众号 Webhook
 
-`WechatOfficialAdapter` 按渠道账号实例化，构造时接收 `channelAccountId` 和由部署环境解析后的微信 Token。Token 不写入 `ChannelAccount.capabilityConfig`、Profile、日志或测试 fixture。`verifyWebhook()` 处理服务器配置的 `echostr` 验签，`normalizeInbound()` 校验 POST 签名并将微信 XML 转换为 `NormalizedImEvent`。
+`WechatOfficialAdapter` 按渠道账号实例化，构造时接收 `channelAccountId` 和由部署环境解析后的微信 Token。真实 Token 不写入 `ChannelAccount.capabilityConfig`、Profile、日志或测试 fixture；测试仅使用无效固定值。`verifyWebhook()` 处理服务器配置的 `echostr` 验签和五分钟重放窗口，`normalizeInbound()` 校验 POST 签名、`ToUserName` 账号归属并将明文模式的微信 XML 转换为 `NormalizedImEvent`。当前不支持 AES 加密模式，HTTP Controller 仍需在读取请求体前配置 64 KiB 流式限制。
 
 模板投递结果使用 `channelAccountId + MsgID` 定位 Delivery；`MsgID + Status` 生成稳定的 webhook 事件标识和 Receipt 去重键。重复回调由入站事件与 Receipt 两层幂等保护，迟到回执继续遵循 Application 层状态机，不会让已投递状态倒退。
 

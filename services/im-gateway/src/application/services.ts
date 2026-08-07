@@ -1005,7 +1005,7 @@ export class DefaultReceiptApplication implements ReceiptApplication {
             ) {
                 return;
             }
-            const status = advanceDeliveryStatus(delivery.status, receipt.stage);
+            const status = advanceDeliveryStatus(delivery.status, receipt);
             if (status !== delivery.status) {
                 await tx.deliveries.save({
                     ...delivery,
@@ -1506,9 +1506,9 @@ function withoutDeliveryAttemptOutcome(delivery: Delivery): Delivery {
  * @param receipt 接收状态。
  * @returns 推进后的状态。
  */
-function advanceDeliveryStatus(current: DeliveryStatus, receipt: NormalizedDeliveryReceipt['stage']): DeliveryStatus {
+function advanceDeliveryStatus(current: DeliveryStatus, receipt: NormalizedDeliveryReceipt): DeliveryStatus {
     if (current === 'delivered') return current;
-    if (receipt === 'delivered') return 'delivered';
+    if (receipt.stage === 'delivered') return 'delivered';
     if (current === 'dead_letter' || current === 'permanent_failed') return current;
-    return 'permanent_failed';
+    return receipt.retryable === true ? 'retryable_failed' : 'permanent_failed';
 }

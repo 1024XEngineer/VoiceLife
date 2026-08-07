@@ -119,6 +119,18 @@ export async function sharedRepositoryContractSuite(makeUow) {
                 ctx.inboundEvents.findByExternalEvent('channel-other', 'external-1'),
             );
             assert.equal(wrongChannel, undefined);
+            await uow.transaction((ctx) =>
+                ctx.inboundEvents.save(
+                    inboundEvent('inbound-2', {
+                        channelAccountId: 'channel-2',
+                        externalEventId: 'external-1',
+                    }),
+                ),
+            );
+            const otherChannel = await uow.transaction((ctx) =>
+                ctx.inboundEvents.findByExternalEvent('channel-2', 'external-1'),
+            );
+            assert.equal(otherChannel.id, 'inbound-2');
             await uow.transaction((ctx) => ctx.inboundEvents.save(inboundEvent('inbound-1', { status: 'processed' })));
             const updated = await uow.transaction((ctx) =>
                 ctx.inboundEvents.findByExternalEvent('channel-1', 'external-1'),
