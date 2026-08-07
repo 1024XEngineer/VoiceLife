@@ -359,11 +359,15 @@ async function runOutboundGenerationTests() {
         'NotificationSubmission 生成与 notification-submission.json 结构不一致',
     );
 
-    // 弱提醒受理结果无 actionStream；deliveries 取决于绑定情况（fixture 的空数组建模未绑定场景）。
-    const weakSubmission = await submitFixture(gateway, weak);
+    // 弱提醒 + 无绑定的 userId（deviceId 保持与令牌一致以通过认证）→ 空 deliveries，
+    // 与 notification-submission-weak.json 完整深比较。
+    const emptySubmission = await submitFixture(gateway, {
+        ...weak,
+        recipient: { userId: 'unbound-user', deviceId: 'device-fixture' },
+    });
     assert(
-        weakSubmission.status === weakSubmissionSpec.status && weakSubmission.actionStream === undefined,
-        'NotificationSubmission 生成与 notification-submission-weak.json 结构不一致',
+        JSON.stringify(emptySubmission) === JSON.stringify(weakSubmissionSpec),
+        'NotificationSubmission 生成与 notification-submission-weak.json 不一致',
     );
 
     const publishedCommands = [];
@@ -379,12 +383,18 @@ async function runOutboundGenerationTests() {
     const actionDeliveryId = actionSubmission.deliveries[0]?.deliveryId;
     assert(actionDeliveryId !== undefined, 'Outbound action fixture did not create a Delivery');
     const token = await actionGateway.application.actionUi.issue(actionDeliveryId);
-    await actionGateway.actionUiApi.post({ token, action: 'acknowledge' });
+    // 生成与 fixture 一致的 snooze + minutes=10 场景；仅归一化真正动态的 ID 后整体深比较。
+    await actionGateway.actionUiApi.post({ token, action: 'snooze', params: { minutes: 10 } });
     const command = publishedCommands[0];
-    const requiredKeys = Object.keys(commandSpec).filter((key) => key !== 'params');
+    const normalizedCommand = {
+        ...commandSpec,
+        commandId: command.commandId,
+        operationId: command.operationId,
+        actorBindingId: command.actorBindingId,
+    };
     assert(
-        command && requiredKeys.every((key) => key in command) && command.schemaVersion === commandSpec.schemaVersion,
-        'ReminderActionCommand 生成与 reminder-action-command.json 结构不一致',
+        JSON.stringify(command) === JSON.stringify(normalizedCommand),
+        'ReminderActionCommand 生成与 reminder-action-command.json 不一致',
     );
 }
 
