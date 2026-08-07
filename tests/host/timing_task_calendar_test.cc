@@ -10,8 +10,10 @@ using voicelife::Status;
 using voicelife::test::Check;
 using voicelife::test::InMemoryTimingTaskStore;
 using voicelife::timing::CalendarSortBy;
+using voicelife::timing::ChangeScope;
 using voicelife::timing::DefaultTimingTaskService;
 using voicelife::timing::RecurrenceFrequency;
+using voicelife::timing::RecurrenceRule;
 using voicelife::timing::SortOrder;
 using voicelife::timing::TimerInstanceStatus;
 using voicelife::timing::TimingClockPort;
@@ -69,7 +71,7 @@ int main() {
         .request_id = "calendar-daily",
         .schedule_id = "schedule-daily",
         .start_at = kStartAt,
-        .time_zone = "UTC",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(recurring_task.ok(), "每日任务应注册成功");
@@ -173,7 +175,7 @@ int main() {
         .id = "calendar-deleted",
         .schedule_id = "schedule-deleted",
         .start_at = kStartAt,
-        .time_zone = "UTC",
+        .time_zone = "+08:00",
         .status = TimingTaskStatus::kActive,
         .deleted_at = kStartAt,
     });
@@ -194,7 +196,7 @@ int main() {
                   .request_id = "calendar-weekly",
                   .schedule_id = "schedule-weekly",
                   .start_at = kStartAt,
-                  .time_zone = "UTC",
+                  .time_zone = "+08:00",
                   .recurrence = {.frequency = RecurrenceFrequency::kWeek},
               })
               .ok(),
@@ -211,7 +213,7 @@ int main() {
                   .request_id = "calendar-weekday-filter",
                   .schedule_id = "schedule-weekday-filter",
                   .start_at = kStartAt,
-                  .time_zone = "UTC",
+                  .time_zone = "+08:00",
                   .recurrence = {.frequency = RecurrenceFrequency::kWeek, .by_weekdays = {1}},
               })
               .ok(),
@@ -228,7 +230,7 @@ int main() {
                   .request_id = "calendar-monthly",
                   .schedule_id = "schedule-monthly",
                   .start_at = kStartAt,
-                  .time_zone = "UTC",
+                  .time_zone = "+08:00",
                   .recurrence = {.frequency = RecurrenceFrequency::kMonth},
               })
               .ok(),
@@ -245,7 +247,7 @@ int main() {
                   .request_id = "calendar-monthday-filter",
                   .schedule_id = "schedule-monthday-filter",
                   .start_at = kStartAt,
-                  .time_zone = "UTC",
+                  .time_zone = "+08:00",
                   .recurrence = {.frequency = RecurrenceFrequency::kMonth, .by_month_days = {4}},
               })
               .ok(),
@@ -262,7 +264,7 @@ int main() {
                   .request_id = "calendar-yearly",
                   .schedule_id = "schedule-yearly",
                   .start_at = kStartAt,
-                  .time_zone = "UTC",
+                  .time_zone = "+08:00",
                   .recurrence = {.frequency = RecurrenceFrequency::kYear},
               })
               .ok(),
@@ -279,7 +281,7 @@ int main() {
         .schedule_id = "schedule-effective-until",
         .start_at = kStartAt,
         .next_trigger_at = kStartAt,
-        .time_zone = "UTC",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
         .effective_until = kStartAt + 2 * kDay,
     });
@@ -295,14 +297,109 @@ int main() {
                   .request_id = "calendar-local-zone",
                   .schedule_id = "schedule-local-zone",
                   .start_at = kStartAt,
-                  .time_zone = "Asia/Shanghai",
+                  .time_zone = "+08:00",
                   .recurrence = {.frequency = RecurrenceFrequency::kWeek},
               })
               .ok(),
-          "非 UTC 周期任务仍可注册");
+          "MVP 周期任务应支持固定 UTC+8 时区");
+    Check(timezone_service
+                  .RegisterTimerTask({
+                      .request_id = "calendar-unsupported-zone",
+                      .schedule_id = "schedule-unsupported-zone",
+                      .start_at = kStartAt,
+                      .time_zone = "UTC",
+                      .recurrence = {.frequency = RecurrenceFrequency::kWeek},
+                  })
+                  .status.code == ErrorCode::kInvalidArgument,
+          "MVP 周期任务应拒绝非固定 UTC+8 时区");
+    const auto local_single_task = timezone_service.RegisterTimerTask({
+        .request_id = "calendar-local-single",
+        .schedule_id = "schedule-local-single",
+        .start_at = kStartAt,
+        .time_zone = "Asia/Shanghai",
+    });
+    Check(local_single_task.ok(), "非 UTC 单次任务应保持兼容");
+    Check(timezone_service
+                  .UpdateTimerTask({
+                      .task_id = local_single_task.value->task_id,
+                      .schedule_id = "schedule-local-single",
+                      .change_scope = ChangeScope::kAll,
+                      .start_at = kStartAt + kDay,
+                      .recurrence = RecurrenceRule{.frequency = RecurrenceFrequency::kDay},
+                  })
+                  .status.code == ErrorCode::kInvalidArgument,
+          "非 UTC 单次任务不能通过修改转为无法展开的周期任务");
+
+    timezone_store.AddTask({
+        .id = "calendar-legacy-zone",
+        .schedule_id = "schedule-legacy-zone",
+        .request_id = "request-legacy-zone",
+        .start_at = kStartAt,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kWeek},
+        .status = TimingTaskStatus::kActive,
+    });
     Check(timezone_service.ListCalendarView({.range_start = kStartAt, .range_end = kStartAt + kDay}).status.code ==
               ErrorCode::kUnavailable,
-          "非 UTC 周期任务应明确报告展开能力未提供");
+          "历史非固定 UTC+8 周期任务应在日历查询阶段明确返回不可用");
+
+    InMemoryTimingTaskStore overflow_store;
+    FixedTimingIdGenerator overflow_ids;
+    DefaultTimingTaskService overflow_service(overflow_store, clock, overflow_ids);
+    overflow_store.AddTask({
+        .id = "calendar-overflow-zone",
+        .schedule_id = "schedule-overflow-zone",
+        .request_id = "request-overflow-zone",
+        .start_at = std::numeric_limits<int64_t>::max(),
+        .time_zone = "+08:00",
+        .recurrence = {.frequency = RecurrenceFrequency::kDay},
+        .status = TimingTaskStatus::kActive,
+    });
+    const auto overflow_calendar = overflow_service.ListCalendarView({
+        .range_start = std::numeric_limits<int64_t>::max() - 100,
+        .range_end = std::numeric_limits<int64_t>::max(),
+    });
+    Check(overflow_calendar.ok() && overflow_calendar.value->total == 0,
+          "UTC+8 偏移溢出时应返回空展开而不是产生非法时间戳");
+
+    constexpr int64_t kLocalMidnightStartAt = 1785688200;  // 2026-08-03 00:30 +08:00
+    InMemoryTimingTaskStore local_weekday_store;
+    FixedTimingIdGenerator local_weekday_ids;
+    DefaultTimingTaskService local_weekday_service(local_weekday_store, clock, local_weekday_ids);
+    const auto local_weekday_task = local_weekday_service.RegisterTimerTask({
+        .request_id = "calendar-local-weekday",
+        .schedule_id = "schedule-local-weekday",
+        .start_at = kLocalMidnightStartAt,
+        .time_zone = "+08:00",
+        .recurrence = {.frequency = RecurrenceFrequency::kWeek, .by_weekdays = {1}},
+    });
+    Check(local_weekday_task.ok(), "UTC+8 周期任务应注册成功");
+    const auto local_weekday_calendar = local_weekday_service.ListCalendarView({
+        .range_start = kLocalMidnightStartAt,
+        .range_end = kLocalMidnightStartAt + 7 * kDay,
+    });
+    Check(local_weekday_calendar.ok() && local_weekday_calendar.value->total == 1 &&
+              local_weekday_calendar.value->occurrences.front().planned_start_at == kLocalMidnightStartAt,
+          "周规则应按 UTC+8 本地日期判断星期，不能按 UTC 日期错移");
+
+    constexpr int64_t kLocalMonthEndStartAt = 1788107400;  // 2026-08-31 00:30 +08:00
+    InMemoryTimingTaskStore local_month_store;
+    FixedTimingIdGenerator local_month_ids;
+    DefaultTimingTaskService local_month_service(local_month_store, clock, local_month_ids);
+    const auto local_month_task = local_month_service.RegisterTimerTask({
+        .request_id = "calendar-local-month-end",
+        .schedule_id = "schedule-local-month-end",
+        .start_at = kLocalMonthEndStartAt,
+        .time_zone = "+08:00",
+        .recurrence = {.frequency = RecurrenceFrequency::kMonth},
+    });
+    Check(local_month_task.ok(), "UTC+8 月末任务应注册成功");
+    const auto local_month_calendar = local_month_service.ListCalendarView({
+        .range_start = kLocalMonthEndStartAt,
+        .range_end = kLocalMonthEndStartAt + 70 * kDay,
+    });
+    Check(local_month_calendar.ok() && local_month_calendar.value->total == 2,
+          "月规则应按 UTC+8 本地月日展开，不应把本地月末错算成 UTC 前一天");
 
     return 0;
 }

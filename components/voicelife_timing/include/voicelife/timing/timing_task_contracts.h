@@ -28,12 +28,12 @@ enum class TriggerSortBy {
     kCreatedAt,
 };
 
-/// 提供注册定时任务所需的数据；request_id 非空且用于重试幂等。
+/// 提供注册定时任务所需的数据；request_id 非空且用于重试幂等，MVP 周期任务使用固定 +08:00 时区。
 struct RegisterTimerTaskCommand {
     std::string request_id{};
     ScheduleId schedule_id{};
     int64_t start_at = 0;
-    std::string time_zone = "Asia/Shanghai";
+    std::string time_zone = "+08:00";
     RecurrenceRule recurrence{};
 };
 
@@ -120,7 +120,7 @@ struct DeleteReminderRuleResult {
     int affected_trigger_count = 0;
 };
 
-/// 提供日历视图的时间范围、过滤和分页条件。
+/// 提供日历视图的时间范围、过滤和分页条件；时间范围按左闭右开语义过滤。
 struct CalendarViewQuery {
     int64_t range_start = 0;
     int64_t range_end = 0;

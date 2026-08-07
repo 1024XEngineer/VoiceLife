@@ -109,4 +109,39 @@ export class PostgresActionRepository implements ActionRepository {
             ['id'],
         );
     }
+
+    /** {@inheritDoc ActionRepository.createIfAbsent} */
+    public async createIfAbsent(action: ImAction): Promise<{ readonly action: ImAction; readonly created: boolean }> {
+        const quoted = ACTION_COLUMNS.map((column) => `"${column}"`).join(', ');
+        const placeholders = ACTION_COLUMNS.map((_, index) => `$${index + 1}`).join(', ');
+        const row = [
+            action.id,
+            action.operationId,
+            action.correlationId,
+            action.deliveryId,
+            action.actorBindingId,
+            action.deviceId,
+            action.reminderTriggerId,
+            action.actionType,
+            toJson(action.actionParams),
+            action.actionKeyHash,
+            action.expectedIdentityId,
+            action.actualIdentityId ?? null,
+            action.status,
+            action.dispatchedAt ?? null,
+            toJson(action.result),
+            action.expiresAt,
+            action.createdAt,
+            action.updatedAt,
+        ];
+        const inserted = await queryOne(
+            this.executor,
+            `INSERT INTO im_actions (${quoted}) VALUES (${placeholders}) ON CONFLICT DO NOTHING RETURNING *`,
+            row,
+        );
+        if (inserted !== undefined) return { action: mapAction(inserted), created: true };
+        const existing = (await this.findById(action.id)) ?? (await this.findByActionKeyHash(action.actionKeyHash));
+        if (existing === undefined) throw new Error('im_actions conflict row vanished after idempotent insert');
+        return { action: existing, created: false };
+    }
 }

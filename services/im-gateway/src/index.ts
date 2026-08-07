@@ -15,6 +15,7 @@ export * from './infrastructure/http/wechat-api.js';
 export * from './infrastructure/koishi/koishi-channel-adapter.js';
 export * from './infrastructure/koishi/voicelife-plugin.js';
 export * from './infrastructure/sse/sse-action-command-hub.js';
+export * from './infrastructure/security/aes-gcm-action-token.js';
 export * from './infrastructure/wechat/wechat-official-adapter.js';
 export * from './ports/external.js';
 export * from './ports/repositories.js';

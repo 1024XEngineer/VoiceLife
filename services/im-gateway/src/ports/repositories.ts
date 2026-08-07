@@ -346,6 +346,12 @@ export interface ActionRepository {
      * @returns 保存完成后兑现的 Promise。
      */
     save(action: ImAction): Promise<void>;
+    /**
+     * 幂等创建动作；并发冲突时返回已存在的权威动作。
+     * @param action 待创建动作。
+     * @returns 权威动作及本次是否创建。
+     */
+    createIfAbsent(action: ImAction): Promise<{ readonly action: ImAction; readonly created: boolean }>;
 }
 
 /** 服务端事务性发件箱的持久化端口。 */

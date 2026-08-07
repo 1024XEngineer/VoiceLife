@@ -5,10 +5,20 @@ import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import type { NotificationIntent, ScheduleReceiptIntent } from '../../contracts/device-gateway.js';
 import { unsafeId, type ChannelAccountId } from '../../contracts/ids.js';
 import type { NormalizedImEvent } from '../../contracts/platform-events.js';
-import type { PlatformCapabilityPort } from '../../ports/external.js';
+import type {
+    ChannelCapabilityResolver,
+    DeliveryRendererPort,
+    ImChannelPort,
+    ImSendAcceptance,
+    OutboundImMessage,
+    PlatformCapabilityPort,
+} from '../../ports/external.js';
 import { ImGatewayError } from '../../shared/errors.js';
 import type { IsoDateTime, JsonValue } from '../../shared/types.js';
-import type { ChannelAccount, ChannelCapabilities } from '../../domain/models.js';
+import type { ChannelAccount, ChannelCapabilities, Delivery } from '../../domain/models.js';
+import { WechatOfficialOutbound, type WechatOfficialOutboundOptions } from './wechat-official-outbound.js';
+
+export type { WechatOfficialOutboundOptions, WechatTemplateFields } from './wechat-official-outbound.js';
 
 const MAX_WEBHOOK_BYTES = 64 * 1024;
 const MAX_TIMESTAMP_SKEW_SECONDS = 300;
@@ -44,10 +54,14 @@ export interface WechatOfficialAdapterOptions {
     readonly expectedToUserName: string;
     /** 返回当前 Unix 秒的时钟，仅用于测试或受控部署。 */
     readonly now?: () => number;
+    /** 可选真实出站配置；缺省时 Adapter 只启用入站 Webhook。 */
+    readonly outbound?: WechatOfficialOutboundOptions;
 }
 
 /** 微信公众号能力、Webhook 验签和入站事件归一化适配器。 */
-export class WechatOfficialAdapter implements PlatformCapabilityPort {
+export class WechatOfficialAdapter
+    implements PlatformCapabilityPort, ChannelCapabilityResolver, DeliveryRendererPort, ImChannelPort
+{
     public readonly platform = 'wechat_official' as const;
 
     private readonly channelAccountId: ChannelAccountId;
@@ -57,6 +71,8 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
     private readonly expectedToUserName: string;
 
     private readonly now: () => number;
+
+    private readonly outbound: WechatOfficialOutbound | undefined;
 
     /** @param options 账号标识与部署注入的微信公众号 Token。 */
     public constructor(options: WechatOfficialAdapterOptions) {
@@ -73,10 +89,24 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
         }
         this.expectedToUserName = expectedToUserName.trim();
         this.now = options.now ?? (() => Math.floor(Date.now() / 1000));
+        this.outbound =
+            options.outbound === undefined ? undefined : new WechatOfficialOutbound(options.outbound, this.now);
     }
 
     /** {@inheritDoc PlatformCapabilityPort.capabilities} */
-    public capabilities(_account: ChannelAccount): Promise<ChannelCapabilities> {
+    public capabilities(account: ChannelAccount): Promise<ChannelCapabilities> {
+        if (account.id !== this.channelAccountId || account.platform !== this.platform || account.status !== 'active') {
+            return Promise.resolve({
+                proactiveMessage: false,
+                nativeAction: false,
+                actionUi: false,
+                deliveryReceipt: false,
+                presentationTypes: [],
+            });
+        }
+        if (this.outbound !== undefined) {
+            return Promise.resolve(this.outbound.capabilities());
+        }
         return Promise.resolve({
             proactiveMessage: false,
             nativeAction: false,
@@ -86,17 +116,62 @@ export class WechatOfficialAdapter implements PlatformCapabilityPort {
         });
     }
 
+    /** {@inheritDoc ChannelCapabilityResolver.resolve} */
+    public resolve(account: ChannelAccount): Promise<ChannelCapabilities> {
+        if (account.id !== this.channelAccountId || account.platform !== this.platform || account.status !== 'active') {
+            return Promise.resolve({
+                proactiveMessage: false,
+                nativeAction: false,
+                actionUi: false,
+                deliveryReceipt: false,
+                presentationTypes: [],
+            });
+        }
+        return this.capabilities(account);
+    }
+
     /** {@inheritDoc PlatformCapabilityPort.renderScheduleReceipt} */
     public renderScheduleReceipt(intent: ScheduleReceiptIntent): Promise<JsonValue> {
+        if (this.outbound !== undefined) {
+            return Promise.resolve(this.outbound.renderScheduleReceipt(intent));
+        }
         return Promise.resolve({ type: 'text', text: intent.summary });
     }
 
     /** {@inheritDoc PlatformCapabilityPort.renderNotification} */
-    public renderNotification(intent: NotificationIntent): Promise<JsonValue> {
-        void intent;
-        return Promise.reject(
-            new ImGatewayError('capability_not_supported', 'WeChat outbound template delivery is not configured'),
-        );
+    public async renderNotification(
+        intent: NotificationIntent,
+        context: { readonly actionToken?: string } = {},
+    ): Promise<JsonValue> {
+        if (this.outbound === undefined) {
+            return Promise.reject(
+                new ImGatewayError('capability_not_supported', 'WeChat outbound template delivery is not configured'),
+            );
+        }
+        return this.outbound.renderNotification(intent, context.actionToken);
+    }
+
+    /** {@inheritDoc DeliveryRendererPort.render} */
+    public async render(
+        delivery: Delivery,
+        account: ChannelAccount,
+        capabilities: ChannelCapabilities,
+        context: { readonly actionToken?: string },
+    ): Promise<JsonValue> {
+        if (this.outbound === undefined) {
+            return Promise.reject(
+                new ImGatewayError('capability_not_supported', 'WeChat outbound template delivery is not configured'),
+            );
+        }
+        return this.outbound.render(this.channelAccountId, delivery, account, capabilities, context.actionToken);
+    }
+
+    /** {@inheritDoc ImChannelPort.send} */
+    public send(message: OutboundImMessage): Promise<ImSendAcceptance> {
+        if (this.outbound === undefined) {
+            return Promise.resolve({ accepted: false, retryable: false, errorCode: 'wechat_not_configured' });
+        }
+        return this.outbound.send(this.channelAccountId, message);
     }
 
     /**

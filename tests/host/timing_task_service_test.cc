@@ -240,7 +240,7 @@ int main() {
         .request_id = "request-recurring",
         .schedule_id = "schedule-recurring",
         .start_at = 1785834000,
-        .time_zone = "UTC",
+        .time_zone = "+08:00",
         .recurrence =
             {
                 .frequency = RecurrenceFrequency::kDay,
@@ -250,13 +250,36 @@ int main() {
     const auto stored_recurring = recurring_store.FindTask(recurring.value->task_id);
     Check(stored_recurring.ok() && stored_recurring.value->start_at == 1785834000,
           "周期任务应使用命令开始时间作为唯一锚点");
-    Check(stored_recurring.ok() && stored_recurring.value->time_zone == "UTC", "周期任务应使用命令顶层时区");
+    Check(stored_recurring.ok() && stored_recurring.value->time_zone == "+08:00", "周期任务应使用命令顶层时区");
+
+    InMemoryTimingTaskStore legacy_replay_store;
+    legacy_replay_store.AddTask({
+        .id = "task-legacy-replay",
+        .schedule_id = "schedule-legacy-replay",
+        .request_id = "request-legacy-replay",
+        .start_at = 1785834000,
+        .next_trigger_at = 1785834000,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kWeek},
+        .status = TimingTaskStatus::kActive,
+    });
+    FixedTimingIdGenerator legacy_replay_ids;
+    DefaultTimingTaskService legacy_replay_service(legacy_replay_store, clock, legacy_replay_ids);
+    const auto legacy_replay = legacy_replay_service.RegisterTimerTask({
+        .request_id = "request-legacy-replay",
+        .schedule_id = "schedule-legacy-replay",
+        .start_at = 1785834000,
+        .time_zone = "UTC",
+        .recurrence = {.frequency = RecurrenceFrequency::kWeek},
+    });
+    Check(legacy_replay.ok() && legacy_replay.value->task_id == "task-legacy-replay",
+          "历史非固定 UTC+8 周期任务重放应返回原任务，不受新写入约束影响");
 
     const auto invalid_day = recurring_service.RegisterTimerTask({
         .request_id = "request-invalid-day",
         .schedule_id = "invalid-day",
         .start_at = 1785834000,
-        .time_zone = "UTC",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kDay, .by_weekdays = {1}},
     });
     Check(invalid_day.status.code == ErrorCode::kInvalidArgument, "每日规则不应接受星期筛选");
@@ -265,7 +288,7 @@ int main() {
         .request_id = "request-invalid-week",
         .schedule_id = "invalid-week",
         .start_at = 1785834000,
-        .time_zone = "UTC",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kWeek, .by_weekdays = {0}},
     });
     Check(invalid_week.status.code == ErrorCode::kInvalidArgument, "每周规则的星期值必须在 1 到 7 之间");
@@ -274,7 +297,7 @@ int main() {
         .request_id = "request-invalid-month",
         .schedule_id = "invalid-month",
         .start_at = 1785834000,
-        .time_zone = "UTC",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kMonth, .by_month_days = {32}},
     });
     Check(invalid_month.status.code == ErrorCode::kInvalidArgument, "每月规则的日期值必须在 1 到 31 之间");
@@ -283,7 +306,7 @@ int main() {
         .request_id = "request-invalid-year",
         .schedule_id = "invalid-year",
         .start_at = 1785834000,
-        .time_zone = "UTC",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kYear, .by_months = {13}},
     });
     Check(invalid_year.status.code == ErrorCode::kInvalidArgument, "每年规则的月份值必须在 1 到 12 之间");
@@ -360,7 +383,7 @@ int main() {
         .request_id = "request-cancel-single",
         .schedule_id = "schedule-cancel-single",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(cancel_registered.ok(), "single 取消用例应先注册周期任务");
@@ -408,7 +431,7 @@ int main() {
         .request_id = "request-cancel-future",
         .schedule_id = "schedule-cancel-future",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(future_cancel_registered.ok(), "future 取消用例应先注册周期任务");
@@ -452,8 +475,8 @@ int main() {
     Check(future_cancel.value->status == TimingTaskStatus::kActive, "future 取消不应终止整个任务");
     Check(future_cancel.value->affected_instance_count == 2, "future 取消应统计边界及之后的实例");
     const auto task_after_future_cancel = future_cancel_store.FindTask(future_cancel_registered.value->task_id);
-    Check(task_after_future_cancel.ok() && task_after_future_cancel.value->effective_until == 1785920399,
-          "future 取消应保存排他的未来规则上界");
+    Check(task_after_future_cancel.ok() && task_after_future_cancel.value->effective_until == 1785920400,
+          "future 取消应保存首个被排除 occurrence 的时刻");
     const auto instances_after_future_cancel =
         future_cancel_store.ListInstances(future_cancel_registered.value->task_id);
     Check(instances_after_future_cancel.ok() && instances_after_future_cancel.value->size() == 3,
@@ -474,7 +497,7 @@ int main() {
         .request_id = "request-invalid-future-boundary",
         .schedule_id = "schedule-invalid-future-boundary",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(invalid_future_boundary_registered.ok(), "非法 future 边界用例应先注册周期任务");
@@ -495,7 +518,7 @@ int main() {
         .request_id = "request-future-terminal-instance",
         .schedule_id = "schedule-future-terminal-instance",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(future_terminal_instance_registered.ok(), "终态实例 future 取消用例应先注册周期任务");
@@ -560,7 +583,7 @@ int main() {
         .request_id = "request-cancel-all",
         .schedule_id = "schedule-cancel-all",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(all_cancel_registered.ok(), "all 取消用例应先注册周期任务");
@@ -696,7 +719,7 @@ int main() {
         .request_id = "request-single",
         .schedule_id = "schedule-single",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(single_registered.ok(), "single 修改用例应先注册周期任务");
@@ -795,7 +818,7 @@ int main() {
         .request_id = "request-future",
         .schedule_id = "schedule-future",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(future_registered.ok(), "future 修改用例应先注册周期任务");
@@ -851,7 +874,7 @@ int main() {
         .request_id = "request-all",
         .schedule_id = "schedule-all",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "+08:00",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(all_registered.ok(), "all 修改用例应先注册周期任务");

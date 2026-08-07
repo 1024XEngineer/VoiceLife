@@ -1,6 +1,6 @@
 # VoiceLife IM Gateway
 
-这是 VoiceLife IM Gateway 的独立服务模块。它用代码表达模块边界、跨端契约和依赖方向，并以 Issue #95 作为当前交付与验收基线；目前包含 PostgreSQL 持久化、真实 Koishi Core Runtime、实时 SSE Hub 和微信公众号 Webhook Adapter。具体平台 Bot、公开 HTTP 监听与 Secret 装配仍由生产部署组合根提供。
+这是 VoiceLife IM Gateway 的独立服务模块。它用代码表达模块边界、跨端契约和依赖方向，并以 Issue #95 作为当前交付与验收基线；目前包含 PostgreSQL 持久化、真实 Koishi Core Runtime、实时 SSE Hub、微信公众号 Webhook/模板投递 Adapter 和服务端渲染的 H5 Action UI。具体平台 Bot、公开 HTTP 监听与 Secret 装配仍由生产部署组合根提供。
 
 ## 边界
 
@@ -92,13 +92,69 @@ Infrastructure 内完成归一化后直接调用 `PlatformEventApplication`，�
 未确认命令始终从 Action Repository 回放。#152 的公开监听进程负责把该异步流序列化为真正的 SSE 响应，
 并注入平台 Bot、PostgreSQL、Secret 与健康检查。
 
-## 微信公众号 Webhook
+## 微信公众号 Adapter 与 Webhook
 
 `WechatOfficialAdapter` 按渠道账号实例化，构造时必须接收 `channelAccountId`、公众号原始 ID `expectedToUserName` 和由部署环境解析后的微信 Token。真实 Token 不写入 `ChannelAccount.capabilityConfig`、Profile、日志或测试 fixture；测试仅使用无效固定值。`verifyWebhook()` 处理服务器配置的 `echostr` 验签和五分钟重放窗口，`normalizeInbound()` 校验 POST 签名、`ToUserName` 账号归属并将明文模式的微信 XML 转换为 `NormalizedImEvent`。
 
-生产组合根通过 `wechatAdapter` 注入 Adapter 后暴露 `runtime.wechatApi`，HTTP 框架将微信 GET/POST 请求映射到 `WechatWebhookController.verify()`/`post()`；框架仍必须在读取请求体前配置 64 KiB 流式限制。当前不支持 AES 加密模式，也未配置真实模板消息出站能力，因此 `proactiveMessage` 为 `false`，`renderNotification()` 明确返回 `capability_not_supported`。
+生产组合根通过 `wechatAdapter` 注入 Adapter 后暴露 `runtime.wechatApi`，HTTP 框架将微信 GET/POST 请求映射到 `WechatWebhookController.verify()`/`post()`；框架仍必须在读取请求体前配置 64 KiB 流式限制。当前不支持微信 Webhook AES 加密模式。
+
+配置 `outbound` 后，同一个 `WechatOfficialAdapter` 同时实现 `ChannelCapabilityResolver`、`DeliveryRendererPort` 和 `ImChannelPort`。组合根应把同一实例注入 `channelCapabilities`、`deliveryRenderer`、`imChannel` 与 `wechatAdapter`。Adapter 获取并缓存 `access_token`，通过微信模板消息接口发送通知；强提醒模板的详情地址只携带 URL 编码后的动作 token。模板接口成功只记录 `accepted` 和精确字符串 `msgid`，后续 `TEMPLATESENDJOBFINISH` 回调才把 Delivery 推进为 `delivered`。
+
+`ChannelAccount.credentialRef` 只保存 `secret://...` 引用。部署层负责解析并注入 Webhook Token、App ID/AppSecret、模板 ID/字段映射、H5 HTTPS 基础地址以及外部身份解密函数；这些值不得写入 `capabilityConfig`、Profile、日志或 fixture。未配置 `outbound` 时 Adapter 继续只提供入站能力，并如实返回 `proactiveMessage: false`。
 
 模板投递结果使用 `channelAccountId + MsgID` 定位 Delivery；`MsgID + Status` 生成稳定的 webhook 事件标识和 Receipt 去重键。重复回调由入站事件与 Receipt 两层幂等保护，迟到回执继续遵循 Application 层状态机，不会让已投递状态倒退。
+
+### 微信测试号联调 harness
+
+`dev:wechat` 是 Issue #131 的本地联调入口，不是生产启动进程。它使用内存 Repository 和真实
+`WechatOfficialAdapter`，仅在 loopback 地址暴露微信 Webhook、H5 Action UI、健康检查以及 Bearer 保护的
+测试投递/状态查询端点。生产监听、PostgreSQL、Koishi 与部署装配仍由 Issue #152 负责。
+
+先在仓库根目录 `.env` 填写测试号配置，并确保 `WECHAT_EXPECTED_TO_USERNAME` 是 `gh_` 开头的公众号原始
+ID，而不是显示名称。`DEVICE_TOKEN` 至少 24 字节，`ACTION_TOKEN_SECRET` 至少 32 字节；两者都可使用
+`openssl rand -hex 32` 生成。不要把 `.env`、AppSecret 或这些令牌提交到仓库或粘贴到日志。
+
+由于 Quick Tunnel 域名在启动后才生成，可以先启动 Tunnel，再把其 HTTPS 域名写入 `.env`：
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:3000
+```
+
+```dotenv
+WECHAT_DEV_HOST=127.0.0.1
+WECHAT_DEV_PORT=3000
+WECHAT_WEBHOOK_PUBLIC_URL=https://example.trycloudflare.com/wechat
+WECHAT_ACTION_UI_BASE_URL=https://example.trycloudflare.com/voicelife/reminder-actions
+```
+
+保持 Tunnel 运行，在另一个终端启动 harness：
+
+```bash
+pnpm --dir services/im-gateway run dev:wechat
+curl https://example.trycloudflare.com/healthz
+```
+
+微信测试号后台的服务器 URL 使用 `WECHAT_WEBHOOK_PUBLIC_URL`，Token 必须与本地
+`WECHAT_WEBHOOK_TOKEN` 完全一致，并选择明文模式。验证成功后，从本机触发一次真实投递：
+
+```bash
+curl -X POST \
+  -H 'Authorization: Bearer <DEVICE_TOKEN>' \
+  http://127.0.0.1:3000/__dev/wechat/send-test
+```
+
+响应中的 `deliveryId` 可用于检查平台回执是否把状态从 `accepted` 推进为 `delivered`：
+
+```bash
+curl -H 'Authorization: Bearer <DEVICE_TOKEN>' \
+  http://127.0.0.1:3000/__dev/wechat/deliveries/<deliveryId>
+```
+
+## H5 Action UI
+
+生产运行时同时暴露 `runtime.actionUiPageApi`。HTTP 框架将 `GET /voicelife/reminder-actions/:token` 映射到 `get()`，将表单 POST 映射到 `post()`，并原样写回状态码、响应头和 HTML body。页面不运行客户端脚本，只渲染通知意图中服务端批准的动作标签与固定参数；路径 token 由服务端覆盖请求体中的同名字段，浏览器看不到内部身份、Delivery、Action 或 Operation 标识。
+
+生产部署使用 `AesGcmActionTokenPort`。它以部署 Secret 派生 AES-256-GCM 密钥，令牌内容不可读且可在进程重启后校验；应用层继续检查动作窗口、绑定和 token + 动作幂等。Secret 必须由安全引用解析后注入，不能使用示例值或持久化到数据库。
 
 ## TSDoc 规范
 

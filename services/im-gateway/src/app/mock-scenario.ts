@@ -346,6 +346,7 @@ export async function runMockNotificationScenario(): Promise<void> {
     });
     const expiringDelivery = expiring.deliveries[0];
     if (expiringDelivery === undefined) throw new Error('Expiring Delivery is missing');
+    await gateway.application.deliveryDispatch.dispatch(expiringDelivery.deliveryId);
     const expiringToken = await gateway.application.actionUi.issue(expiringDelivery.deliveryId);
     const expiringAction = await gateway.actionUiApi.post({
         token: expiringToken,
