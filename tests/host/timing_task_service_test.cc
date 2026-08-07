@@ -360,7 +360,7 @@ int main() {
         .request_id = "request-cancel-single",
         .schedule_id = "schedule-cancel-single",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "UTC",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(cancel_registered.ok(), "single 取消用例应先注册周期任务");
@@ -408,7 +408,7 @@ int main() {
         .request_id = "request-cancel-future",
         .schedule_id = "schedule-cancel-future",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "UTC",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(future_cancel_registered.ok(), "future 取消用例应先注册周期任务");
@@ -452,8 +452,8 @@ int main() {
     Check(future_cancel.value->status == TimingTaskStatus::kActive, "future 取消不应终止整个任务");
     Check(future_cancel.value->affected_instance_count == 2, "future 取消应统计边界及之后的实例");
     const auto task_after_future_cancel = future_cancel_store.FindTask(future_cancel_registered.value->task_id);
-    Check(task_after_future_cancel.ok() && task_after_future_cancel.value->effective_until == 1785920399,
-          "future 取消应保存排他的未来规则上界");
+    Check(task_after_future_cancel.ok() && task_after_future_cancel.value->effective_until == 1785920400,
+          "future 取消应保存首个被排除 occurrence 的时刻");
     const auto instances_after_future_cancel =
         future_cancel_store.ListInstances(future_cancel_registered.value->task_id);
     Check(instances_after_future_cancel.ok() && instances_after_future_cancel.value->size() == 3,
@@ -474,7 +474,7 @@ int main() {
         .request_id = "request-invalid-future-boundary",
         .schedule_id = "schedule-invalid-future-boundary",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "UTC",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(invalid_future_boundary_registered.ok(), "非法 future 边界用例应先注册周期任务");
@@ -495,7 +495,7 @@ int main() {
         .request_id = "request-future-terminal-instance",
         .schedule_id = "schedule-future-terminal-instance",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "UTC",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(future_terminal_instance_registered.ok(), "终态实例 future 取消用例应先注册周期任务");
@@ -560,7 +560,7 @@ int main() {
         .request_id = "request-cancel-all",
         .schedule_id = "schedule-cancel-all",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "UTC",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(all_cancel_registered.ok(), "all 取消用例应先注册周期任务");
@@ -696,7 +696,7 @@ int main() {
         .request_id = "request-single",
         .schedule_id = "schedule-single",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "UTC",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(single_registered.ok(), "single 修改用例应先注册周期任务");
@@ -795,7 +795,7 @@ int main() {
         .request_id = "request-future",
         .schedule_id = "schedule-future",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "UTC",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(future_registered.ok(), "future 修改用例应先注册周期任务");
@@ -851,7 +851,7 @@ int main() {
         .request_id = "request-all",
         .schedule_id = "schedule-all",
         .start_at = 1785834000,
-        .time_zone = "Asia/Shanghai",
+        .time_zone = "UTC",
         .recurrence = {.frequency = RecurrenceFrequency::kDay},
     });
     Check(all_registered.ok(), "all 修改用例应先注册周期任务");

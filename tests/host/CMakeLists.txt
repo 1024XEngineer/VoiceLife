@@ -171,6 +171,9 @@ target_link_libraries(timing_task_state_test PRIVATE timing)
 add_voicelife_test(timing_task_service_test "unit;timing" timing_task_service_test.cc)
 target_link_libraries(timing_task_service_test PRIVATE timing)
 
+add_voicelife_test(timing_task_calendar_test "unit;timing" timing_task_calendar_test.cc)
+target_link_libraries(timing_task_calendar_test PRIVATE timing)
+
 add_voicelife_test(timing_task_service_reminder_triggers_test "unit;timing" timing_task_service_reminder_triggers_test.cc)
 target_link_libraries(timing_task_service_reminder_triggers_test PRIVATE timing)
 

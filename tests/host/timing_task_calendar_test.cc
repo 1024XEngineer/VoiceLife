@@ -10,8 +10,10 @@ using voicelife::Status;
 using voicelife::test::Check;
 using voicelife::test::InMemoryTimingTaskStore;
 using voicelife::timing::CalendarSortBy;
+using voicelife::timing::ChangeScope;
 using voicelife::timing::DefaultTimingTaskService;
 using voicelife::timing::RecurrenceFrequency;
+using voicelife::timing::RecurrenceRule;
 using voicelife::timing::SortOrder;
 using voicelife::timing::TimerInstanceStatus;
 using voicelife::timing::TimingClockPort;
@@ -291,18 +293,32 @@ int main() {
     FixedTimingIdGenerator timezone_ids;
     DefaultTimingTaskService timezone_service(timezone_store, clock, timezone_ids);
     Check(timezone_service
-              .RegisterTimerTask({
-                  .request_id = "calendar-local-zone",
-                  .schedule_id = "schedule-local-zone",
-                  .start_at = kStartAt,
-                  .time_zone = "Asia/Shanghai",
-                  .recurrence = {.frequency = RecurrenceFrequency::kWeek},
-              })
-              .ok(),
-          "非 UTC 周期任务仍可注册");
-    Check(timezone_service.ListCalendarView({.range_start = kStartAt, .range_end = kStartAt + kDay}).status.code ==
-              ErrorCode::kUnavailable,
-          "非 UTC 周期任务应明确报告展开能力未提供");
+                  .RegisterTimerTask({
+                      .request_id = "calendar-local-zone",
+                      .schedule_id = "schedule-local-zone",
+                      .start_at = kStartAt,
+                      .time_zone = "Asia/Shanghai",
+                      .recurrence = {.frequency = RecurrenceFrequency::kWeek},
+                  })
+                  .status.code == ErrorCode::kInvalidArgument,
+          "非 UTC 周期任务应于注册阶段被拒绝，不能创建无法展开的任务");
+    const auto local_single_task = timezone_service.RegisterTimerTask({
+        .request_id = "calendar-local-single",
+        .schedule_id = "schedule-local-single",
+        .start_at = kStartAt,
+        .time_zone = "Asia/Shanghai",
+    });
+    Check(local_single_task.ok(), "非 UTC 单次任务应保持兼容");
+    Check(timezone_service
+                  .UpdateTimerTask({
+                      .task_id = local_single_task.value->task_id,
+                      .schedule_id = "schedule-local-single",
+                      .change_scope = ChangeScope::kAll,
+                      .start_at = kStartAt + kDay,
+                      .recurrence = RecurrenceRule{.frequency = RecurrenceFrequency::kDay},
+                  })
+                  .status.code == ErrorCode::kInvalidArgument,
+          "非 UTC 单次任务不能通过修改转为无法展开的周期任务");
 
     return 0;
 }

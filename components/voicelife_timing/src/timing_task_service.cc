@@ -103,6 +103,13 @@ Status ValidateRecurrence(const RecurrenceRule& recurrence) {
     return Status::Ok();
 }
 
+Status ValidateRecurrenceTimeZone(const RecurrenceRule& recurrence, const std::string& time_zone) {
+    if (recurrence.frequency != RecurrenceFrequency::kNone && time_zone != "UTC") {
+        return Status::Error(ErrorCode::kInvalidArgument, "MVP 周期任务仅支持 UTC 时区");
+    }
+    return ValidateRecurrence(recurrence);
+}
+
 Status ValidateUpdateCommand(const UpdateTimerTaskCommand& command) {
     if (command.task_id.empty() || command.schedule_id.empty()) {
         return Status::Error(ErrorCode::kInvalidArgument, "修改任务缺少 task_id 或 schedule_id");
@@ -206,7 +213,7 @@ Result<RegisterTimerTaskResult> DefaultTimingTaskService::RegisterTimerTask(cons
         return Result<RegisterTimerTaskResult>::Failure(policy_status.code, policy_status.message);
     }
 
-    const Status recurrence_status = ValidateRecurrence(command.recurrence);
+    const Status recurrence_status = ValidateRecurrenceTimeZone(command.recurrence, command.time_zone);
     if (!recurrence_status.ok()) {
         return Result<RegisterTimerTaskResult>::Failure(recurrence_status.code, recurrence_status.message);
     }
@@ -286,7 +293,13 @@ Result<UpdateTimerTaskResult> DefaultTimingTaskService::UpdateTimerTask(const Up
     if (existing_task.value->status != TimingTaskStatus::kActive || existing_task.value->deleted_at != 0) {
         return Result<UpdateTimerTaskResult>::Failure(ErrorCode::kConflict, "任务已终止或删除，不能修改");
     }
-
+    if (command.recurrence.has_value()) {
+        const Status recurrence_status =
+            ValidateRecurrenceTimeZone(*command.recurrence, existing_task.value->time_zone);
+        if (!recurrence_status.ok()) {
+            return Result<UpdateTimerTaskResult>::Failure(recurrence_status.code, recurrence_status.message);
+        }
+    }
     const auto existing_instances = store_.ListInstances(command.task_id);
     if (!existing_instances.ok()) {
         return Result<UpdateTimerTaskResult>::Failure(existing_instances.status.code,
@@ -411,7 +424,7 @@ Result<CancelTimerTaskResult> DefaultTimingTaskService::CancelTimerTask(const Ca
             if (updated_task.effective_until != 0) {
                 return Result<CancelTimerTaskResult>::Failure(ErrorCode::kConflict, "任务已设置未来取消边界");
             }
-            updated_task.effective_until = command.effective_from - 1;
+            updated_task.effective_until = command.effective_from;
             if (updated_task.next_trigger_at >= command.effective_from) {
                 updated_task.next_trigger_at = 0;
             }

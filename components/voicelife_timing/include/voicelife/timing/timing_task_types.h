@@ -106,6 +106,7 @@ struct TimingTask {
     TimingTaskStatus status = TimingTaskStatus::kActive;
     int64_t created_at = 0;
     int64_t updated_at = 0;
+    /// 0 表示无上界；否则为首个不再生成 occurrence 的 UTC 时间戳。
     int64_t effective_until = 0;
     int64_t deleted_at = 0;
 };
