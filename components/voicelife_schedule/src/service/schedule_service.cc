@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
-#include <mutex>
 #include <utility>
 
 #include "../helpers/schedule_create_helpers.h"
@@ -20,15 +19,6 @@ namespace voicelife::schedule {
 namespace {
 
 constexpr std::size_t kMaximumEventLength = 100;
-
-/**
- * @brief 返回模拟撤销流程使用的事务互斥量。
- * @return 跨日程状态和操作记录提交共享的互斥量。
- */
-std::mutex& MockUndoTransactionMutex() {
-    static std::mutex mutex;
-    return mutex;
-}
 
 }  // namespace
 
@@ -307,15 +297,12 @@ UndoScheduleOperationResult ScheduleService::undo_schedule_operation(const UndoS
     const Status validation = ValidateUndoScheduleOperationCommand(command);
     if (!validation.ok()) return FailedUndoScheduleOperationResult(validation);
 
-    // mock 的日程和操作记录分属两个内存存储；该锁只保证并发 undo 不重复消费同一记录。
-    // 与其他日程写操作的跨存储原子性由下方 TODO(#121) 的真实事务解决。
-    std::lock_guard<std::mutex> transaction_lock(MockUndoTransactionMutex());
-    const DateTime now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
     // 查找窗口内仍可撤销的目标操作
+    const DateTime now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
     const Result<OperationRecord> target = FindUndoableMockScheduleOperation(command.operation_id, now);
     if (!target.ok()) return FailedUndoScheduleOperationResult(target.status);
 
-    // 先恢复日程状态，再提交撤销记录
+    // TODO：真实存储接入后，在同一事务内完成日程恢复、目标操作失效（不能再撤销至此）和撤销记录写入
     const Result<AppliedScheduleUndo> applied_result = ApplyMockScheduleUndo(*target.value);
     if (!applied_result.ok()) return FailedUndoScheduleOperationResult(applied_result.status);
     const AppliedScheduleUndo& applied = *applied_result.value;
@@ -333,17 +320,10 @@ UndoScheduleOperationResult ScheduleService::undo_schedule_operation(const UndoS
         .previous = applied.before,
     };
 
-    // 提交撤销记录并使目标操作失效；真实存储接入后应在同一事务内完成
+    // 提交撤销记录并使目标操作失效
     const Result<OperationRecord> recorded =
         InvalidateMockScheduleOperationAndAppendUndo(target.value->id, std::move(undo_operation), now);
-    if (!recorded.ok()) {
-        const Status rollback = RollbackMockScheduleUndo(applied);
-        if (!rollback.ok()) {
-            return FailedUndoScheduleOperationResult(
-                Status::Error(ErrorCode::kInternal, "撤销记录提交失败，且日程状态回滚失败"));
-        }
-        return FailedUndoScheduleOperationResult(recorded.status);
-    }
+    if (!recorded.ok()) return FailedUndoScheduleOperationResult(recorded.status);
 
     // 撤销成功，返回原操作和恢复后的日程
     return {
