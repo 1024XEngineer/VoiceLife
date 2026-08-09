@@ -91,8 +91,11 @@ Tunnel 或服务器反向代理，以免 Quick Tunnel 重启后域名改变。
 - `GET|POST /voicelife/reminder-actions/:token`
 - `GET|POST /wechat` 与 `GET /healthz`
 
-通知受理后进程会异步派发每个 Delivery。结构化日志用同一个 `correlationId` 记录设备受理、Delivery 派发、
-Action 提交与 SSE 下发；异步失败只记录稳定错误码，不回显凭据或平台载荷。
+通知受理与 Delivery Outbox 事件在同一 PostgreSQL 事务内提交；常驻 worker 领取事件后派发，并在启动时恢复
+`pending`、`retryable_failed` 与租约已过期的 `sending` Delivery。临时失败按 `availableAt` 延迟重试，HTTP
+进程只负责在事务提交后唤醒 worker，不再承担可能随 202 响应丢失的进程内派发任务。结构化日志用同一个
+`correlationId` 记录设备受理、Delivery 派发、Action 提交与 SSE 下发；异步失败只记录稳定错误码，不回显
+凭据或平台载荷。
 
 跨端 JSON fixture 位于 `contracts/im-gateway/v1/fixtures`，由 C++ 主机测试与 TypeScript 测试共同消费。
 

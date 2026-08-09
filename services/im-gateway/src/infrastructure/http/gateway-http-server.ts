@@ -46,6 +46,8 @@ export interface GatewayHttpServerOptions {
     readonly port: number;
     readonly runtime: ImGatewayRuntime;
     readonly logger: GatewayLogger;
+    /** 通知生产 Outbox worker 已有新 Delivery 可领取。 */
+    readonly deliveryAvailable?: () => void;
     /**
      * 探测数据库等关键依赖是否仍可用。
      * @returns 健康响应；抛错时监听器返回 503。
@@ -174,7 +176,7 @@ async function routeRequest(
         });
         context.correlationId = correlationId(body);
         writeJson(response, 202, submission);
-        dispatchDeliveries(submission.deliveries, options, context.correlationId, requestId);
+        notifyDeliveryWorker(submission.deliveries, options);
         return;
     }
     if (url.pathname === '/v1/im/notifications' && method === 'POST') {
@@ -187,7 +189,7 @@ async function routeRequest(
         });
         context.correlationId = correlationId(body);
         writeJson(response, 202, submission);
-        dispatchDeliveries(submission.deliveries, options, context.correlationId, requestId);
+        notifyDeliveryWorker(submission.deliveries, options);
         return;
     }
     const actionResultMatch = ACTION_RESULT_PATH.exec(url.pathname);
@@ -262,34 +264,15 @@ async function routeRequest(
     writeText(response, 404, 'Not Found');
 }
 
-function dispatchDeliveries(
+function notifyDeliveryWorker(
     deliveries: readonly { readonly deliveryId: string }[],
     options: GatewayHttpServerOptions,
-    correlation: string | undefined,
-    requestId: string,
 ): void {
-    for (const delivery of deliveries) {
-        void options.runtime.application.deliveryDispatch
-            .dispatch(unsafeId(delivery.deliveryId))
-            .then((result) => {
-                safeLog(options.logger, {
-                    level: 'info',
-                    event: 'delivery.dispatched',
-                    requestId,
-                    ...(correlation === undefined ? {} : { correlationId: correlation }),
-                    deliveryId: result.id,
-                });
-            })
-            .catch((error: unknown) => {
-                safeLog(options.logger, {
-                    level: 'error',
-                    event: 'delivery.dispatch.failed',
-                    requestId,
-                    ...(correlation === undefined ? {} : { correlationId: correlation }),
-                    deliveryId: delivery.deliveryId,
-                    errorCode: safeErrorCode(error),
-                });
-            });
+    if (deliveries.length === 0) return;
+    try {
+        options.deliveryAvailable?.();
+    } catch {
+        // The polling worker remains the source of truth if an eager wake-up fails.
     }
 }
 

@@ -1,6 +1,7 @@
 import { createKoishiGatewayRuntime, type KoishiGatewayRuntime } from './create-koishi-gateway.js';
 import { unsafeId, type ChannelAccountId, type DeviceId } from '../contracts/ids.js';
 import type { ChannelAccount } from '../domain/models.js';
+import { DeliveryOutboxWorker } from '../infrastructure/delivery-outbox-worker.js';
 import {
     type GatewayLogger,
     startGatewayHttpServer,
@@ -135,6 +136,7 @@ export async function startConfiguredGatewayProcess(
     const processLogger = nonThrowingLogger(logger);
     const unitOfWork = new PostgresImUnitOfWork(config.databaseUrl);
     let koishi: KoishiGatewayRuntime | undefined;
+    let deliveryWorker: DeliveryOutboxWorker | undefined;
     let http: StartedGatewayHttpServer | undefined;
     try {
         await unitOfWork.migrate();
@@ -188,11 +190,19 @@ export async function startConfiguredGatewayProcess(
         });
         await ensureConfiguredChannel(koishi.runtime, channelAccountId, config.wechat);
         await koishi.start();
+        deliveryWorker = new DeliveryOutboxWorker({
+            unitOfWork,
+            dispatch: koishi.runtime.application.deliveryDispatch,
+            clock,
+            logger: processLogger,
+        });
+        deliveryWorker.start();
         http = await startGatewayHttpServer({
             host: config.host,
             port: config.port,
             runtime: koishi.runtime,
             logger: processLogger,
+            deliveryAvailable: () => deliveryWorker!.wake(),
             healthCheck: async () => {
                 const account = await koishi!.runtime.application.channels.find(channelAccountId);
                 if (account === undefined || account.status !== 'active') throw new Error('channel unavailable');
@@ -205,12 +215,13 @@ export async function startConfiguredGatewayProcess(
         return {
             origin: http.origin,
             close(): Promise<void> {
-                closePromise ??= closeGateway(http!, koishi!, unitOfWork, processLogger);
+                closePromise ??= closeGateway(http!, deliveryWorker!, koishi!, unitOfWork, processLogger);
                 return closePromise;
             },
         };
     } catch (error) {
         if (http !== undefined) await http.close().catch(() => undefined);
+        if (deliveryWorker !== undefined) await deliveryWorker.close().catch(() => undefined);
         if (koishi !== undefined) await koishi.close().catch(() => undefined);
         await unitOfWork.close().catch(() => undefined);
         throw error;
@@ -262,12 +273,18 @@ function assertConfiguredChannel(account: ChannelAccount, wechat: GatewayWechatC
 
 async function closeGateway(
     http: StartedGatewayHttpServer,
+    deliveryWorker: DeliveryOutboxWorker,
     koishi: KoishiGatewayRuntime,
     unitOfWork: PostgresImUnitOfWork,
     logger: GatewayLogger,
 ): Promise<void> {
     const errors: unknown[] = [];
-    for (const close of [() => http.close(), () => koishi.close(), () => unitOfWork.close()]) {
+    for (const close of [
+        () => http.close(),
+        () => deliveryWorker.close(),
+        () => koishi.close(),
+        () => unitOfWork.close(),
+    ]) {
         try {
             await close();
         } catch (error) {

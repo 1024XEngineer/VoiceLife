@@ -486,9 +486,37 @@ export async function sharedRepositoryContractSuite(makeUow) {
         });
     });
 
-    await test('outbox appends without error', async () => {
+    await test('outbox claims due events with a lease and publishes them', async () => {
         await withUow(makeUow, async (uow) => {
-            await uow.transaction((ctx) => ctx.outbox.append(outboxEvent()));
+            await uow.transaction(async (ctx) => {
+                await ctx.outbox.append(outboxEvent('outbox-due', { eventType: 'im.delivery.requested' }));
+                await ctx.outbox.append(
+                    outboxEvent('outbox-future', {
+                        eventType: 'im.delivery.retry-scheduled',
+                        availableAt: T2,
+                    }),
+                );
+                await ctx.outbox.append(outboxEvent('outbox-unrelated', { eventType: 'audit.created' }));
+            });
+
+            const claimed = await uow.transaction((ctx) =>
+                ctx.outbox.claimPending(['im.delivery.requested', 'im.delivery.retry-scheduled'], T1, T2, 10),
+            );
+            assert.deepEqual(
+                claimed.map((event) => ({ id: event.id, attempts: event.attempts, availableAt: event.availableAt })),
+                [{ id: 'outbox-due', attempts: 1, availableAt: T2 }],
+            );
+
+            const leased = await uow.transaction((ctx) =>
+                ctx.outbox.claimPending(['im.delivery.requested'], T1, T2, 10),
+            );
+            assert.deepEqual(leased, []);
+
+            await uow.transaction((ctx) => ctx.outbox.markPublished('outbox-due', T1));
+            const afterPublish = await uow.transaction((ctx) =>
+                ctx.outbox.claimPending(['im.delivery.requested'], T2, LATE, 10),
+            );
+            assert.deepEqual(afterPublish, []);
         });
     });
 }

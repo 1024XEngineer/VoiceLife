@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createMockImGateway } from '../dist/index.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
+import { InMemoryImUnitOfWork } from '../dist/infrastructure/persistence/in-memory.js';
 import { buildGateway, expectRejected, pendingStrongDelivery } from './helpers.mjs';
 
 /** 提交强提醒并派发到已接受,返回回执所需的投递上下文。 */
@@ -103,7 +104,8 @@ test('a failed receipt on an accepted delivery marks it permanent_failed', async
 });
 
 test('a retryable failed receipt keeps an accepted delivery eligible for retry', async () => {
-    const { gateway, clock } = buildGateway();
+    const unitOfWork = new InMemoryImUnitOfWork();
+    const { gateway, clock } = buildGateway({ unitOfWork });
     const ctx = await acceptedDelivery(gateway);
 
     await gateway.application.receipts.record(
@@ -114,6 +116,16 @@ test('a retryable failed receipt keeps an accepted delivery eligible for retry',
     assert.equal(details.delivery.status, 'retryable_failed');
     assert.equal(details.receipts[0].stage, 'failed');
     assert.deepEqual(details.receipts[0].detail, { retryable: true });
+    const retryEvents = await unitOfWork.transaction((context) =>
+        context.outbox.claimPending(
+            ['im.delivery.retry-scheduled'],
+            clock.addMinutes(clock.now(), 1),
+            clock.addMinutes(clock.now(), 2),
+            10,
+        ),
+    );
+    assert.equal(retryEvents.length, 1);
+    assert.equal(retryEvents[0].aggregateId, ctx.deliveryId);
 });
 
 test('a permanent_failed delivery does not regress on further failed receipts', async () => {

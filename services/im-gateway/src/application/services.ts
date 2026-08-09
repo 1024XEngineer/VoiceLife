@@ -1015,11 +1015,24 @@ export class DefaultReceiptApplication implements ReceiptApplication {
             }
             const status = advanceDeliveryStatus(delivery.status, receipt);
             if (status !== delivery.status) {
+                const now = this.clock.now();
                 await tx.deliveries.save({
                     ...delivery,
                     status,
-                    updatedAt: this.clock.now(),
+                    updatedAt: now,
                 });
+                if (status === 'retryable_failed') {
+                    await tx.outbox.append({
+                        id: this.ids.nextOutboxEventId(),
+                        eventType: 'im.delivery.retry-scheduled',
+                        aggregateId: delivery.id,
+                        payload: { deliveryId: delivery.id },
+                        status: 'pending',
+                        attempts: currentAttempt.attemptNo,
+                        availableAt: this.clock.addMinutes(now, 1),
+                        createdAt: now,
+                    });
+                }
             }
         });
     }

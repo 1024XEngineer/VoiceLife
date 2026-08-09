@@ -101,6 +101,7 @@ async function withServer(work) {
         runtime: fakeRuntime(events),
         healthCheck: async () => ({ status: 'ok' }),
         logger: { log: (entry) => logs.push(entry) },
+        deliveryAvailable: () => events.push({ kind: 'worker-wake' }),
     });
     try {
         await work({ ...server, events, logs });
@@ -216,8 +217,7 @@ test('production server mounts health, device, Action UI and webhook routes', as
         assert.equal(actionResult.status, 200);
         assert.equal((await actionResult.json()).correlationId, 'correlation-action-result');
 
-        await new Promise((resolve) => globalThis.setImmediate(resolve));
-        assert.deepEqual(events, [{ kind: 'dispatch', deliveryId: 'delivery-1' }]);
+        assert.deepEqual(events, [{ kind: 'worker-wake' }]);
 
         const actionPage = await globalThis.fetch(`${origin}/voicelife/reminder-actions/token%2Evalue`);
         assert.equal(actionPage.status, 200);
@@ -303,6 +303,14 @@ test('configured production process migrates Postgres, starts Koishi and closes 
     );
     assert.equal(
         logs.some((entry) => entry.event === 'gateway.stopped'),
+        true,
+    );
+    assert.equal(
+        logs.some((entry) => entry.event === 'delivery.worker.started'),
+        true,
+    );
+    assert.equal(
+        logs.some((entry) => entry.event === 'delivery.worker.stopped'),
         true,
     );
 

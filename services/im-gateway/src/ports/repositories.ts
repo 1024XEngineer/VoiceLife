@@ -8,6 +8,7 @@ import type {
     ExternalIdentityId,
     InboundEventId,
     OperationId,
+    OutboxEventId,
     PairingSessionId,
     ReminderTriggerId,
     UserId,
@@ -362,6 +363,33 @@ export interface OutboxRepository {
      * @returns 追加完成后兑现的 Promise。
      */
     append(event: ImOutboxEvent): Promise<void>;
+    /**
+     * 原子领取指定类型且已到可用时间的待发布事件，并把 availableAt 推进到租约截止时间。
+     * @param eventTypes 本 worker 可处理的事件类型。
+     * @param now 当前时间。
+     * @param leaseUntil 本次领取的租约截止时间；进程崩溃后事件可再次领取。
+     * @param limit 单批最大事件数。
+     * @returns 已领取事件，attempts 已递增。
+     */
+    claimPending(
+        eventTypes: readonly string[],
+        now: IsoDateTime,
+        leaseUntil: IsoDateTime,
+        limit: number,
+    ): Promise<readonly ImOutboxEvent[]>;
+    /**
+     * 把已成功消费的事件标记为发布完成。
+     * @param eventId 发件箱事件标识。
+     * @param publishedAt 完成时间。
+     * @returns 更新完成后兑现的 Promise。
+     */
+    markPublished(eventId: OutboxEventId, publishedAt: IsoDateTime): Promise<void>;
+    /**
+     * 把无法消费且不应继续重试的事件标记为失败。
+     * @param eventId 发件箱事件标识。
+     * @returns 更新完成后兑现的 Promise。
+     */
+    markFailed(eventId: OutboxEventId): Promise<void>;
 }
 
 /** 同一事务内可用的全部 IM 聚合仓储。 */

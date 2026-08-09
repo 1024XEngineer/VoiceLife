@@ -10,6 +10,7 @@ export * from './contracts/device-gateway-parser.js';
 export * from './contracts/ids.js';
 export * from './contracts/platform-events.js';
 export * from './domain/models.js';
+export * from './infrastructure/delivery-outbox-worker.js';
 export * from './infrastructure/http/action-ui-api.js';
 export * from './infrastructure/http/device-api.js';
 export * from './infrastructure/http/gateway-http-server.js';
