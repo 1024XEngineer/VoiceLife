@@ -1,5 +1,6 @@
 /** IM Gateway 对外暴露的稳定错误码。 */
 export type ImGatewayErrorCode =
+    | 'unauthorized'
     | 'invalid_contract'
     | 'idempotency_conflict'
     | 'binding_not_found'

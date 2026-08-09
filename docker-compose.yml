@@ -3,18 +3,47 @@ services:
     image: postgres:16-alpine
     container_name: voicelife-postgres
     environment:
-      POSTGRES_USER: voicelife
-      POSTGRES_PASSWORD: voicelife
-      POSTGRES_DB: voicelife
+      POSTGRES_USER: ${POSTGRES_USER:-voicelife}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-voicelife}
     ports:
       - "5432:5432"
     volumes:
       - voicelife_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U voicelife -d voicelife"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 2s
       timeout: 3s
       retries: 15
+
+  gateway:
+    build:
+      context: services/im-gateway
+    container_name: voicelife-im-gateway
+    env_file:
+      - .env
+    environment:
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: 3000
+      DATABASE_HOST: postgres
+    ports:
+      - "${GATEWAY_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
 
 volumes:
   voicelife_postgres_data:

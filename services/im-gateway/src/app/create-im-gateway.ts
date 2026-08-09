@@ -14,7 +14,11 @@ import {
 } from '../application/services.js';
 import type { DeviceId } from '../contracts/ids.js';
 import { unsafeId } from '../contracts/ids.js';
-import { ActionUiController, ActionUiPageController } from '../infrastructure/http/action-ui-api.js';
+import {
+    ActionUiController,
+    ActionUiPageController,
+    type ActionUiSubmissionObserver,
+} from '../infrastructure/http/action-ui-api.js';
 import { DeviceIntentController, ReminderActionStreamController } from '../infrastructure/http/device-api.js';
 import { WechatWebhookController } from '../infrastructure/http/wechat-api.js';
 import type { WechatOfficialAdapter } from '../infrastructure/wechat/wechat-official-adapter.js';
@@ -64,6 +68,8 @@ export interface ImGatewayDependencies {
     readonly identityProtector: ExternalIdentityProtector;
     readonly clock: Clock;
     readonly ids: IdGenerator;
+    /** 可选的脱敏动作观测端口。 */
+    readonly actionUiObserver?: ActionUiSubmissionObserver;
     /** 可选的微信公众号 Adapter；注入后暴露 Webhook Controller。 */
     readonly wechatAdapter?: WechatOfficialAdapter;
 }
@@ -148,7 +154,7 @@ export function createImGateway(dependencies: ImGatewayDependencies): ImGatewayR
             actions,
         ),
         actionUiApi: new ActionUiController(actionUi),
-        actionUiPageApi: new ActionUiPageController(actionUi),
+        actionUiPageApi: new ActionUiPageController(actionUi, dependencies.actionUiObserver),
         ...(dependencies.wechatAdapter === undefined
             ? {}
             : { wechatApi: new WechatWebhookController(dependencies.wechatAdapter, platformEvents) }),

@@ -13,6 +13,7 @@ export interface KoishiGatewayOptions {
     readonly context?: Context;
     readonly dependencies: Omit<ImGatewayDependencies, 'actionStream' | 'imChannel'> & {
         readonly actionStream?: ActionCommandStreamPort;
+        readonly imChannel?: ImGatewayDependencies['imChannel'];
     };
     readonly capabilities: readonly PlatformCapabilityPort[];
     /**
@@ -49,11 +50,13 @@ export function createKoishiGatewayRuntime(options: KoishiGatewayOptions): Koish
     const capabilities = validateCapabilities(options.capabilities);
     const context = options.context ?? new Context();
     const actionStream = options.dependencies.actionStream ?? new SseActionCommandHub();
-    const channel = new KoishiChannelAdapter({
-        unitOfWork: options.dependencies.unitOfWork,
-        bot: new KoishiContextBotFacade(context),
-        revealExternalUserId: options.revealExternalUserId,
-    });
+    const channel =
+        options.dependencies.imChannel ??
+        new KoishiChannelAdapter({
+            unitOfWork: options.dependencies.unitOfWork,
+            bot: new KoishiContextBotFacade(context),
+            revealExternalUserId: options.revealExternalUserId,
+        });
     const runtime = createImGateway({
         ...options.dependencies,
         actionStream,

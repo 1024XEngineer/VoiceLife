@@ -40,10 +40,25 @@ export interface ActionUiPageResponse {
     readonly body: string;
 }
 
+/** 接收已验证动作命令的观测端口，供生产结构化日志串联 correlationId。 */
+export interface ActionUiSubmissionObserver {
+    /**
+     * 记录已持久化并准备下发设备的动作命令。
+     * @param command 不含原始动作令牌的动作命令。
+     */
+    submitted(command: ReminderActionCommand): void;
+}
+
 /** 服务端渲染的移动端提醒动作页面，不向浏览器暴露内部聚合标识。 */
 export class ActionUiPageController {
-    /** @param actionUi 动作页面应用服务。 */
-    public constructor(private readonly actionUi: ActionUiApplication) {}
+    /**
+     * @param actionUi 动作页面应用服务。
+     * @param observer 可选的脱敏动作观测端口。
+     */
+    public constructor(
+        private readonly actionUi: ActionUiApplication,
+        private readonly observer?: ActionUiSubmissionObserver,
+    ) {}
 
     /**
      * 校验路径令牌并渲染允许的动作选项。
@@ -72,6 +87,11 @@ export class ActionUiPageController {
             const submitted = submittedAction(input);
             const intent = parseReminderActionIntent({ token: parsedToken, ...submitted });
             const command = await this.actionUi.execute(intent);
+            try {
+                this.observer?.submitted(command);
+            } catch {
+                // Observability failures must not change an already-persisted action result.
+            }
             return htmlResponse(200, renderResultPage(command.action, command.params));
         } catch (error) {
             return actionUiErrorResponse(error);
