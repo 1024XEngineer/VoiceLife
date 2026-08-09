@@ -13,6 +13,7 @@ export * from './domain/models.js';
 export * from './infrastructure/http/action-ui-api.js';
 export * from './infrastructure/http/device-api.js';
 export * from './infrastructure/http/gateway-http-server.js';
+export * from './infrastructure/http/gateway-sse-response.js';
 export * from './infrastructure/http/wechat-api.js';
 export * from './infrastructure/koishi/koishi-channel-adapter.js';
 export * from './infrastructure/koishi/voicelife-plugin.js';

@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
 import type { ImGatewayRuntime } from '../../app/create-im-gateway.js';
-import type { ActionId, DeviceId, PairingSessionId, ReminderTriggerId } from '../../contracts/ids.js';
+import type { ActionId, DeviceId, PairingSessionId } from '../../contracts/ids.js';
 import { unsafeId } from '../../contracts/ids.js';
-import { SSE_HEARTBEAT_INTERVAL_SECONDS, SSE_RESPONSE_HEADERS } from './device-api.js';
 import type { ActionUiPageResponse } from './action-ui-api.js';
+import { streamReminderActions } from './gateway-sse-response.js';
 import { ImGatewayError } from '../../shared/errors.js';
 
 const JSON_BODY_LIMIT = 64 * 1024;
@@ -207,7 +207,18 @@ async function routeRequest(
     const actionStreamMatch = ACTION_STREAM_PATH.exec(url.pathname);
     if (actionStreamMatch !== null && method === 'GET') {
         context.route = 'device.action-stream.connect';
-        await streamActions(request, response, url, options, requestId, context, actionStreamMatch[1]!);
+        await streamReminderActions({
+            request,
+            response,
+            url,
+            runtime: options.runtime,
+            logger: options.logger,
+            requestId,
+            encodedDeviceId: actionStreamMatch[1]!,
+            correlationIdObserved: (value) => {
+                context.correlationId = value;
+            },
+        });
         return;
     }
     if (url.pathname === '/wechat') {
@@ -282,55 +293,6 @@ function dispatchDeliveries(
     }
 }
 
-async function streamActions(
-    request: IncomingMessage,
-    response: ServerResponse,
-    url: URL,
-    options: GatewayHttpServerOptions,
-    requestId: string,
-    context: RequestLogContext,
-    encodedDeviceId: string,
-): Promise<void> {
-    const reminderType = url.searchParams.get('reminderType');
-    const reminderTriggerId = url.searchParams.get('reminderTriggerId');
-    if (reminderType !== 'strong' || reminderTriggerId === null || reminderTriggerId.trim() === '') {
-        throw new InvalidRequestError();
-    }
-    const controller = new AbortController();
-    request.once('aborted', () => controller.abort());
-    response.once('close', () => controller.abort());
-    const events = await options.runtime.actionStreamApi.connect({
-        authorization: authorization(request),
-        deviceId: unsafeId<DeviceId>(decodePathSegment(encodedDeviceId)),
-        reminderType,
-        reminderTriggerId: unsafeId<ReminderTriggerId>(reminderTriggerId),
-        ...(singleHeader(request.headers['last-event-id']) === undefined
-            ? {}
-            : { lastEventId: unsafeId<ActionId>(singleHeader(request.headers['last-event-id'])!) }),
-        signal: controller.signal,
-    });
-    response.writeHead(200, { ...SSE_RESPONSE_HEADERS, Connection: 'keep-alive' });
-    response.flushHeaders();
-    const heartbeat = setInterval(() => response.write(': heartbeat\n\n'), SSE_HEARTBEAT_INTERVAL_SECONDS * 1000);
-    heartbeat.unref();
-    try {
-        for await (const event of events) {
-            context.correlationId = event.data.correlationId;
-            safeLog(options.logger, {
-                level: 'info',
-                event: 'action.stream.sent',
-                requestId,
-                correlationId: event.data.correlationId,
-                actionId: event.id,
-            });
-            response.write(`id: ${event.id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
-        }
-    } finally {
-        clearInterval(heartbeat);
-        response.end();
-    }
-}
-
 function authorization(request: IncomingMessage): string {
     return request.headers.authorization ?? '';
 }
@@ -339,10 +301,6 @@ function requiredHeader(request: IncomingMessage, name: string): string {
     const value = request.headers[name];
     if (typeof value !== 'string' || value.trim() === '') throw new InvalidRequestError();
     return value;
-}
-
-function singleHeader(value: string | readonly string[] | undefined): string | undefined {
-    return typeof value === 'string' ? value : value?.[0];
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
