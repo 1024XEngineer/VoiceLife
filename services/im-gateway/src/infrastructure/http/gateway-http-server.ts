@@ -474,6 +474,7 @@ function closeServer(server: Server): Promise<void> {
     if (!server.listening) return Promise.resolve();
     return new Promise((resolve, reject) => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));
+        server.closeAllConnections();
     });
 }
 

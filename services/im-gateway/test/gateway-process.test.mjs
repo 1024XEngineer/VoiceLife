@@ -331,6 +331,43 @@ test('production server serializes action commands as SSE and logs correlation i
     });
 });
 
+test('production server shutdown terminates an active SSE connection', async () => {
+    const runtime = fakeRuntime([]);
+    runtime.actionStreamApi.connect = async ({ signal }) => ({
+        [Symbol.asyncIterator]() {
+            return this;
+        },
+        next() {
+            return new Promise((resolve) => {
+                if (signal.aborted) resolve({ done: true });
+                else signal.addEventListener('abort', () => resolve({ done: true }), { once: true });
+            });
+        },
+    });
+    const server = await startGatewayHttpServer({
+        host: '127.0.0.1',
+        port: 0,
+        runtime,
+        healthCheck: async () => ({ status: 'ok' }),
+        logger: { log: () => {} },
+    });
+    const client = new globalThis.AbortController();
+    const response = await globalThis.fetch(
+        `${server.origin}/v1/devices/device-fixture/reminder-actions/stream?reminderType=strong&reminderTriggerId=trigger-1`,
+        { headers: { authorization: `Bearer ${deviceToken}` }, signal: client.signal },
+    );
+    assert.equal(response.status, 200);
+
+    const close = server.close();
+    const closedPromptly = await Promise.race([
+        close.then(() => true),
+        new Promise((resolve) => globalThis.setTimeout(() => resolve(false), 250)),
+    ]);
+    client.abort();
+    await close;
+    assert.equal(closedPromptly, true);
+});
+
 test('production health reports dependency failures as unavailable', async () => {
     const server = await startGatewayHttpServer({
         host: '127.0.0.1',
