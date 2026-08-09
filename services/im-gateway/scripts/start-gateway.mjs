@@ -1,6 +1,6 @@
 import process from 'node:process';
 
-import { startConfiguredGatewayProcess } from '../dist/app/gateway-process.js';
+import { GatewayConfigurationError, startConfiguredGatewayProcess } from '../dist/app/gateway-process.js';
 
 try {
     const gateway = await startConfiguredGatewayProcess(process.env);
@@ -14,7 +14,12 @@ try {
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
 } catch (error) {
-    const errorCode = error instanceof Error ? error.name : 'unknown_error';
-    process.stderr.write(`${JSON.stringify({ level: 'error', event: 'gateway.start.failed', errorCode })}\n`);
+    const failure = {
+        level: 'error',
+        event: 'gateway.start.failed',
+        errorCode: error instanceof GatewayConfigurationError ? 'invalid_configuration' : 'startup_failed',
+        ...(error instanceof GatewayConfigurationError ? { message: error.message } : {}),
+    };
+    process.stderr.write(`${JSON.stringify(failure)}\n`);
     process.exitCode = 1;
 }

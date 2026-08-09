@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 import {
@@ -128,6 +131,56 @@ test('production configuration requires every secret without exposing its value'
         () => readGatewayConfiguration(fixtureEnvironment({ ACTION_TOKEN_SECRET: 'too-short' })),
         /ACTION_TOKEN_SECRET must contain at least 32 bytes/u,
     );
+});
+
+test('production configuration rejects current and historical public example secrets', async () => {
+    for (const [name, value] of [
+        ['DEVICE_TOKEN', 'replace-with-at-least-24-random-bytes'],
+        ['ACTION_TOKEN_SECRET', 'replace-with-at-least-32-random-bytes'],
+        ['IDENTITY_SECRET', 'replace-with-a-distinct-32-byte-random-secret'],
+    ]) {
+        assert.throws(
+            () => readGatewayConfiguration(fixtureEnvironment({ [name]: value })),
+            new RegExp(`${name} must not use the public example value`, 'u'),
+        );
+    }
+
+    const example = Object.fromEntries(
+        (await readFile(new URL('../../../.env.example', import.meta.url), 'utf8'))
+            .split(/\r?\n/u)
+            .filter((line) => line !== '' && !line.startsWith('#'))
+            .map((line) => line.split('=', 2)),
+    );
+    for (const name of ['DEVICE_TOKEN', 'ACTION_TOKEN_SECRET', 'IDENTITY_SECRET']) {
+        assert.throws(
+            () => readGatewayConfiguration(fixtureEnvironment({ [name]: example[name] })),
+            (error) => error.name === 'GatewayConfigurationError' && error.message.startsWith(`${name} `),
+        );
+    }
+});
+
+test('production entry reports trusted configuration errors without logging their values', async () => {
+    const leakedValue = 'secret-value-that-is-too-short';
+    const child = spawn(process.execPath, ['scripts/start-gateway.mjs'], {
+        cwd: new URL('..', import.meta.url),
+        env: { ...process.env, ...fixtureEnvironment({ ACTION_TOKEN_SECRET: leakedValue }) },
+        stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+    });
+    const [exitCode] = await once(child, 'exit');
+
+    assert.equal(exitCode, 1);
+    assert.doesNotMatch(stderr, new RegExp(leakedValue, 'u'));
+    assert.deepEqual(JSON.parse(stderr), {
+        level: 'error',
+        event: 'gateway.start.failed',
+        errorCode: 'invalid_configuration',
+        message: 'ACTION_TOKEN_SECRET must contain at least 32 bytes',
+    });
 });
 
 test('production server returns a Bearer challenge for rejected device credentials', async () => {

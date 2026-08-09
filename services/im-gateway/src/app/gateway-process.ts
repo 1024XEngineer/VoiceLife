@@ -36,6 +36,21 @@ export {
 /** 生产进程可读取的环境变量集合。 */
 export type GatewayEnvironment = Readonly<Record<string, string | undefined>>;
 
+const PUBLIC_EXAMPLE_SECRET_VALUES = new Set([
+    'replace-with-at-least-24-random-bytes',
+    'replace-with-at-least-32-random-bytes',
+    'replace-with-a-distinct-32-byte-random-secret',
+]);
+
+/** 只携带环境变量名与公开约束、不携带配置值的生产配置错误。 */
+export class GatewayConfigurationError extends Error {
+    /** @param message 可安全写入启动日志的配置约束说明。 */
+    public constructor(message: string) {
+        super(message);
+        this.name = 'GatewayConfigurationError';
+    }
+}
+
 /** 生产进程经过校验的微信公众号配置。 */
 export interface GatewayWechatConfiguration {
     readonly channelAccountId: string;
@@ -81,24 +96,24 @@ export function readGatewayConfiguration(environment: GatewayEnvironment): Gatew
     const rawPort = environment.GATEWAY_PORT?.trim() || '3000';
     const port = Number(rawPort);
     if (!/^\d{1,5}$/u.test(rawPort) || !Number.isSafeInteger(port) || port < 0 || port > 65_535) {
-        throw new Error('GATEWAY_PORT must be a valid TCP port');
+        throw new GatewayConfigurationError('GATEWAY_PORT must be a valid TCP port');
     }
     if ((environment.WECHAT_WEBHOOK_MODE?.trim() || 'plain') !== 'plain') {
-        throw new Error('WECHAT_WEBHOOK_MODE must be plain for the current adapter');
+        throw new GatewayConfigurationError('WECHAT_WEBHOOK_MODE must be plain for the current adapter');
     }
     const databaseUrl = databaseConnectionUrl(environment);
     const actionUiBaseUrl = requiredEnvironment(environment, 'WECHAT_ACTION_UI_BASE_URL');
     assertActionUiBaseUrl(actionUiBaseUrl);
     const expectedToUserName = requiredEnvironment(environment, 'WECHAT_EXPECTED_TO_USERNAME');
     if (!/^gh_[A-Za-z0-9_-]+$/u.test(expectedToUserName)) {
-        throw new Error('WECHAT_EXPECTED_TO_USERNAME must be the gh_ prefixed original account ID');
+        throw new GatewayConfigurationError('WECHAT_EXPECTED_TO_USERNAME must be the gh_ prefixed original account ID');
     }
     const deviceToken = requiredEnvironment(environment, 'DEVICE_TOKEN');
-    assertMinimumBytes(deviceToken, 'DEVICE_TOKEN', 24);
+    assertProductionSecret(deviceToken, 'DEVICE_TOKEN', 24);
     const actionTokenSecret = requiredEnvironment(environment, 'ACTION_TOKEN_SECRET');
-    assertMinimumBytes(actionTokenSecret, 'ACTION_TOKEN_SECRET', 32);
+    assertProductionSecret(actionTokenSecret, 'ACTION_TOKEN_SECRET', 32);
     const identitySecret = environment.IDENTITY_SECRET?.trim() || actionTokenSecret;
-    assertMinimumBytes(identitySecret, 'IDENTITY_SECRET', 32);
+    assertProductionSecret(identitySecret, 'IDENTITY_SECRET', 32);
     return {
         host,
         port,
@@ -282,7 +297,9 @@ function assertConfiguredChannel(account: ChannelAccount, wechat: GatewayWechatC
         account.connectionMode !== 'webhook' ||
         account.status !== 'active'
     ) {
-        throw new Error('Configured WeChat channel account conflicts with the persisted deployment metadata');
+        throw new GatewayConfigurationError(
+            'Configured WeChat channel account conflicts with the persisted deployment metadata',
+        );
     }
 }
 
@@ -312,20 +329,23 @@ async function closeGateway(
 
 function requiredEnvironment(environment: GatewayEnvironment, name: string): string {
     const value = environment[name]?.trim();
-    if (value === undefined || value === '') throw new Error(`${name} is required`);
+    if (value === undefined || value === '') throw new GatewayConfigurationError(`${name} is required`);
     return value;
 }
 
-function assertMinimumBytes(value: string, name: string, minimum: number): void {
+function assertProductionSecret(value: string, name: string, minimum: number): void {
     if (Buffer.byteLength(value, 'utf8') < minimum) {
-        throw new Error(`${name} must contain at least ${String(minimum)} bytes`);
+        throw new GatewayConfigurationError(`${name} must contain at least ${String(minimum)} bytes`);
+    }
+    if (PUBLIC_EXAMPLE_SECRET_VALUES.has(value)) {
+        throw new GatewayConfigurationError(`${name} must not use the public example value`);
     }
 }
 
 function templateField(environment: GatewayEnvironment, name: string): string {
     const value = requiredEnvironment(environment, name);
     if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(value)) {
-        throw new Error(`${name} must be a valid WeChat template field name`);
+        throw new GatewayConfigurationError(`${name} must be a valid WeChat template field name`);
     }
     return value;
 }
@@ -337,7 +357,7 @@ function assertDatabaseUrl(value: string): void {
             throw new Error('invalid PostgreSQL URL');
         }
     } catch {
-        throw new Error('DATABASE_URL must be a PostgreSQL connection URL');
+        throw new GatewayConfigurationError('DATABASE_URL must be a PostgreSQL connection URL');
     }
 }
 
@@ -347,7 +367,7 @@ function databaseConnectionUrl(environment: GatewayEnvironment): string {
     const host = environment.DATABASE_HOST?.trim();
     if (host === undefined || host === '') return value;
     if (!/^(?:[A-Za-z0-9-]+\.)*[A-Za-z0-9-]+$/u.test(host)) {
-        throw new Error('DATABASE_HOST must be a valid hostname');
+        throw new GatewayConfigurationError('DATABASE_HOST must be a valid hostname');
     }
     const url = new URL(value);
     url.hostname = host;
@@ -368,6 +388,6 @@ function assertActionUiBaseUrl(value: string): void {
             throw new Error('invalid Action UI URL');
         }
     } catch {
-        throw new Error('WECHAT_ACTION_UI_BASE_URL must be a public HTTPS Action UI base URL');
+        throw new GatewayConfigurationError('WECHAT_ACTION_UI_BASE_URL must be a public HTTPS Action UI base URL');
     }
 }

@@ -48,7 +48,8 @@ pnpm --dir services/im-gateway test
 `PostgresImUnitOfWork`、Koishi Runtime、SSE Hub 与 `WechatOfficialAdapter`，然后监听设备 API、Action UI、
 `/wechat` 和 `/healthz`。生产进程不使用 `createMockImGateway()`。
 
-复制 [`.env.example`](../../.env.example) 后填入部署值。`DEVICE_TOKEN` 至少 24 字节，
+复制 [`.env.example`](../../.env.example) 后填入部署值；其中的 `replace-me` 会被生产配置故意拒绝，不能直接启动。
+`DEVICE_TOKEN` 至少 24 字节，
 `ACTION_TOKEN_SECRET` 至少 32 字节；建议额外提供独立的 `IDENTITY_SECRET`，未提供时会从
 `ACTION_TOKEN_SECRET` 按用途派生不同密钥。凭据只从环境变量注入，结构化日志不会记录 Authorization、
 请求体、Action token、动态 URL 或 Secret。
