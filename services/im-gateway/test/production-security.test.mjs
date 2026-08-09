@@ -7,6 +7,11 @@ import {
     HmacPairingCodePort,
     UuidIdGenerator,
 } from '../dist/infrastructure/security/production-ports.js';
+import {
+    CapabilityChannelHealthPort,
+    DirectConversationResolver,
+    SystemClock,
+} from '../dist/infrastructure/production-support.js';
 
 test('production device authentication accepts only the configured device token', async () => {
     const authentication = new BearerDeviceAuthenticationPort(
@@ -46,7 +51,39 @@ test('production id generator emits opaque collision-resistant identifiers', () 
     const ids = new UuidIdGenerator('wechat-production');
 
     assert.equal(ids.nextChannelAccountId(), 'wechat-production');
+    assert.match(ids.nextPairingSessionId(), /^pairing-[0-9a-f-]{36}$/u);
+    assert.match(ids.nextBindingId(), /^binding-[0-9a-f-]{36}$/u);
+    assert.match(ids.nextExternalIdentityId(), /^identity-[0-9a-f-]{36}$/u);
     assert.match(ids.nextDeliveryId(), /^delivery-[0-9a-f-]{36}$/u);
+    assert.match(ids.nextDeliveryAttemptId(), /^attempt-[0-9a-f-]{36}$/u);
+    assert.match(ids.nextDeliveryReceiptId(), /^receipt-[0-9a-f-]{36}$/u);
+    assert.match(ids.nextOperationId(), /^operation-[0-9a-f-]{36}$/u);
+    assert.match(ids.nextOutboxEventId(), /^outbox-[0-9a-f-]{36}$/u);
     assert.notEqual(ids.nextRequestId(), ids.nextRequestId());
     assert.equal(ids.actionIdForDelivery('delivery-fixture'), 'action-delivery-fixture');
+});
+
+test('production clock, channel health and direct conversations expose runtime-safe values', async () => {
+    const clock = new SystemClock();
+    assert.match(clock.now(), /^\d{4}-\d{2}-\d{2}T/u);
+    assert.equal(clock.addMinutes('2026-08-09T00:00:00.000Z', 5), '2026-08-09T00:05:00.000Z');
+
+    const capabilities = { resolve: async () => ({ proactiveMessage: true }) };
+    const health = new CapabilityChannelHealthPort(capabilities, clock);
+    assert.equal((await health.check({ id: 'channel-1', status: 'active' })).status, 'healthy');
+    assert.equal((await health.check({ id: 'channel-1', status: 'disabled' })).status, 'unavailable');
+    const degraded = new CapabilityChannelHealthPort({ resolve: async () => ({ proactiveMessage: false }) }, clock);
+    assert.equal((await degraded.check({ id: 'channel-1', status: 'active' })).detail, 'proactive_message_unavailable');
+
+    const conversation = await new DirectConversationResolver().resolveDirect({
+        id: 'identity-1',
+        channelAccountId: 'channel-1',
+        externalUserIdCiphertext: 'v1.protected',
+    });
+    assert.deepEqual(conversation, {
+        channelAccountId: 'channel-1',
+        externalIdentityId: 'identity-1',
+        kind: 'direct',
+        externalConversationIdCiphertext: 'v1.protected',
+    });
 });
