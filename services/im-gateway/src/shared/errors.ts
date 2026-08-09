@@ -9,6 +9,7 @@ export type ImGatewayErrorCode =
     | 'action_expired'
     | 'duplicate_event'
     | 'invalid_transition'
+    | 'resource_exhausted'
     | 'capability_not_supported'
     | 'not_implemented';
 

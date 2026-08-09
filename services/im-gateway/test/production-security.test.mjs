@@ -75,6 +75,14 @@ test('production clock, channel health and direct conversations expose runtime-s
     const degraded = new CapabilityChannelHealthPort({ resolve: async () => ({ proactiveMessage: false }) }, clock);
     assert.equal((await degraded.check({ id: 'channel-1', status: 'active' })).detail, 'proactive_message_unavailable');
 
+    const unavailable = new CapabilityChannelHealthPort(capabilities, clock, async () => false);
+    assert.deepEqual(await unavailable.check({ id: 'channel-1', status: 'active' }), {
+        accountId: 'channel-1',
+        status: 'unavailable',
+        checkedAt: clock.now(),
+        detail: 'runtime_unavailable',
+    });
+
     const conversation = await new DirectConversationResolver().resolveDirect({
         id: 'identity-1',
         channelAccountId: 'channel-1',

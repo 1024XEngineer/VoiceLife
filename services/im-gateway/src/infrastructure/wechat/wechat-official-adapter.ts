@@ -175,6 +175,19 @@ export class WechatOfficialAdapter
     }
 
     /**
+     * 供注册在 Koishi Context 中的微信公众号 Bot 发送已渲染消息。
+     * @param externalUserId 当前发送使用的微信 OpenID。
+     * @param content 已渲染的微信模板载荷。
+     * @returns 微信平台的受理或失败分类。
+     */
+    public sendToUser(externalUserId: string, content: JsonValue): Promise<ImSendAcceptance> {
+        if (this.outbound === undefined) {
+            return Promise.resolve({ accepted: false, retryable: false, errorCode: 'wechat_not_configured' });
+        }
+        return this.outbound.sendToUser(externalUserId, content);
+    }
+
+    /**
      * 校验微信公众号服务器配置请求，并在成功时返回微信要求的 echostr。
      * @param request 微信 query 参数构成的请求。
      * @returns 验证请求的 echostr；普通 POST 请求没有 echostr 时返回 undefined。

@@ -160,6 +160,30 @@ test('production server returns a Bearer challenge for rejected device credentia
     }
 });
 
+test('production server reports exhausted SSE capacity as too many requests', async () => {
+    const runtime = fakeRuntime([]);
+    runtime.actionStreamApi.connect = async () => {
+        throw new ImGatewayError('resource_exhausted', 'fixture capacity reached', true);
+    };
+    const server = await startGatewayHttpServer({
+        host: '127.0.0.1',
+        port: 0,
+        runtime,
+        healthCheck: async () => ({ status: 'ok' }),
+        logger: { log: () => {} },
+    });
+    try {
+        const response = await globalThis.fetch(
+            `${server.origin}/v1/devices/device-fixture/reminder-actions/stream?reminderType=strong&reminderTriggerId=trigger-1`,
+            { headers: { authorization: `Bearer ${deviceToken}` } },
+        );
+        assert.equal(response.status, 429);
+        assert.deepEqual(await response.json(), { error: 'resource_exhausted' });
+    } finally {
+        await server.close();
+    }
+});
+
 test('production server mounts health, device, Action UI and webhook routes', async () => {
     await withServer(async ({ origin, events }) => {
         const health = await globalThis.fetch(`${origin}/healthz`);

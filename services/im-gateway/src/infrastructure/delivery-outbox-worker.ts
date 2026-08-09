@@ -21,7 +21,7 @@ export interface DeliveryOutboxWorkerOptions {
     /** 包含 Delivery 与 Outbox 仓储的事务工作单元。 */
     readonly unitOfWork: ImUnitOfWork;
     /** 执行带领取隔离的 Delivery 派发应用服务。 */
-    readonly dispatch: Pick<DeliveryDispatchApplication, 'dispatch'>;
+    readonly dispatch: Pick<DeliveryDispatchApplication, 'dispatch' | 'markDeadLetter'>;
     /** 提供可测试的 UTC 时间。 */
     readonly clock: Clock;
     /** 接收脱敏 worker 生命周期与投递日志。 */
@@ -108,6 +108,10 @@ export class DeliveryOutboxWorker {
             await this.fail(event, deliveryId, 'delivery_not_found');
             return;
         }
+        if (delivery.status === 'permanent_failed') {
+            await this.deadLetter(event, delivery);
+            return;
+        }
         if (isConsumed(delivery)) {
             await this.publish(event);
             return;
@@ -118,15 +122,29 @@ export class DeliveryOutboxWorker {
                 this.logDeferred(result, 'delivery_claim_active');
                 return;
             }
+            if (result.status === 'permanent_failed') {
+                await this.deadLetter(event, result);
+                return;
+            }
             await this.publish(event);
-            safeLog(this.options.logger, {
-                level: 'info',
-                event: 'delivery.worker.dispatched',
-                deliveryId: result.id,
-                correlationId: result.correlationId,
-            });
+            if (result.status === 'retryable_failed') {
+                safeLog(this.options.logger, {
+                    level: 'warn',
+                    event: 'delivery.worker.retry.scheduled',
+                    deliveryId: result.id,
+                    correlationId: result.correlationId,
+                    ...(result.lastErrorCode === undefined ? {} : { errorCode: result.lastErrorCode }),
+                });
+            } else {
+                safeLog(this.options.logger, {
+                    level: 'info',
+                    event: 'delivery.worker.dispatched',
+                    deliveryId: result.id,
+                    correlationId: result.correlationId,
+                });
+            }
         } catch (error) {
-            if (error instanceof ImGatewayError && error.code !== 'invalid_transition') {
+            if (error instanceof ImGatewayError && error.code === 'delivery_not_found') {
                 await this.fail(event, deliveryId, error.code);
                 return;
             }
@@ -147,6 +165,18 @@ export class DeliveryOutboxWorker {
             event: 'delivery.worker.event.failed',
             deliveryId,
             errorCode,
+        });
+    }
+
+    private async deadLetter(event: ImOutboxEvent, delivery: Delivery): Promise<void> {
+        const deadLetter = await this.options.dispatch.markDeadLetter(delivery.id);
+        await this.publish(event);
+        safeLog(this.options.logger, {
+            level: 'error',
+            event: 'delivery.worker.dead-lettered',
+            deliveryId: deadLetter.id,
+            correlationId: deadLetter.correlationId,
+            ...(deadLetter.lastErrorCode === undefined ? {} : { errorCode: deadLetter.lastErrorCode }),
         });
     }
 
@@ -180,7 +210,7 @@ export class DeliveryOutboxWorker {
 }
 
 function isConsumed(delivery: Delivery): boolean {
-    return ['accepted', 'delivered', 'permanent_failed', 'dead_letter'].includes(delivery.status);
+    return ['accepted', 'delivered', 'dead_letter'].includes(delivery.status);
 }
 
 function addMilliseconds(value: IsoDateTime, milliseconds: number): IsoDateTime {

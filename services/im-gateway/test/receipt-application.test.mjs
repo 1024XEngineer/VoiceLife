@@ -92,14 +92,15 @@ test('a delivered delivery does not regress on a later failed receipt', async ()
     assert.equal(details.receipts[1].stage, 'failed');
 });
 
-test('a failed receipt on an accepted delivery marks it permanent_failed', async () => {
+test('a failed receipt on an accepted delivery moves it to the dead letter queue', async () => {
     const { gateway, clock } = buildGateway();
     const ctx = await acceptedDelivery(gateway);
 
     await gateway.application.receipts.record(receipt(ctx, clock.addMinutes(clock.now(), 1), { stage: 'failed' }));
 
     const details = await gateway.application.deliveries.find(ctx.deliveryId);
-    assert.equal(details.delivery.status, 'permanent_failed');
+    assert.equal(details.delivery.status, 'dead_letter');
+    assert.equal(details.delivery.lastErrorCode, 'delivery_receipt_failed');
     assert.equal(details.receipts[0].stage, 'failed');
 });
 
@@ -128,7 +129,43 @@ test('a retryable failed receipt keeps an accepted delivery eligible for retry',
     assert.equal(retryEvents[0].aggregateId, ctx.deliveryId);
 });
 
-test('a permanent_failed delivery does not regress on further failed receipts', async () => {
+test('the fifth retryable failed receipt moves the delivery to the dead letter queue', async () => {
+    let sendCalls = 0;
+    const { gateway, clock } = buildGateway({
+        imChannel: {
+            send: async () => {
+                sendCalls += 1;
+                return { accepted: true, platformMessageId: `platform-${sendCalls}` };
+            },
+        },
+    });
+    const deliveryId = await pendingStrongDelivery(gateway);
+
+    for (let attemptNo = 1; attemptNo <= 5; attemptNo += 1) {
+        await gateway.application.deliveryDispatch.dispatch(deliveryId);
+        const current = await gateway.application.deliveries.find(deliveryId);
+        const currentAttempt = current.attempts.at(-1);
+        await gateway.application.receipts.record({
+            externalEventId: `rcpt-${attemptNo}`,
+            channelAccountId: current.delivery.channelAccountId,
+            externalMessageId: current.delivery.externalMessageId,
+            attemptId: currentAttempt.id,
+            dedupeKey: `rcpt-dedupe-${attemptNo}`,
+            stage: 'failed',
+            retryable: true,
+            occurredAt: clock.now(),
+        });
+        if (attemptNo < 5) {
+            assert.equal((await gateway.application.deliveries.find(deliveryId)).delivery.status, 'retryable_failed');
+        }
+    }
+
+    const exhausted = await gateway.application.deliveries.find(deliveryId);
+    assert.equal(exhausted.delivery.status, 'dead_letter');
+    assert.equal(exhausted.delivery.lastErrorCode, 'delivery_retry_exhausted');
+});
+
+test('a dead_letter delivery does not regress on further failed receipts', async () => {
     const { gateway, clock } = buildGateway();
     const ctx = await acceptedDelivery(gateway);
     await gateway.application.receipts.record(receipt(ctx, clock.addMinutes(clock.now(), 1), { stage: 'failed' }));
@@ -141,7 +178,7 @@ test('a permanent_failed delivery does not regress on further failed receipts', 
     await gateway.application.receipts.record(second);
 
     const details = await gateway.application.deliveries.find(ctx.deliveryId);
-    assert.equal(details.delivery.status, 'permanent_failed');
+    assert.equal(details.delivery.status, 'dead_letter');
     assert.equal(details.receipts.length, 2);
 });
 

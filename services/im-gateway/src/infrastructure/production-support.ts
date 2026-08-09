@@ -26,10 +26,12 @@ export class CapabilityChannelHealthPort implements ChannelHealthPort {
     /**
      * @param capabilities 平台能力解析器。
      * @param clock 健康检查时间来源。
+     * @param runtimeAvailable 检查对应平台 Bot 是否仍处于可服务状态。
      */
     public constructor(
         private readonly capabilities: ChannelCapabilityResolver,
         private readonly clock: Clock,
+        private readonly runtimeAvailable: (account: ChannelAccount) => boolean | Promise<boolean> = () => true,
     ) {}
 
     /** {@inheritDoc ChannelHealthPort.check} */
@@ -38,6 +40,20 @@ export class CapabilityChannelHealthPort implements ChannelHealthPort {
             return { accountId: account.id, status: 'unavailable', checkedAt: this.clock.now() };
         }
         const available = await this.capabilities.resolve(account);
+        let runtimeAvailable: boolean;
+        try {
+            runtimeAvailable = await this.runtimeAvailable(account);
+        } catch {
+            runtimeAvailable = false;
+        }
+        if (!runtimeAvailable) {
+            return {
+                accountId: account.id,
+                status: 'unavailable',
+                checkedAt: this.clock.now(),
+                detail: 'runtime_unavailable',
+            };
+        }
         return {
             accountId: account.id,
             status: available.proactiveMessage ? 'healthy' : 'degraded',

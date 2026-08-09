@@ -117,7 +117,7 @@ test('dispatch of a dead-letter delivery is rejected', async () => {
     );
 });
 
-test('dispatch is rejected when the delivery target binding is missing', async () => {
+test('dispatch records a permanent failure when the delivery target binding disappears', async () => {
     const clock = new FixedClock();
     const uow = new ExposedUnitOfWork();
     const gateway = createMockImGateway('device-fixture', clock, { unitOfWork: uow });
@@ -125,53 +125,52 @@ test('dispatch is rejected when the delivery target binding is missing', async (
     const submission = await gateway.application.notifications.submitNotification(strongIntent());
     uow.deleteBinding(submission.deliveries[0].bindingId);
 
-    await expectGatewayError(
-        () => gateway.application.deliveryDispatch.dispatch(submission.deliveries[0].deliveryId),
-        'binding_not_found',
-        'Dispatch with a missing binding was not rejected',
-    );
+    const updated = await gateway.application.deliveryDispatch.dispatch(submission.deliveries[0].deliveryId);
+
+    assert.equal(updated.status, 'permanent_failed');
+    assert.equal(updated.lastErrorCode, 'delivery_target_unavailable');
+    const details = await gateway.application.deliveries.find(updated.id);
+    assert.equal(details.attempts.length, 1);
+    assert.equal(details.attempts[0].status, 'permanent_failed');
 });
 
-test('dispatch rejects a delivery whose channel account was disabled after submission', async () => {
+test('dispatch records a permanent failure when the channel account is disabled after submission', async () => {
     const { gateway, sent } = gatewayWithChannel([]);
     const { channel } = await bindFixtureUser(gateway);
     const submission = await gateway.application.notifications.submitNotification(strongIntent());
     await gateway.application.channels.disable(channel.id);
 
-    await expectGatewayError(
-        () => gateway.application.deliveryDispatch.dispatch(submission.deliveries[0].deliveryId),
-        'binding_not_found',
-        'Dispatch used a disabled channel account',
-    );
+    const updated = await gateway.application.deliveryDispatch.dispatch(submission.deliveries[0].deliveryId);
+
+    assert.equal(updated.status, 'permanent_failed');
+    assert.equal(updated.lastErrorCode, 'delivery_target_unavailable');
     assert.equal(sent.length, 0);
 });
 
-test('dispatch rejects a delivery whose binding was terminated after submission', async () => {
+test('dispatch records a permanent failure when the binding is terminated after submission', async () => {
     const { gateway, sent } = gatewayWithChannel([]);
     const { binding } = await bindFixtureUser(gateway);
     const submission = await gateway.application.notifications.submitNotification(strongIntent());
     await gateway.application.bindings.revoke(binding.id);
 
-    await expectGatewayError(
-        () => gateway.application.deliveryDispatch.dispatch(submission.deliveries[0].deliveryId),
-        'binding_not_found',
-        'Dispatch used a terminated binding',
-    );
+    const updated = await gateway.application.deliveryDispatch.dispatch(submission.deliveries[0].deliveryId);
+
+    assert.equal(updated.status, 'permanent_failed');
+    assert.equal(updated.lastErrorCode, 'delivery_target_unavailable');
     assert.equal(sent.length, 0);
 });
 
-test('dispatch rejects a delivery whose external identity was revoked after submission', async () => {
+test('dispatch records a permanent failure when the external identity is revoked after submission', async () => {
     const uow = new ExposedUnitOfWork();
     const { gateway, sent } = gatewayWithChannel([], { unitOfWork: uow });
     const { binding } = await bindFixtureUser(gateway);
     const submission = await gateway.application.notifications.submitNotification(strongIntent());
     uow.setIdentityStatus(binding.externalIdentityId, 'revoked');
 
-    await expectGatewayError(
-        () => gateway.application.deliveryDispatch.dispatch(submission.deliveries[0].deliveryId),
-        'binding_not_found',
-        'Dispatch used a revoked external identity',
-    );
+    const updated = await gateway.application.deliveryDispatch.dispatch(submission.deliveries[0].deliveryId);
+
+    assert.equal(updated.status, 'permanent_failed');
+    assert.equal(updated.lastErrorCode, 'delivery_target_unavailable');
     assert.equal(sent.length, 0);
 });
 
@@ -207,6 +206,34 @@ test('a retryable platform rejection schedules a retry via the outbox', async ()
     assert.equal(events[0].status, 'pending');
     assert.equal(events[0].attempts, 1);
     assert.equal(events[0].availableAt, clock.addMinutes(clock.now(), 1));
+});
+
+test('automatic delivery retries use bounded backoff and become permanent after the fifth attempt', async () => {
+    const uow = new ExposedUnitOfWork();
+    const failures = Array.from({ length: 5 }, () => ({
+        accepted: false,
+        retryable: true,
+        errorCode: 'busy',
+    }));
+    const { gateway, clock } = gatewayWithChannel(failures, { unitOfWork: uow });
+    const deliveryId = await pendingStrongDelivery(gateway);
+
+    let updated;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        updated = await gateway.application.deliveryDispatch.dispatch(deliveryId);
+    }
+
+    assert.equal(updated.status, 'permanent_failed');
+    assert.equal(updated.lastErrorCode, 'delivery_retry_exhausted');
+    const details = await gateway.application.deliveries.find(deliveryId);
+    assert.equal(details.attempts.length, 5);
+    assert.equal(details.attempts[4].status, 'retryable_failed');
+    const retries = uow.outboxEvents().filter((event) => event.eventType === 'im.delivery.retry-scheduled');
+    assert.equal(retries.length, 4);
+    assert.deepEqual(
+        retries.map((event) => event.availableAt),
+        [1, 2, 4, 8].map((minutes) => clock.addMinutes(clock.now(), minutes)),
+    );
 });
 
 test('a channel send exception is treated as a retryable failure', async () => {

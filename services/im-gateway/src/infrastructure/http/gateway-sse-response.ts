@@ -42,14 +42,20 @@ export async function streamReminderActions(options: ReminderActionStreamHttpOpt
     });
     options.response.writeHead(200, { ...SSE_RESPONSE_HEADERS, Connection: 'keep-alive' });
     options.response.flushHeaders();
-    const heartbeat = setInterval(
-        () => options.response.write(': heartbeat\n\n'),
-        SSE_HEARTBEAT_INTERVAL_SECONDS * 1000,
-    );
+    const heartbeat = setInterval(() => {
+        if (!options.response.destroyed && !options.response.writableNeedDrain) {
+            options.response.write(': heartbeat\n\n');
+        }
+    }, SSE_HEARTBEAT_INTERVAL_SECONDS * 1000);
     heartbeat.unref();
     try {
         for await (const event of events) {
             options.correlationIdObserved(event.data.correlationId);
+            const written = await writeWithBackpressure(
+                options.response,
+                `id: ${event.id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`,
+            );
+            if (!written) break;
             safeLog(options.logger, {
                 level: 'info',
                 event: 'action.stream.sent',
@@ -57,12 +63,31 @@ export async function streamReminderActions(options: ReminderActionStreamHttpOpt
                 correlationId: event.data.correlationId,
                 actionId: event.id,
             });
-            options.response.write(`id: ${event.id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
         }
     } finally {
         clearInterval(heartbeat);
         options.response.end();
     }
+}
+
+function writeWithBackpressure(response: ServerResponse, chunk: string): Promise<boolean> {
+    if (response.destroyed || response.writableEnded) return Promise.resolve(false);
+    if (response.write(chunk)) return Promise.resolve(true);
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (written: boolean): void => {
+            if (settled) return;
+            settled = true;
+            response.off('drain', onDrain);
+            response.off('close', onClose);
+            resolve(written);
+        };
+        const onDrain = (): void => finish(true);
+        const onClose = (): void => finish(false);
+        response.once('drain', onDrain);
+        response.once('close', onClose);
+        if (response.destroyed || response.writableEnded) finish(false);
+    });
 }
 
 function singleHeader(value: string | readonly string[] | undefined): string | undefined {

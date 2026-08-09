@@ -70,9 +70,10 @@ docker compose ps
 
 容器内保留 `.env` 的 `DATABASE_URL` 凭据与数据库名，只由 Compose 注入的 `DATABASE_HOST=postgres` 替换
 宿主机地址；`DATABASE_URL` 中的密码必须与 `POSTGRES_PASSWORD` 一致。Gateway 在 PostgreSQL healthcheck
-通过后启动，自身 healthcheck 会持续探测数据库中的渠道账号。
+通过后启动，自身 healthcheck 会持续探测数据库中的渠道账号与 Koishi Bot 运行状态。Compose 默认只把
+Gateway 端口绑定到宿主机 loopback，避免设备 API 绕过公网 HTTPS 入口。
 
-监听器使用 HTTP，公网 HTTPS 必须由 Cloudflare Tunnel 或反向代理终止 TLS。Quick Tunnel 联调可先运行：
+监听器使用 HTTP，公网 HTTPS 必须由宿主机上的 Cloudflare Tunnel 或反向代理终止 TLS。Quick Tunnel 联调可先运行：
 
 ```bash
 cloudflared tunnel --url http://127.0.0.1:3000
@@ -95,7 +96,12 @@ Tunnel 或服务器反向代理，以免 Quick Tunnel 重启后域名改变。
 `pending`、`retryable_failed` 与租约已过期的 `sending` Delivery。临时失败按 `availableAt` 延迟重试，HTTP
 进程只负责在事务提交后唤醒 worker，不再承担可能随 202 响应丢失的进程内派发任务。结构化日志用同一个
 `correlationId` 记录设备受理、Delivery 派发、Action 提交与 SSE 下发；异步失败只记录稳定错误码，不回显
-凭据或平台载荷。
+凭据或平台载荷。自动投递最多尝试五次并按 1/2/4/8 分钟退避，耗尽或遇到永久失败后进入死信；目标绑定在
+受理后失效也会保存失败 Attempt，不会留下无法恢复的 `pending` Delivery。
+
+生产微信公众号 Bot 注册在真实 Koishi Context 中；Delivery 通过 `KoishiChannelAdapter` 选择并校验 Bot 后再
+调用微信传输。SSE Hub 同时限制总连接、单设备、单提醒窗口和慢客户端队列，溢出连接依赖 Action Repository
+在重连时回放，HTTP 序列化会等待 socket 背压解除。
 
 跨端 JSON fixture 位于 `contracts/im-gateway/v1/fixtures`，由 C++ 主机测试与 TypeScript 测试共同消费。
 

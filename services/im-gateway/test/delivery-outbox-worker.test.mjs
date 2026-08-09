@@ -165,6 +165,88 @@ test('delivery outbox worker retries a leased event after a concurrent dispatch 
     assert.deepEqual(remaining, []);
 });
 
+test('delivery outbox worker dead-letters a permanent dispatch failure before publishing the event', async () => {
+    const unitOfWork = new InMemoryImUnitOfWork();
+    await unitOfWork.transaction(async (context) => {
+        await context.deliveries.save(delivery('delivery-permanent', { status: 'pending' }));
+        await context.outbox.append(
+            outboxEvent('outbox-permanent', {
+                eventType: 'im.delivery.requested',
+                aggregateId: 'delivery-permanent',
+            }),
+        );
+    });
+    const logs = [];
+    const worker = new DeliveryOutboxWorker({
+        unitOfWork,
+        clock: new FixedClock(T0),
+        dispatch: {
+            dispatch: async () =>
+                delivery('delivery-permanent', {
+                    status: 'permanent_failed',
+                    lastErrorCode: 'delivery_target_unavailable',
+                }),
+            markDeadLetter: async (deliveryId) => {
+                const deadLetter = delivery(deliveryId, {
+                    status: 'dead_letter',
+                    lastErrorCode: 'delivery_target_unavailable',
+                });
+                await unitOfWork.transaction((context) => context.deliveries.save(deadLetter));
+                return deadLetter;
+            },
+        },
+        logger: { log: (entry) => logs.push(entry) },
+    });
+
+    assert.equal(await worker.runOnce(), 1);
+    const stored = await unitOfWork.transaction((context) => context.deliveries.findById('delivery-permanent'));
+    assert.equal(stored.status, 'dead_letter');
+    assert.equal(
+        logs.some(
+            (entry) =>
+                entry.event === 'delivery.worker.dead-lettered' && entry.errorCode === 'delivery_target_unavailable',
+        ),
+        true,
+    );
+    assert.deepEqual(
+        await unitOfWork.transaction((context) => context.outbox.claimPending(['im.delivery.requested'], T1, T1, 10)),
+        [],
+    );
+});
+
+test('delivery outbox worker keeps a business dispatch error recoverable instead of orphaning the delivery', async () => {
+    const unitOfWork = new InMemoryImUnitOfWork();
+    await unitOfWork.transaction(async (context) => {
+        await context.deliveries.save(delivery());
+        await context.outbox.append(
+            outboxEvent('outbox-target-race', {
+                eventType: 'im.delivery.requested',
+                aggregateId: 'delivery-1',
+            }),
+        );
+    });
+    const clock = new FixedClock(T0);
+    const worker = new DeliveryOutboxWorker({
+        unitOfWork,
+        clock,
+        dispatch: {
+            dispatch: async () => {
+                throw new ImGatewayError('binding_not_found', 'target changed concurrently');
+            },
+            markDeadLetter: async () => assert.fail('a recoverable event must not be dead-lettered'),
+        },
+        logger: { log: () => {} },
+    });
+
+    assert.equal(await worker.runOnce(), 1);
+    clock.advanceMinutes(3);
+    const reclaimed = await unitOfWork.transaction((context) =>
+        context.outbox.claimPending(['im.delivery.requested'], clock.now(), T1, 10),
+    );
+    assert.equal(reclaimed.length, 1);
+    assert.equal(reclaimed[0].id, 'outbox-target-race');
+});
+
 test('delivery outbox worker rejects invalid lifecycle tuning', () => {
     assert.throws(
         () =>

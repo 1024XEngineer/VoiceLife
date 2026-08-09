@@ -72,6 +72,13 @@ export class KoishiChannelAdapter implements ImChannelPort {
                 ? { accepted: false, retryable: true, errorCode: 'koishi_missing_message_id' }
                 : { accepted: true, platformMessageId };
         } catch (error) {
+            if (error instanceof KoishiPlatformSendError) {
+                return {
+                    accepted: false,
+                    retryable: error.retryable,
+                    errorCode: error.errorCode,
+                };
+            }
             if (error instanceof KoishiBotUnavailableError) {
                 return { accepted: false, retryable: true, errorCode: 'koishi_bot_unavailable' };
             }
@@ -80,6 +87,21 @@ export class KoishiChannelAdapter implements ImChannelPort {
             }
             throw error;
         }
+    }
+}
+
+/** 平台 Bot 保留原始重试分类后向 Koishi Channel Adapter 报告的发送错误。 */
+export class KoishiPlatformSendError extends Error {
+    /**
+     * @param retryable 当前失败是否允许自动重试。
+     * @param errorCode 不含载荷或凭据的稳定平台错误码。
+     */
+    public constructor(
+        public readonly retryable: boolean,
+        public readonly errorCode: string,
+    ) {
+        super('The platform bot rejected the outbound message');
+        this.name = 'KoishiPlatformSendError';
     }
 }
 

@@ -1,4 +1,5 @@
 import { createKoishiGatewayRuntime, type KoishiGatewayRuntime } from './create-koishi-gateway.js';
+import { Context } from '@koishijs/core';
 import { unsafeId, type ChannelAccountId, type DeviceId } from '../contracts/ids.js';
 import type { ChannelAccount } from '../domain/models.js';
 import { DeliveryOutboxWorker } from '../infrastructure/delivery-outbox-worker.js';
@@ -22,6 +23,7 @@ import {
     UuidIdGenerator,
 } from '../infrastructure/security/production-ports.js';
 import { WechatOfficialAdapter } from '../infrastructure/wechat/wechat-official-adapter.js';
+import { WechatOfficialKoishiBot } from '../infrastructure/koishi/wechat-official-koishi-bot.js';
 
 export {
     startGatewayHttpServer,
@@ -156,7 +158,15 @@ export async function startConfiguredGatewayProcess(
                 revealExternalUserId: (ciphertext) => identities.reveal(ciphertext),
             },
         });
+        const context = new Context();
+        const koishiBotId = `wechat:${channelAccountId}`;
+        const wechatBot = new WechatOfficialKoishiBot(context, {
+            koishiBotId,
+            selfId: channelAccountId,
+            transport: adapter,
+        });
         koishi = createKoishiGatewayRuntime({
+            context,
             dependencies: {
                 unitOfWork,
                 actionTokens: new AesGcmActionTokenPort(config.actionTokenSecret),
@@ -165,10 +175,13 @@ export async function startConfiguredGatewayProcess(
                     config.deviceToken,
                 ),
                 channelCapabilities: adapter,
-                channelHealth: new CapabilityChannelHealthPort(adapter, clock),
+                channelHealth: new CapabilityChannelHealthPort(
+                    adapter,
+                    clock,
+                    (account) => account.koishiBotId === wechatBot.sid && wechatBot.isActive,
+                ),
                 conversations: new DirectConversationResolver(),
                 deliveryRenderer: adapter,
-                imChannel: adapter,
                 pairingCodes: new HmacPairingCodePort(config.identitySecret),
                 identityProtector: identities,
                 clock,
@@ -206,7 +219,8 @@ export async function startConfiguredGatewayProcess(
             healthCheck: async () => {
                 const account = await koishi!.runtime.application.channels.find(channelAccountId);
                 if (account === undefined || account.status !== 'active') throw new Error('channel unavailable');
-                await koishi!.runtime.application.channels.health(channelAccountId);
+                const health = await koishi!.runtime.application.channels.health(channelAccountId);
+                if (health.status !== 'healthy') throw new Error('channel unavailable');
                 return { status: 'ok' };
             },
         });
@@ -264,6 +278,7 @@ function assertConfiguredChannel(account: ChannelAccount, wechat: GatewayWechatC
         account.platform !== 'wechat_official' ||
         account.tenantExternalId !== wechat.expectedToUserName ||
         account.credentialRef !== 'secret://env/WECHAT_APP_SECRET' ||
+        account.koishiBotId !== `wechat:${account.id}` ||
         account.connectionMode !== 'webhook' ||
         account.status !== 'active'
     ) {

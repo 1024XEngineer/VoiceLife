@@ -76,6 +76,8 @@ import type {
 
 const DEFAULT_ACTION_WINDOW_MINUTES = 10;
 const DEFAULT_PAIRING_WINDOW_MINUTES = 10;
+const MAX_AUTOMATIC_DELIVERY_ATTEMPTS = 5;
+const MAX_DELIVERY_RETRY_DELAY_MINUTES = 30;
 
 /** 派发领取租约时长；sending claim 超过该时长未续期即视为崩溃，允许其他 worker 重领。 */
 const DISPATCH_CLAIM_LEASE_SECONDS = 60;
@@ -755,10 +757,37 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
                 account === undefined ||
                 account.status !== 'active'
             ) {
-                throw new ImGatewayError('binding_not_found', 'Delivery target is incomplete');
+                const now = this.clock.now();
+                const failed: Delivery = {
+                    ...withoutDeliveryAttemptOutcome(delivery),
+                    status: 'permanent_failed',
+                    lastErrorCode: 'delivery_target_unavailable',
+                    updatedAt: now,
+                };
+                const written = await tx.deliveries.saveIfClaimed(failed, delivery.claimToken!);
+                if (written === undefined) {
+                    return {
+                        kind: 'terminal' as const,
+                        delivery: (await tx.deliveries.findById(deliveryId)) ?? failed,
+                    };
+                }
+                const attemptNo = await tx.deliveries.nextAttemptNo(deliveryId);
+                await tx.deliveries.saveAttempt({
+                    id: this.ids.nextDeliveryAttemptId(),
+                    deliveryId,
+                    attemptNo,
+                    requestId: this.ids.nextRequestId(),
+                    renderedPayload: {},
+                    status: 'permanent_failed',
+                    errorCode: 'delivery_target_unavailable',
+                    startedAt: now,
+                    completedAt: now,
+                });
+                return { kind: 'terminal' as const, delivery: written };
             }
-            return { delivery, identity, account };
+            return { kind: 'target' as const, delivery, identity, account };
         });
+        if (target.kind === 'terminal') return target.delivery;
         const claimToken = target.delivery.claimToken;
         if (claimToken === undefined) {
             throw new Error('Claimed delivery is missing a claim token');
@@ -830,18 +859,25 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
             } as const;
         }
         const completionTime = this.clock.now();
-        const status = acceptance.accepted
+        const attemptStatus = acceptance.accepted
             ? 'accepted'
             : acceptance.retryable === true
               ? 'retryable_failed'
               : 'permanent_failed';
+        const retriesExhausted =
+            attemptStatus === 'retryable_failed' && attempt.attemptNo >= MAX_AUTOMATIC_DELIVERY_ATTEMPTS;
+        const status = retriesExhausted ? 'permanent_failed' : attemptStatus;
         const terminal: Delivery = {
             ...withoutDeliveryAttemptOutcome(target.delivery),
             status,
             ...(status !== 'accepted' || acceptance.platformMessageId === undefined
                 ? {}
                 : { externalMessageId: acceptance.platformMessageId }),
-            ...(acceptance.errorCode === undefined ? {} : { lastErrorCode: acceptance.errorCode }),
+            ...(retriesExhausted
+                ? { lastErrorCode: 'delivery_retry_exhausted' }
+                : acceptance.errorCode === undefined
+                  ? {}
+                  : { lastErrorCode: acceptance.errorCode }),
             updatedAt: completionTime,
         };
         return this.unitOfWork.transaction(async (tx) => {
@@ -852,7 +888,7 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
             }
             await tx.deliveries.saveAttempt({
                 ...attempt,
-                status,
+                status: attemptStatus,
                 ...(acceptance.platformMessageId === undefined
                     ? {}
                     : { platformMessageId: acceptance.platformMessageId }),
@@ -867,7 +903,7 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
                     payload: { deliveryId },
                     status: 'pending',
                     attempts: attempt.attemptNo,
-                    availableAt: this.clock.addMinutes(completionTime, 1),
+                    availableAt: this.clock.addMinutes(completionTime, deliveryRetryDelayMinutes(attempt.attemptNo)),
                     createdAt: completionTime,
                 });
             }
@@ -889,17 +925,18 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
     ): Promise<Delivery> {
         const now = this.clock.now();
         return this.unitOfWork.transaction(async (tx) => {
+            const attemptNo = await tx.deliveries.nextAttemptNo(deliveryId);
+            const retriesExhausted = attemptNo >= MAX_AUTOMATIC_DELIVERY_ATTEMPTS;
             const failed: Delivery = {
                 ...withoutDeliveryAttemptOutcome(delivery),
-                status: 'retryable_failed',
-                lastErrorCode: 'pre_send_exception',
+                status: retriesExhausted ? 'permanent_failed' : 'retryable_failed',
+                lastErrorCode: retriesExhausted ? 'delivery_retry_exhausted' : 'pre_send_exception',
                 updatedAt: now,
             };
             const written = await tx.deliveries.saveIfClaimed(failed, claimToken);
             if (written === undefined) {
                 return (await tx.deliveries.findById(deliveryId)) ?? failed;
             }
-            const attemptNo = await tx.deliveries.nextAttemptNo(deliveryId);
             await tx.deliveries.saveAttempt({
                 id: this.ids.nextDeliveryAttemptId(),
                 deliveryId,
@@ -911,16 +948,18 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
                 startedAt: now,
                 completedAt: now,
             });
-            await tx.outbox.append({
-                id: this.ids.nextOutboxEventId(),
-                eventType: 'im.delivery.retry-scheduled',
-                aggregateId: deliveryId,
-                payload: { deliveryId },
-                status: 'pending',
-                attempts: attemptNo,
-                availableAt: this.clock.addMinutes(now, 1),
-                createdAt: now,
-            });
+            if (!retriesExhausted) {
+                await tx.outbox.append({
+                    id: this.ids.nextOutboxEventId(),
+                    eventType: 'im.delivery.retry-scheduled',
+                    aggregateId: deliveryId,
+                    payload: { deliveryId },
+                    status: 'pending',
+                    attempts: attemptNo,
+                    availableAt: this.clock.addMinutes(now, deliveryRetryDelayMinutes(attemptNo)),
+                    createdAt: now,
+                });
+            }
             return written;
         });
     }
@@ -1013,12 +1052,22 @@ export class DefaultReceiptApplication implements ReceiptApplication {
             ) {
                 return;
             }
-            const status = advanceDeliveryStatus(delivery.status, receipt);
+            const receiptStatus = advanceDeliveryStatus(delivery.status, receipt);
+            const retriesExhausted =
+                receiptStatus === 'retryable_failed' && currentAttempt.attemptNo >= MAX_AUTOMATIC_DELIVERY_ATTEMPTS;
+            const status = retriesExhausted || receiptStatus === 'permanent_failed' ? 'dead_letter' : receiptStatus;
             if (status !== delivery.status) {
                 const now = this.clock.now();
                 await tx.deliveries.save({
                     ...delivery,
                     status,
+                    ...(status === 'dead_letter'
+                        ? {
+                              lastErrorCode: retriesExhausted
+                                  ? 'delivery_retry_exhausted'
+                                  : (receipt.platformCode ?? 'delivery_receipt_failed'),
+                          }
+                        : {}),
                     updatedAt: now,
                 });
                 if (status === 'retryable_failed') {
@@ -1029,7 +1078,7 @@ export class DefaultReceiptApplication implements ReceiptApplication {
                         payload: { deliveryId: delivery.id },
                         status: 'pending',
                         attempts: currentAttempt.attemptNo,
-                        availableAt: this.clock.addMinutes(now, 1),
+                        availableAt: this.clock.addMinutes(now, deliveryRetryDelayMinutes(currentAttempt.attemptNo)),
                         createdAt: now,
                     });
                 }
@@ -1633,6 +1682,10 @@ function withoutDeliveryAttemptOutcome(delivery: Delivery): Delivery {
     delete cleared.claimedAt;
     delete cleared.claimToken;
     return cleared;
+}
+
+function deliveryRetryDelayMinutes(attemptNo: number): number {
+    return Math.min(MAX_DELIVERY_RETRY_DELAY_MINUTES, 2 ** Math.max(0, attemptNo - 1));
 }
 
 function isJsonObject(value: JsonValue | undefined): value is { readonly [key: string]: JsonValue } {

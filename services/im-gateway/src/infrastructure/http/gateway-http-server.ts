@@ -413,9 +413,11 @@ function writeGatewayError(response: ServerResponse, error: ImGatewayError): voi
                 ? 410
                 : error.code === 'idempotency_conflict' || error.code === 'duplicate_event'
                   ? 409
-                  : error.code === 'invalid_transition'
-                    ? 403
-                    : 400;
+                  : error.code === 'resource_exhausted'
+                    ? 429
+                    : error.code === 'invalid_transition'
+                      ? 403
+                      : 400;
     if (status === 401) response.setHeader('www-authenticate', 'Bearer');
     writeJson(response, status, { error: error.code });
 }
