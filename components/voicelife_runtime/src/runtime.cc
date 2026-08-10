@@ -334,6 +334,7 @@ class Runtime final {
         }
         const Status standby_status = wake_gate_->StartStandby();
         if (!standby_status.ok()) return standby_status;
+        ESP_LOGI(kTag, "WAKE_STANDBY_READY=1 word=你好牛牛");
 #endif
         return Status::Ok();
     }
