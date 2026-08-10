@@ -47,6 +47,12 @@ export interface ChannelAccountRepository {
 /** 配对会话的持久化与过期查询端口。 */
 export interface PairingSessionRepository {
     /**
+     * 仅当不存在相同展示码散列的待确认会话时创建会话。
+     * @param session 待创建的配对会话。
+     * @returns true 表示已创建；false 表示展示码与另一待确认会话冲突。
+     */
+    createPendingIfAbsent(session: PairingSession): Promise<boolean>;
+    /**
      * 按标识查询配对会话。
      * @param id 配对会话标识。
      * @returns 配对会话，不存在时返回 undefined。
@@ -58,6 +64,12 @@ export interface PairingSessionRepository {
      * @returns 待确认会话，不存在时返回 undefined。
      */
     findPendingByDisplayCodeHash(hash: string): Promise<PairingSession | undefined>;
+    /**
+     * 锁定指定展示码对应的待确认会话，直到当前工作单元结束。
+     * @param hash 展示码散列。
+     * @returns 被锁定的待确认会话，不存在时返回 undefined。
+     */
+    lockPendingByDisplayCodeHash(hash: string): Promise<PairingSession | undefined>;
     /**
      * 查询截止时间已到的待确认会话。
      * @param now 当前时间。
@@ -74,6 +86,12 @@ export interface PairingSessionRepository {
 
 /** 受保护外部身份的持久化端口。 */
 export interface IdentityRepository {
+    /**
+     * 按渠道账号与外部身份散列幂等创建身份。
+     * @param identity 待创建的外部身份。
+     * @returns 新建或并发写入时已存在的权威身份。
+     */
+    createIfAbsent(identity: ExternalIdentity): Promise<ExternalIdentity>;
     /**
      * 按标识查询外部身份。
      * @param id 外部身份标识。
@@ -100,6 +118,12 @@ export interface IdentityRepository {
 
 /** 用户、设备与外部身份绑定关系的持久化端口。 */
 export interface BindingRepository {
+    /**
+     * 按用户、设备与外部身份三元组幂等创建有效绑定。
+     * @param binding 待创建的 active 绑定，必须带设备标识。
+     * @returns 新建或并发写入时已存在的权威绑定。
+     */
+    createActiveIfAbsent(binding: ImBinding): Promise<ImBinding>;
     /**
      * 按标识查询绑定。
      * @param id 绑定标识。

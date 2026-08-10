@@ -393,6 +393,53 @@ describe(
             await uow.close();
         });
 
+        await test('migration keeps one pending display code and prevents a collision from recurring', async () => {
+            const uow = new PostgresImUnitOfWork(POSTGRES_URL);
+            await uow.migrate();
+            await uow.truncateAll();
+            await uow.runRaw('DROP INDEX IF EXISTS im_pairing_sessions_pending_display_code_hash_uq');
+            await uow.runRaw('DELETE FROM im_schema_migrations WHERE version >= 4');
+            await uow.runRaw(
+                `INSERT INTO im_pairing_sessions (
+                    id, display_code_hash, user_id, device_id, allowed_platforms, status, expires_at, created_at, confirmed_at
+                 ) VALUES
+                    ($1, $2, $3, $4, NULL, 'pending', $5, $6, NULL),
+                    ($7, $2, $3, $8, NULL, 'pending', $5, $9, NULL)`,
+                [
+                    'pairing-earlier',
+                    'hash-duplicate',
+                    'user-duplicate',
+                    'device-earlier',
+                    T2,
+                    T0,
+                    'pairing-later',
+                    'device-later',
+                    T1,
+                ],
+            );
+
+            await uow.migrate();
+
+            const sessions = await uow.runRaw(
+                `SELECT id, status FROM im_pairing_sessions
+                 WHERE display_code_hash = $1 ORDER BY id`,
+                ['hash-duplicate'],
+            );
+            assert.deepEqual(sessions, [
+                { id: 'pairing-earlier', status: 'cancelled' },
+                { id: 'pairing-later', status: 'pending' },
+            ]);
+            await assert.rejects(
+                uow.runRaw(
+                    `INSERT INTO im_pairing_sessions (
+                        id, display_code_hash, user_id, device_id, allowed_platforms, status, expires_at, created_at, confirmed_at
+                     ) VALUES ($1, $2, $3, $4, NULL, 'pending', $5, $6, NULL)`,
+                    ['pairing-third', 'hash-duplicate', 'user-duplicate', 'device-third', T2, T2],
+                ),
+            );
+            await uow.close();
+        });
+
         await test('concurrent identical notifications yield one delivery and one outbox event', async () => {
             const clock = new FixedClock();
             const [first, second] = await Promise.all([makePostgresUow(), makePostgresUow()]);

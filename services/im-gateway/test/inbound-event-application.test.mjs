@@ -42,9 +42,31 @@ test('recordIfNew persists a received event keyed by channel and external event'
     assert.equal(stored.channelAccountId, 'channel-1');
     assert.equal(stored.externalEventId, 'external-1');
     assert.equal(stored.eventType, 'message.received');
-    assert.deepEqual(stored.payload, { text: 'hello' });
+    assert.deepEqual(stored.payload, { kind: 'message_received' });
     assert.equal(stored.status, 'received');
     assert.equal(stored.receivedAt, clock.now());
+});
+
+test('recordIfNew excludes WeChat OpenID, text and pairing codes from persisted payloads', async () => {
+    const { gateway, uow } = inboundGateway();
+    await gateway.application.inboundEvents.recordIfNew(
+        event({
+            id: 'inbound-private-text',
+            externalEventId: 'external-private-text',
+            payload: { externalUserId: 'openid-sensitive', messageId: 'message-sensitive', text: '私密内容' },
+        }),
+    );
+    await gateway.application.inboundEvents.recordIfNew(
+        event({
+            id: 'inbound-private-code',
+            externalEventId: 'external-private-code',
+            type: 'binding.requested',
+            payload: { externalUserId: 'openid-sensitive', displayCode: '123456' },
+        }),
+    );
+
+    assert.deepEqual(uow.inbound('inbound-private-text').payload, { kind: 'message_received' });
+    assert.deepEqual(uow.inbound('inbound-private-code').payload, { kind: 'binding_requested' });
 });
 
 test('recordIfNew deduplicates by channel plus external event only', async () => {
@@ -74,7 +96,7 @@ test('a failed inbound event can be accepted again with the latest payload', asy
     assert.equal(uow.inbound('inbound-1'), undefined);
     const retried = uow.inbound('inbound-retry');
     assert.equal(retried.status, 'received');
-    assert.deepEqual(retried.payload, { text: 'retry' });
+    assert.deepEqual(retried.payload, { kind: 'message_received' });
     assert.equal(retried.receivedAt, clock.now());
 });
 

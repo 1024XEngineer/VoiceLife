@@ -1,7 +1,7 @@
 import { queryOne, type SqlExecutor } from './sql.js';
 
 /** 当前 schema 版本号；低于该版本的库会在 migrate() 时逐版本升级。 */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /** 迁移版本表：version 行与对应 DDL 在同一事务内写入，保证原子可见。 */
 const SCHEMA_MIGRATIONS_TABLE = 'im_schema_migrations';
@@ -212,8 +212,33 @@ const V3_STATEMENTS: readonly string[] = [
         WHERE status = 'active' AND device_id IS NOT NULL`,
 ];
 
+/** v4 配对码迁移：取消历史碰撞会话，并保证任一待确认码只对应一个会话。 */
+const V4_STATEMENTS: readonly string[] = [
+    `WITH ranked AS (
+        SELECT id,
+               row_number() OVER (
+                   PARTITION BY display_code_hash
+                   ORDER BY created_at DESC, id DESC
+               ) AS rank
+        FROM im_pairing_sessions
+        WHERE status = 'pending'
+    )
+    UPDATE im_pairing_sessions AS session
+    SET status = 'cancelled'
+    FROM ranked
+    WHERE session.id = ranked.id AND ranked.rank > 1`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS im_pairing_sessions_pending_display_code_hash_uq
+        ON im_pairing_sessions (display_code_hash)
+        WHERE status = 'pending'`,
+];
+
 /** 按版本号索引的迁移脚本；下标 i 对应版本 i+1。 */
-const VERSIONED_STATEMENTS: readonly (readonly string[])[] = [V1_STATEMENTS, V2_STATEMENTS, V3_STATEMENTS];
+const VERSIONED_STATEMENTS: readonly (readonly string[])[] = [
+    V1_STATEMENTS,
+    V2_STATEMENTS,
+    V3_STATEMENTS,
+    V4_STATEMENTS,
+];
 
 /**
  * 以版本管理方式应用 IM Gateway 表结构与索引。

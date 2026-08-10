@@ -26,7 +26,7 @@ const MAX_MESSAGE_ID_LENGTH = 64;
 const MAX_STATUS_LENGTH = 64;
 const TEXT_ENCODER = new TextEncoder();
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
-const BINDING_CODE = /^(?:绑定|bind)\s*[:：]?\s*([0-9]{4,12})$/iu;
+const BINDING_CODE = /^(?:绑定|bind)\s*[:：]?\s*([0-9]{6})$/iu;
 const XML_PARSER = new XMLParser({
     ignoreAttributes: true,
     parseTagValue: false,

@@ -63,6 +63,18 @@ export async function sharedRepositoryContractSuite(makeUow) {
         });
     });
 
+    await test('pairing sessions atomically reserve a pending display-code hash', async () => {
+        await withUow(makeUow, async (uow) => {
+            const [first, second] = await Promise.all([
+                uow.transaction((ctx) => ctx.pairingSessions.createPendingIfAbsent(pairingSession('pairing-a'))),
+                uow.transaction((ctx) => ctx.pairingSessions.createPendingIfAbsent(pairingSession('pairing-b'))),
+            ]);
+            assert.equal([first, second].filter(Boolean).length, 1);
+            const found = await uow.transaction((ctx) => ctx.pairingSessions.findPendingByDisplayCodeHash('hash-1234'));
+            assert.equal(found.id, first ? 'pairing-a' : 'pairing-b');
+        });
+    });
+
     await test('external identities round-trip and channel-and-hash lookup', async () => {
         await withUow(makeUow, async (uow) => {
             await uow.transaction(async (ctx) => {
