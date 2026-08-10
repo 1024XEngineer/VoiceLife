@@ -318,7 +318,7 @@ describe(
             // 模拟 v1 库：移除 claim 列并回退版本行
             await uow.runRaw('ALTER TABLE im_deliveries DROP COLUMN claimed_at');
             await uow.runRaw('ALTER TABLE im_deliveries DROP COLUMN claim_token');
-            await uow.runRaw(`DELETE FROM im_schema_migrations WHERE version >= ${SCHEMA_VERSION}`);
+            await uow.runRaw('DELETE FROM im_schema_migrations WHERE version >= 2');
             await uow.runRaw(
                 `INSERT INTO im_deliveries (
                     id, business_event_id, correlation_id, binding_id, channel_account_id, kind,
