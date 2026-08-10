@@ -45,8 +45,12 @@ export async function sharedRepositoryContractSuite(makeUow) {
                 await ctx.pairingSessions.save(
                     pairingSession('pairing-confirmed', { status: 'confirmed', displayCodeHash: 'hash-confirmed' }),
                 );
-                await ctx.pairingSessions.save(pairingSession('pairing-future', { expiresAt: T2 }));
-                await ctx.pairingSessions.save(pairingSession('pairing-expired', { expiresAt: T0 }));
+                await ctx.pairingSessions.save(
+                    pairingSession('pairing-future', { displayCodeHash: 'hash-future', expiresAt: T2 }),
+                );
+                await ctx.pairingSessions.save(
+                    pairingSession('pairing-expired', { displayCodeHash: 'hash-expired', expiresAt: T0 }),
+                );
             });
             const found = await uow.transaction((ctx) => ctx.pairingSessions.findById('pairing-1'));
             assert.deepEqual(found, pairingSession());
