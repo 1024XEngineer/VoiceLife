@@ -334,6 +334,10 @@ class Runtime final {
         }
         const Status standby_status = wake_gate_->StartStandby();
         if (!standby_status.ok()) return standby_status;
+        LogVoiceEvidence({.session_id = session_->config().session_id,
+                          .generation = session_->generation(),
+                          .event = "standby_ready",
+                          .detail = {}});
         ESP_LOGI(kTag, "WAKE_STANDBY_READY=1 word=你好牛牛");
 #endif
         return Status::Ok();
@@ -347,6 +351,10 @@ class Runtime final {
 
     void QueueWakeWord(std::string_view wake_word) {
         if (wake_queue_ == nullptr) return;
+        LogVoiceEvidence({.session_id = session_ ? session_->config().session_id : "",
+                          .generation = session_ ? session_->generation() : 0,
+                          .event = "wake_detected",
+                          .detail = {}});
         WakeRequest request{};
         const std::size_t size =
             wake_word.size() < sizeof(request.wake_word) - 1 ? wake_word.size() : sizeof(request.wake_word) - 1;
@@ -373,6 +381,10 @@ class Runtime final {
             ESP_LOGW(kTag, "本地待机恢复失败: %s", standby_status.message.c_str());
             return;
         }
+        LogVoiceEvidence({.session_id = session_ ? session_->config().session_id : "",
+                          .generation = session_ ? session_->generation() : 0,
+                          .event = "standby_ready",
+                          .detail = {}});
         ESP_LOGI(kTag, "WAKE_STANDBY_READY=1");
     }
 
@@ -423,6 +435,9 @@ class Runtime final {
         if (evidence.event == "tts_stopped" || evidence.event == "tts_aborted" || evidence.event == "provider_error" ||
             evidence.event == "capture_stop_failed" || evidence.event == "tts_capture_stop_failed") {
             capture_started_us_.store(0);
+        }
+        if (evidence.event == "tts_stopped" || evidence.event == "tts_aborted") {
+            QueueStandbyRecovery();
         }
         if (evidence.event == "transport_disconnected") QueueStandbyRecovery();
     }

@@ -18,6 +18,9 @@ EVENT_PATTERN = re.compile(
     r".*?\bmin_heap=(?P<min_heap>\d+)\b"
 )
 LABEL_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+FAILURE_EVENTS = frozenset(
+    {"provider_error", "capture_stop_failed", "tts_capture_stop_failed", "stop_disconnect_failed"}
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,14 +52,32 @@ def validate_label(label: str) -> str:
     return label
 
 
+def validate_event_sequence(events: list[dict[str, int | str]], expected: list[str]) -> tuple[bool, str]:
+    """Require expected events as an ordered subsequence and reject failures."""
+    observed = [str(event["event"]) for event in events]
+    failures = sorted(set(observed) & FAILURE_EVENTS)
+    if failures:
+        return False, f"failure lifecycle event observed: {', '.join(failures)}"
+    position = 0
+    for required in expected:
+        try:
+            position = observed.index(required, position) + 1
+        except ValueError:
+            return False, f"ordered lifecycle event missing: {required}"
+    return True, ""
+
+
 def write_evidence(path: Path, label: str, expected: list[str], events: list[dict[str, int | str]]) -> None:
     seen = {str(event["event"]) for event in events}
+    sequence_valid, sequence_error = validate_event_sequence(events, expected)
     document = {
         "schema_version": 1,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "label": validate_label(label),
         "expected_events": expected,
         "all_expected_events_seen": set(expected).issubset(seen),
+        "ordered_lifecycle_valid": sequence_valid,
+        "validation_error": sequence_error,
         "events": events,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,6 +107,10 @@ def main() -> int:
     missing = sorted(set(args.expect) - seen)
     if missing:
         print(f"Evidence recorded, but expected events were missing: {', '.join(missing)}")
+        return 1
+    sequence_valid, sequence_error = validate_event_sequence(events, args.expect)
+    if not sequence_valid:
+        print(f"Evidence recorded, but lifecycle validation failed: {sequence_error}")
         return 1
     print("Sanitized Linx voice-flow evidence recorded.")
     return 0
