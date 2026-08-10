@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 
 import { WechatOfficialAdapter, WechatWebhookController, createMockImGateway } from '../dist/index.js';
+import { ImGatewayError } from '../dist/shared/errors.js';
 
 const token = 'controller-fixture-token';
 const timestamp = '1722643200';
@@ -53,7 +54,7 @@ test('replies with the usage guide as passive XML for help and unknown text', as
     assert.equal(posted[0].type, 'message.received');
 });
 
-test('acknowledges binding commands without the fallback help reply', async () => {
+test('replies with a binding confirmation as passive XML', async () => {
     const controller = new WechatWebhookController(adapter(), { postEvent: async () => undefined });
     const result = await controller.post(
         signedRequest(
@@ -61,7 +62,28 @@ test('acknowledges binding commands without the fallback help reply', async () =
         ),
     );
 
-    assert.deepEqual(result, { body: 'success', contentType: 'text/plain; charset=utf-8' });
+    assert.deepEqual(result, {
+        contentType: 'application/xml; charset=utf-8',
+        body: '<xml><ToUserName><![CDATA[open_controller]]></ToUserName><FromUserName><![CDATA[gh_controller]]></FromUserName><CreateTime>1722643200</CreateTime><MsgType><![CDATA[text]]></MsgType><Content><![CDATA[绑定成功。\nVoiceLife 将向你发送提醒消息。\n输入“帮助”可查看使用说明。]]></Content></xml>',
+    });
+});
+
+test('replies with an actionable message for invalid or expired binding codes', async () => {
+    const controller = new WechatWebhookController(adapter(), {
+        postEvent: async () => {
+            throw new ImGatewayError('binding_not_found', 'Pairing session is invalid');
+        },
+    });
+    const result = await controller.post(
+        signedRequest(
+            '<xml><ToUserName>gh_controller</ToUserName><FromUserName>open_controller</FromUserName><CreateTime>1722643200</CreateTime><MsgType>text</MsgType><Content>绑定 123456</Content><MsgId>10003</MsgId></xml>',
+        ),
+    );
+
+    assert.deepEqual(result, {
+        contentType: 'application/xml; charset=utf-8',
+        body: '<xml><ToUserName><![CDATA[open_controller]]></ToUserName><FromUserName><![CDATA[gh_controller]]></FromUserName><CreateTime>1722643200</CreateTime><MsgType><![CDATA[text]]></MsgType><Content><![CDATA[绑定码无效或已过期，请在设备端重新获取后再试。]]></Content></xml>',
+    });
 });
 
 test('exposes the WeChat webhook controller when the adapter is injected into the composition root', () => {

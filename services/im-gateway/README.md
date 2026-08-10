@@ -164,7 +164,8 @@ Infrastructure 内完成归一化后直接调用 `PlatformEventApplication`，�
 
 `WECHAT_DISPLAY_TIME_ZONE` 使用 IANA 时区名（默认 `Asia/Shanghai`），模板中的 UTC 业务时间会格式化为
 `2026年8月10日 16:42` 这类用户可读文本。用户发送“帮助”或未识别的文本时，Webhook 会同步返回微信被动文本 XML，
-提示其以 `绑定 ABC123` 的格式发送绑定码；这个帮助回复不依赖模板消息权限。
+提示其以 `绑定 ABC123` 的格式发送绑定码；有效绑定会同步返回成功提示，无效或过期的绑定码会返回重新获取提示。
+这些被动回复均不依赖模板消息权限。
 
 `ChannelAccount.credentialRef` 只保存 `secret://...` 引用。部署层负责解析并注入 Webhook Token、App ID/AppSecret、模板 ID/字段映射、H5 HTTPS 基础地址以及外部身份解密函数；这些值不得写入 `capabilityConfig`、Profile、日志或 fixture。未配置 `outbound` 时 Adapter 继续只提供入站能力，并如实返回 `proactiveMessage: false`。
 

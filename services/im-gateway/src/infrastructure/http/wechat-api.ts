@@ -1,8 +1,12 @@
 import type { PlatformEventApplication } from '../../application/api.js';
 import type { NormalizedImEvent } from '../../contracts/platform-events.js';
+import { ImGatewayError } from '../../shared/errors.js';
 import type { WechatWebhookRequest, WechatOfficialAdapter } from '../wechat/wechat-official-adapter.js';
 
 const HELP_MESSAGE = '欢迎使用 VoiceLife。\n发送绑定码：绑定 ABC123\n输入“帮助”可再次查看说明。';
+const BINDING_SUCCESS_MESSAGE = '绑定成功。\nVoiceLife 将向你发送提醒消息。\n输入“帮助”可查看使用说明。';
+const BINDING_FAILURE_MESSAGE = '绑定码无效或已过期，请在设备端重新获取后再试。';
+const BINDING_FAILURE_CODES = new Set(['binding_not_found', 'capability_not_supported', 'invalid_transition']);
 
 /** 微信 Webhook POST 的响应正文与媒体类型。 */
 export interface WechatWebhookPostResponse {
@@ -34,19 +38,41 @@ export class WechatWebhookController {
     /**
      * 处理微信公众号 POST webhook，并提交规范化事件。
      * @param request 已由 HTTP 框架映射的微信请求。
-     * @returns 微信要求的成功文本，或针对帮助及未知文本的被动 XML 回复。
+     * @returns 微信要求的成功文本，或针对绑定、帮助及未知文本的被动 XML 回复。
      */
     public async post(request: WechatWebhookRequest): Promise<WechatWebhookPostResponse> {
         const event = await this.adapter.normalizeInbound(request);
-        await this.platformEvents.postEvent(event);
+        try {
+            await this.platformEvents.postEvent(event);
+        } catch (error) {
+            if (event.type === 'binding.requested' && isExpectedBindingFailure(error)) {
+                return passiveTextResponse(this.adapter, event.payload.externalUserId, BINDING_FAILURE_MESSAGE);
+            }
+            throw error;
+        }
+        if (event.type === 'binding.requested') {
+            return passiveTextResponse(this.adapter, event.payload.externalUserId, BINDING_SUCCESS_MESSAGE);
+        }
         if (isTextMessage(event)) {
-            return {
-                body: this.adapter.renderPassiveTextReply(event.payload.externalUserId, HELP_MESSAGE),
-                contentType: 'application/xml; charset=utf-8',
-            };
+            return passiveTextResponse(this.adapter, event.payload.externalUserId, HELP_MESSAGE);
         }
         return { body: 'success', contentType: 'text/plain; charset=utf-8' };
     }
+}
+
+function passiveTextResponse(
+    adapter: WechatOfficialAdapter,
+    externalUserId: string,
+    content: string,
+): WechatWebhookPostResponse {
+    return {
+        body: adapter.renderPassiveTextReply(externalUserId, content),
+        contentType: 'application/xml; charset=utf-8',
+    };
+}
+
+function isExpectedBindingFailure(error: unknown): boolean {
+    return error instanceof ImGatewayError && BINDING_FAILURE_CODES.has(error.code);
 }
 
 function isTextMessage(event: NormalizedImEvent): event is Extract<
