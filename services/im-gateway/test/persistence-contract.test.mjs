@@ -348,6 +348,51 @@ describe(
             await uow.close();
         });
 
+        await test('migration keeps the latest duplicate active binding and prevents it from recurring', async () => {
+            const uow = new PostgresImUnitOfWork(POSTGRES_URL);
+            await uow.migrate();
+            await uow.truncateAll();
+            await uow.runRaw('DROP INDEX IF EXISTS im_bindings_active_user_device_identity_uq');
+            await uow.runRaw('DELETE FROM im_schema_migrations WHERE version >= 3');
+            await uow.runRaw(
+                `INSERT INTO im_bindings (
+                    id, user_id, device_id, external_identity_id, priority, status, bound_at, unbound_at, revoked_at
+                 ) VALUES
+                    ($1, $2, $3, $4, 100, 'active', $5, NULL, NULL),
+                    ($6, $2, $3, $4, 100, 'active', $7, NULL, NULL)`,
+                [
+                    'binding-earlier',
+                    'user-duplicate',
+                    'device-duplicate',
+                    'identity-duplicate',
+                    T0,
+                    'binding-later',
+                    T1,
+                ],
+            );
+
+            await uow.migrate();
+
+            const bindings = await uow.runRaw(
+                `SELECT id, status FROM im_bindings
+                 WHERE user_id = $1 ORDER BY id`,
+                ['user-duplicate'],
+            );
+            assert.deepEqual(bindings, [
+                { id: 'binding-earlier', status: 'unbound' },
+                { id: 'binding-later', status: 'active' },
+            ]);
+            await assert.rejects(
+                uow.runRaw(
+                    `INSERT INTO im_bindings (
+                        id, user_id, device_id, external_identity_id, priority, status, bound_at, unbound_at, revoked_at
+                     ) VALUES ($1, $2, $3, $4, 100, 'active', $5, NULL, NULL)`,
+                    ['binding-third', 'user-duplicate', 'device-duplicate', 'identity-duplicate', T2],
+                ),
+            );
+            await uow.close();
+        });
+
         await test('concurrent identical notifications yield one delivery and one outbox event', async () => {
             const clock = new FixedClock();
             const [first, second] = await Promise.all([makePostgresUow(), makePostgresUow()]);

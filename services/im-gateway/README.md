@@ -167,6 +167,9 @@ Infrastructure 内完成归一化后直接调用 `PlatformEventApplication`，�
 提示其以 `绑定 ABC123` 的格式发送绑定码；有效绑定会同步返回成功提示，无效或过期的绑定码会返回重新获取提示。
 这些被动回复均不依赖模板消息权限。
 
+同一用户、设备和微信身份重复配对时会复用已有有效绑定，不会生成重复提醒。启动迁移会将该组合的历史重复
+active 绑定保留最新一条，并把较早记录标记为 `unbound`。
+
 `ChannelAccount.credentialRef` 只保存 `secret://...` 引用。部署层负责解析并注入 Webhook Token、App ID/AppSecret、模板 ID/字段映射、H5 HTTPS 基础地址以及外部身份解密函数；这些值不得写入 `capabilityConfig`、Profile、日志或 fixture。未配置 `outbound` 时 Adapter 继续只提供入站能力，并如实返回 `proactiveMessage: false`。
 
 模板投递结果使用 `channelAccountId + MsgID` 定位 Delivery；`MsgID + Status` 生成稳定的 webhook 事件标识和 Receipt 去重键。重复回调由入站事件与 Receipt 两层幂等保护，迟到回执继续遵循 Application 层状态机，不会让已投递状态倒退。
