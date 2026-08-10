@@ -261,14 +261,26 @@ export interface TriggerPreparedActionCommand {
     readonly actualIdentityId?: ExternalIdentityId;
 }
 
-/** 动作页面呈现给用户的安全只读视图。 */
-export interface ActionUiView {
+/** 尚未提交动作时，页面呈现给用户的服务端批准选项。 */
+export interface AvailableActionUiView {
+    readonly state: 'available';
     readonly actionId: ActionId;
     readonly actions: readonly ReminderActionKind[];
     /** 页面可以呈现的服务端批准动作、文案与固定参数。 */
     readonly options: readonly ActionUiOption[];
     readonly expiresAt: ImAction['expiresAt'];
 }
+
+/** 动作经任一入口消费后，页面可以安全公开的统一生命周期状态。 */
+export interface ConsumedActionUiView {
+    readonly state: 'submitted' | 'processing' | 'succeeded' | 'failed' | 'expired';
+    readonly action: ReminderActionKind;
+    readonly params?: { readonly minutes: number };
+    readonly expiresAt: ImAction['expiresAt'];
+}
+
+/** 动作页面呈现给用户的安全只读视图。 */
+export type ActionUiView = AvailableActionUiView | ConsumedActionUiView;
 
 /** 动作页面可以提交的单个服务端批准选项。 */
 export interface ActionUiOption {

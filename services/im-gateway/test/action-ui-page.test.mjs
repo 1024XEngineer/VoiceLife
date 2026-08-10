@@ -3,16 +3,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { ActionUiPageController, AesGcmActionTokenPort, ImGatewayError, createMockImGateway } from '../dist/index.js';
+import { FixedClock } from '../dist/infrastructure/mock-support.js';
 import { pendingStrongDelivery } from './helpers.mjs';
 
-function pageFixture() {
+function pageFixture(viewOverride) {
     const calls = [];
     const actionUi = {
         show: async (token) => {
             calls.push(['show', token]);
             if (token === 'expired') throw new ImGatewayError('action_expired', 'expired');
             if (token === 'missing') throw new ImGatewayError('action_not_found', 'missing');
+            if (viewOverride !== undefined) return viewOverride;
             return {
+                state: 'available',
                 actionId: 'action-must-not-render',
                 actions: ['acknowledge', 'snooze'],
                 options: [
@@ -131,9 +134,78 @@ test('H5 snooze result does not claim the device has already applied the delay',
     assert.doesNotMatch(response.body, /设备会在新时间再次提醒/u);
 });
 
+test('H5 refresh renders every consumed action state without reusable controls', async () => {
+    const expiresAt = '2026-08-07T12:00:00.000Z';
+    const cases = [
+        {
+            view: { state: 'submitted', action: 'acknowledge', expiresAt },
+            expected: /操作已提交，等待设备确认/u,
+        },
+        {
+            view: { state: 'processing', action: 'acknowledge', expiresAt },
+            expected: /设备正在处理/u,
+        },
+        {
+            view: { state: 'succeeded', action: 'acknowledge', expiresAt },
+            expected: /提醒已处理/u,
+        },
+        {
+            view: { state: 'succeeded', action: 'snooze', params: { minutes: 10 }, expiresAt },
+            expected: /设备已确认推迟 10 分钟/u,
+        },
+        {
+            view: { state: 'failed', action: 'acknowledge', expiresAt },
+            expected: /操作未完成/u,
+        },
+        {
+            view: { state: 'expired', action: 'acknowledge', expiresAt },
+            expected: /操作已过期/u,
+        },
+    ];
+
+    for (const fixture of cases) {
+        const { controller } = pageFixture(fixture.view);
+        const response = await controller.get('opaque-token');
+        assert.equal(response.status, 200);
+        assert.match(response.body, fixture.expected);
+        assert.doesNotMatch(response.body, /<form|name="action"|action-must-not-render|operation-/u);
+    }
+});
+
+test('H5 refresh reflects an action consumed outside the H5 controller', async () => {
+    const published = [];
+    const clock = new FixedClock();
+    const gateway = createMockImGateway('device-fixture', clock, {
+        actionTokens: new AesGcmActionTokenPort('fixture-cross-entry-secret-with-32-bytes', () => Buffer.alloc(12, 6)),
+        actionStream: {
+            publish: async (command) => published.push(command),
+            subscribe: async function* () {},
+            close: async () => {},
+        },
+    });
+    const deliveryId = await pendingStrongDelivery(gateway);
+    await gateway.application.deliveryDispatch.dispatch(deliveryId);
+    const token = await gateway.application.actionUi.issue(deliveryId);
+    const claims = await gateway.application.actions.prepareToken(deliveryId);
+
+    await gateway.application.actions.triggerPrepared({
+        claims,
+        actionType: 'snooze',
+        actionParams: { minutes: 10 },
+        actionKeyHash: 'cross-entry-action-key',
+    });
+    const response = await gateway.actionUiPageApi.get(token);
+
+    assert.equal(response.status, 200);
+    assert.match(response.body, /已提交推迟 10 分钟的请求，等待设备确认/u);
+    assert.doesNotMatch(response.body, /<form|name="action"/u);
+    assert.equal(published.length, 1);
+});
+
 test('runtime H5 route validates an opaque token and repeated submission dispatches once', async () => {
     const published = [];
-    const gateway = createMockImGateway('device-fixture', undefined, {
+    const clock = new FixedClock();
+    const gateway = createMockImGateway('device-fixture', clock, {
         actionTokens: new AesGcmActionTokenPort('fixture-action-page-secret-with-32-bytes', () => Buffer.alloc(12, 5)),
         actionStream: {
             publish: async (command) => published.push(command),
@@ -147,11 +219,33 @@ test('runtime H5 route validates an opaque token and repeated submission dispatc
 
     const page = await gateway.actionUiPageApi.get(token);
     const first = await gateway.actionUiPageApi.post(token, { action: 'acknowledge' });
+    const submitted = await gateway.actionUiPageApi.get(token);
     const replay = await gateway.actionUiPageApi.post(token, { action: 'acknowledge' });
+    const action = await gateway.application.actions.find(published[0].commandId);
+    assert.notEqual(action, undefined);
+    await gateway.deviceApi.postReminderActionResult({
+        authorization: 'Bearer fixture-device-token',
+        deviceId: action.deviceId,
+        commandId: action.id,
+        body: {
+            schemaVersion: '1',
+            operationId: action.operationId,
+            reminderTriggerId: action.reminderTriggerId,
+            status: 'succeeded',
+            occurredAt: clock.now(),
+        },
+    });
+    const completed = await gateway.actionUiPageApi.get(token);
 
     assert.equal(page.status, 200);
     assert.equal(first.status, 200);
+    assert.equal(submitted.status, 200);
     assert.equal(replay.status, 200);
+    assert.equal(completed.status, 200);
     assert.equal(published.length, 1);
     assert.doesNotMatch(page.body, new RegExp(deliveryId, 'u'));
+    assert.match(submitted.body, /操作已提交，等待设备确认/u);
+    assert.doesNotMatch(submitted.body, /name="action"/u);
+    assert.match(completed.body, /提醒已处理/u);
+    assert.doesNotMatch(completed.body, /name="action"/u);
 });

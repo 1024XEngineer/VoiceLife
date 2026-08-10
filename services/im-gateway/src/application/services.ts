@@ -1139,7 +1139,20 @@ export class DefaultActionApplication implements ActionApplication {
             ) {
                 throw new ImGatewayError('action_expired', 'Action UI token has expired');
             }
+            const existing = await tx.actions.findById(claims.actionId);
+            if (existing !== undefined) {
+                if (existing.deliveryId !== delivery.id || existing.expiresAt !== claims.expiresAt) {
+                    throw new ImGatewayError('action_not_found', 'Action token does not match the consumed action');
+                }
+                return {
+                    state: actionUiState(existing.status),
+                    action: existing.actionType,
+                    ...actionUiParams(existing),
+                    expiresAt: existing.expiresAt,
+                };
+            }
             return {
+                state: 'available',
                 actionId: claims.actionId,
                 actions: metadata.options.map((option) => option.type),
                 options: metadata.options.map((option) => ({
@@ -1605,6 +1618,22 @@ function hasApprovedActionOption(
 function sameActionParams(left: JsonValue | undefined, right: JsonValue | undefined): boolean {
     if (left === undefined || right === undefined) return left === right;
     return canonicalizeJson(left) === canonicalizeJson(right);
+}
+
+function actionUiState(status: ActionStatus): Exclude<ActionUiView['state'], 'available'> {
+    return status === 'pending' || status === 'dispatched' ? 'submitted' : status;
+}
+
+function actionUiParams(action: ImAction): { readonly params?: { readonly minutes: number } } {
+    if (
+        action.actionType === 'snooze' &&
+        isJsonObject(action.actionParams) &&
+        typeof action.actionParams.minutes === 'number' &&
+        Number.isInteger(action.actionParams.minutes)
+    ) {
+        return { params: { minutes: action.actionParams.minutes } };
+    }
+    return {};
 }
 
 /**

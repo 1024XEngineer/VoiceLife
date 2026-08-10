@@ -69,7 +69,10 @@ export class ActionUiPageController {
         try {
             const parsedToken = parseActionToken(token);
             const view = await this.actionUi.show(parsedToken);
-            return htmlResponse(200, renderActionPage(parsedToken, view));
+            return htmlResponse(
+                200,
+                view.state === 'available' ? renderActionPage(parsedToken, view) : renderActionStatePage(view),
+            );
         } catch (error) {
             return actionUiErrorResponse(error);
         }
@@ -141,7 +144,7 @@ function submittedAction(input: unknown): Record<string, unknown> {
     };
 }
 
-function renderActionPage(token: string, view: ActionUiView): string {
+function renderActionPage(token: string, view: Extract<ActionUiView, { state: 'available' }>): string {
     const action = ACTION_UI_ROUTES.execute.replace(':token', encodeURIComponent(token));
     const options = view.options.map((option) => renderActionOption(action, option)).join('');
     return pageShell(
@@ -157,6 +160,30 @@ function renderActionPage(token: string, view: ActionUiView): string {
 </section>
 </main>`,
     );
+}
+
+function renderActionStatePage(view: Exclude<ActionUiView, { state: 'available' }>): string {
+    if (view.state === 'submitted') return renderResultPage(view.action, view.params);
+    if (view.state === 'processing') {
+        return pageShell(
+            '设备正在处理',
+            '<main class="result"><div class="check" aria-hidden="true">&#8635;</div><p class="kicker">处理中</p><h1>设备正在处理</h1><p class="summary">操作已经送达设备，请稍候查看最终结果。</p></main>',
+        );
+    }
+    if (view.state === 'succeeded') {
+        const detail =
+            view.action === 'snooze' && view.params !== undefined
+                ? `设备已确认推迟 ${String(view.params.minutes)} 分钟。`
+                : '设备已确认这条提醒。';
+        return pageShell(
+            '提醒已处理',
+            `<main class="result"><div class="check" aria-hidden="true">&#10003;</div><p class="kicker">已完成</p><h1>提醒已处理</h1><p class="summary">${escapeHtml(detail)}</p></main>`,
+        );
+    }
+    if (view.state === 'failed') {
+        return renderMessagePage('操作未完成', '设备未能完成这次操作，请在设备端查看提醒状态。');
+    }
+    return renderMessagePage('操作已过期', '这条提醒的操作时间已经结束。');
 }
 
 function renderActionOption(actionPath: string, option: ActionUiOption): string {
