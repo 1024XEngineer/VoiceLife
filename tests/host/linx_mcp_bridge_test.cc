@@ -68,6 +68,12 @@ int main() {
           "tools/call 必须返回 MCP text content");
     Check(called.Get("result")->Get("isError")->boolean == false, "成功 tools/call 必须明确声明 isError=false");
 
+    const auto initialized_notification = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})", server, "remote-session");
+    Check(initialized_notification.ok() && initialized_notification.value.has_value() &&
+              initialized_notification.value->empty(),
+          "MCP initialized 通知必须被消费且不回包");
+
     const auto missing = voicelife::runtime::HandleLinxMcpPayload(
         R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"unknown.tool","arguments":{}},"id":4})", server);
     Check(missing.ok(), "未知工具必须返回 JSON-RPC 错误响应");

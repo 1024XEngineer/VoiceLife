@@ -393,6 +393,7 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
             const std::string session_id = inbound.session_id.value_or(ActiveSessionConfig().session_id);
             if (const auto response = mcp_handler_(inbound.text, session_id);
                 response.ok() && response.value.has_value()) {
+                if (response.value->empty()) return;
                 const Status status = transport_.SendText(*response.value);
                 if (!status.ok()) Emit(Event(voice::VoiceEventKind::kError, status.message));
             } else {

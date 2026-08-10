@@ -126,8 +126,16 @@ Result<std::string> HandleLinxMcpPayload(std::string_view payload, const mcp::Mc
     }
     const JsonValue* id = Get(request, "id");
     const JsonValue* method = Get(request, "method");
-    if (id == nullptr || method == nullptr || !method->IsString()) {
-        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "MCP 请求缺少 id 或 method");
+    if (method == nullptr || !method->IsString()) {
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "MCP 请求缺少 method");
+    }
+    // JSON-RPC notifications (including MCP's notifications/initialized)
+    // intentionally have no id and must not produce a response frame.
+    if (id == nullptr) {
+        if (method->string.rfind("notifications/", 0) == 0 || method->string == "ping") {
+            return Result<std::string>::Success(std::string{});
+        }
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "MCP 请求缺少 id");
     }
     if (method->string == "initialize") {
         const std::string result = "{\"jsonrpc\":\"2.0\",\"id\":" + Serialize(*id) +

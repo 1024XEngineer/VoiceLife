@@ -223,6 +223,10 @@ Status EnsureWifiStaConnected() {
         return EspError("设置 Wi-Fi STA 配置", error);
     if (const esp_err_t error = esp_wifi_start(); error != ESP_OK && error != ESP_ERR_INVALID_STATE)
         return EspError("启动 ESP Wi-Fi", error);
+    // From this point onward the netif, event group, and handlers are owned by
+    // this process. A transient first association failure must reuse them on
+    // the next attempt instead of creating a duplicate default STA netif.
+    initialized = true;
     wifi_scan_config_t scan_config{};
     if (const esp_err_t error = esp_wifi_scan_start(&scan_config, true); error != ESP_OK) {
         return EspError("扫描 Wi-Fi", error);
@@ -289,7 +293,6 @@ Status EnsureWifiStaConnected() {
     if ((result & kWifiConnectedBit) == 0) {
         return Status::Error(ErrorCode::kUnavailable, "Wi-Fi STA 连接失败或超时");
     }
-    initialized = true;
     return Status::Ok();
 }
 
