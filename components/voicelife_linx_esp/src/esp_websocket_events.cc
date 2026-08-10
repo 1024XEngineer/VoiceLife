@@ -27,6 +27,12 @@ void EspWebSocketTransport::Impl::Enqueue(int32_t event_id, const esp_websocket_
     } else if (event_id == WEBSOCKET_EVENT_DISCONNECTED) {
         envelope.kind = detail::EventKind::kDisconnected;
     } else if (event_id == WEBSOCKET_EVENT_DATA && event_data != nullptr) {
+        // ESP-IDF dispatches ping, pong and close control frames through the
+        // same DATA event. The managed client handles those frames itself;
+        // only RFC 6455 data opcodes belong in the Linx message assembler.
+        if (!IsWebSocketDataOpcode(static_cast<WebSocketOpcode>(event_data->op_code))) {
+            return;
+        }
         envelope.kind = detail::EventKind::kData;
         envelope.opcode = event_data->op_code;
         envelope.fin = event_data->fin;

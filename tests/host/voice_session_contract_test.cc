@@ -206,8 +206,16 @@ int main() {
     Check(session.SubmitAudio(Frame(generation, 3)).code == ErrorCode::kConflict, "跳号音频帧必须拒绝");
     Check(session.SubmitAudio(Frame(generation - 1, 1)).code == ErrorCode::kInvalidArgument,
           "旧 generation 音频帧必须拒绝");
-    Check(session.EndCapture().ok(), "采集应可正常结束");
-    Check(input.EmitCapture(Frame(0, 0)).code == ErrorCode::kUnavailable, "结束采集后迟到的输入帧必须拒绝");
+    provider.Emit(voicelife::voice::VoiceEvent{
+        .kind = voicelife::voice::VoiceEventKind::kTtsStarted, .generation = generation, .text = {}, .aborted = false});
+    Check(input.stops == 1 && session.state() == voicelife::voice::VoiceSessionState::kSpeaking,
+          "采集中收到 TTS start 必须先停止本地采集，再进入播放状态");
+    Check(provider.EmitAudio(Frame(generation, 1)).ok() && output.pushes == 2,
+          "停止采集后的 TTS 二进制帧必须进入输出端口");
+    provider.Emit(voicelife::voice::VoiceEvent{
+        .kind = voicelife::voice::VoiceEventKind::kTtsStopped, .generation = generation, .text = {}, .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kReady, "正常 TTS stop 后会话必须回到 ready");
+    Check(input.EmitCapture(Frame(0, 0)).code == ErrorCode::kUnavailable, "停止采集后迟到的输入帧必须拒绝");
     Check(session.Speak("测试播报").ok(), "ready 会话应允许播报");
     voicelife::voice::VoiceEvent tts_started;
     tts_started.kind = voicelife::voice::VoiceEventKind::kTtsStarted;
@@ -218,7 +226,7 @@ int main() {
     Check(session.generation() != generation && provider.generation_ == session.generation() &&
               provider.generation_at_abort == session.generation() && output.flushes == 1,
           "打断应刷新播放并让 Provider 切换到新 generation");
-    Check(provider.EmitAudio(Frame(generation, 1)).code == ErrorCode::kInvalidArgument && output.pushes == 1,
+    Check(provider.EmitAudio(Frame(generation, 1)).code == ErrorCode::kInvalidArgument && output.pushes == 2,
           "打断后迟到的旧 generation 音频不得重新进入播放队列");
     provider.Emit(voicelife::voice::VoiceEvent{});
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady,

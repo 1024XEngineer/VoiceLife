@@ -26,7 +26,8 @@ Status EspWebSocketTransport::Impl::Connect(const linx::LinxConnectionConfig& co
     const bool explicitly_allowed_insecure = options_.allow_insecure_ws && config.websocket_url.rfind("ws://", 0) == 0;
     if (!config.valid() || (!secure && !explicitly_allowed_insecure) || options_.event_queue_capacity == 0 ||
         options_.event_chunk_bytes == 0 || options_.event_chunk_bytes > detail::kMaxEventChunkBytes ||
-        options_.max_message_bytes == 0) {
+        options_.max_message_bytes == 0 || options_.websocket_task_stack_size == 0 ||
+        options_.worker_task_stack_size == 0) {
         return Status::Error(ErrorCode::kInvalidArgument, "ESP Linx WSS 配置无效");
     }
     if (closing_.load() && state_ != TransportState::kFailed) {
@@ -74,6 +75,7 @@ Status EspWebSocketTransport::Impl::Connect(const linx::LinxConnectionConfig& co
     websocket_config.enable_close_reconnect = options_.enable_close_reconnect;
     websocket_config.reconnect_timeout_ms = options_.reconnect_timeout_ms;
     websocket_config.network_timeout_ms = options_.network_timeout_ms;
+    websocket_config.task_stack = static_cast<int>(options_.websocket_task_stack_size);
     websocket_config.buffer_size = static_cast<int>(options_.event_chunk_bytes);
     websocket_config.crt_bundle_attach = secure ? esp_crt_bundle_attach : nullptr;
     websocket_config.skip_cert_common_name_check = false;
@@ -253,7 +255,7 @@ bool EspWebSocketTransport::Impl::PrepareWorker() {
         return false;
     }
     running_.store(true);
-    if (xTaskCreate(&WorkerEntry, "linx_ws_events", 6144, this, 5, &worker_) != pdPASS) {
+    if (xTaskCreate(&WorkerEntry, "linx_ws_events", options_.worker_task_stack_size, this, 5, &worker_) != pdPASS) {
         CleanupWorker();
         return false;
     }

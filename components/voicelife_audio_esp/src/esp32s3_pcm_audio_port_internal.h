@@ -44,6 +44,7 @@ int32_t ToWire(int16_t pcm, const I2sEndpointProfile& endpoint);
 #endif
 
 Status ValidateNegotiatedFormat(const I2sEndpointProfile& endpoint, const voice::AudioFormat& negotiated);
+Status ValidatePlaybackFormat(const I2sEndpointProfile& endpoint, const voice::AudioFormat& negotiated);
 
 }  // namespace detail
 

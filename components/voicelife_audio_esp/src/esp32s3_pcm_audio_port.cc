@@ -22,6 +22,15 @@ Status ValidateNegotiatedFormat(const I2sEndpointProfile& endpoint, const voice:
     return assembler.Validate();
 }
 
+Status ValidatePlaybackFormat(const I2sEndpointProfile& endpoint, const voice::AudioFormat& negotiated) {
+    if (!negotiated.valid() || negotiated.codec != voice::AudioCodec::kPcmS16Le || negotiated.bits_per_sample != 16 ||
+        negotiated.channels != endpoint.format.channels || negotiated.sample_rate_hz < 8000 ||
+        negotiated.sample_rate_hz > 48000) {
+        return Invalid("协商下行 PCM 格式不受当前板级 I2S 输出支持");
+    }
+    return Status::Ok();
+}
+
 }  // namespace detail
 
 void Esp32s3PcmAudioPorts::Impl::InputPort::SetAudioSink(voice::AudioFrameSink sink) {
@@ -107,7 +116,7 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
     if (!profile_status.ok()) {
         return profile_status;
     }
-    const Status format_status = detail::ValidateNegotiatedFormat(profile_.playback_i2s, format);
+    const Status format_status = detail::ValidatePlaybackFormat(profile_.playback_i2s, format);
     if (!format_status.ok()) {
         return format_status;
     }

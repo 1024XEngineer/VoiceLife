@@ -53,6 +53,9 @@ git push -u fork HEAD
 
 完整规则见 [架构与适配器设计规范](./docs/architecture/design-guidelines.md)。
 
+涉及第三方实现、ESP-SR/音频模型、硬件适配或上游代码迁移时，还必须遵守
+[上游复用与证据驱动开发规范](./docs/engineering/upstream-reuse-and-evidence-standard.md)：先记录来源、许可证、边界和证据，再决定直接复用、适配、重写或拒绝。
+
 ## 常用检查
 
 ```bash

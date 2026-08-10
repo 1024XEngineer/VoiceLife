@@ -39,6 +39,8 @@ struct EspWebSocketTransportOptions {
     uint32_t connect_timeout_ms = 10000;
     uint32_t network_timeout_ms = 10000;
     uint32_t reconnect_timeout_ms = 1000;
+    uint32_t websocket_task_stack_size = 12288;
+    uint32_t worker_task_stack_size = 12288;
     bool enable_close_reconnect = true;
     bool allow_insecure_ws = false;
 };

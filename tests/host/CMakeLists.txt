@@ -87,12 +87,14 @@ target_link_libraries(mcp PUBLIC contracts)
 target_link_libraries(mcp PRIVATE yyjson)
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/audio_frame_queue.cc"
+    "${ROOT_DIR}/components/voicelife_voice/src/wake_gate_audio_input.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_provider_registry.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
 target_link_libraries(voice PUBLIC contracts)
 add_voicelife_library(linx voicelife_linx
     "${ROOT_DIR}/components/voicelife_linx/src/linx_json_codec.cc"
+    "${ROOT_DIR}/components/voicelife_linx/src/linx_ota.cc"
     "${ROOT_DIR}/components/voicelife_linx/src/linx_speech_provider.cc")
 target_link_libraries(linx PUBLIC voice cjson)
 add_voicelife_library(linx_esp voicelife_linx_esp
@@ -194,6 +196,20 @@ add_voicelife_test(mcp_server_test "unit;mcp"
 target_include_directories(mcp_server_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
 target_link_libraries(mcp_server_test PRIVATE mcp)
 
+add_voicelife_test(schedule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_mcp_tools_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime/src/schedule_mcp_tools.cc")
+target_include_directories(schedule_mcp_tools_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule)
+
+add_voicelife_test(linx_mcp_bridge_test "unit;mcp;linx;runtime" linx_mcp_bridge_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime/src/linx_mcp_bridge.cc"
+    "${ROOT_DIR}/components/voicelife_runtime/src/schedule_mcp_tools.cc")
+target_include_directories(linx_mcp_bridge_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_link_libraries(linx_mcp_bridge_test PRIVATE contracts mcp schedule)
+
+add_voicelife_test(linx_ota_contract_test "unit;linx;contract" linx_ota_contract_test.cc)
+target_link_libraries(linx_ota_contract_test PRIVATE contracts linx)
+
 add_voicelife_test(voice_session_coordinator_test "unit;voice" voice_session_coordinator_test.cc)
 target_link_libraries(voice_session_coordinator_test PRIVATE voice)
 
@@ -203,6 +219,10 @@ target_link_libraries(voice_session_contract_test PRIVATE voice)
 add_voicelife_test(audio_frame_queue_contract_test "unit;voice;audio;contract"
     audio_frame_queue_contract_test.cc)
 target_link_libraries(audio_frame_queue_contract_test PRIVATE voice)
+
+add_voicelife_test(wake_gate_audio_input_test "unit;voice;audio;contract"
+    wake_gate_audio_input_test.cc)
+target_link_libraries(wake_gate_audio_input_test PRIVATE voice)
 
 add_voicelife_test(linx_provider_contract_test "unit;voice;linx;contract" linx_provider_contract_test.cc)
 target_link_libraries(linx_provider_contract_test PRIVATE linx)

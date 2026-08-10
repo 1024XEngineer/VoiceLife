@@ -158,6 +158,12 @@ def backup(args: argparse.Namespace) -> None:
 
     artifacts: dict[str, dict] = {}
     artifact_names = ("data", "probe_slot", "otadata")
+    extra_labels = tuple(dict.fromkeys(getattr(args, "extra_label", [])))
+    for label in extra_labels:
+        if label in {"data", "probe_slot", "otadata"}:
+            raise ProbeError(f"extra backup label duplicates required artifact: {label}")
+        layout[label] = partition_by_label(partitions, label)
+        artifact_names += (label,)
     for index, name in enumerate(artifact_names):
         partition = layout[name]
         path = directory / f"{partition.label}.bin"
@@ -284,6 +290,12 @@ def main() -> int:
     backup_parser.add_argument("--data-label", default="voicelife")
     backup_parser.add_argument("--probe-slot", default="ota_1")
     backup_parser.add_argument("--expected-data-size", type=lambda value: int(value, 0), default=0x200000)
+    backup_parser.add_argument(
+        "--extra-label",
+        action="append",
+        default=[],
+        help="额外只读备份的分区标签，可重复；不会参与 restore 写回",
+    )
     backup_parser.set_defaults(handler=backup)
 
     write_parser = subparsers.add_parser("write-probe", help="将探针写入已人工确认的非活动 OTA 槽")

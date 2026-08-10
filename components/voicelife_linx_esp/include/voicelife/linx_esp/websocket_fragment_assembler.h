@@ -15,6 +15,16 @@ enum class WebSocketOpcode : uint8_t {
     kBinary = 0x2,
 };
 
+/**
+ * @brief 判断 opcode 是否承载需要交给业务层重组的数据帧。
+ * @param opcode 待判断的 RFC 6455 操作码。
+ * @return text、binary 或 continuation 数据帧时返回 true。
+ */
+[[nodiscard]] constexpr bool IsWebSocketDataOpcode(WebSocketOpcode opcode) {
+    return opcode == WebSocketOpcode::kContinuation || opcode == WebSocketOpcode::kText ||
+           opcode == WebSocketOpcode::kBinary;
+}
+
 /** 表示一次 ESP-IDF WebSocket 数据回调中的有限分片。 */
 struct WebSocketFragment {
     uint64_t generation = 0;

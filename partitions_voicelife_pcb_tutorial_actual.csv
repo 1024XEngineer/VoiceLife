@@ -1,0 +1,10 @@
+# ESP32-S3 PCB tutorial board layout read from the connected device.
+# Physical Flash is 16 MB; the installed firmware currently uses the lower 8 MB layout.
+# Name,     Type, SubType, Offset,   Size, Flags
+nvs,        data, nvs,     0x9000,   24K,
+otadata,    data, ota,     0xf000,   8K,
+phy_init,   data, phy,     0x11000,  4K,
+ota_0,      app,  ota_0,   0x20000,  0x3e0000,
+ota_1,      app,  ota_1,   0x400000, 0x3e0000,
+voicelife,  data, spiffs,  0x7e0000, 2M,
+linx_secrets,data,nvs,    0xa00000, 64K,

@@ -28,11 +28,13 @@ bool SameAudioFormats(const voice::VoiceAudioFormats& left, const voice::VoiceAu
 
 LinxSpeechProviderAdapter::LinxSpeechProviderAdapter(LinxTransportPort& transport, LinxProtocolCodecPort& codec,
                                                      LinxConnectionConfig connection,
-                                                     voice::CapabilityProfile capabilities)
+                                                     voice::CapabilityProfile capabilities,
+                                                     LinxMcpMessageHandler mcp_handler)
     : transport_(transport),
       codec_(codec),
       connection_(std::move(connection)),
-      capabilities_(std::move(capabilities)) {}
+      capabilities_(std::move(capabilities)),
+      mcp_handler_(std::move(mcp_handler)) {}
 
 voice::CapabilityProfile LinxSpeechProviderAdapter::DefaultCapabilities() {
     return {.provider_id = "xrobot-websocket", .capabilities = {"streaming-asr", "tts", "cancel-generation", "pcm"}};
@@ -69,6 +71,7 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
         hello_received_ = false;
         audio_formats_ready_ = false;
         has_negotiated_formats_ = false;
+        remote_session_id_.reset();
         audio_formats_ = {.capture = config.audio, .playback = config.audio};
         last_audio_formats_ = audio_formats_;
         hello_status_ = Status::Ok();
@@ -133,14 +136,14 @@ Status LinxSpeechProviderAdapter::StartCapture(voice::VoiceMode) {
     if (!connected_.load()) {
         return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
     }
-    return Send(codec_.EncodeListenStart(config_));
+    return Send(codec_.EncodeListenStart(ActiveSessionConfig()));
 }
 
 Status LinxSpeechProviderAdapter::StopCapture() {
     if (!connected_.load()) {
         return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
     }
-    return Send(codec_.EncodeListenStop(config_));
+    return Send(codec_.EncodeListenStop(ActiveSessionConfig()));
 }
 
 Status LinxSpeechProviderAdapter::SendAudio(const voice::AudioFrame& frame) {
@@ -157,14 +160,24 @@ Status LinxSpeechProviderAdapter::Abort(std::string_view reason) {
     if (!connected_.load()) {
         return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
     }
-    return Send(codec_.EncodeAbort(config_, reason));
+    return Send(codec_.EncodeAbort(ActiveSessionConfig(), reason));
 }
 
 Status LinxSpeechProviderAdapter::Speak(std::string_view text) {
     if (!connected_.load()) {
         return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
     }
-    return Send(codec_.EncodeListenDetect(config_, text));
+    return Send(codec_.EncodeListenDetect(ActiveSessionConfig(), text));
+}
+
+Status LinxSpeechProviderAdapter::NotifyLocalWakeWord(std::string_view wake_word) {
+    if (!connected_.load()) {
+        return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
+    }
+    if (wake_word.empty()) {
+        return Status::Error(ErrorCode::kInvalidArgument, "本地唤醒词为空");
+    }
+    return Send(codec_.EncodeListenDetect(ActiveSessionConfig(), wake_word));
 }
 
 Status LinxSpeechProviderAdapter::Disconnect() {
@@ -194,6 +207,7 @@ void LinxSpeechProviderAdapter::OnTransportConnected() {
         std::lock_guard<std::mutex> lock(hello_mutex_);
         hello_received_ = false;
         audio_formats_ready_ = false;
+        remote_session_id_.reset();
         hello_status_ = Status::Ok();
     }
     const Status status = Send(codec_.EncodeHello(config_, connection_));
@@ -206,6 +220,15 @@ void LinxSpeechProviderAdapter::OnTransportConnected() {
         hello_cv_.notify_all();
         Emit(Event(voice::VoiceEventKind::kError, status.message));
     }
+}
+
+voice::VoiceSessionConfig LinxSpeechProviderAdapter::ActiveSessionConfig() const {
+    std::lock_guard<std::mutex> lock(hello_mutex_);
+    auto config = config_;
+    if (remote_session_id_.has_value()) {
+        config.session_id = *remote_session_id_;
+    }
+    return config;
 }
 
 void LinxSpeechProviderAdapter::OnTransportDisconnected() {
@@ -253,11 +276,19 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
         return;
     }
     const LinxInboundMessage& inbound = *decoded.value;
-    // Reject messages from a different session. A stale or misrouted
-    // message on the same WebSocket must not mutate the current session.
-    if (inbound.session_id.has_value() && *inbound.session_id != config_.session_id) {
-        Emit(Event(voice::VoiceEventKind::kError, "Linx 消息 session_id 不匹配: " + *inbound.session_id));
-        return;
+    // Linx assigns session_id in its hello response. Only that first hello
+    // can establish the remote ID; all later messages must match it.
+    if (inbound.kind != LinxMessageKind::kHello) {
+        bool session_mismatch = !connected_.load();
+        {
+            std::lock_guard<std::mutex> lock(hello_mutex_);
+            session_mismatch = session_mismatch || (remote_session_id_.has_value() && inbound.session_id.has_value() &&
+                                                    *inbound.session_id != *remote_session_id_);
+        }
+        if (session_mismatch) {
+            Emit(Event(voice::VoiceEventKind::kError, "Linx 消息 session_id 不匹配或 hello 未完成"));
+            return;
+        }
     }
     switch (inbound.kind) {
         case LinxMessageKind::kHello: {
@@ -310,7 +341,14 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
                     hello_received_ = true;
                     audio_formats_ready_ = false;
                     hello_status_ = format_status;
+                } else if (inbound.session_id.has_value() && inbound.session_id->empty()) {
+                    format_changed = true;
+                    format_status = Status::Error(ErrorCode::kInvalidArgument, "Linx hello session_id 不能为空");
+                    hello_received_ = true;
+                    audio_formats_ready_ = false;
+                    hello_status_ = format_status;
                 } else {
+                    remote_session_id_ = inbound.session_id;
                     hello_received_ = true;
                     audio_formats_ = formats;
                     last_audio_formats_ = formats;
@@ -346,6 +384,22 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
                 Emit(Event(voice::VoiceEventKind::kTtsStopped, {}, inbound.aborted));
             }
             return;
+        case LinxMessageKind::kMcp: {
+            if (!mcp_handler_) {
+                Emit(Event(voice::VoiceEventKind::kError, "Linx 收到 MCP 请求，但设备未配置 MCP handler"));
+                return;
+            }
+            Emit(Event(voice::VoiceEventKind::kToolCall));
+            const std::string session_id = inbound.session_id.value_or(ActiveSessionConfig().session_id);
+            if (const auto response = mcp_handler_(inbound.text, session_id);
+                response.ok() && response.value.has_value()) {
+                const Status status = transport_.SendText(*response.value);
+                if (!status.ok()) Emit(Event(voice::VoiceEventKind::kError, status.message));
+            } else {
+                Emit(Event(voice::VoiceEventKind::kError, response.status.message));
+            }
+            return;
+        }
         case LinxMessageKind::kError:
             Emit(Event(voice::VoiceEventKind::kError, inbound.text));
             return;
