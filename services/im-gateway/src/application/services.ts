@@ -248,6 +248,18 @@ export class DefaultPairingApplication implements PairingApplication {
                 await tx.identities.save(identity);
             }
 
+            const existingBinding = (await tx.bindings.listActiveByUser(userId)).find(
+                (binding) => binding.deviceId === session.deviceId && binding.externalIdentityId === identity.id,
+            );
+            if (existingBinding !== undefined) {
+                await tx.pairingSessions.save({
+                    ...session,
+                    status: 'confirmed',
+                    confirmedAt: now,
+                });
+                return existingBinding;
+            }
+
             const binding: ImBinding = {
                 id: this.ids.nextBindingId(),
                 userId,

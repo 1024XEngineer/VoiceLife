@@ -162,6 +162,8 @@ Infrastructure 内完成归一化后直接调用 `PlatformEventApplication`，�
 
 配置 `outbound` 后，同一个 `WechatOfficialAdapter` 同时实现 `ChannelCapabilityResolver`、`DeliveryRendererPort` 和 `ImChannelPort`。组合根应把同一实例注入 `channelCapabilities`、`deliveryRenderer`、`imChannel` 与 `wechatAdapter`。Adapter 获取并缓存 `access_token`，通过微信模板消息接口发送通知；强提醒模板的详情地址只携带 URL 编码后的动作 token。模板接口成功只记录 `accepted` 和精确字符串 `msgid`，后续 `TEMPLATESENDJOBFINISH` 回调才把 Delivery 推进为 `delivered`。
 
+同一用户、设备和微信身份重复配对时会复用已有有效绑定，不会生成重复提醒。启动迁移会将该组合的历史重复
+active 绑定保留最新一条，并把较早记录标记为 `unbound`。
 `ChannelAccount.credentialRef` 只保存 `secret://...` 引用。部署层负责解析并注入 Webhook Token、App ID/AppSecret、模板 ID/字段映射、H5 HTTPS 基础地址以及外部身份解密函数；这些值不得写入 `capabilityConfig`、Profile、日志或 fixture。未配置 `outbound` 时 Adapter 继续只提供入站能力，并如实返回 `proactiveMessage: false`。
 
 模板投递结果使用 `channelAccountId + MsgID` 定位 Delivery；`MsgID + Status` 生成稳定的 webhook 事件标识和 Receipt 去重键。重复回调由入站事件与 Receipt 两层幂等保护，迟到回执继续遵循 Application 层状态机，不会让已投递状态倒退。

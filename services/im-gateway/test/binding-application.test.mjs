@@ -34,6 +34,27 @@ test('list and identity lookup return only active bindings', async () => {
     assert.deepEqual(await gateway.application.bindings.list('user-other'), []);
 });
 
+test('repeated pairing reuses the active user, device and external identity binding', async () => {
+    const { gateway } = bindingGateway();
+    const { channel, binding } = await bindFixtureUser(gateway);
+    const pairing = await gateway.application.pairing.create({
+        userId: binding.userId,
+        deviceId: binding.deviceId,
+    });
+
+    const repeated = await gateway.application.pairing.confirm({
+        displayCode: pairing.displayCode,
+        channelAccountId: channel.id,
+        externalUserId: 'fixture-open-id',
+    });
+
+    assert.equal(repeated.id, binding.id);
+    assert.deepEqual(
+        (await gateway.application.bindings.list(binding.userId)).map((item) => item.id),
+        [binding.id],
+    );
+});
+
 test('unbind records its terminal status and removes the binding from active queries', async () => {
     const { gateway, clock, uow } = bindingGateway();
     const { binding } = await bindFixtureUser(gateway);
