@@ -135,3 +135,68 @@ test('SSE action hub queues a command until the subscriber requests its next eve
     assert.equal((await stream.next()).value.commandId, 'action-fixture');
     await stream.return();
 });
+
+test('SSE action hub rejects subscriptions beyond global, device and reminder-window limits', async () => {
+    const global = new SseActionCommandHub({
+        maxSubscriptions: 1,
+        maxSubscriptionsPerDevice: 1,
+        maxSubscriptionsPerScope: 1,
+    });
+    const first = iterator(global.subscribe(subscription()));
+    assert.throws(
+        () => global.subscribe(subscription({ deviceId: 'device-other', reminderTriggerId: 'trigger-other' })),
+        (error) => error.code === 'resource_exhausted',
+    );
+    await first.return();
+
+    const device = new SseActionCommandHub({
+        maxSubscriptions: 4,
+        maxSubscriptionsPerDevice: 1,
+        maxSubscriptionsPerScope: 1,
+    });
+    const deviceFirst = iterator(device.subscribe(subscription()));
+    assert.throws(
+        () => device.subscribe(subscription({ reminderTriggerId: 'trigger-other' })),
+        (error) => error.code === 'resource_exhausted',
+    );
+    await deviceFirst.return();
+
+    const scope = new SseActionCommandHub({
+        maxSubscriptions: 4,
+        maxSubscriptionsPerDevice: 4,
+        maxSubscriptionsPerScope: 1,
+    });
+    const scopeFirst = iterator(scope.subscribe(subscription()));
+    assert.throws(
+        () => scope.subscribe(subscription()),
+        (error) => error.code === 'resource_exhausted',
+    );
+    await scopeFirst.return();
+});
+
+test('SSE action hub closes a slow subscription when its bounded queue overflows', async () => {
+    const overflows = [];
+    const hub = new SseActionCommandHub({
+        maxQueueSize: 1,
+        subscriptionOverflowed: (scope) => overflows.push(scope),
+    });
+    const stream = iterator(hub.subscribe(subscription()));
+
+    await hub.publish(command());
+    await hub.publish(command({ commandId: 'action-second', operationId: 'operation-second' }));
+
+    assert.deepEqual(await stream.next(), { done: true, value: undefined });
+    assert.deepEqual(overflows, [subscription()]);
+});
+
+test('SSE action hub rejects invalid capacity configuration', () => {
+    assert.throws(() => new SseActionCommandHub({ maxSubscriptions: 0 }), /positive integer/u);
+    assert.throws(
+        () =>
+            new SseActionCommandHub({
+                maxSubscriptions: 1,
+                maxSubscriptionsPerDevice: 2,
+            }),
+        /cannot exceed/u,
+    );
+});

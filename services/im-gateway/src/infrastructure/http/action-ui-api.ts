@@ -40,10 +40,25 @@ export interface ActionUiPageResponse {
     readonly body: string;
 }
 
+/** 接收已验证动作命令的观测端口，供生产结构化日志串联 correlationId。 */
+export interface ActionUiSubmissionObserver {
+    /**
+     * 记录已持久化并准备下发设备的动作命令。
+     * @param command 不含原始动作令牌的动作命令。
+     */
+    submitted(command: ReminderActionCommand): void;
+}
+
 /** 服务端渲染的移动端提醒动作页面，不向浏览器暴露内部聚合标识。 */
 export class ActionUiPageController {
-    /** @param actionUi 动作页面应用服务。 */
-    public constructor(private readonly actionUi: ActionUiApplication) {}
+    /**
+     * @param actionUi 动作页面应用服务。
+     * @param observer 可选的脱敏动作观测端口。
+     */
+    public constructor(
+        private readonly actionUi: ActionUiApplication,
+        private readonly observer?: ActionUiSubmissionObserver,
+    ) {}
 
     /**
      * 校验路径令牌并渲染允许的动作选项。
@@ -54,7 +69,10 @@ export class ActionUiPageController {
         try {
             const parsedToken = parseActionToken(token);
             const view = await this.actionUi.show(parsedToken);
-            return htmlResponse(200, renderActionPage(parsedToken, view));
+            return htmlResponse(
+                200,
+                view.state === 'available' ? renderActionPage(parsedToken, view) : renderActionStatePage(view),
+            );
         } catch (error) {
             return actionUiErrorResponse(error);
         }
@@ -72,6 +90,11 @@ export class ActionUiPageController {
             const submitted = submittedAction(input);
             const intent = parseReminderActionIntent({ token: parsedToken, ...submitted });
             const command = await this.actionUi.execute(intent);
+            try {
+                this.observer?.submitted(command);
+            } catch {
+                // Observability failures must not change an already-persisted action result.
+            }
             return htmlResponse(200, renderResultPage(command.action, command.params));
         } catch (error) {
             return actionUiErrorResponse(error);
@@ -121,7 +144,7 @@ function submittedAction(input: unknown): Record<string, unknown> {
     };
 }
 
-function renderActionPage(token: string, view: ActionUiView): string {
+function renderActionPage(token: string, view: Extract<ActionUiView, { state: 'available' }>): string {
     const action = ACTION_UI_ROUTES.execute.replace(':token', encodeURIComponent(token));
     const options = view.options.map((option) => renderActionOption(action, option)).join('');
     return pageShell(
@@ -137,6 +160,30 @@ function renderActionPage(token: string, view: ActionUiView): string {
 </section>
 </main>`,
     );
+}
+
+function renderActionStatePage(view: Exclude<ActionUiView, { state: 'available' }>): string {
+    if (view.state === 'submitted') return renderResultPage(view.action, view.params);
+    if (view.state === 'processing') {
+        return pageShell(
+            '设备正在处理',
+            '<main class="result"><div class="check" aria-hidden="true">&#8635;</div><p class="kicker">处理中</p><h1>设备正在处理</h1><p class="summary">操作已经送达设备，请稍候查看最终结果。</p></main>',
+        );
+    }
+    if (view.state === 'succeeded') {
+        const detail =
+            view.action === 'snooze' && view.params !== undefined
+                ? `设备已确认推迟 ${String(view.params.minutes)} 分钟。`
+                : '设备已确认这条提醒。';
+        return pageShell(
+            '提醒已处理',
+            `<main class="result"><div class="check" aria-hidden="true">&#10003;</div><p class="kicker">已完成</p><h1>提醒已处理</h1><p class="summary">${escapeHtml(detail)}</p></main>`,
+        );
+    }
+    if (view.state === 'failed') {
+        return renderMessagePage('操作未完成', '设备未能完成这次操作，请在设备端查看提醒状态。');
+    }
+    return renderMessagePage('操作已过期', '这条提醒的操作时间已经结束。');
 }
 
 function renderActionOption(actionPath: string, option: ActionUiOption): string {

@@ -1,5 +1,6 @@
 /** IM Gateway 对外暴露的稳定错误码。 */
 export type ImGatewayErrorCode =
+    | 'unauthorized'
     | 'invalid_contract'
     | 'idempotency_conflict'
     | 'binding_not_found'
@@ -8,6 +9,7 @@ export type ImGatewayErrorCode =
     | 'action_expired'
     | 'duplicate_event'
     | 'invalid_transition'
+    | 'resource_exhausted'
     | 'capability_not_supported'
     | 'not_implemented';
 

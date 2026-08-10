@@ -1,6 +1,6 @@
 # VoiceLife IM Gateway
 
-这是 VoiceLife IM Gateway 的独立服务模块。它用代码表达模块边界、跨端契约和依赖方向，并以 Issue #95 作为当前交付与验收基线；目前包含 PostgreSQL 持久化、真实 Koishi Core Runtime、实时 SSE Hub、微信公众号 Webhook/模板投递 Adapter 和服务端渲染的 H5 Action UI。具体平台 Bot、公开 HTTP 监听与 Secret 装配仍由生产部署组合根提供。
+这是 VoiceLife IM Gateway 的独立服务模块。它用代码表达模块边界、跨端契约和依赖方向，并以 Issue #95 作为当前交付与验收基线；目前包含 PostgreSQL 持久化、真实 Koishi Core Runtime、实时 SSE Hub、微信公众号 Webhook/模板投递 Adapter、服务端渲染的 H5 Action UI，以及可直接部署的生产 HTTP/SSE 进程。
 
 ## 边界
 
@@ -41,6 +41,68 @@ pnpm --dir services/im-gateway check
 pnpm --dir services/im-gateway build
 pnpm --dir services/im-gateway test
 ```
+
+## 生产进程与部署
+
+`pnpm start` 从仓库根目录 `.env` 解析配置，自动执行 PostgreSQL migration，装配真实
+`PostgresImUnitOfWork`、Koishi Runtime、SSE Hub 与 `WechatOfficialAdapter`，然后监听设备 API、Action UI、
+`/wechat` 和 `/healthz`。生产进程不使用 `createMockImGateway()`。
+
+复制 [`.env.example`](../../.env.example) 后填入部署值；其中的 `replace-me` 会被生产配置故意拒绝，不能直接启动。
+`DEVICE_TOKEN` 至少 24 字节，
+`ACTION_TOKEN_SECRET` 至少 32 字节；建议额外提供独立的 `IDENTITY_SECRET`，未提供时会从
+`ACTION_TOKEN_SECRET` 按用途派生不同密钥。凭据只从环境变量注入，结构化日志不会记录 Authorization、
+请求体、Action token、动态 URL 或 Secret。
+
+本机先启动 PostgreSQL，再启动进程：
+
+```bash
+docker compose up -d postgres
+pnpm --dir services/im-gateway start
+curl http://127.0.0.1:3000/healthz
+```
+
+完整容器部署要求 `.env` 额外提供 `POSTGRES_PASSWORD`，然后执行：
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+容器内保留 `.env` 的 `DATABASE_URL` 凭据与数据库名，只由 Compose 注入的 `DATABASE_HOST=postgres` 替换
+宿主机地址；`DATABASE_URL` 中的密码必须与 `POSTGRES_PASSWORD` 一致。Gateway 在 PostgreSQL healthcheck
+通过后启动，自身 healthcheck 会持续探测数据库中的渠道账号与 Koishi Bot 运行状态。Compose 默认只把
+Gateway 端口绑定到宿主机 loopback，避免设备 API 绕过公网 HTTPS 入口。
+
+监听器使用 HTTP，公网 HTTPS 必须由宿主机上的 Cloudflare Tunnel 或反向代理终止 TLS。Quick Tunnel 联调可先运行：
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:3000
+```
+
+把生成的 HTTPS 域名写入 `WECHAT_ACTION_UI_BASE_URL`，其路径必须以
+`/voicelife/reminder-actions` 结尾；微信后台 webhook URL 使用同一域名的 `/wechat`。正式环境应使用具名
+Tunnel 或服务器反向代理，以免 Quick Tunnel 重启后域名改变。
+
+生产监听路由包括：
+
+- `POST /v1/im/pairing-sessions` 与 `GET /v1/im/pairing-sessions/:pairingSessionId`
+- `POST /v1/im/schedule-receipts` 与 `POST /v1/im/notifications`
+- `GET /v1/devices/:deviceId/reminder-actions/stream`（SSE）
+- `POST /v1/devices/:deviceId/reminder-actions/:commandId/result`
+- `GET|POST /voicelife/reminder-actions/:token`
+- `GET|POST /wechat` 与 `GET /healthz`
+
+通知受理与 Delivery Outbox 事件在同一 PostgreSQL 事务内提交；常驻 worker 领取事件后派发，并在启动时恢复
+`pending`、`retryable_failed` 与租约已过期的 `sending` Delivery。临时失败按 `availableAt` 延迟重试，HTTP
+进程只负责在事务提交后唤醒 worker，不再承担可能随 202 响应丢失的进程内派发任务。结构化日志用同一个
+`correlationId` 记录设备受理、Delivery 派发、Action 提交与 SSE 下发；异步失败只记录稳定错误码，不回显
+凭据或平台载荷。自动投递最多尝试五次并按 1/2/4/8 分钟退避，耗尽或遇到永久失败后进入死信；目标绑定在
+受理后失效也会保存失败 Attempt，不会留下无法恢复的 `pending` Delivery。
+
+生产微信公众号 Bot 注册在真实 Koishi Context 中；Delivery 通过 `KoishiChannelAdapter` 选择并校验 Bot 后再
+调用微信传输。SSE Hub 同时限制总连接、单设备、单提醒窗口和慢客户端队列，溢出连接依赖 Action Repository
+在重连时回放，HTTP 序列化会等待 socket 背压解除。
 
 跨端 JSON fixture 位于 `contracts/im-gateway/v1/fixtures`，由 C++ 主机测试与 TypeScript 测试共同消费。
 

@@ -10,6 +10,7 @@ import type {
     ExternalIdentityId,
     InboundEventId,
     OperationId,
+    OutboxEventId,
     PairingSessionId,
     ReminderTriggerId,
     UserId,
@@ -483,6 +484,47 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
     public append(event: ImOutboxEvent): Promise<void> {
         this.outboxRows.push(event);
         return Promise.resolve();
+    }
+
+    /** {@inheritDoc OutboxRepository.claimPending} */
+    public claimPending(
+        eventTypes: readonly string[],
+        now: IsoDateTime,
+        leaseUntil: IsoDateTime,
+        limit: number,
+    ): Promise<readonly ImOutboxEvent[]> {
+        const claimed = this.outboxRows
+            .filter(
+                (event) =>
+                    event.status === 'pending' && event.availableAt <= now && eventTypes.includes(event.eventType),
+            )
+            .sort(
+                (left, right) =>
+                    left.availableAt.localeCompare(right.availableAt) || left.createdAt.localeCompare(right.createdAt),
+            )
+            .slice(0, limit)
+            .map((event) => ({ ...event, attempts: event.attempts + 1, availableAt: leaseUntil }));
+        for (const event of claimed) this.replaceOutbox(event);
+        return Promise.resolve(claimed);
+    }
+
+    /** {@inheritDoc OutboxRepository.markPublished} */
+    public markPublished(eventId: OutboxEventId, publishedAt: IsoDateTime): Promise<void> {
+        const event = this.outboxRows.find((candidate) => candidate.id === eventId);
+        if (event !== undefined) this.replaceOutbox({ ...event, status: 'published', publishedAt });
+        return Promise.resolve();
+    }
+
+    /** {@inheritDoc OutboxRepository.markFailed} */
+    public markFailed(eventId: OutboxEventId): Promise<void> {
+        const event = this.outboxRows.find((candidate) => candidate.id === eventId);
+        if (event !== undefined) this.replaceOutbox({ ...event, status: 'failed' });
+        return Promise.resolve();
+    }
+
+    private replaceOutbox(event: ImOutboxEvent): void {
+        const index = this.outboxRows.findIndex((candidate) => candidate.id === event.id);
+        if (index >= 0) this.outboxRows[index] = event;
     }
 }
 

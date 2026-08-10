@@ -34,7 +34,13 @@ function actionUiFixture() {
         },
         inspectPrepared: async (preparedClaims) => {
             calls.push(['inspectPrepared', preparedClaims]);
-            return { actionId: preparedClaims.actionId, actions: ['acknowledge'], expiresAt: preparedClaims.expiresAt };
+            return {
+                state: 'available',
+                actionId: preparedClaims.actionId,
+                actions: ['acknowledge'],
+                options: [{ action: 'acknowledge', label: '知道了' }],
+                expiresAt: preparedClaims.expiresAt,
+            };
         },
         triggerPrepared: async (command) => {
             calls.push(['triggerPrepared', command]);

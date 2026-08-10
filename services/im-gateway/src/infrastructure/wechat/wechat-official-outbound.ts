@@ -138,14 +138,24 @@ export class WechatOfficialOutbound {
         if (message.delivery.channelAccountId !== undefined && message.delivery.channelAccountId !== channelAccountId) {
             return { accepted: false, retryable: false, errorCode: 'wechat_account_mismatch' };
         }
+        const revealedExternalUserId = await this.options.revealExternalUserId(
+            message.conversation.externalConversationIdCiphertext,
+        );
+        return this.sendToUser(revealedExternalUserId, message.content);
+    }
+
+    /**
+     * 发送已由 Koishi Channel Adapter 解密目标并渲染的模板消息。
+     * @param revealedExternalUserId 当前调用使用的微信 OpenID。
+     * @param content 已渲染的微信模板载荷。
+     * @returns 平台即时受理结果。
+     */
+    public async sendToUser(revealedExternalUserId: string, content: JsonValue): Promise<ImSendAcceptance> {
         const payload = parseTemplatePayload(
-            message.content,
+            content,
             this.options.templateId,
             this.options.templateFields,
             this.options.actionUiBaseUrl,
-        );
-        const revealedExternalUserId = await this.options.revealExternalUserId(
-            message.conversation.externalConversationIdCiphertext,
         );
         const externalUserId = revealedExternalUserId.trim();
         if (!/^[A-Za-z0-9_-]{1,128}$/u.test(externalUserId)) {

@@ -182,7 +182,7 @@ export async function runMockNotificationScenario(): Promise<void> {
     }
 
     const actionView = await gateway.actionUiApi.get(actionToken);
-    if (!actionView.actions.includes('snooze')) {
+    if (actionView.state !== 'available' || !actionView.actions.includes('snooze')) {
         throw new Error('Action UI token did not resolve Delivery actions');
     }
     const action = await gateway.actionUiApi.post({

@@ -2,10 +2,11 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createMockImGateway, createPostgresImGateway, mockImGatewayPorts } from '../dist/index.js';
+import { DeliveryOutboxWorker } from '../dist/infrastructure/delivery-outbox-worker.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
 import { PostgresImUnitOfWork } from '../dist/infrastructure/persistence/postgres.js';
 import { IM_TABLES, SCHEMA_VERSION } from '../dist/infrastructure/persistence/postgres/schema.js';
-import { bindFixtureUser, strongIntent } from './helpers.mjs';
+import { bindFixtureUser, strongIntent, weakIntent } from './helpers.mjs';
 import {
     action,
     attempt,
@@ -222,6 +223,28 @@ describe(
             }
         });
 
+        await test('concurrent outbox workers claim a due event exactly once per lease', async () => {
+            const [first, second] = await Promise.all([makePostgresUow(), makePostgresUow()]);
+            try {
+                await first.transaction((context) =>
+                    context.outbox.append(
+                        outboxEvent('outbox-concurrent', {
+                            eventType: 'im.delivery.requested',
+                            aggregateId: 'delivery-1',
+                        }),
+                    ),
+                );
+                const claims = await Promise.all([
+                    first.transaction((context) => context.outbox.claimPending(['im.delivery.requested'], T1, T2, 10)),
+                    second.transaction((context) => context.outbox.claimPending(['im.delivery.requested'], T1, T2, 10)),
+                ]);
+                assert.equal(claims.flat().length, 1);
+                assert.equal(claims.flat()[0].id, 'outbox-concurrent');
+            } finally {
+                await Promise.all([first.close(), second.close()]);
+            }
+        });
+
         await test('a reclaimed claim fences the stale worker out of later writes', async () => {
             const [first, second] = await Promise.all([makePostgresUow(), makePostgresUow()]);
             try {
@@ -417,6 +440,40 @@ describe(
             assert.equal(replay[0].commandId, command.commandId);
             assert.equal(replay[0].operationId, command.operationId);
             await second.close();
+        });
+
+        await test('a fresh delivery worker dispatches an outbox request persisted before restart', async () => {
+            const clock = new FixedClock();
+            const first = await makePostgresUow();
+            const gatewayA = createMockImGateway('device-fixture', clock, { unitOfWork: first });
+            await bindFixtureUser(gatewayA);
+            const submission = await gatewayA.application.notifications.submitNotification(weakIntent());
+            const deliveryId = submission.deliveries[0].deliveryId;
+            await first.close();
+
+            const second = new PostgresImUnitOfWork(POSTGRES_URL);
+            try {
+                const gatewayB = createMockImGateway('device-fixture', clock, { unitOfWork: second });
+                const worker = new DeliveryOutboxWorker({
+                    unitOfWork: second,
+                    dispatch: gatewayB.application.deliveryDispatch,
+                    clock,
+                    logger: { log: () => {} },
+                });
+                assert.equal(await worker.runOnce(), 1);
+                const recovered = await gatewayB.application.deliveries.find(deliveryId);
+                assert.equal(recovered.delivery.status, 'accepted');
+                const outbox = await second.runRaw(
+                    `SELECT status FROM im_outbox_events WHERE aggregate_id = $1 ORDER BY created_at`,
+                    [deliveryId],
+                );
+                assert.deepEqual(
+                    outbox.map((event) => event.status),
+                    ['published'],
+                );
+            } finally {
+                await second.close();
+            }
         });
 
         await test('a restart through the production composition root recovers pending actions', async () => {
