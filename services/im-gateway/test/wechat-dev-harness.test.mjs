@@ -20,7 +20,7 @@ async function withHarness(overrides, work) {
             },
             post: async (request) => {
                 webhookRequests.push({ method: 'POST', request });
-                return 'success';
+                return { body: 'success', contentType: 'text/plain; charset=utf-8' };
             },
         },
         actionUiPageApi: {
@@ -91,6 +91,7 @@ test('WeChat development harness exposes health, webhook and Action UI routes', 
             body: xml,
         });
         assert.equal(webhook.status, 200);
+        assert.equal(webhook.headers.get('content-type'), 'text/plain; charset=utf-8');
         assert.equal(await webhook.text(), 'success');
         assert.equal(webhookRequests[1].method, 'POST');
         assert.deepEqual(

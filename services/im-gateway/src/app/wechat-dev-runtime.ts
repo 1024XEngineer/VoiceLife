@@ -37,6 +37,7 @@ interface WechatDevConfiguration {
         readonly body: string;
         readonly time: string;
     };
+    readonly displayTimeZone: string;
     readonly actionUiBaseUrl: string;
     readonly openId: string;
     readonly deviceId: string;
@@ -66,6 +67,7 @@ export async function startConfiguredWechatDevHarness(
             appSecret: config.appSecret,
             templateId: config.templateId,
             templateFields: config.templateFields,
+            displayTimeZone: config.displayTimeZone,
             actionUiBaseUrl: config.actionUiBaseUrl,
             revealExternalUserId,
             ...(overrides.fetch === undefined ? {} : { fetch: overrides.fetch }),
@@ -178,6 +180,7 @@ function readConfiguration(environment: WechatDevEnvironment): WechatDevConfigur
             body: templateField(environment, 'WECHAT_TEMPLATE_BODY_FIELD'),
             time: templateField(environment, 'WECHAT_TEMPLATE_TIME_FIELD'),
         },
+        displayTimeZone: displayTimeZone(environment),
         actionUiBaseUrl,
         openId: requiredEnvironment(environment, 'WECHAT_TEST_OPENID'),
         deviceId: requiredEnvironment(environment, 'DEVICE_ID'),
@@ -203,6 +206,16 @@ function templateField(environment: WechatDevEnvironment, name: string): string 
     const value = requiredEnvironment(environment, name);
     if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(value)) {
         throw new Error(`${name} must be a valid WeChat template field name`);
+    }
+    return value;
+}
+
+function displayTimeZone(environment: WechatDevEnvironment): string {
+    const value = environment.WECHAT_DISPLAY_TIME_ZONE?.trim() || 'Asia/Shanghai';
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone: value }).format(0);
+    } catch {
+        throw new Error('WECHAT_DISPLAY_TIME_ZONE must be a valid IANA time zone');
     }
     return value;
 }

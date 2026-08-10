@@ -64,6 +64,7 @@ export interface GatewayWechatConfiguration {
         readonly body: string;
         readonly time: string;
     };
+    readonly displayTimeZone: string;
     readonly actionUiBaseUrl: string;
 }
 
@@ -134,6 +135,7 @@ export function readGatewayConfiguration(environment: GatewayEnvironment): Gatew
                 body: templateField(environment, 'WECHAT_TEMPLATE_BODY_FIELD'),
                 time: templateField(environment, 'WECHAT_TEMPLATE_TIME_FIELD'),
             },
+            displayTimeZone: displayTimeZone(environment),
             actionUiBaseUrl,
         },
     };
@@ -169,6 +171,7 @@ export async function startConfiguredGatewayProcess(
                 appSecret: config.wechat.appSecret,
                 templateId: config.wechat.templateId,
                 templateFields: config.wechat.templateFields,
+                displayTimeZone: config.wechat.displayTimeZone,
                 actionUiBaseUrl: config.wechat.actionUiBaseUrl,
                 revealExternalUserId: (ciphertext) => identities.reveal(ciphertext),
             },
@@ -346,6 +349,16 @@ function templateField(environment: GatewayEnvironment, name: string): string {
     const value = requiredEnvironment(environment, name);
     if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(value)) {
         throw new GatewayConfigurationError(`${name} must be a valid WeChat template field name`);
+    }
+    return value;
+}
+
+function displayTimeZone(environment: GatewayEnvironment): string {
+    const value = environment.WECHAT_DISPLAY_TIME_ZONE?.trim() || 'Asia/Shanghai';
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone: value }).format(0);
+    } catch {
+        throw new GatewayConfigurationError('WECHAT_DISPLAY_TIME_ZONE must be a valid IANA time zone');
     }
     return value;
 }
