@@ -19,6 +19,7 @@
 #include "voicelife/audio_esp/esp32s3_audio_probe.h"
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #include "voicelife/audio_esp/esp_multinet_wake_detector.h"
+#include "voicelife/display_esp/ssd1306_status_display.h"
 #include "voicelife/linx/linx_speech_provider.h"
 #include "voicelife/linx/linx_types.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
@@ -237,11 +238,17 @@ class Runtime final {
         auto& registry = voice::SpeechProviderRegistry::Instance();
         if (!init_status_.ok()) return init_status_;
 #ifdef ESP_PLATFORM
+        if (const Status display_status = display_esp::InitializeStatusDisplay(); !display_status.ok()) {
+            ESP_LOGW(kTag, "OLED 状态屏初始化失败: %s", display_status.message.c_str());
+        }
+        (void)display_esp::SetStatus("WIFI");
         if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) return secret_store;
         auto connection = BootstrapLinxOtaConfig();
         if (!connection.ok() || !connection.value.has_value()) {
+            (void)display_esp::SetStatus("ERROR");
             return connection.status;
         }
+        (void)display_esp::SetStatus("LINX");
         linx_config_ = std::move(*connection.value);
         auto result = registry.Create("xrobot-websocket", {});
 #else
@@ -277,6 +284,7 @@ class Runtime final {
 #endif
         const Status session_status = session_->Start(config);
         if (!session_status.ok()) {
+            (void)display_esp::SetStatus("ERROR");
             return session_status;
         }
 
@@ -334,6 +342,7 @@ class Runtime final {
         }
         const Status standby_status = wake_gate_->StartStandby();
         if (!standby_status.ok()) return standby_status;
+        (void)display_esp::SetStatus("LISTEN");
         LogVoiceEvidence({.session_id = session_->config().session_id,
                           .generation = session_->generation(),
                           .event = "standby_ready",
@@ -355,6 +364,7 @@ class Runtime final {
                           .generation = session_ ? session_->generation() : 0,
                           .event = "wake_detected",
                           .detail = {}});
+        (void)display_esp::SetStatus("IDLE");
         WakeRequest request{};
         const std::size_t size =
             wake_word.size() < sizeof(request.wake_word) - 1 ? wake_word.size() : sizeof(request.wake_word) - 1;
@@ -381,6 +391,7 @@ class Runtime final {
             ESP_LOGW(kTag, "本地待机恢复失败: %s", standby_status.message.c_str());
             return;
         }
+        (void)display_esp::SetStatus("IDLE");
         LogVoiceEvidence({.session_id = session_ ? session_->config().session_id : "",
                           .generation = session_ ? session_->generation() : 0,
                           .event = "standby_ready",
@@ -405,6 +416,7 @@ class Runtime final {
                 RestoreStandby();
                 continue;
             }
+            (void)display_esp::SetStatus("LISTEN");
             const Status capture = session_->BeginCapture();
             if (!capture.ok()) {
                 ESP_LOGW(kTag, "唤醒后开始采集失败: %s", capture.message.c_str());
@@ -418,6 +430,7 @@ class Runtime final {
         // only lifecycle names and numeric counters needed for board review.
         if (evidence.event == "capture_started") {
             capture_started_us_.store(esp_timer_get_time());
+            (void)display_esp::SetStatus("LISTEN");
         }
         const int64_t started_at = capture_started_us_.load();
         const int64_t now = esp_timer_get_time();
@@ -437,8 +450,14 @@ class Runtime final {
             capture_started_us_.store(0);
         }
         if (evidence.event == "tts_stopped" || evidence.event == "tts_aborted") {
+            (void)display_esp::SetStatus("IDLE");
             QueueStandbyRecovery();
         }
+        if (evidence.event == "stt_text_received" || evidence.event == "tool_call_received") {
+            (void)display_esp::SetStatus("THINK");
+        }
+        if (evidence.event == "tts_started") (void)display_esp::SetStatus("SPEAK");
+        if (evidence.event == "provider_error") (void)display_esp::SetStatus("ERROR");
         if (evidence.event == "transport_disconnected") QueueStandbyRecovery();
     }
 
