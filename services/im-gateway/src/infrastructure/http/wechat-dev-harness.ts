@@ -98,7 +98,7 @@ async function routeRequest(
         if (method === 'POST') {
             const body = await readBody(request, WECHAT_BODY_LIMIT);
             const result = await options.webhookApi.post({ ...webhookRequest(url), body });
-            writeText(response, 200, result);
+            writeWechatWebhookResponse(response, result);
             return;
         }
         writeMethodNotAllowed(response, 'GET, POST');
@@ -239,6 +239,21 @@ function writeText(response: ServerResponse, status: number, body: string): void
         'x-content-type-options': 'nosniff',
     });
     response.end(body);
+}
+
+function writeWechatWebhookResponse(
+    response: ServerResponse,
+    result: {
+        readonly body: string;
+        readonly contentType: 'application/xml; charset=utf-8' | 'text/plain; charset=utf-8';
+    },
+): void {
+    response.writeHead(200, {
+        'content-type': result.contentType,
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+    });
+    response.end(result.body);
 }
 
 function writeUnauthorized(response: ServerResponse): void {

@@ -20,6 +20,31 @@ export class PostgresIdentityRepository implements IdentityRepository {
     /** @param executor 事务客户端或连接池。 */
     public constructor(private readonly executor: SqlExecutor) {}
 
+    /** {@inheritDoc IdentityRepository.createIfAbsent} */
+    public async createIfAbsent(identity: ExternalIdentity): Promise<ExternalIdentity> {
+        const row = await queryOne(
+            this.executor,
+            `INSERT INTO im_external_identities (${IDENTITY_COLUMNS.join(', ')})
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (channel_account_id, external_user_id_hash) DO NOTHING
+             RETURNING *`,
+            [
+                identity.id,
+                identity.channelAccountId,
+                identity.externalUserIdCiphertext,
+                identity.externalUserIdHash,
+                identity.displayName ?? null,
+                identity.status,
+                identity.createdAt,
+                identity.updatedAt,
+            ],
+        );
+        if (row !== undefined) return mapExternalIdentity(row);
+        const existing = await this.findByChannelAndHash(identity.channelAccountId, identity.externalUserIdHash);
+        if (existing === undefined) throw new Error('External identity conflict did not expose an existing row');
+        return existing;
+    }
+
     /** {@inheritDoc IdentityRepository.findById} */
     public async findById(id: ExternalIdentityId): Promise<ExternalIdentity | undefined> {
         const row = await queryOne(this.executor, 'SELECT * FROM im_external_identities WHERE id = $1', [id]);

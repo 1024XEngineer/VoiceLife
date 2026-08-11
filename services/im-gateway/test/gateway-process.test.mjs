@@ -82,7 +82,7 @@ function fakeRuntime(events) {
         },
         wechatApi: {
             verify: (input) => input.echostr,
-            post: async () => 'success',
+            post: async () => ({ body: 'success', contentType: 'text/plain; charset=utf-8' }),
         },
         application: {
             deliveryDispatch: {
@@ -118,6 +118,7 @@ test('production configuration requires every secret without exposing its value'
     assert.equal(config.host, '127.0.0.1');
     assert.equal(config.port, 3000);
     assert.equal(config.wechat.channelAccountId, 'wechat-production');
+    assert.equal(config.wechat.displayTimeZone, 'Asia/Shanghai');
     assert.equal(
         new URL(readGatewayConfiguration(fixtureEnvironment({ DATABASE_HOST: 'postgres' })).databaseUrl).hostname,
         'postgres',
@@ -126,6 +127,10 @@ test('production configuration requires every secret without exposing its value'
     assert.throws(
         () => readGatewayConfiguration(fixtureEnvironment({ WECHAT_APP_SECRET: '' })),
         /WECHAT_APP_SECRET is required/u,
+    );
+    assert.throws(
+        () => readGatewayConfiguration(fixtureEnvironment({ WECHAT_DISPLAY_TIME_ZONE: 'not/a-time-zone' })),
+        /WECHAT_DISPLAY_TIME_ZONE must be a valid IANA time zone/u,
     );
     assert.throws(
         () => readGatewayConfiguration(fixtureEnvironment({ ACTION_TOKEN_SECRET: 'too-short' })),
@@ -317,6 +322,7 @@ test('production server mounts health, device, Action UI and webhook routes', as
             body: '<xml/>',
         });
         assert.equal(webhookPost.status, 200);
+        assert.equal(webhookPost.headers.get('content-type'), 'text/plain; charset=utf-8');
         assert.equal(await webhookPost.text(), 'success');
     });
 });

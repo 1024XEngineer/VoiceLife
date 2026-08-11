@@ -26,7 +26,7 @@ const MAX_MESSAGE_ID_LENGTH = 64;
 const MAX_STATUS_LENGTH = 64;
 const TEXT_ENCODER = new TextEncoder();
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
-const BINDING_CODE = /^(?:绑定|bind)\s*[:：]?\s*([0-9]{4,12})$/iu;
+const BINDING_CODE = /^(?:绑定|bind)\s*[:：]?\s*([0-9]{6})$/iu;
 const XML_PARSER = new XMLParser({
     ignoreAttributes: true,
     parseTagValue: false,
@@ -250,6 +250,21 @@ export class WechatOfficialAdapter
             };
         }
         throw new ImGatewayError('invalid_contract', 'WeChat message type is invalid');
+    }
+
+    /**
+     * 为已验证的微信用户构造被动文本回复 XML。
+     * @param externalUserId 收到 Webhook 的微信 OpenID。
+     * @param content 要回复给用户的文本。
+     * @returns 可直接写回微信 Webhook 的明文 XML。
+     */
+    public renderPassiveTextReply(externalUserId: string, content: string): string {
+        const recipient = externalUserId.trim();
+        const text = content.trim();
+        if (!/^[A-Za-z0-9_-]{1,128}$/u.test(recipient) || text === '' || text.length > 2048) {
+            throw new ImGatewayError('invalid_contract', 'WeChat passive text reply is invalid');
+        }
+        return `<xml><ToUserName><![CDATA[${cdata(recipient)}]]></ToUserName><FromUserName><![CDATA[${cdata(this.expectedToUserName)}]]></FromUserName><CreateTime>${String(this.now())}</CreateTime><MsgType><![CDATA[text]]></MsgType><Content><![CDATA[${cdata(text)}]]></Content></xml>`;
     }
 
     private eventId(externalEventId: string): NormalizedImEvent['id'] {
@@ -554,6 +569,10 @@ function eventTime(createTime: string | undefined, requestTimestamp: string | un
         throw new ImGatewayError('invalid_contract', 'WeChat event timestamp is invalid');
     }
     return date.toISOString() as IsoDateTime;
+}
+
+function cdata(value: string): string {
+    return value.replaceAll(']]>', ']]]]><![CDATA[>');
 }
 
 function stableEventId(kind: string, fields: Record<string, string>): string {

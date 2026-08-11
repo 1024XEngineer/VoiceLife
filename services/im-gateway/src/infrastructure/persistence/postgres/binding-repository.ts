@@ -21,6 +21,43 @@ export class PostgresBindingRepository implements BindingRepository {
     /** @param executor 事务客户端或连接池。 */
     public constructor(private readonly executor: SqlExecutor) {}
 
+    /** {@inheritDoc BindingRepository.createActiveIfAbsent} */
+    public async createActiveIfAbsent(binding: ImBinding): Promise<ImBinding> {
+        if (binding.status !== 'active' || binding.deviceId === undefined) {
+            throw new Error('Active idempotent binding creation requires an active binding with a device');
+        }
+        const row = await queryOne(
+            this.executor,
+            `INSERT INTO im_bindings (${BINDING_COLUMNS.join(', ')})
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (user_id, device_id, external_identity_id)
+             WHERE status = 'active' AND device_id IS NOT NULL
+             DO NOTHING
+             RETURNING *`,
+            [
+                binding.id,
+                binding.userId,
+                binding.deviceId,
+                binding.externalIdentityId,
+                binding.priority,
+                binding.status,
+                binding.boundAt,
+                binding.unboundAt ?? null,
+                binding.revokedAt ?? null,
+            ],
+        );
+        if (row !== undefined) return mapBinding(row);
+        const { rows } = await this.executor.query(
+            `SELECT * FROM im_bindings
+             WHERE user_id = $1 AND device_id = $2 AND external_identity_id = $3 AND status = 'active'
+             LIMIT 1`,
+            [binding.userId, binding.deviceId, binding.externalIdentityId],
+        );
+        const existing = rows[0];
+        if (existing === undefined) throw new Error('Binding conflict did not expose an existing row');
+        return mapBinding(existing);
+    }
+
     /** {@inheritDoc BindingRepository.findById} */
     public async findById(id: BindingId): Promise<ImBinding | undefined> {
         const row = await queryOne(this.executor, 'SELECT * FROM im_bindings WHERE id = $1', [id]);

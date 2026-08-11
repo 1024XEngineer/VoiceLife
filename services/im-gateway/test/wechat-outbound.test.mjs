@@ -92,7 +92,7 @@ test('configured WeChat outbound advertises template + H5 fallback and renders a
         data: {
             thing1: { value: 'Fixture reminder' },
             thing2: { value: '' },
-            time3: { value: '2026-08-03T00:00:00.000Z' },
+            time3: { value: '2026年8月3日 08:00' },
         },
         url: 'https://gateway.example/voicelife/reminder-actions/opaque%2Ftoken.value',
     });
@@ -114,12 +114,25 @@ test('WeChat outbound rejects invalid deployment configuration before making a r
         { templateFields: { title: 'same', body: 'same', time: 'time3' } },
         { requestTimeoutMs: 0 },
         { requestTimeoutMs: 10_001 },
+        { displayTimeZone: 'not/a-time-zone' },
     ]) {
         assert.throws(
             () => outboundAdapter(fetchImpl, override),
             (error) => error.code === 'invalid_contract',
         );
     }
+});
+
+test('renders template times in the configured IANA time zone', async () => {
+    const adapter = outboundAdapter(
+        async () => {
+            throw new Error('fetch is not expected while rendering');
+        },
+        { displayTimeZone: 'America/New_York' },
+    );
+
+    const rendered = await adapter.renderNotification(strongIntent(), { actionToken: 'opaque-token' });
+    assert.equal(rendered.data.time3.value, '2026年8月2日 20:00');
 });
 
 test('WeChat outbound rejects unsafe base URLs and template fields', () => {
@@ -179,7 +192,7 @@ test('WeChat outbound validates delivery scope and payload shape before network 
         data: {
             thing1: { value: '日程已更新' },
             thing2: { value: 'created a schedule' },
-            time3: { value: '2026-08-03T00:00:00.000Z' },
+            time3: { value: '2026年8月3日 08:00' },
         },
     });
     for (const delivery of [

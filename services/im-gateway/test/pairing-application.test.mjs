@@ -44,6 +44,28 @@ test('create preserves platform restrictions and a custom expiry', async () => {
     assert.equal(created.session.expiresAt, clock.addMinutes(clock.now(), 3));
 });
 
+test('create retries when an issued display code collides with a pending session', async () => {
+    const issued = [
+        { displayCode: '111111', hash: 'hash:111111' },
+        { displayCode: '111111', hash: 'hash:111111' },
+        { displayCode: '222222', hash: 'hash:222222' },
+    ];
+    let issueCount = 0;
+    const { gateway } = buildGateway({
+        pairingCodes: {
+            issue: async () => issued[issueCount++],
+            hash: async (displayCode) => `hash:${displayCode}`,
+        },
+    });
+
+    const first = await gateway.application.pairing.create({ userId: 'user-a', deviceId: 'device-a' });
+    const second = await gateway.application.pairing.create({ userId: 'user-b', deviceId: 'device-b' });
+
+    assert.equal(first.displayCode, '111111');
+    assert.equal(second.displayCode, '222222');
+    assert.equal(issueCount, 3);
+});
+
 test('create rejects a pairing lifetime outside the one-to-ten-minute contract', async () => {
     const { gateway } = buildGateway();
 
@@ -92,7 +114,7 @@ test('anonymous pairing requires and accepts a user during confirmation', async 
                 channelAccountId: channel.id,
                 externalUserId: 'open-fixture',
             }),
-        'binding_not_found',
+        'invalid_contract',
         'Anonymous pairing without a confirmation user was accepted',
     );
 
@@ -194,7 +216,7 @@ test('confirm does not reactivate a revoked external identity implicitly', async
                 channelAccountId: channel.id,
                 externalUserId: 'open-fixture',
             }),
-        'binding_not_found',
+        'invalid_transition',
         'Pairing implicitly reactivated a revoked external identity',
     );
 });
@@ -215,7 +237,7 @@ test('cancel and expiry make a pairing code unusable', async () => {
                 channelAccountId: channel.id,
                 externalUserId: 'open-cancelled',
             }),
-        'binding_not_found',
+        'pairing_code_invalid',
         'A cancelled pairing code was accepted',
     );
 
@@ -237,7 +259,7 @@ test('cancel and expiry make a pairing code unusable', async () => {
                 channelAccountId: expiryChannel.id,
                 externalUserId: 'open-expired',
             }),
-        'binding_not_found',
+        'pairing_code_invalid',
         'An expired pairing code was accepted',
     );
 });

@@ -232,9 +232,8 @@ async function routeRequest(
             return;
         }
         if (method === 'POST') {
-            writeText(
+            writeWechatWebhookResponse(
                 response,
-                200,
                 await webhookApi.post({ ...webhookRequest(url), body: await readBody(request, WECHAT_BODY_LIMIT) }),
             );
             return;
@@ -373,6 +372,17 @@ function writeJson(response: ServerResponse, status: number, value: unknown): vo
 function writeText(response: ServerResponse, status: number, body: string): void {
     response.writeHead(status, responseHeaders('text/plain; charset=utf-8'));
     response.end(body);
+}
+
+function writeWechatWebhookResponse(
+    response: ServerResponse,
+    result: {
+        readonly body: string;
+        readonly contentType: 'application/xml; charset=utf-8' | 'text/plain; charset=utf-8';
+    },
+): void {
+    response.writeHead(200, responseHeaders(result.contentType));
+    response.end(result.body);
 }
 
 function responseHeaders(contentType: string): Record<string, string> {

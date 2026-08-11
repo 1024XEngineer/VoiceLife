@@ -72,6 +72,30 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         return work(this);
     }
 
+    /** {@inheritDoc PairingSessionRepository.createPendingIfAbsent} */
+    public createPendingIfAbsent(session: PairingSession): Promise<boolean> {
+        const exists = [...this.pairingRows.values()].some(
+            (candidate) => candidate.status === 'pending' && candidate.displayCodeHash === session.displayCodeHash,
+        );
+        if (exists) return Promise.resolve(false);
+        this.pairingRows.set(session.id, session);
+        return Promise.resolve(true);
+    }
+
+    /** {@inheritDoc BindingRepository.createActiveIfAbsent} */
+    public createActiveIfAbsent(binding: ImBinding): Promise<ImBinding> {
+        const existing = [...this.bindingRows.values()].find(
+            (candidate) =>
+                candidate.status === 'active' &&
+                candidate.userId === binding.userId &&
+                candidate.deviceId === binding.deviceId &&
+                candidate.externalIdentityId === binding.externalIdentityId,
+        );
+        if (existing !== undefined) return Promise.resolve(existing);
+        this.bindingRows.set(binding.id, binding);
+        return Promise.resolve(binding);
+    }
+
     /** {@inheritDoc ChannelAccountRepository.save} */
     public save(value: ChannelAccount): Promise<void>;
     /** {@inheritDoc PairingSessionRepository.save} */
@@ -115,18 +139,31 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
     public createIfAbsent(
         record: IntentSubmissionRecord,
     ): Promise<{ created: boolean; record: IntentSubmissionRecord }>;
+    /** {@inheritDoc IdentityRepository.createIfAbsent} */
+    public createIfAbsent(identity: ExternalIdentity): Promise<ExternalIdentity>;
     /**
      * 按业务键幂等创建投递或受理记录；同键已存在时保留首条。
      * @param value 待创建的投递或受理记录。
      * @returns 投递：权威标识与是否新建；受理记录：是否新建与当前权威记录。
      */
     public createIfAbsent(
-        value: Delivery | IntentSubmissionRecord | ImAction,
+        value: Delivery | IntentSubmissionRecord | ImAction | ExternalIdentity,
     ): Promise<
         | { readonly action: ImAction; readonly created: boolean }
         | { id: DeliveryId; created: boolean }
         | { created: boolean; record: IntentSubmissionRecord }
+        | ExternalIdentity
     > {
+        if ('externalUserIdCiphertext' in value) {
+            const existing = [...this.identityRows.values()].find(
+                (candidate) =>
+                    candidate.channelAccountId === value.channelAccountId &&
+                    candidate.externalUserIdHash === value.externalUserIdHash,
+            );
+            if (existing !== undefined) return Promise.resolve(existing);
+            this.identityRows.set(value.id, value);
+            return Promise.resolve(value);
+        }
         if ('actionKeyHash' in value) {
             const existing =
                 this.actionRows.get(value.id) ??
@@ -253,6 +290,11 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
                 (session) => session.displayCodeHash === hash && session.status === 'pending',
             ),
         );
+    }
+
+    /** {@inheritDoc PairingSessionRepository.lockPendingByDisplayCodeHash} */
+    public lockPendingByDisplayCodeHash(hash: string): Promise<PairingSession | undefined> {
+        return this.findPendingByDisplayCodeHash(hash);
     }
 
     /** {@inheritDoc PairingSessionRepository.findExpiredPairingSessions} */

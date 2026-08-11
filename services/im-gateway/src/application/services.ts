@@ -76,6 +76,7 @@ import type {
 
 const DEFAULT_ACTION_WINDOW_MINUTES = 10;
 const DEFAULT_PAIRING_WINDOW_MINUTES = 10;
+const MAX_PAIRING_CODE_ISSUE_ATTEMPTS = 8;
 const MAX_AUTOMATIC_DELIVERY_ATTEMPTS = 5;
 const MAX_DELIVERY_RETRY_DELAY_MINUTES = 30;
 
@@ -178,20 +179,24 @@ export class DefaultPairingApplication implements PairingApplication {
                 `Pairing expiry must be an integer from ${MIN_PAIRING_SESSION_MINUTES} to ${MAX_PAIRING_SESSION_MINUTES} minutes`,
             );
         }
-        const code = await this.pairingCodes.issue();
-        const now = this.clock.now();
-        const session: PairingSession = {
-            id: this.ids.nextPairingSessionId(),
-            displayCodeHash: code.hash,
-            ...(command.userId === undefined ? {} : { userId: command.userId }),
-            deviceId: command.deviceId,
-            ...(command.allowedPlatforms === undefined ? {} : { allowedPlatforms: command.allowedPlatforms }),
-            status: 'pending',
-            expiresAt: this.clock.addMinutes(now, command.expiresInMinutes ?? DEFAULT_PAIRING_WINDOW_MINUTES),
-            createdAt: now,
-        };
-        await this.unitOfWork.transaction((tx) => tx.pairingSessions.save(session));
-        return { session, displayCode: code.displayCode };
+        for (let attempt = 0; attempt < MAX_PAIRING_CODE_ISSUE_ATTEMPTS; attempt++) {
+            const code = await this.pairingCodes.issue();
+            const now = this.clock.now();
+            const session: PairingSession = {
+                id: this.ids.nextPairingSessionId(),
+                displayCodeHash: code.hash,
+                ...(command.userId === undefined ? {} : { userId: command.userId }),
+                deviceId: command.deviceId,
+                ...(command.allowedPlatforms === undefined ? {} : { allowedPlatforms: command.allowedPlatforms }),
+                status: 'pending',
+                expiresAt: this.clock.addMinutes(now, command.expiresInMinutes ?? DEFAULT_PAIRING_WINDOW_MINUTES),
+                createdAt: now,
+            };
+            if (await this.unitOfWork.transaction((tx) => tx.pairingSessions.createPendingIfAbsent(session))) {
+                return { session, displayCode: code.displayCode };
+            }
+        }
+        throw new ImGatewayError('resource_exhausted', 'Could not issue a unique pairing code', true);
     }
 
     /** {@inheritDoc PairingApplication.find} */
@@ -206,9 +211,9 @@ export class DefaultPairingApplication implements PairingApplication {
         const codeHash = await this.pairingCodes.hash(command.displayCode);
         const protectedIdentity = await this.identityProtector.protect(command.externalUserId);
         return this.unitOfWork.transaction(async (tx) => {
-            const session = await tx.pairingSessions.findPendingByDisplayCodeHash(codeHash);
+            const session = await tx.pairingSessions.lockPendingByDisplayCodeHash(codeHash);
             if (session === undefined || session.expiresAt <= this.clock.now()) {
-                throw new ImGatewayError('binding_not_found', 'Pairing session is invalid');
+                throw new ImGatewayError('pairing_code_invalid', 'Pairing session is invalid or expired');
             }
             const account = await tx.channelAccounts.findById(command.channelAccountId);
             if (account === undefined || account.status !== 'active') {
@@ -226,16 +231,13 @@ export class DefaultPairingApplication implements PairingApplication {
             }
             const userId = session.userId ?? command.userId;
             if (userId === undefined) {
-                throw new ImGatewayError('binding_not_found', 'Pairing confirmation requires an internal userId');
+                throw new ImGatewayError('invalid_contract', 'Pairing confirmation requires an internal userId');
             }
 
-            let identity = await tx.identities.findByChannelAndHash(account.id, protectedIdentity.hash);
             const now = this.clock.now();
-            if (identity !== undefined && identity.status !== 'active') {
-                throw new ImGatewayError('binding_not_found', 'External identity is not active');
-            }
+            let identity = await tx.identities.findByChannelAndHash(account.id, protectedIdentity.hash);
             if (identity === undefined) {
-                identity = {
+                identity = await tx.identities.createIfAbsent({
                     id: this.ids.nextExternalIdentityId(),
                     channelAccountId: account.id,
                     externalUserIdCiphertext: protectedIdentity.ciphertext,
@@ -244,11 +246,13 @@ export class DefaultPairingApplication implements PairingApplication {
                     status: 'active',
                     createdAt: now,
                     updatedAt: now,
-                };
-                await tx.identities.save(identity);
+                });
+            }
+            if (identity.status !== 'active') {
+                throw new ImGatewayError('invalid_transition', 'External identity is not active');
             }
 
-            const binding: ImBinding = {
+            const binding = await tx.bindings.createActiveIfAbsent({
                 id: this.ids.nextBindingId(),
                 userId,
                 deviceId: session.deviceId,
@@ -256,8 +260,7 @@ export class DefaultPairingApplication implements PairingApplication {
                 priority: 100,
                 status: 'active',
                 boundAt: now,
-            };
-            await tx.bindings.save(binding);
+            });
             await tx.pairingSessions.save({
                 ...session,
                 status: 'confirmed',
@@ -361,7 +364,7 @@ export class DefaultInboundEventApplication implements InboundEventApplication {
                 await tx.inboundEvents.save({
                     ...duplicate,
                     id: event.id,
-                    payload: event.payload as unknown as JsonValue,
+                    payload: persistedInboundPayload(event),
                     status: 'received',
                     occurredAt: event.occurredAt,
                     receivedAt: this.clock.now(),
@@ -373,7 +376,7 @@ export class DefaultInboundEventApplication implements InboundEventApplication {
                 channelAccountId: event.channelAccountId,
                 externalEventId: event.externalEventId,
                 eventType: toInboundEventType(event.type),
-                payload: event.payload as unknown as JsonValue,
+                payload: persistedInboundPayload(event),
                 status: 'received',
                 occurredAt: event.occurredAt,
                 receivedAt: this.clock.now(),
@@ -409,6 +412,22 @@ export class DefaultInboundEventApplication implements InboundEventApplication {
             await tx.inboundEvents.save({ ...event, status });
         });
     }
+}
+
+function persistedInboundPayload(event: NormalizedImEvent): JsonValue {
+    if (event.type === 'binding.requested') return { kind: 'binding_requested' };
+    if (event.type === 'message.received') {
+        const payload = event.payload;
+        if (typeof payload !== 'object' || payload === null || Array.isArray(payload))
+            return { kind: 'message_received' };
+        const value = payload as Record<string, JsonValue>;
+        return {
+            kind: 'message_received',
+            ...(typeof value.messageType === 'string' ? { messageType: value.messageType } : {}),
+            ...(typeof value.event === 'string' ? { event: value.event } : {}),
+        };
+    }
+    return event.payload as JsonValue;
 }
 
 /** 将平台事件路由至绑定、回执或动作流程的默认实现。 */

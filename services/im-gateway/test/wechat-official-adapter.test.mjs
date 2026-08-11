@@ -352,6 +352,22 @@ test('normalizes a binding code message without leaking WeChat fields', async ()
     });
 });
 
+test('only accepts the documented six-digit binding code format', async () => {
+    for (const content of ['绑定 12345', '绑定 1234567', '绑定 ABC123', '绑定 123456 额外文字']) {
+        const xml = `
+          <xml>
+            <ToUserName>gh_fixture</ToUserName>
+            <FromUserName>open_bind</FromUserName>
+            <CreateTime>1722643200</CreateTime>
+            <MsgType>text</MsgType>
+            <Content><![CDATA[${content}]]></Content>
+            <MsgId>10003</MsgId>
+          </xml>`;
+        const event = await adapter().normalizeInbound(request(xml));
+        assert.equal(event.type, 'message.received', `Unexpected binding format accepted: ${content}`);
+    }
+});
+
 test('normalizes template delivery callbacks and deduplicates them by platform event', async () => {
     const xml = `
       <xml>

@@ -3,6 +3,7 @@ export type ImGatewayErrorCode =
     | 'unauthorized'
     | 'invalid_contract'
     | 'idempotency_conflict'
+    | 'pairing_code_invalid'
     | 'binding_not_found'
     | 'delivery_not_found'
     | 'action_not_found'

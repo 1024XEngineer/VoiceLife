@@ -45,8 +45,12 @@ export async function sharedRepositoryContractSuite(makeUow) {
                 await ctx.pairingSessions.save(
                     pairingSession('pairing-confirmed', { status: 'confirmed', displayCodeHash: 'hash-confirmed' }),
                 );
-                await ctx.pairingSessions.save(pairingSession('pairing-future', { expiresAt: T2 }));
-                await ctx.pairingSessions.save(pairingSession('pairing-expired', { expiresAt: T0 }));
+                await ctx.pairingSessions.save(
+                    pairingSession('pairing-future', { displayCodeHash: 'hash-future', expiresAt: T2 }),
+                );
+                await ctx.pairingSessions.save(
+                    pairingSession('pairing-expired', { displayCodeHash: 'hash-expired', expiresAt: T0 }),
+                );
             });
             const found = await uow.transaction((ctx) => ctx.pairingSessions.findById('pairing-1'));
             assert.deepEqual(found, pairingSession());
@@ -60,6 +64,18 @@ export async function sharedRepositoryContractSuite(makeUow) {
             assert.equal(notPending, undefined);
             const expired = await uow.transaction((ctx) => ctx.pairingSessions.findExpiredPairingSessions(T2));
             assert.deepEqual([...expired.map((session) => session.id)].sort(), ['pairing-expired', 'pairing-future']);
+        });
+    });
+
+    await test('pairing sessions atomically reserve a pending display-code hash', async () => {
+        await withUow(makeUow, async (uow) => {
+            const [first, second] = await Promise.all([
+                uow.transaction((ctx) => ctx.pairingSessions.createPendingIfAbsent(pairingSession('pairing-a'))),
+                uow.transaction((ctx) => ctx.pairingSessions.createPendingIfAbsent(pairingSession('pairing-b'))),
+            ]);
+            assert.equal([first, second].filter(Boolean).length, 1);
+            const found = await uow.transaction((ctx) => ctx.pairingSessions.findPendingByDisplayCodeHash('hash-1234'));
+            assert.equal(found.id, first ? 'pairing-a' : 'pairing-b');
         });
     });
 

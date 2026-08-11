@@ -22,6 +22,29 @@ export class PostgresPairingSessionRepository implements PairingSessionRepositor
     /** @param executor 事务客户端或连接池。 */
     public constructor(private readonly executor: SqlExecutor) {}
 
+    /** {@inheritDoc PairingSessionRepository.createPendingIfAbsent} */
+    public async createPendingIfAbsent(session: PairingSession): Promise<boolean> {
+        const row = await queryOne(
+            this.executor,
+            `INSERT INTO im_pairing_sessions (${PAIRING_COLUMNS.join(', ')})
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT DO NOTHING
+             RETURNING id`,
+            [
+                session.id,
+                session.displayCodeHash,
+                session.userId ?? null,
+                session.deviceId,
+                toJson(session.allowedPlatforms),
+                session.status,
+                session.expiresAt,
+                session.createdAt,
+                session.confirmedAt ?? null,
+            ],
+        );
+        return row !== undefined;
+    }
+
     /** {@inheritDoc PairingSessionRepository.findById} */
     public async findById(id: PairingSessionId): Promise<PairingSession | undefined> {
         const row = await queryOne(this.executor, 'SELECT * FROM im_pairing_sessions WHERE id = $1', [id]);
@@ -33,6 +56,18 @@ export class PostgresPairingSessionRepository implements PairingSessionRepositor
         const row = await queryOne(
             this.executor,
             'SELECT * FROM im_pairing_sessions WHERE display_code_hash = $1 AND status = $2 ORDER BY created_at ASC, id ASC LIMIT 1',
+            [hash, 'pending'],
+        );
+        return row === undefined ? undefined : mapPairingSession(row);
+    }
+
+    /** {@inheritDoc PairingSessionRepository.lockPendingByDisplayCodeHash} */
+    public async lockPendingByDisplayCodeHash(hash: string): Promise<PairingSession | undefined> {
+        const row = await queryOne(
+            this.executor,
+            `SELECT * FROM im_pairing_sessions
+             WHERE display_code_hash = $1 AND status = $2
+             FOR UPDATE`,
             [hash, 'pending'],
         );
         return row === undefined ? undefined : mapPairingSession(row);

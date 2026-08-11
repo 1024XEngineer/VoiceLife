@@ -26,6 +26,8 @@ export interface WechatOfficialOutboundOptions {
     readonly appSecret: string;
     readonly templateId: string;
     readonly templateFields: WechatTemplateFields;
+    /** 模板中展示时间使用的 IANA 时区；默认 Asia/Shanghai。 */
+    readonly displayTimeZone?: string;
     readonly actionUiBaseUrl: string;
     /** 将持久化的受保护外部身份还原为微信 openid；实现不得记录明文。 */
     readonly revealExternalUserId: (ciphertext: string) => Promise<string>;
@@ -35,7 +37,8 @@ export interface WechatOfficialOutboundOptions {
     readonly requestTimeoutMs?: number;
 }
 
-interface NormalizedWechatOutboundOptions extends Omit<WechatOfficialOutboundOptions, 'fetch'> {
+interface NormalizedWechatOutboundOptions extends Omit<WechatOfficialOutboundOptions, 'fetch' | 'displayTimeZone'> {
+    readonly displayTimeZone: string;
     readonly fetch: typeof fetch;
     readonly requestTimeoutMs: number;
 }
@@ -79,7 +82,11 @@ export class WechatOfficialOutbound {
      * @returns 微信模板消息载荷。
      */
     public renderScheduleReceipt(intent: ScheduleReceiptIntent): JsonValue {
-        return this.templatePayload({ title: '日程已更新', body: intent.summary, time: intent.occurredAt });
+        return this.templatePayload({
+            title: '日程已更新',
+            body: intent.summary,
+            time: formatTemplateTime(intent.occurredAt, this.options.displayTimeZone),
+        });
     }
 
     /**
@@ -93,7 +100,11 @@ export class WechatOfficialOutbound {
             throw new ImGatewayError('invalid_contract', 'Strong WeChat reminders require an Action UI token');
         }
         return this.templatePayload(
-            { title: intent.content.title, body: intent.content.body ?? '', time: intent.triggerAt },
+            {
+                title: intent.content.title,
+                body: intent.content.body ?? '',
+                time: formatTemplateTime(intent.triggerAt, this.options.displayTimeZone),
+            },
             actionToken,
         );
     }
@@ -312,6 +323,7 @@ function normalizeOptions(options: WechatOfficialOutboundOptions): NormalizedWec
     if (new Set(Object.values(fields)).size !== 3) {
         throw new ImGatewayError('invalid_contract', 'WeChat template fields must be distinct');
     }
+    const displayTimeZone = normalizeDisplayTimeZone(options.displayTimeZone);
     let actionUiUrl: URL;
     try {
         actionUiUrl = new URL(options.actionUiBaseUrl);
@@ -340,11 +352,37 @@ function normalizeOptions(options: WechatOfficialOutboundOptions): NormalizedWec
         appSecret,
         templateId,
         templateFields: fields,
+        displayTimeZone,
         actionUiBaseUrl: actionUiUrl.toString().replace(/\/$/u, ''),
         revealExternalUserId: options.revealExternalUserId,
         fetch: fetchImpl,
         requestTimeoutMs,
     };
+}
+
+function normalizeDisplayTimeZone(value: string | undefined): string {
+    const timeZone = value?.trim() || 'Asia/Shanghai';
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone }).format(0);
+    } catch {
+        throw new ImGatewayError('invalid_contract', 'WeChat display time zone is invalid');
+    }
+    return timeZone;
+}
+
+function formatTemplateTime(value: string, timeZone: string): string {
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).formatToParts(new Date(value));
+    const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find((item) => item.type === type)?.value ?? '';
+    const datePart = (type: 'year' | 'month' | 'day'): string => String(Number(part(type)));
+    return `${datePart('year')}年${datePart('month')}月${datePart('day')}日 ${part('hour')}:${part('minute')}`;
 }
 
 function templateField(value: string): string {

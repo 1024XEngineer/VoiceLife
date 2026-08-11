@@ -318,7 +318,7 @@ describe(
             // 模拟 v1 库：移除 claim 列并回退版本行
             await uow.runRaw('ALTER TABLE im_deliveries DROP COLUMN claimed_at');
             await uow.runRaw('ALTER TABLE im_deliveries DROP COLUMN claim_token');
-            await uow.runRaw(`DELETE FROM im_schema_migrations WHERE version >= ${SCHEMA_VERSION}`);
+            await uow.runRaw('DELETE FROM im_schema_migrations WHERE version >= 2');
             await uow.runRaw(
                 `INSERT INTO im_deliveries (
                     id, business_event_id, correlation_id, binding_id, channel_account_id, kind,
@@ -345,6 +345,98 @@ describe(
             assert.equal(reclaimed.status, 'sending');
             assert.equal(reclaimed.claimedAt, T2);
             assert.notEqual(reclaimed.claimToken, undefined);
+            await uow.close();
+        });
+
+        await test('migration keeps the latest duplicate active binding and prevents it from recurring', async () => {
+            const uow = new PostgresImUnitOfWork(POSTGRES_URL);
+            await uow.migrate();
+            await uow.truncateAll();
+            await uow.runRaw('DROP INDEX IF EXISTS im_bindings_active_user_device_identity_uq');
+            await uow.runRaw('DELETE FROM im_schema_migrations WHERE version >= 3');
+            await uow.runRaw(
+                `INSERT INTO im_bindings (
+                    id, user_id, device_id, external_identity_id, priority, status, bound_at, unbound_at, revoked_at
+                 ) VALUES
+                    ($1, $2, $3, $4, 100, 'active', $5, NULL, NULL),
+                    ($6, $2, $3, $4, 100, 'active', $7, NULL, NULL)`,
+                [
+                    'binding-earlier',
+                    'user-duplicate',
+                    'device-duplicate',
+                    'identity-duplicate',
+                    T0,
+                    'binding-later',
+                    T1,
+                ],
+            );
+
+            await uow.migrate();
+
+            const bindings = await uow.runRaw(
+                `SELECT id, status FROM im_bindings
+                 WHERE user_id = $1 ORDER BY id`,
+                ['user-duplicate'],
+            );
+            assert.deepEqual(bindings, [
+                { id: 'binding-earlier', status: 'unbound' },
+                { id: 'binding-later', status: 'active' },
+            ]);
+            await assert.rejects(
+                uow.runRaw(
+                    `INSERT INTO im_bindings (
+                        id, user_id, device_id, external_identity_id, priority, status, bound_at, unbound_at, revoked_at
+                     ) VALUES ($1, $2, $3, $4, 100, 'active', $5, NULL, NULL)`,
+                    ['binding-third', 'user-duplicate', 'device-duplicate', 'identity-duplicate', T2],
+                ),
+            );
+            await uow.close();
+        });
+
+        await test('migration keeps one pending display code and prevents a collision from recurring', async () => {
+            const uow = new PostgresImUnitOfWork(POSTGRES_URL);
+            await uow.migrate();
+            await uow.truncateAll();
+            await uow.runRaw('DROP INDEX IF EXISTS im_pairing_sessions_pending_display_code_hash_uq');
+            await uow.runRaw('DELETE FROM im_schema_migrations WHERE version >= 4');
+            await uow.runRaw(
+                `INSERT INTO im_pairing_sessions (
+                    id, display_code_hash, user_id, device_id, allowed_platforms, status, expires_at, created_at, confirmed_at
+                 ) VALUES
+                    ($1, $2, $3, $4, NULL, 'pending', $5, $6, NULL),
+                    ($7, $2, $3, $8, NULL, 'pending', $5, $9, NULL)`,
+                [
+                    'pairing-earlier',
+                    'hash-duplicate',
+                    'user-duplicate',
+                    'device-earlier',
+                    T2,
+                    T0,
+                    'pairing-later',
+                    'device-later',
+                    T1,
+                ],
+            );
+
+            await uow.migrate();
+
+            const sessions = await uow.runRaw(
+                `SELECT id, status FROM im_pairing_sessions
+                 WHERE display_code_hash = $1 ORDER BY id`,
+                ['hash-duplicate'],
+            );
+            assert.deepEqual(sessions, [
+                { id: 'pairing-earlier', status: 'cancelled' },
+                { id: 'pairing-later', status: 'pending' },
+            ]);
+            await assert.rejects(
+                uow.runRaw(
+                    `INSERT INTO im_pairing_sessions (
+                        id, display_code_hash, user_id, device_id, allowed_platforms, status, expires_at, created_at, confirmed_at
+                     ) VALUES ($1, $2, $3, $4, NULL, 'pending', $5, $6, NULL)`,
+                    ['pairing-third', 'hash-duplicate', 'user-duplicate', 'device-third', T2, T2],
+                ),
+            );
             await uow.close();
         });
 
