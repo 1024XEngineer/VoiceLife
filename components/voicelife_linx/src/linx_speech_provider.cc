@@ -401,6 +401,12 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
             }
             return;
         }
+        case LinxMessageKind::kGoodbye:
+            // 服务端结束会话的告别消息：不是故障，保持当前状态等待断开事件。
+            return;
+        case LinxMessageKind::kLlm:
+            // 服务端表情/情感 UI 消息：本板仅文本 OLED，无表情渲染，直接忽略。
+            return;
         case LinxMessageKind::kError:
             Emit(Event(voice::VoiceEventKind::kError, inbound.text));
             return;

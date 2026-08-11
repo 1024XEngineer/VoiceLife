@@ -314,6 +314,24 @@ Result<LinxInboundMessage> LinxJsonCodec::DecodeText(std::string_view message) c
         return Result<LinxInboundMessage>::Success(std::move(decoded));
     }
 
+    if (type_str == "goodbye") {
+        decoded.kind = LinxMessageKind::kGoodbye;
+        const cJSON* msg = GetOptional(root.get(), "message", cJSON_String);
+        if (msg != nullptr) decoded.text = cJSON_GetStringValue(msg);
+        return Result<LinxInboundMessage>::Success(std::move(decoded));
+    }
+
+    if (type_str == "llm") {
+        decoded.kind = LinxMessageKind::kLlm;
+        const cJSON* text = GetOptional(root.get(), "text", cJSON_String);
+        if (text != nullptr) decoded.text = cJSON_GetStringValue(text);
+        const cJSON* emotion = GetOptional(root.get(), "emotion", cJSON_String);
+        if (emotion != nullptr) decoded.emotion = cJSON_GetStringValue(emotion);
+        const cJSON* action = GetOptional(root.get(), "action", cJSON_String);
+        if (action != nullptr) decoded.action = cJSON_GetStringValue(action);
+        return Result<LinxInboundMessage>::Success(std::move(decoded));
+    }
+
     return Result<LinxInboundMessage>::Failure(ErrorCode::kInvalidArgument, "未知 Linx 消息类型: " + type_str);
 }
 

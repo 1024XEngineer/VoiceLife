@@ -120,6 +120,15 @@ int main() {
     Check(parsed_mcp.ok() && parsed_mcp.value->kind == voicelife::linx::LinxMessageKind::kMcp &&
               parsed_mcp.value->text.find("tools/list") != std::string::npos,
           "MCP 消息应保留 JSON-RPC payload");
+    auto parsed_goodbye = codec.DecodeText(R"({"type":"goodbye","message":"session closed"})");
+    Check(parsed_goodbye.ok() && parsed_goodbye.value->kind == voicelife::linx::LinxMessageKind::kGoodbye &&
+              parsed_goodbye.value->text == "session closed",
+          "goodbye 消息应解析为会话告别类型");
+    auto parsed_llm = codec.DecodeText(R"({"type":"llm","text":"ok","emotion":"happy","action":"thinking"})");
+    Check(parsed_llm.ok() && parsed_llm.value->kind == voicelife::linx::LinxMessageKind::kLlm &&
+              parsed_llm.value->emotion.has_value() && *parsed_llm.value->emotion == "happy" &&
+              parsed_llm.value->action.has_value() && *parsed_llm.value->action == "thinking",
+          "llm 表情消息应解析 emotion/action");
     Check(codec.DecodeText(R"({"type":"mystery"})").status.code == ErrorCode::kInvalidArgument, "未知消息类型必须拒绝");
 
     FakeTransport transport;
@@ -168,6 +177,15 @@ int main() {
     Check(events.size() == events_before_mismatched_session + 1 &&
               events.back().kind == voicelife::voice::VoiceEventKind::kError,
           "后续来自其他 session 的消息必须拒绝");
+
+    const auto events_before_goodbye = events.size();
+    transport.EmitText(R"({"type":"goodbye","session_id":"remote-linx-session","message":"bye"})");
+    const auto events_after_goodbye = events.size();
+    transport.EmitText(
+        R"({"type":"llm","session_id":"remote-linx-session","text":"ok","emotion":"happy","action":"thinking"})");
+    Check(events_after_goodbye == events_before_goodbye && events.size() == events_after_goodbye,
+          "goodbye 与 llm 表情消息不得触发 provider 错误事件");
+    Check(provider.audio_formats().ok(), "goodbye/llm 消息不得破坏已协商的音频格式");
 
     FakeTransport mcp_transport;
     int mcp_calls = 0;

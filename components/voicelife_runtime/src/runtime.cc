@@ -659,6 +659,10 @@ class Runtime final {
                  static_cast<unsigned>(stats.captured_frames), static_cast<unsigned>(stats.dropped_input_frames),
                  static_cast<unsigned>(stats.played_frames), static_cast<unsigned>(stats.rejected_output_frames),
                  static_cast<unsigned>(stats.minimum_free_heap_bytes));
+        if (evidence.event == "provider_error") {
+            // 板端诊断：只输出本地错误消息（不包含 STT 文本、凭据或原始响应）。
+            ESP_LOGW(kTag, "PROVIDER_ERROR_DETAIL=%.160s", evidence.detail.c_str());
+        }
         if (evidence.event == "tts_stopped" || evidence.event == "tts_aborted" || evidence.event == "provider_error" ||
             evidence.event == "capture_stop_failed" || evidence.event == "tts_capture_stop_failed") {
             capture_started_us_.store(0);
