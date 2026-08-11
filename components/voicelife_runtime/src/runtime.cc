@@ -247,9 +247,14 @@ class Runtime final {
             ESP_LOGW(kTag, "OLED 状态屏初始化失败: %s", display_status.message.c_str());
         }
         (void)display_esp::SetStatus("WIFI");
-        if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) return secret_store;
+        if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) {
+            ESP_LOGW(kTag, "STARTUP_ERROR stage=secret_store code=%d", static_cast<int>(secret_store.code));
+            (void)display_esp::SetStatus("ERROR");
+            return secret_store;
+        }
         auto connection = BootstrapLinxOtaConfig();
         if (!connection.ok() || !connection.value.has_value()) {
+            ESP_LOGW(kTag, "STARTUP_ERROR stage=linx_bootstrap code=%d", static_cast<int>(connection.status.code));
             (void)display_esp::SetStatus("ERROR");
             return connection.status;
         }
@@ -260,6 +265,7 @@ class Runtime final {
         auto result = registry.Create("scaffold", {});
 #endif
         if (!result.ok() || !result.value.has_value()) {
+            ESP_LOGW(kTag, "STARTUP_ERROR stage=provider_create code=%d", static_cast<int>(result.status.code));
             return Status::Error(ErrorCode::kInternal, "无法创建语音 Provider: " + result.status.message);
         }
         provider_ = std::move(*result.value);
@@ -289,6 +295,7 @@ class Runtime final {
 #endif
         const Status session_status = session_->Start(config);
         if (!session_status.ok()) {
+            ESP_LOGW(kTag, "STARTUP_ERROR stage=session_start code=%d", static_cast<int>(session_status.code));
             (void)display_esp::SetStatus("ERROR");
             return session_status;
         }
@@ -346,7 +353,10 @@ class Runtime final {
             if (task_status != pdPASS) return Status::Error(ErrorCode::kInternal, "创建唤醒控制任务失败");
         }
         const Status interaction_status = HandleInteractionEvent(voice::VoiceInteractionEvent::kBootCompleted);
-        if (!interaction_status.ok()) return interaction_status;
+        if (!interaction_status.ok()) {
+            ESP_LOGW(kTag, "STARTUP_ERROR stage=interaction_boot code=%d", static_cast<int>(interaction_status.code));
+            return interaction_status;
+        }
         StartBoardControls();
 #endif
         return Status::Ok();
@@ -361,7 +371,6 @@ class Runtime final {
         kStartCapture,
         kStopCapture,
         kInterruptAndStartCapture,
-        kInterruptAndStartVoiceTurn,
     };
 
     struct BoardRequest {
@@ -501,17 +510,6 @@ class Runtime final {
         (void)xQueueSend(wake_queue_, &request, 0);
     }
 
-    void QueueInterruptAndVoiceTurn(std::string_view wake_word) {
-        if (wake_queue_ == nullptr) return;
-        BoardRequest request{};
-        request.kind = BoardRequestKind::kInterruptAndStartVoiceTurn;
-        const std::size_t size =
-            wake_word.size() < sizeof(request.wake_word) - 1 ? wake_word.size() : sizeof(request.wake_word) - 1;
-        std::memcpy(request.wake_word, wake_word.data(), size);
-        request.wake_word[size] = '\0';
-        (void)xQueueSend(wake_queue_, &request, 0);
-    }
-
     void RestoreStandby() {
         if (!wake_gate_) return;
         const Status stop_status = wake_gate_->StopCapture();
@@ -592,17 +590,6 @@ class Runtime final {
                 }
                 continue;
             }
-            if (request.kind == BoardRequestKind::kInterruptAndStartVoiceTurn) {
-                if (!session_ || !provider_) continue;
-                const Status interrupt = session_->Interrupt();
-                const Status notify = interrupt.ok() ? provider_->NotifyLocalWakeWord(request.wake_word) : interrupt;
-                const Status capture = notify.ok() ? session_->BeginCapture() : notify;
-                if (!capture.ok()) {
-                    ESP_LOGW(kTag, "打断后本地唤醒开始采集失败: %s", capture.message.c_str());
-                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
-                }
-                continue;
-            }
             if (!session_ || !provider_) continue;
             const Status notify = provider_->NotifyLocalWakeWord(request.wake_word);
             if (!notify.ok()) {
@@ -642,12 +629,6 @@ class Runtime final {
                 return Status::Ok();
             case voice::VoiceInteractionAction::kInterruptAndStartCapture:
                 QueueInterruptAndCapture();
-                return Status::Ok();
-            case voice::VoiceInteractionAction::kInterruptAndStartVoiceTurn:
-                if (wake_word.empty()) {
-                    return Status::Error(ErrorCode::kInvalidArgument, "本地唤醒词不能为空");
-                }
-                QueueInterruptAndVoiceTurn(wake_word);
                 return Status::Ok();
             case voice::VoiceInteractionAction::kRestoreStandby:
                 QueueStandbyRecovery();

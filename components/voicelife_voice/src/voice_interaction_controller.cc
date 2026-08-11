@@ -56,10 +56,12 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             if (state_ == VoiceInteractionState::kStandby) {
                 state_ = VoiceInteractionState::kListening;
                 transition.action = VoiceInteractionAction::kStartVoiceTurn;
-            } else if (state_ == VoiceInteractionState::kSpeaking || state_ == VoiceInteractionState::kListening ||
-                       state_ == VoiceInteractionState::kThinking) {
-                state_ = VoiceInteractionState::kListening;
-                transition.action = VoiceInteractionAction::kInterruptAndStartVoiceTurn;
+            } else if (state_ == VoiceInteractionState::kListening) {
+                state_ = VoiceInteractionState::kStandby;
+                transition.action = VoiceInteractionAction::kStopVoiceTurn;
+            } else if (state_ == VoiceInteractionState::kSpeaking || state_ == VoiceInteractionState::kThinking) {
+                state_ = VoiceInteractionState::kInterrupting;
+                transition.action = VoiceInteractionAction::kInterruptSession;
             } else {
                 return InvalidTransition(state_, event);
             }

@@ -73,10 +73,15 @@ int main() {
                     VoiceInteractionAction::kStartVoiceTurn, "待机唤醒仍应开始云端语音");
     CheckTransition(controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
                     VoiceInteractionAction::kNone, "打断回归路径应允许直接播报");
+    CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kInterrupting,
+                    VoiceInteractionAction::kInterruptSession, "播报中再次唤醒应只打断当前播报");
+    CheckTransition(controller, VoiceInteractionEvent::kInterruptCompleted, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "播报打断后应回到待机再等待下一次唤醒");
+
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kInterruptAndStartVoiceTurn, "播报中再次唤醒应打断并立即重新聆听");
-    CheckTransition(controller, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kStandby,
-                    VoiceInteractionAction::kStopVoiceTurn, "重新聆听后触摸松开应停止采集");
+                    VoiceInteractionAction::kStartVoiceTurn, "待机中唤醒应开始新一轮云端语音");
+    CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kStopVoiceTurn, "聆听中再次唤醒应关闭当前音频通道");
 
     const auto invalid = controller.Handle(VoiceInteractionEvent::kTtsStopped);
     Check(invalid.status.code == ErrorCode::kConflict && controller.state() == VoiceInteractionState::kStandby,

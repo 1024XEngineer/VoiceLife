@@ -49,8 +49,6 @@ enum class VoiceInteractionAction {
     kStopVoiceTurn,
     /** 打断当前会话后开始手动采集，不发送本地唤醒事件。 */
     kInterruptAndStartCapture,
-    /** 打断当前会话后重新发送本地唤醒事件并开始采集。 */
-    kInterruptAndStartVoiceTurn,
     kRestoreStandby,
     kInterruptSession,
 };
