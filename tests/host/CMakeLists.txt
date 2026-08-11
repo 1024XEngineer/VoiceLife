@@ -141,6 +141,10 @@ add_voicelife_test(schedule_query_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_query_test.cc")
 target_link_libraries(schedule_query_test PRIVATE schedule)
 
+add_voicelife_test(schedule_repository_service_test "unit;schedule;repository"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_repository_service_test.cc")
+target_link_libraries(schedule_repository_service_test PRIVATE schedule)
+
 add_voicelife_test(schedule_delete_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_delete_test.cc")
 target_link_libraries(schedule_delete_test PRIVATE schedule)
@@ -271,3 +275,13 @@ target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
 add_voicelife_test(sqlite_schedule_repository_test "integration;storage;sqlite;schedule"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_repository_test.cc")
 target_link_libraries(sqlite_schedule_repository_test PRIVATE storage_sqlite schedule)
+
+add_voicelife_test(sqlite_database_test "unit;storage;sqlite;database"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_database_test.cc")
+target_link_libraries(sqlite_database_test PRIVATE storage_sqlite)
+
+add_voicelife_test(sqlite_schedule_repository_unit_test "unit;storage;sqlite;schedule;repository"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_repository_unit_test.cc")
+target_include_directories(sqlite_schedule_repository_unit_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
+target_link_libraries(sqlite_schedule_repository_unit_test PRIVATE storage_sqlite schedule)
