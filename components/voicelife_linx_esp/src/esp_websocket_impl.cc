@@ -6,9 +6,12 @@
 #include <utility>
 
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 
 namespace voicelife::linx_esp {
@@ -247,10 +250,29 @@ Result<std::string> EspWebSocketTransport::Impl::BuildHeaders(const linx::LinxCo
 }
 
 bool EspWebSocketTransport::Impl::PrepareWorker() {
-    event_queue_ = xQueueCreate(options_.event_queue_capacity, sizeof(detail::EventEnvelope));
+    const size_t event_queue_bytes = options_.event_queue_capacity * sizeof(detail::EventEnvelope);
+#if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
+    // The WebSocket callback runs in task context, so its bounded frame queue
+    // may live in PSRAM. Keeping this 128 KiB burst buffer out of internal RAM
+    // leaves enough contiguous memory for TLS and the audio pipeline.
+    event_queue_ = xQueueCreateWithCaps(options_.event_queue_capacity, sizeof(detail::EventEnvelope),
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    event_queue_uses_caps_ = event_queue_ != nullptr;
+    if (event_queue_ == nullptr) {
+        ESP_LOGW(detail::kTag, "LINX_WS_QUEUE_PSRAM_ALLOC_FAILED bytes=%u psram_free=%u",
+                 static_cast<unsigned>(event_queue_bytes),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
+    }
+#endif
+    if (event_queue_ == nullptr) {
+        event_queue_ = xQueueCreate(options_.event_queue_capacity, sizeof(detail::EventEnvelope));
+    }
     state_events_ = xEventGroupCreate();
     worker_stopped_ = xSemaphoreCreateBinary();
     if (event_queue_ == nullptr || state_events_ == nullptr || worker_stopped_ == nullptr) {
+        ESP_LOGW(detail::kTag, "LINX_WS_QUEUE_ALLOC_FAILED bytes=%u internal_free=%u",
+                 static_cast<unsigned>(event_queue_bytes),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
         CleanupWorker();
         return false;
     }
@@ -269,8 +291,17 @@ void EspWebSocketTransport::Impl::CleanupWorker() {
         return;
     }
     if (event_queue_ != nullptr) {
+#if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
+        if (event_queue_uses_caps_) {
+            vQueueDeleteWithCaps(event_queue_);
+        } else {
+            vQueueDelete(event_queue_);
+        }
+#else
         vQueueDelete(event_queue_);
+#endif
         event_queue_ = nullptr;
+        event_queue_uses_caps_ = false;
     }
     if (state_events_ != nullptr) {
         vEventGroupDelete(state_events_);
