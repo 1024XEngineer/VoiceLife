@@ -119,6 +119,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes libsqlite3-dev
           python -m pip install --disable-pip-version-check "gcovr==8.5"
       - name: 生成 C++ 覆盖率报告
         shell: bash
@@ -168,6 +170,8 @@ jobs:
           echo "runner=${RUNNER_NAME} os=${RUNNER_OS} arch=${RUNNER_ARCH}"
           cmake --version | head -n 1
           python3 --version
+      - name: 安装 SQLite 开发库
+        run: sudo apt-get update && sudo apt-get install --yes libsqlite3-dev
       - name: 检查提交描述
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
         run: python3 scripts/check_commit_message.py --range "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"

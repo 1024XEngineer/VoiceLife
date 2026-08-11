@@ -86,7 +86,7 @@ VoiceLife 使用 ESP-IDF 组件化模块单体。核心代码使用 C++，外部
 | `voicelife_contracts` | Status、Result、事件和跨模块公共契约 | 无 |
 | `voicelife_schedule` | 日程实体、命令、结果和服务接口 | contracts |
 | `voicelife_timing` | 定时任务、实例和提醒规则 | contracts |
-| `voicelife_storage_sqlite` | SQLite 生命周期、事务和健康指标 | contracts |
+| `voicelife_storage_sqlite` | SQLite 连接、日程仓储、SQL 与行映射 | contracts、schedule；启用时需要 sqlite3 |
 | `voicelife_im` | 平台无关的 IM 事件、上报和传输契约 | contracts |
 | `voicelife_voice` | 语音会话、音频/传输 Port 和 Provider Registry | contracts |
 | `voicelife_linx` | Linx/XRobot 协议和 Provider Adapter | contracts、voice |
@@ -123,7 +123,7 @@ Profile 描述一次固件选择哪些实现，不保存凭据：
 | 方向 | 状态 | 说明 |
 | --- | --- | --- |
 | 组件边界和依赖检查 | 已完成 | 主机与 CI 可验证 |
-| 日程模块 | 主机契约已覆盖 | 已支持创建、查询、修改、取消和撤销，持久化接入仍在推进 |
+| 日程模块 | 主机契约已覆盖 | 主机集成测试已跑通 SQLite 创建与查询最小链路；设备 Runtime、修改、取消和撤销仍待接入 |
 | 定时任务模块 | 主机契约已覆盖 | 已支持创建、更新、取消和提醒规则，注册与唯一性语义已固定 |
 | SQLite 存储资格测试 | 已完成基线 | FATFS/WL 路线通过，断电和长期磨损仍待补测 |
 | IM Gateway | 开发中 | 已接入 PostgreSQL 持久化与重启恢复，平台渠道仍在补齐 |

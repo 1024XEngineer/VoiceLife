@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(voicelife_host_tests LANGUAGES C CXX)
 
 find_package(Threads REQUIRED)
+find_package(SQLite3 REQUIRED)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -100,8 +101,17 @@ add_voicelife_library(linx_esp voicelife_linx_esp
     "${ROOT_DIR}/components/voicelife_linx_esp/src/websocket_fragment_assembler.cc")
 target_link_libraries(linx_esp PUBLIC contracts linx)
 add_voicelife_library(storage_sqlite voicelife_storage_sqlite
-    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/storage_protocol.cc")
-target_link_libraries(storage_sqlite PUBLIC contracts)
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_row_mapper.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_sql.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_database.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_repository.cc")
+target_include_directories(storage_sqlite PRIVATE "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
+target_link_libraries(storage_sqlite PUBLIC contracts schedule)
+if(TARGET SQLite3::SQLite3)
+    target_link_libraries(storage_sqlite PRIVATE SQLite3::SQLite3)
+else()
+    target_link_libraries(storage_sqlite PRIVATE SQLite::SQLite3)
+endif()
 add_voicelife_library(audio_esp voicelife_audio_esp
     "${ROOT_DIR}/components/voicelife_audio_esp/src/audio_board_profile.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_audio_probe.cc"
@@ -258,6 +268,6 @@ target_link_libraries(im_response_reader_test PRIVATE im contracts)
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
 
-add_voicelife_test(storage_protocol_contract_test "unit;storage;contract"
-    storage_protocol_contract_test.cc)
-target_link_libraries(storage_protocol_contract_test PRIVATE storage_sqlite)
+add_voicelife_test(sqlite_schedule_repository_test "integration;storage;sqlite;schedule"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_repository_test.cc")
+target_link_libraries(sqlite_schedule_repository_test PRIVATE storage_sqlite schedule)

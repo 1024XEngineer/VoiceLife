@@ -197,29 +197,21 @@ Gateway 内部按能力选择微信、飞书或其他 Adapter：
 
 Linx 官方 WebSocket 需要 Bearer/Device-Id/Client-Id 鉴权、hello 协商音频参数，支持 OPUS/PCM 二进制帧和 listen/stt/tts/abort 控制消息；具体协议映射和 ESP32-S3 真机验收顺序见 [语音模块子架构](./voice-subarchitecture.md)。
 
-### 8.2 SQLite 统一底座，不做通用 CRUD
+### 8.2 SQLite 连接与业务仓储分离
 
-领域模块继续拥有自己的 Store Port 和 SQL 行映射，但不得各自 mount 文件系统、打开数据库、执行 PRAGMA、维护迁移或解释 SQLite 错误。真实实现统一依赖 `voicelife_storage_sqlite`：
+业务服务只依赖本领域 Repository，不能包含 SQL、SQLite 句柄、PRAGMA 或连接生命周期。当前最小实现按以下方向依赖：
 
 ```text
-Schedule / TimingTask / 其他领域
-        │  各自的业务语义 Store Port
-        ▼
-voicelife_*_sqlite Adapter
-        │  本领域 SQL、Prepared Statement、行映射
-        ▼
-voicelife_storage_sqlite
-        ├── FATFS/WL mount 与单数据库连接
-        ├── 单写者队列与显式事务保护
-        ├── schema_migrations 与启动自检
-        ├── PRAGMA 配置及读回校验
-        ├── SQLite -> ErrorCode 映射
-        └── 容量、延迟、完整性指标
+ScheduleService
+        -> ScheduleRepository
+        -> SqliteScheduleRepository
+        -> SqliteDatabase / SqliteStatement
+        -> sqlite3
 ```
 
-统一的是数据库生命周期和事务设施，不是业务接口。禁止引入 `Repository<T>`、字符串表名、任意 SQL 执行器或跨模块共享数据对象；跨领域原子写入仍由用例层定义粗粒度 Port，在一笔 SQLite 事务中提交业务事实、幂等记录和 Outbox。
+`ScheduleRepository` 只表达日程读写能力，不设计跨领域的泛型 `Repository<T>`。SQL 集中放在 SQLite 组件的 `src/sql`，行映射放在 `src/mapping`。SQLite C API 只允许出现在 Database/Statement 实现中，业务服务和 Repository 都不得直接调用。
 
-Runtime 只能创建一个数据库实例。包括 TimingTask 在内的领域 SQLite Adapter 必须注入这一个实例，不得保留第二套 driver/runtime 生命周期。四轮实板测试的提交均值中位数约 1.16 秒，已经超过音频实时路径预算；写操作必须进入有界单写者队列，语音任务只等待业务级结果，不直接持有 SQLite 连接。
+当前只实现建表、插入和查询，并由主机集成测试验证真实连接。ESP32 Runtime 最终只能创建一个数据库实例，后续领域 Repository 必须共享该实例；当前 Runtime 尚未组装 SQLite。四轮实板测试的提交均值中位数约 1.16 秒，已经超过音频实时路径预算；写操作必须离开音频实时任务。
 
 当前唯一通过资格测试的组合是 SQLite 3.53.4、ESP-IDF 6.0.2、FATFS/WL 4 KiB 扇区、`DELETE + EXTRA + psow=0`。`joltwallet/littlefs 1.22.3` 的三组候选配置都出现显式回滚泄漏，不能作为兼容实现保留。生产挂载必须使用 `format_if_mount_failed=false`，失败时保留现场并进入受限模式。
 

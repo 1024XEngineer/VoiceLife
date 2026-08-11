@@ -1,0 +1,10 @@
+menu "VoiceLife SQLite 存储"
+
+config VOICELIFE_STORAGE_SQLITE
+    bool "构建 SQLite 日程仓储"
+    default n
+    help
+        启用 ScheduleService -> ScheduleRepository -> SQLite 最小链路。
+        构建前必须先准备固定版本的 sqlite3 组件。
+
+endmenu

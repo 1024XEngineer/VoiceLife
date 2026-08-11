@@ -80,6 +80,9 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+      - name: 安装 SQLite 开发库
+        if: matrix.id == 'cpp'
+        run: sudo apt-get update && sudo apt-get install --yes libsqlite3-dev
       - name: 构建主机 C++ 测试
         if: matrix.id == 'cpp'
         run: ./scripts/run_host_tests.sh
