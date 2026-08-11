@@ -54,6 +54,12 @@ void TestPropertyList() {
     Check(values.value<bool>("enabled") == false, "应读取匹配类型的参数值");
     Check(!values.value<std::string>("enabled").has_value(), "参数类型不匹配时应返回空值");
     Check(!values.value<int64_t>("missing").has_value(), "参数不存在时应返回空值");
+
+    PropertyList optional;
+    optional.add_property(Property::Optional("location", PropertyType::kString));
+    const auto optional_schema = optional.to_schema();
+    Check(optional_schema.required.empty() && optional_schema.properties.contains("location"),
+          "无默认值的可选参数不应进入 required");
 }
 
 /**
@@ -154,6 +160,19 @@ void TestToolCalls() {
                       })
                   .status.code == ErrorCode::kInvalidArgument,
           "未定义参数应被拒绝");
+
+    Check(server
+              .add_tool("self.device.optional", "可选参数测试",
+                        PropertyList({Property::Optional("location", PropertyType::kString)}),
+                        [](const PropertyList& properties) {
+                            return ToolResult{
+                                .status = Status::Ok(),
+                                .output = {{"location", properties.value<std::string>("location").value_or("none")}}};
+                        })
+              .ok(),
+          "无默认值的可选参数应能注册");
+    Check(server.call({.request_id = "request-optional", .name = "self.device.optional", .arguments = {}}).status.ok(),
+          "省略可选参数时调用应通过");
     Check(server.call({
                           .request_id = "request-9",
                           .name = "self.device.configure",

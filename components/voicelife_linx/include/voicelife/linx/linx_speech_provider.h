@@ -3,13 +3,18 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "voicelife/linx/linx_types.h"
 
 namespace voicelife::linx {
+
+/** @brief 处理 Linx MCP JSON-RPC payload 并返回完整响应消息。 */
+using LinxMcpMessageHandler = std::function<Result<std::string>(std::string_view payload, std::string_view session_id)>;
 
 /** 将 Linx 协议和传输适配为稳定的语音 Provider 契约。 */
 class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
@@ -23,7 +28,8 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
      */
     LinxSpeechProviderAdapter(LinxTransportPort& transport, LinxProtocolCodecPort& codec,
                               LinxConnectionConfig connection,
-                              voice::CapabilityProfile capabilities = DefaultCapabilities());
+                              voice::CapabilityProfile capabilities = DefaultCapabilities(),
+                              LinxMcpMessageHandler mcp_handler = {});
 
     /**
      * @brief 设置下行音频接收回调。
@@ -56,6 +62,11 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     Status Abort(std::string_view reason) override;
     /** @brief 请求 Linx 合成文本。 @param text 待合成文本。 @return 请求结果。 */
     Status Speak(std::string_view text) override;
+    /** @brief 发送本地唤醒确认，触发 Linx listen.detect。
+     * @param wake_word 已由板端确认的唤醒词。
+     * @return 消息发送结果。
+     */
+    Status NotifyLocalWakeWord(std::string_view wake_word) override;
     /** @brief 断开 Linx Provider 会话。 @return 断开结果。 */
     Status Disconnect() override;
     /**
@@ -74,6 +85,7 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     void OnBinary(const std::vector<uint8_t>& payload);
     void OnTransportConnected();
     void OnTransportDisconnected();
+    [[nodiscard]] voice::VoiceSessionConfig ActiveSessionConfig() const;
     Status Send(Result<std::string> encoded);
     void Emit(voice::VoiceEvent event);
 
@@ -81,6 +93,7 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     LinxProtocolCodecPort& codec_;
     LinxConnectionConfig connection_;
     voice::CapabilityProfile capabilities_;
+    LinxMcpMessageHandler mcp_handler_;
     voice::VoiceSessionConfig config_;
     voice::VoiceEventSink event_sink_;
     voice::AudioFrameSink audio_sink_;

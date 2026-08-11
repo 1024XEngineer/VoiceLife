@@ -69,7 +69,7 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
     Status send_audio_result = Status::Ok();
     Status close_result = Status::Ok();
     std::string hello_message =
-        R"({"type":"hello","transport":"websocket","audio_params":{"format":"pcm","sample_rate":24000,"channels":1,"bit_depth":16,"frame_duration":60}})";
+        R"({"type":"hello","transport":"websocket","session_id":"remote-linx-session","audio_params":{"format":"pcm","sample_rate":24000,"channels":1,"bit_depth":16,"frame_duration":60}})";
     bool emit_hello = true;
     int connects = 0;
     int closes = 0;
@@ -101,6 +101,7 @@ int main() {
     auto hello = codec.EncodeHello(config, connection);
     Check(hello.ok(), "Linx hello 应可编码");
     Check(hello.value->find("\"transport\":\"websocket\"") != std::string::npos, "hello 必须声明 websocket transport");
+    Check(hello.value->find("\"mcp\":true") != std::string::npos, "hello 必须声明 MCP 能力");
     Check(hello.value->find("\"sample_rate\":16000") != std::string::npos, "hello 必须声明采样率");
     auto detect = codec.EncodeListenDetect(config, "请播报\\测试");
     Check(detect.ok() && detect.value->find("\\\\测试") != std::string::npos, "detect 必须正确转义文本并携带请求");
@@ -115,13 +116,19 @@ int main() {
           "tts sentence_start 应映射");
     auto parsed_stop = codec.DecodeText(R"({"type":"tts","state":"stop","is_aborted":true})");
     Check(parsed_stop.ok() && parsed_stop.value->aborted, "tts stop 应保留 is_aborted");
+    auto parsed_mcp = codec.DecodeText(R"({"type":"mcp","payload":{"jsonrpc":"2.0","method":"tools/list","id":1}})");
+    Check(parsed_mcp.ok() && parsed_mcp.value->kind == voicelife::linx::LinxMessageKind::kMcp &&
+              parsed_mcp.value->text.find("tools/list") != std::string::npos,
+          "MCP 消息应保留 JSON-RPC payload");
     Check(codec.DecodeText(R"({"type":"mystery"})").status.code == ErrorCode::kInvalidArgument, "未知消息类型必须拒绝");
 
     FakeTransport transport;
     voicelife::linx::LinxSpeechProviderAdapter provider(transport, codec, connection);
     std::vector<voicelife::voice::VoiceEvent> events;
     std::vector<voicelife::voice::AudioFrame> received_audio;
-    provider.SetAudioSink([&received_audio](voicelife::voice::AudioFrame frame) {
+    bool reject_output = false;
+    provider.SetAudioSink([&received_audio, &reject_output](voicelife::voice::AudioFrame frame) {
+        if (reject_output) return Status::Error(ErrorCode::kConflict, "测试播放队列已满");
         received_audio.push_back(std::move(frame));
         return Status::Ok();
     });
@@ -144,9 +151,49 @@ int main() {
           "Provider 应分别暴露请求的上行格式和 hello 协商的下行格式");
     transport.EmitConnected();
     Check(transport.texts.size() == 1, "重复 connected 事件不得重复发送 hello");
-    Check(provider.StartCapture(config.mode).ok() && provider.StopCapture().ok(), "listen start/stop 应通过传输发送");
+    Check(provider.NotifyLocalWakeWord("你好牛牛").ok() && provider.StartCapture(config.mode).ok() &&
+              provider.StopCapture().ok(),
+          "本地唤醒必须先 detect，再发送 listen start/stop");
     Check(provider.Speak("测试播报").ok() && provider.Abort("user_interrupt").ok(), "detect/abort 应通过传输发送");
-    Check(transport.texts.size() == 5, "hello、listen、listen、detect、abort 应各发送一帧");
+    Check(transport.texts.size() == 6, "hello、本地 detect、listen、listen、detect、abort 应各发送一帧");
+    Check(transport.texts[1].find("\"type\":\"listen\"") != std::string::npos &&
+              transport.texts[1].find("\"state\":\"detect\"") != std::string::npos &&
+              transport.texts[2].find("\"state\":\"start\"") != std::string::npos,
+          "本地唤醒链路必须保持 listen.detect 在 listen.start 之前");
+    Check(transport.texts[1].find("\"session_id\":\"remote-linx-session\"") != std::string::npos &&
+              transport.texts[5].find("\"session_id\":\"remote-linx-session\"") != std::string::npos,
+          "服务端 hello 分配的 session_id 必须用于后续控制消息");
+    const auto events_before_mismatched_session = events.size();
+    transport.EmitText(R"({"type":"stt","session_id":"wrong-session","text":"不应接受"})");
+    Check(events.size() == events_before_mismatched_session + 1 &&
+              events.back().kind == voicelife::voice::VoiceEventKind::kError,
+          "后续来自其他 session 的消息必须拒绝");
+
+    FakeTransport mcp_transport;
+    int mcp_calls = 0;
+    voicelife::linx::LinxSpeechProviderAdapter mcp_provider(
+        mcp_transport, codec, connection, voicelife::linx::LinxSpeechProviderAdapter::DefaultCapabilities(),
+        [&mcp_calls](std::string_view, std::string_view session_id) {
+            ++mcp_calls;
+            return voicelife::Result<std::string>::Success(
+                "{\"type\":\"mcp\",\"session_id\":\"" + std::string(session_id) +
+                "\",\"payload\":{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}");
+        });
+    Check(mcp_provider.Connect(session_config, {}).ok(), "配置 MCP handler 的 Provider 应连接成功");
+    std::vector<voicelife::voice::VoiceEvent> mcp_events;
+    mcp_provider.Disconnect();
+    Check(mcp_provider
+              .Connect(session_config,
+                       [&mcp_events](const voicelife::voice::VoiceEvent& event) { mcp_events.push_back(event); })
+              .ok(),
+          "配置 MCP handler 的 Provider 应能重新绑定事件接收器");
+    mcp_transport.EmitText(R"({"type":"mcp","payload":{"jsonrpc":"2.0","method":"tools/list","id":1}})");
+    Check(mcp_calls == 1 && mcp_transport.texts.back().find("\"type\":\"mcp\"") != std::string::npos &&
+              mcp_transport.texts.back().find("\"session_id\":\"remote-linx-session\"") != std::string::npos,
+          "MCP payload 应调用 handler 并回发响应");
+    Check(!mcp_events.empty() && mcp_events.back().kind == voicelife::voice::VoiceEventKind::kToolCall &&
+              mcp_events.back().text.empty(),
+          "MCP 调用必须产生不含业务参数的生命周期事件");
 
     voicelife::voice::AudioFrame uplink;
     uplink.generation = 7;
@@ -159,12 +206,18 @@ int main() {
               received_audio.front().sequence == 0 && received_audio.front().payload.size() == 3 &&
               received_audio.front().format.sample_rate_hz == 24000,
           "二进制下行音频应使用协商格式并携带 generation");
+    const auto events_before_output_backpressure = events.size();
+    reject_output = true;
+    transport.EmitBinary({5, 6, 7});
+    reject_output = false;
+    Check(events.size() == events_before_output_backpressure,
+          "有界播放队列拒绝单帧应只计入端口指标，不能伪装成 Provider 失败");
     transport.EmitDisconnected();
     Check(events.back().kind == voicelife::voice::VoiceEventKind::kDisconnected, "物理断线必须向会话上报生命周期事件");
     Check(provider.SendAudio(uplink).code == ErrorCode::kUnavailable, "断线后必须立即阻断音频上行");
     provider.SetGeneration(8);
     transport.EmitConnected();
-    Check(transport.texts.size() == 6 && transport.texts.back().find("\"type\":\"hello\"") != std::string::npos,
+    Check(transport.texts.size() == 7 && transport.texts.back().find("\"type\":\"hello\"") != std::string::npos,
           "自动重连后必须只补发一次 hello");
     Check(events.back().kind == voicelife::voice::VoiceEventKind::kConnected && events.back().generation == 8,
           "重连 hello 必须使用新的 generation");
@@ -229,5 +282,13 @@ int main() {
     Check(codec.DecodeText(R"({"type":"hello","audio_params":{"format":"wav","sample_rate":16000,"channels":1}})")
                   .status.code == ErrorCode::kInvalidArgument,
           "不支持的音频格式必须拒绝");
+    Check(codec.DecodeText(R"({"type":"hello","audio_params":{"format":"pcm","sample_rate":16000.5,"channels":1}})")
+                  .status.code == ErrorCode::kInvalidArgument,
+          "非整数采样率必须拒绝");
+    Check(
+        codec.DecodeText(
+                 R"({"type":"hello","audio_params":{"format":"pcm","sample_rate":16000,"channels":1,"bit_depth":300}})")
+                .status.code == ErrorCode::kInvalidArgument,
+        "超范围位深必须拒绝");
     return 0;
 }

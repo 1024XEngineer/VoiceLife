@@ -48,7 +48,7 @@ struct LinxAudioParams {
 };
 
 /** 表示 Linx 入站控制消息的类别。 */
-enum class LinxMessageKind { kHello, kStt, kTts, kError };
+enum class LinxMessageKind { kHello, kStt, kTts, kMcp, kError };
 /** 表示 Linx TTS 消息的生命周期状态。 */
 enum class LinxTtsState { kStart, kSentenceStart, kStop };
 

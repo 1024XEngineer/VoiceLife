@@ -146,6 +146,7 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
     bool generation_changed = false;
     bool disconnected = false;
     bool playback_aborted = false;
+    bool stop_input_for_tts = false;
     Status flush_status = Status::Ok();
     uint64_t generation = 0;
     {
@@ -166,6 +167,10 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
         } else if (event.kind == VoiceEventKind::kConnected && audio_ready_ && state_ == VoiceSessionState::kStarting) {
             state_ = VoiceSessionState::kReady;
         } else if (event.kind == VoiceEventKind::kTtsStarted) {
+            // This board has no AEC path. Stop capture before accepting the
+            // server's TTS binary frames, rather than running I2S RX/TX as a
+            // misleading full-duplex conversation.
+            stop_input_for_tts = state_ == VoiceSessionState::kCapturing;
             state_ = VoiceSessionState::kSpeaking;
         } else if (event.kind == VoiceEventKind::kTtsStopped) {
             if (event.aborted && audio_ready_) {
@@ -194,6 +199,31 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
         }
     } else if (event.kind == VoiceEventKind::kConnected) {
         Emit("transport_connected", "provider hello completed");
+    } else if (event.kind == VoiceEventKind::kAsrText) {
+        Emit("stt_text_received", event.text);
+    } else if (event.kind == VoiceEventKind::kToolCall) {
+        Emit("tool_call_received", event.text);
+    } else if (event.kind == VoiceEventKind::kTtsStarted) {
+        if (stop_input_for_tts) {
+            const Status status = input_.StopCapture();
+            if (!status.ok()) {
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    if (generation_ == event.generation && state_ == VoiceSessionState::kSpeaking) {
+                        state_ = VoiceSessionState::kFailed;
+                    }
+                }
+                Emit("tts_capture_stop_failed", status.message);
+                return;
+            }
+        }
+        Emit("tts_started", "");
+    } else if (event.kind == VoiceEventKind::kTtsSentenceStarted) {
+        Emit("tts_sentence_started", event.text);
+    } else if (event.kind == VoiceEventKind::kTtsStopped) {
+        Emit("tts_stopped", "");
+    } else if (event.kind == VoiceEventKind::kError) {
+        Emit("provider_error", event.text);
     }
     if (disconnected) {
         return;

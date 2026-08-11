@@ -6,6 +6,7 @@
 #include "voicelife/linx_esp/websocket_fragment_assembler.h"
 
 using voicelife::ErrorCode;
+using voicelife::linx_esp::IsWebSocketDataOpcode;
 using voicelife::linx_esp::WebSocketFragment;
 using voicelife::linx_esp::WebSocketFragmentAssembler;
 using voicelife::linx_esp::WebSocketOpcode;
@@ -28,6 +29,14 @@ WebSocketFragment Chunk(uint64_t generation, WebSocketOpcode opcode, std::string
 
 int main() {
     WebSocketFragmentAssembler assembler(8);
+
+    Check(IsWebSocketDataOpcode(WebSocketOpcode::kText) && IsWebSocketDataOpcode(WebSocketOpcode::kBinary) &&
+              IsWebSocketDataOpcode(WebSocketOpcode::kContinuation),
+          "text、binary 和 continuation 必须进入业务消息重组");
+    Check(!IsWebSocketDataOpcode(static_cast<WebSocketOpcode>(0x8)) &&
+              !IsWebSocketDataOpcode(static_cast<WebSocketOpcode>(0x9)) &&
+              !IsWebSocketDataOpcode(static_cast<WebSocketOpcode>(0xA)),
+          "close、ping 和 pong 控制帧不得进入业务消息重组");
 
     auto single = assembler.Push(Chunk(1, WebSocketOpcode::kText, "hello", 5, 0, true));
     Check(single.ok() && single.value->complete, "单帧 text 应立即完成");

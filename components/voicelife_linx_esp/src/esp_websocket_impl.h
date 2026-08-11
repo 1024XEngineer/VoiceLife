@@ -36,6 +36,11 @@ struct EventEnvelope {
     size_t data_len = 0;
     size_t payload_len = 0;
     size_t payload_offset = 0;
+    int tls_last_error = 0;
+    int tls_stack_error = 0;
+    int tls_cert_flags = 0;
+    int handshake_status = 0;
+    int socket_errno = 0;
     std::array<uint8_t, kMaxEventChunkBytes> data{};
 };
 
@@ -73,6 +78,7 @@ class EspWebSocketTransport::Impl final {
     EspWebSocketTransportOptions options_;
     esp_websocket_client_handle_t client_ = nullptr;
     QueueHandle_t event_queue_ = nullptr;
+    bool event_queue_uses_caps_ = false;
     EventGroupHandle_t state_events_ = nullptr;
     SemaphoreHandle_t worker_stopped_ = nullptr;
     TaskHandle_t worker_ = nullptr;

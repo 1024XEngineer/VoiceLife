@@ -1,21 +1,40 @@
 #include "voicelife/runtime/runtime.h"
 
+#include <algorithm>
+#include <array>
+#include <cstdio>
 #include <memory>
 #include <string>
+#include <utility>
 
 #ifdef ESP_PLATFORM
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <string_view>
 
+#include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
 #include "voicelife/audio_esp/audio_board_profile.h"
 #include "voicelife/audio_esp/esp32s3_audio_probe.h"
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
+#include "voicelife/audio_esp/esp_multinet_wake_detector.h"
+#include "voicelife/display_esp/ssd1306_status_display.h"
+#include "voicelife/linx/linx_speech_provider.h"
+#include "voicelife/linx/linx_types.h"
+#include "voicelife/linx_esp/esp_websocket_transport.h"
+#include "voicelife/mcp/mcp_server.h"
+#include "voicelife/schedule/schedule_service.h"
 #endif
 
+#include "linx_mcp_bridge.h"
+#include "linx_ota_bootstrap.h"
+#include "schedule_mcp_tools.h"
+#include "voicelife/voice/voice_interaction_controller.h"
 #include "voicelife/voice/voice_ports.h"
 #include "voicelife/voice/voice_session.h"
 
@@ -24,6 +43,55 @@ namespace {
 
 #ifdef ESP_PLATFORM
 constexpr char kTag[] = "VoiceLifeRuntime";
+
+#if CONFIG_NVS_ENCRYPTION
+Result<std::string> ReadNvsString(nvs_handle_t handle, const char* key) {
+    size_t required = 0;
+    esp_err_t error = nvs_get_str(handle, key, nullptr, &required);
+    if (error != ESP_OK || required <= 1) {
+        return Result<std::string>::Failure(ErrorCode::kNotFound, std::string("缺少 Linx NVS 配置: ") + key);
+    }
+    std::string value(required, '\0');
+    error = nvs_get_str(handle, key, value.data(), &required);
+    if (error != ESP_OK) {
+        return Result<std::string>::Failure(ErrorCode::kUnavailable, "读取 Linx NVS 配置失败");
+    }
+    value.resize(required > 0 ? required - 1 : 0);
+    if (value.empty()) {
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, std::string("Linx NVS 配置为空: ") + key);
+    }
+    return Result<std::string>::Success(std::move(value));
+}
+#endif
+
+class NvsSecretResolver final : public linx_esp::SecretResolverPort {
+   public:
+    Result<std::string> Resolve(std::string_view reference) override {
+#if !CONFIG_NVS_ENCRYPTION
+        (void)reference;
+        return Result<std::string>::Failure(ErrorCode::kUnavailable, "Linx token 解析需要启用 NVS encryption");
+#else
+        constexpr std::string_view prefix = "nvs://";
+        if (reference.rfind(prefix, 0) != 0) {
+            return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx token 引用必须使用 nvs://");
+        }
+        const std::string path(reference.substr(prefix.size()));
+        const auto separator = path.find('/');
+        if (separator == std::string::npos || separator == 0 || separator + 1 >= path.size()) {
+            return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx token 引用格式无效");
+        }
+        nvs_handle_t handle = 0;
+        const esp_err_t open_error = nvs_open_from_partition(LinxSecretPartitionLabel(),
+                                                             path.substr(0, separator).c_str(), NVS_READONLY, &handle);
+        if (open_error != ESP_OK) {
+            return Result<std::string>::Failure(ErrorCode::kNotFound, "Linx token NVS 命名空间不可用");
+        }
+        auto result = ReadNvsString(handle, path.substr(separator + 1).c_str());
+        nvs_close(handle);
+        return result;
+#endif
+    }
+};
 
 #if CONFIG_VOICELIFE_AUDIO_PORT_SMOKE
 Status RunAudioPortSmoke() {
@@ -136,6 +204,7 @@ class ScaffoldSpeechProvider final : public voice::SpeechProviderAdapter {
     Status SendAudio(const voice::AudioFrame&) override { return Status::Ok(); }
     Status Abort(std::string_view) override { return Status::Ok(); }
     Status Speak(std::string_view) override { return Status::Ok(); }
+    Status NotifyLocalWakeWord(std::string_view) override { return Status::Ok(); }
     Status Disconnect() override { return Status::Ok(); }
     Result<voice::VoiceAudioFormats> audio_formats() const override {
         voice::VoiceAudioFormats fmt;
@@ -153,25 +222,81 @@ class Runtime final {
    public:
     Runtime() {
         auto& registry = voice::SpeechProviderRegistry::Instance();
+#ifdef ESP_PLATFORM
+        init_status_ = RegisterScheduleMcpTools(mcp_server_, schedule_service_);
+        if (init_status_.ok()) {
+            ESP_LOGI(kTag, "MCP_TOOLS_READY count=2 names=schedule.create,schedule.query");
+        }
+        registry.Register("xrobot-websocket", linx::LinxSpeechProviderAdapter::DefaultCapabilities(), [this]() {
+            return std::make_unique<linx::LinxSpeechProviderAdapter>(
+                *linx_transport_, linx_codec_, linx_config_, linx::LinxSpeechProviderAdapter::DefaultCapabilities(),
+                [this](std::string_view payload, std::string_view session_id) {
+                    return HandleLinxMcpPayload(payload, mcp_server_, session_id);
+                });
+        });
+#endif
         registry.Register("scaffold", voice::CapabilityProfile{"scaffold", {"streaming-asr", "tts"}},
                           []() { return std::make_unique<ScaffoldSpeechProvider>(); });
     }
 
     Status Start() {
         auto& registry = voice::SpeechProviderRegistry::Instance();
+        if (!init_status_.ok()) return init_status_;
+#ifdef ESP_PLATFORM
+        if (const Status display_status = display_esp::InitializeStatusDisplay(); !display_status.ok()) {
+            ESP_LOGW(kTag, "OLED 状态屏初始化失败: %s", display_status.message.c_str());
+        }
+        (void)display_esp::SetStatus("WIFI");
+        if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) {
+            ESP_LOGW(kTag, "STARTUP_ERROR stage=secret_store code=%d", static_cast<int>(secret_store.code));
+            (void)display_esp::SetStatus("ERROR");
+            return secret_store;
+        }
+        auto connection = BootstrapLinxOtaConfig();
+        if (!connection.ok() || !connection.value.has_value()) {
+            ESP_LOGW(kTag, "STARTUP_ERROR stage=linx_bootstrap code=%d", static_cast<int>(connection.status.code));
+            (void)display_esp::SetStatus("ERROR");
+            return connection.status;
+        }
+        (void)display_esp::SetStatus("LINX");
+        linx_config_ = std::move(*connection.value);
+        auto result = registry.Create("xrobot-websocket", {});
+#else
         auto result = registry.Create("scaffold", {});
+#endif
         if (!result.ok() || !result.value.has_value()) {
+            ESP_LOGW(kTag, "STARTUP_ERROR stage=provider_create code=%d", static_cast<int>(result.status.code));
             return Status::Error(ErrorCode::kInternal, "无法创建语音 Provider: " + result.status.message);
         }
         provider_ = std::move(*result.value);
 
+#ifdef ESP_PLATFORM
+        audio_ports_ = std::make_unique<audio_esp::Esp32s3PcmAudioPorts>(audio_esp::VoiceLifePcbEsp32s3Profile());
+        wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
+        wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_->input(), *wake_detector_);
+        wake_gate_->SetWakeSink([this](std::string_view wake_word) { QueueWakeWord(wake_word); });
+        session_ = std::make_unique<voice::VoiceSession>(
+            *wake_gate_, audio_ports_->output(), *provider_,
+            [this](const voice::VoiceEvidence& evidence) { LogVoiceEvidence(evidence); });
+        voice::VoiceSessionConfig config;
+        config.session_id = "voicelife-linx-session";
+        config.provider_id = "xrobot-websocket";
+        config.mode = voice::VoiceMode::kRealtime;
+        config.audio.codec = voice::AudioCodec::kPcmS16Le;
+        config.audio.sample_rate_hz = 16000;
+        config.audio.channels = 1;
+        config.audio.bits_per_sample = 16;
+        config.audio.frame_duration_ms = 20;
+#else
         session_ = std::make_unique<voice::VoiceSession>(audio_input_, audio_output_, *provider_);
-
         voice::VoiceSessionConfig config;
         config.session_id = "scaffold-session";
         config.provider_id = "scaffold";
+#endif
         const Status session_status = session_->Start(config);
         if (!session_status.ok()) {
+            ESP_LOGW(kTag, "STARTUP_ERROR stage=session_start code=%d", static_cast<int>(session_status.code));
+            (void)display_esp::SetStatus("ERROR");
             return session_status;
         }
 
@@ -219,21 +344,388 @@ class Runtime final {
             return audio_port_status;
         }
 #endif
+#ifdef ESP_PLATFORM
+        if (wake_queue_ == nullptr) {
+            wake_queue_ = xQueueCreate(4, sizeof(BoardRequest));
+            if (wake_queue_ == nullptr) return Status::Error(ErrorCode::kInternal, "创建唤醒队列失败");
+            const BaseType_t task_status =
+                xTaskCreate(&Runtime::WakeTaskEntry, "voicelife_wake", 4096, this, 5, &wake_task_);
+            if (task_status != pdPASS) return Status::Error(ErrorCode::kInternal, "创建唤醒控制任务失败");
+        }
+        const Status interaction_status = HandleInteractionEvent(voice::VoiceInteractionEvent::kBootCompleted);
+        if (!interaction_status.ok()) {
+            ESP_LOGW(kTag, "STARTUP_ERROR stage=interaction_boot code=%d", static_cast<int>(interaction_status.code));
+            return interaction_status;
+        }
+        StartBoardControls();
+#endif
         return Status::Ok();
     }
 
    private:
+#ifdef ESP_PLATFORM
+    enum class BoardRequestKind : uint8_t {
+        kWakeWord,
+        kRestoreStandby,
+        kInterrupt,
+        kStartCapture,
+        kStopCapture,
+        kInterruptAndStartCapture,
+    };
+
+    struct BoardRequest {
+        BoardRequestKind kind = BoardRequestKind::kRestoreStandby;
+        char wake_word[32];
+    };
+
+    struct ButtonSample {
+        gpio_num_t gpio = GPIO_NUM_NC;
+        bool previous_pressed = false;
+        bool long_fired = false;
+        int64_t pressed_at_us = 0;
+    };
+
+    static constexpr gpio_num_t kBootButtonGpio = GPIO_NUM_0;
+    static constexpr gpio_num_t kTouchButtonGpio = GPIO_NUM_47;
+    static constexpr gpio_num_t kVolumeUpButtonGpio = GPIO_NUM_40;
+    static constexpr gpio_num_t kVolumeDownButtonGpio = GPIO_NUM_39;
+    static constexpr int64_t kLongPressUs = 2000000;
+
+    static void BoardTaskEntry(void* context) { static_cast<Runtime*>(context)->BoardTask(); }
+
+    void StartBoardControls() {
+        const gpio_config_t config = {
+            .pin_bit_mask = (1ULL << kBootButtonGpio) | (1ULL << kTouchButtonGpio) | (1ULL << kVolumeUpButtonGpio) |
+                            (1ULL << kVolumeDownButtonGpio),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        ESP_ERROR_CHECK(gpio_config(&config));
+        buttons_[0].gpio = kBootButtonGpio;
+        buttons_[1].gpio = kTouchButtonGpio;
+        buttons_[2].gpio = kVolumeUpButtonGpio;
+        buttons_[3].gpio = kVolumeDownButtonGpio;
+        if (xTaskCreate(&BoardTaskEntry, "voicelife_buttons", 3072, this, 5, &button_task_) != pdPASS) {
+            ESP_LOGW(kTag, "创建板级按键任务失败");
+        }
+    }
+
+    void BoardTask() {
+        while (true) {
+            const int64_t now = esp_timer_get_time();
+            for (std::size_t index = 0; index < buttons_.size(); ++index) {
+                auto& button = buttons_[index];
+                const bool pressed = gpio_get_level(button.gpio) == 0;
+                if (pressed && !button.previous_pressed) {
+                    button.pressed_at_us = now;
+                    button.long_fired = false;
+                    if (index == 1) {
+                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kPressDown);
+                    }
+                } else if (pressed && !button.long_fired && now - button.pressed_at_us >= kLongPressUs) {
+                    button.long_fired = true;
+                    if (index == 2) {
+                        SetVolume(100);
+                    } else if (index == 3) {
+                        SetVolume(0);
+                    }
+                } else if (!pressed && button.previous_pressed) {
+                    if (index == 0 && !button.long_fired) {
+                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kToggleChat);
+                    } else if (index == 1) {
+                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kPressUp);
+                    } else if (index == 2 && !button.long_fired) {
+                        SetVolume(std::min(volume_ + 10, 100));
+                    } else if (index == 3 && !button.long_fired) {
+                        SetVolume(std::max(volume_ - 10, 0));
+                    }
+                    button.pressed_at_us = 0;
+                }
+                button.previous_pressed = pressed;
+            }
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+    }
+
+    void SetVolume(int volume) {
+        volume_ = std::clamp(volume, 0, 100);
+        if (audio_ports_) audio_ports_->SetOutputVolume(volume_);
+        char text[16] = {};
+        std::snprintf(text, sizeof(text), "VOL:%d", volume_);
+        (void)display_esp::SetStatus(text);
+    }
+
+    void QueueWakeWord(std::string_view wake_word) {
+        LogVoiceEvidence({.session_id = session_ ? session_->config().session_id : "",
+                          .generation = session_ ? session_->generation() : 0,
+                          .event = "wake_detected",
+                          .detail = {}});
+        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kWakeDetected, wake_word);
+    }
+
+    void QueueVoiceTurn(std::string_view wake_word) {
+        if (wake_queue_ == nullptr) return;
+        BoardRequest request{};
+        request.kind = BoardRequestKind::kWakeWord;
+        const std::size_t size =
+            wake_word.size() < sizeof(request.wake_word) - 1 ? wake_word.size() : sizeof(request.wake_word) - 1;
+        std::memcpy(request.wake_word, wake_word.data(), size);
+        request.wake_word[size] = '\0';
+        (void)xQueueSend(wake_queue_, &request, 0);
+    }
+
+    void QueueStandbyRecovery() {
+        if (wake_queue_ == nullptr) return;
+        const BoardRequest recovery{};
+        (void)xQueueSend(wake_queue_, &recovery, 0);
+    }
+
+    void QueueInterrupt() {
+        if (wake_queue_ == nullptr) return;
+        BoardRequest request{};
+        request.kind = BoardRequestKind::kInterrupt;
+        (void)xQueueSend(wake_queue_, &request, 0);
+    }
+
+    void QueueCaptureStart() {
+        if (wake_queue_ == nullptr) return;
+        BoardRequest request{};
+        request.kind = BoardRequestKind::kStartCapture;
+        (void)xQueueSend(wake_queue_, &request, 0);
+    }
+
+    void QueueCaptureStop() {
+        if (wake_queue_ == nullptr) return;
+        BoardRequest request{};
+        request.kind = BoardRequestKind::kStopCapture;
+        (void)xQueueSend(wake_queue_, &request, 0);
+    }
+
+    void QueueInterruptAndCapture() {
+        if (wake_queue_ == nullptr) return;
+        BoardRequest request{};
+        request.kind = BoardRequestKind::kInterruptAndStartCapture;
+        (void)xQueueSend(wake_queue_, &request, 0);
+    }
+
+    void RestoreStandby() {
+        if (!wake_gate_) return;
+        const Status stop_status = wake_gate_->StopCapture();
+        if (!stop_status.ok()) {
+            ESP_LOGW(kTag, "本地待机恢复停止上行失败: %s", stop_status.message.c_str());
+            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+            return;
+        }
+        const Status standby_status = wake_gate_->StartStandby();
+        if (!standby_status.ok()) {
+            ESP_LOGW(kTag, "本地待机恢复失败: %s", standby_status.message.c_str());
+            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+            return;
+        }
+        LogVoiceEvidence({.session_id = session_ ? session_->config().session_id : "",
+                          .generation = session_ ? session_->generation() : 0,
+                          .event = "standby_ready",
+                          .detail = {}});
+        if (interaction_.state() == voice::VoiceInteractionState::kError ||
+            interaction_.state() == voice::VoiceInteractionState::kInterrupting) {
+            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kStandbyReady);
+        }
+        ESP_LOGI(kTag, "WAKE_STANDBY_READY=1");
+    }
+
+    static void WakeTaskEntry(void* context) { static_cast<Runtime*>(context)->WakeTask(); }
+
+    void WakeTask() {
+        BoardRequest request{};
+        while (true) {
+            if (xQueueReceive(wake_queue_, &request, portMAX_DELAY) != pdTRUE) continue;
+            if (request.kind == BoardRequestKind::kRestoreStandby) {
+                RestoreStandby();
+                continue;
+            }
+            if (request.kind == BoardRequestKind::kInterrupt) {
+                if (!session_) continue;
+                const Status interrupt = session_->Interrupt();
+                if (interrupt.ok()) {
+                    if (interaction_.state() == voice::VoiceInteractionState::kInterrupting) {
+                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kInterruptCompleted);
+                    } else {
+                        QueueStandbyRecovery();
+                    }
+                } else {
+                    ESP_LOGW(kTag, "板端打断失败: %s", interrupt.message.c_str());
+                    QueueStandbyRecovery();
+                }
+                continue;
+            }
+            if (request.kind == BoardRequestKind::kStartCapture) {
+                const Status capture =
+                    session_ ? session_->BeginCapture() : Status::Error(ErrorCode::kUnavailable, "语音会话尚未启动");
+                if (!capture.ok()) {
+                    ESP_LOGW(kTag, "板级按键开始采集失败: %s", capture.message.c_str());
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+                }
+                continue;
+            }
+            if (request.kind == BoardRequestKind::kStopCapture) {
+                const Status stop =
+                    session_ ? session_->EndCapture() : Status::Error(ErrorCode::kUnavailable, "语音会话尚未启动");
+                if (!stop.ok()) {
+                    ESP_LOGW(kTag, "板级按键结束采集失败: %s", stop.message.c_str());
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+                } else {
+                    QueueStandbyRecovery();
+                }
+                continue;
+            }
+            if (request.kind == BoardRequestKind::kInterruptAndStartCapture) {
+                if (!session_) continue;
+                const Status interrupt = session_->Interrupt();
+                const Status capture = interrupt.ok() ? session_->BeginCapture() : interrupt;
+                if (!capture.ok()) {
+                    ESP_LOGW(kTag, "板级打断后开始采集失败: %s", capture.message.c_str());
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+                }
+                continue;
+            }
+            if (!session_ || !provider_) continue;
+            const Status notify = provider_->NotifyLocalWakeWord(request.wake_word);
+            if (!notify.ok()) {
+                ESP_LOGW(kTag, "本地唤醒通知 Linx 失败: %s", notify.message.c_str());
+                (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+                continue;
+            }
+            const Status capture = session_->BeginCapture();
+            if (!capture.ok()) {
+                ESP_LOGW(kTag, "唤醒后开始采集失败: %s", capture.message.c_str());
+                (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+            }
+        }
+    }
+
+    Status HandleInteractionEvent(voice::VoiceInteractionEvent event, std::string_view wake_word = {}) {
+        const auto transition = interaction_.Handle(event);
+        if (!transition.ok() || !transition.value.has_value()) {
+            ESP_LOGW(kTag, "忽略乱序板端交互事件=%d: %s", static_cast<int>(event), transition.status.message.c_str());
+            return transition.status;
+        }
+        (void)display_esp::SetStatus(interaction_.display_text());
+        switch (transition.value->action) {
+            case voice::VoiceInteractionAction::kNone:
+                return Status::Ok();
+            case voice::VoiceInteractionAction::kStartCapture:
+                QueueCaptureStart();
+                return Status::Ok();
+            case voice::VoiceInteractionAction::kStartVoiceTurn:
+                if (wake_word.empty()) {
+                    return Status::Error(ErrorCode::kInvalidArgument, "本地唤醒词不能为空");
+                }
+                QueueVoiceTurn(wake_word);
+                return Status::Ok();
+            case voice::VoiceInteractionAction::kStopVoiceTurn:
+                QueueCaptureStop();
+                return Status::Ok();
+            case voice::VoiceInteractionAction::kInterruptAndStartCapture:
+                QueueInterruptAndCapture();
+                return Status::Ok();
+            case voice::VoiceInteractionAction::kRestoreStandby:
+                QueueStandbyRecovery();
+                return Status::Ok();
+            case voice::VoiceInteractionAction::kInterruptSession:
+                QueueInterrupt();
+                return Status::Ok();
+        }
+        return Status::Error(ErrorCode::kInternal, "未知板端交互动作");
+    }
+
+    void LogVoiceEvidence(const voice::VoiceEvidence& evidence) {
+        // Evidence detail can contain STT text or service diagnostics. Emit
+        // only lifecycle names and numeric counters needed for board review.
+        if (evidence.event == "capture_started") {
+            capture_started_us_.store(esp_timer_get_time());
+        }
+        const int64_t started_at = capture_started_us_.load();
+        const int64_t now = esp_timer_get_time();
+        const uint64_t latency_ms =
+            started_at > 0 && now >= started_at ? static_cast<uint64_t>((now - started_at) / 1000) : 0;
+        const auto stats = audio_ports_ ? audio_ports_->stats() : audio_esp::AudioPortStats{};
+        ESP_LOGI(kTag,
+                 "VOICE_EVENT session=%s generation=%llu event=%s detail_present=%d latency_from_capture_ms=%llu "
+                 "audio_captured=%u audio_dropped=%u audio_played=%u audio_rejected=%u min_heap=%u",
+                 evidence.session_id.c_str(), static_cast<unsigned long long>(evidence.generation),
+                 evidence.event.c_str(), evidence.detail.empty() ? 0 : 1, static_cast<unsigned long long>(latency_ms),
+                 static_cast<unsigned>(stats.captured_frames), static_cast<unsigned>(stats.dropped_input_frames),
+                 static_cast<unsigned>(stats.played_frames), static_cast<unsigned>(stats.rejected_output_frames),
+                 static_cast<unsigned>(stats.minimum_free_heap_bytes));
+        if (evidence.event == "tts_stopped" || evidence.event == "tts_aborted" || evidence.event == "provider_error" ||
+            evidence.event == "capture_stop_failed" || evidence.event == "tts_capture_stop_failed") {
+            capture_started_us_.store(0);
+        }
+        if (evidence.event == "capture_started") {
+            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kCaptureStarted);
+        } else if (evidence.event == "stt_text_received" || evidence.event == "tool_call_received") {
+            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kIntentReceived);
+        } else if (evidence.event == "tts_started") {
+            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kTtsStarted);
+        } else if (evidence.event == "tts_stopped" || evidence.event == "tts_aborted") {
+            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kTtsStopped);
+        } else if (evidence.event == "transport_disconnected") {
+            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kTransportDisconnected);
+        } else if (evidence.event == "transport_connected") {
+            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kTransportConnected);
+        } else if (evidence.event == "provider_error" || evidence.event == "capture_stop_failed" ||
+                   evidence.event == "tts_capture_stop_failed") {
+            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+        }
+    }
+
+    NvsSecretResolver linx_secrets_;
+    mcp::McpServer mcp_server_;
+    schedule::ScheduleService schedule_service_;
+    Status init_status_ = Status::Ok();
+    linx::LinxJsonCodec linx_codec_;
+    linx::LinxConnectionConfig linx_config_;
+    std::unique_ptr<linx_esp::EspWebSocketTransport> linx_transport_ =
+        std::make_unique<linx_esp::EspWebSocketTransport>(linx_secrets_);
+    std::unique_ptr<audio_esp::Esp32s3PcmAudioPorts> audio_ports_;
+    std::unique_ptr<audio_esp::EspMultiNetWakeDetector> wake_detector_;
+    std::unique_ptr<voice::WakeGateAudioInput> wake_gate_;
+    QueueHandle_t wake_queue_ = nullptr;
+    TaskHandle_t wake_task_ = nullptr;
+    TaskHandle_t button_task_ = nullptr;
+    std::array<ButtonSample, 4> buttons_{};
+    int volume_ = 70;
+    std::atomic<int64_t> capture_started_us_{0};
+#else
     ScaffoldAudioInput audio_input_;
     ScaffoldAudioOutput audio_output_;
+#endif
+    voice::VoiceInteractionController interaction_;
     std::unique_ptr<voice::SpeechProviderAdapter> provider_;
     std::unique_ptr<voice::VoiceSession> session_;
+
+   public:
+    Status RequestInterrupt() {
+        if (!session_) return Status::Error(ErrorCode::kUnavailable, "设备运行时尚未启动");
+#ifdef ESP_PLATFORM
+        return HandleInteractionEvent(voice::VoiceInteractionEvent::kInterruptRequested);
+#else
+        return Status::Error(ErrorCode::kUnavailable, "板端打断仅支持 ESP 平台");
+#endif
+    }
 };
 
 }  // namespace
 
-Status Start() {
+Runtime& Instance() {
     static Runtime runtime;
-    return runtime.Start();
+    return runtime;
 }
+
+Status Start() { return Instance().Start(); }
+
+Status RequestInterrupt() { return Instance().RequestInterrupt(); }
 
 }  // namespace voicelife::runtime

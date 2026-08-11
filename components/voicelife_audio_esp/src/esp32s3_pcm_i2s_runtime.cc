@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "esp_err.h"
+
 namespace voicelife::audio_esp {
 
 namespace detail {
@@ -75,22 +77,32 @@ Status Esp32s3PcmAudioPorts::Impl::TryInitializeChannelsLocked() {
     config.auto_clear_after_cb = true;
 
     esp_err_t error = ESP_OK;
+    const char* failed_stage = "";
     if (profile_.topology == AudioBoardTopology::kExternalCodecDuplex ||
         profile_.capture_i2s.port == profile_.playback_i2s.port) {
         error = i2s_new_channel(&config, &tx_channel_, &rx_channel_);
+        failed_stage = "duplex";
     } else {
         error = i2s_new_channel(&config, &tx_channel_, nullptr);
         if (error == ESP_OK) {
             config.id = static_cast<int>(profile_.capture_i2s.port);
             error = i2s_new_channel(&config, nullptr, &rx_channel_);
+            failed_stage = "rx";
+        } else {
+            failed_stage = "tx";
         }
     }
     if (error != ESP_OK) {
         DestroyChannelsLocked();
-        return detail::Unavailable("创建 ESP32-S3 I2S 通道失败");
+        return detail::Unavailable(std::string("创建 ESP32-S3 I2S 通道失败 stage=") + failed_stage +
+                                   " error=" + esp_err_to_name(error));
     }
 
-    const i2s_std_config_t tx_config = detail::MakeStdConfig(profile_.playback_i2s, true);
+    I2sEndpointProfile playback_endpoint = profile_.playback_i2s;
+    if (playback_format_.has_value()) {
+        playback_endpoint.format = *playback_format_;
+    }
+    const i2s_std_config_t tx_config = detail::MakeStdConfig(playback_endpoint, true);
     const i2s_std_config_t rx_config = detail::MakeStdConfig(profile_.capture_i2s, false);
     error = i2s_channel_init_std_mode(tx_channel_, &tx_config);
     if (error == ESP_OK) {
@@ -227,7 +239,10 @@ void Esp32s3PcmAudioPorts::Impl::DeliveryLoop() {
 }
 
 Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
-    const auto& endpoint = profile_.playback_i2s;
+    I2sEndpointProfile endpoint = profile_.playback_i2s;
+    if (playback_format_.has_value()) {
+        endpoint.format = *playback_format_;
+    }
     const std::size_t sample_count = frame.payload.size() / (sizeof(int16_t) * endpoint.format.channels);
     const auto* pcm = reinterpret_cast<const int16_t*>(frame.payload.data());
     const std::size_t period_samples = static_cast<std::size_t>(endpoint.format.sample_rate_hz) *
@@ -238,11 +253,22 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
         std::vector<uint8_t> wire(bytes);
         if (endpoint.wire_bits_per_sample == 32) {
             auto* out = reinterpret_cast<int32_t*>(wire.data());
+            const int volume = output_volume_.load();
             for (std::size_t i = 0; i < count; ++i) {
-                out[i] = detail::ToWire(pcm[offset + i], endpoint);
+                const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume / 100;
+                out[i] = detail::ToWire(static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767)), endpoint);
             }
         } else {
-            std::memcpy(wire.data(), pcm + offset, bytes);
+            const int volume = output_volume_.load();
+            if (volume == 100) {
+                std::memcpy(wire.data(), pcm + offset, bytes);
+            } else {
+                auto* out = reinterpret_cast<int16_t*>(wire.data());
+                for (std::size_t i = 0; i < count; ++i) {
+                    const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume / 100;
+                    out[i] = static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767));
+                }
+            }
         }
         size_t bytes_written = 0;
         const esp_err_t error =

@@ -27,6 +27,12 @@ void EspWebSocketTransport::Impl::Enqueue(int32_t event_id, const esp_websocket_
     } else if (event_id == WEBSOCKET_EVENT_DISCONNECTED) {
         envelope.kind = detail::EventKind::kDisconnected;
     } else if (event_id == WEBSOCKET_EVENT_DATA && event_data != nullptr) {
+        // ESP-IDF dispatches ping, pong and close control frames through the
+        // same DATA event. The managed client handles those frames itself;
+        // only RFC 6455 data opcodes belong in the Linx message assembler.
+        if (!IsWebSocketDataOpcode(static_cast<WebSocketOpcode>(event_data->op_code))) {
+            return;
+        }
         envelope.kind = detail::EventKind::kData;
         envelope.opcode = event_data->op_code;
         envelope.fin = event_data->fin;
@@ -41,6 +47,14 @@ void EspWebSocketTransport::Impl::Enqueue(int32_t event_id, const esp_websocket_
         }
     } else if (event_id == WEBSOCKET_EVENT_ERROR) {
         envelope.kind = detail::EventKind::kError;
+        if (event_data != nullptr) {
+            envelope.tls_last_error = event_data->error_handle.esp_tls_last_esp_err;
+            envelope.tls_stack_error = event_data->error_handle.esp_tls_stack_err;
+            envelope.tls_cert_flags = event_data->error_handle.esp_tls_cert_verify_flags;
+            envelope.handshake_status = event_data->error_handle.esp_ws_handshake_status_code;
+            envelope.socket_errno = event_data->error_handle.esp_transport_sock_errno;
+            envelope.opcode = static_cast<uint8_t>(event_data->error_handle.error_type);
+        }
     } else {
         return;
     }
@@ -111,6 +125,9 @@ void EspWebSocketTransport::Impl::HandleEnvelope(const detail::EventEnvelope& en
             }
             return;
         case detail::EventKind::kError: {
+            ESP_LOGW(detail::kTag, "LINX_WS_ERROR type=%u tls=%d stack=%d cert_flags=%d handshake=%d errno=%d",
+                     static_cast<unsigned>(envelope.opcode), envelope.tls_last_error, envelope.tls_stack_error,
+                     envelope.tls_cert_flags, envelope.handshake_status, envelope.socket_errno);
             std::lock_guard<std::mutex> status_lock(status_mutex_);
             error_status_ = Status::Error(ErrorCode::kUnavailable, "ESP Linx WebSocket 收到错误事件");
         }
