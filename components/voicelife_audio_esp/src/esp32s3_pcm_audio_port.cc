@@ -183,7 +183,7 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
         input_cv_.notify_all();
         return detail::Unavailable("创建 I2S 采集任务失败");
     }
-    if (xTaskCreate(&DeliveryTaskEntry, "voice_audio_sink", 3072, this, 4, &delivery_task_) != pdPASS) {
+    if (xTaskCreate(&DeliveryTaskEntry, "voice_audio_sink", 16384, this, 4, &delivery_task_) != pdPASS) {
         input_running_ = false;
         i2s_channel_disable(rx_channel_);
         input_cv_.notify_all();

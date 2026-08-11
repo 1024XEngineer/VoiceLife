@@ -138,23 +138,23 @@ std::string_view VoiceInteractionController::display_text() const {
     std::lock_guard<std::mutex> lock(mutex_);
     switch (state_) {
         case VoiceInteractionState::kBooting:
-            return "BOOT";
+            return "开机";
         case VoiceInteractionState::kStandby:
-            return "IDLE";
+            return "空闲";
         case VoiceInteractionState::kListening:
-            return "LISTEN";
+            return "聆听";
         case VoiceInteractionState::kThinking:
-            return "THINK";
+            return "思考";
         case VoiceInteractionState::kSpeaking:
-            return "SPEAK";
+            return "播报";
         case VoiceInteractionState::kInterrupting:
-            return "STOP";
+            return "停止";
         case VoiceInteractionState::kReconnecting:
-            return "RECONNECT";
+            return "重连";
         case VoiceInteractionState::kError:
-            return "ERROR";
+            return "错误";
     }
-    return "ERROR";
+    return "错误";
 }
 
 }  // namespace voicelife::voice

@@ -24,7 +24,7 @@ void CheckTransition(VoiceInteractionController& controller, VoiceInteractionEve
 
 int main() {
     VoiceInteractionController controller;
-    Check(controller.state() == VoiceInteractionState::kBooting && controller.display_text() == "BOOT",
+    Check(controller.state() == VoiceInteractionState::kBooting && controller.display_text() == "开机",
           "控制器应以 BOOT 状态启动");
     CheckTransition(controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "启动后应进入待机并启动本地唤醒");
@@ -62,7 +62,7 @@ int main() {
                     VoiceInteractionAction::kRestoreStandby, "断线时必须停止云端上行并保留本地待机");
     CheckTransition(controller, VoiceInteractionEvent::kTransportConnected, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "重连完成后应重新可被唤醒");
-    Check(controller.display_text() == "IDLE", "待机状态应使用固定 OLED 文本");
+    Check(controller.display_text() == "空闲", "待机状态应使用固定 OLED 文本");
 
     CheckTransition(controller, VoiceInteractionEvent::kPressDown, VoiceInteractionState::kListening,
                     VoiceInteractionAction::kStartCapture, "触摸按下应开始手动采集");
@@ -88,8 +88,7 @@ int main() {
           "乱序 TTS stop 不能破坏待机状态");
     const auto failure = controller.Handle(VoiceInteractionEvent::kFailure);
     Check(failure.ok() && failure.value->state == VoiceInteractionState::kError &&
-              failure.value->action == VoiceInteractionAction::kInterruptSession &&
-              controller.display_text() == "ERROR",
+              failure.value->action == VoiceInteractionAction::kInterruptSession && controller.display_text() == "错误",
           "失败必须可见，并要求中止远端轮次后恢复本地待机");
     CheckTransition(controller, VoiceInteractionEvent::kStandbyReady, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kNone, "本地待机恢复后应清除错误状态");

@@ -43,6 +43,8 @@ namespace {
 
 #ifdef ESP_PLATFORM
 constexpr char kTag[] = "VoiceLifeRuntime";
+constexpr uint32_t kWakeFeedbackMs = 1200;
+constexpr uint32_t kListenTimeoutMs = 12000;
 
 #if CONFIG_NVS_ENCRYPTION
 Result<std::string> ReadNvsString(nvs_handle_t handle, const char* key) {
@@ -246,19 +248,19 @@ class Runtime final {
         if (const Status display_status = display_esp::InitializeStatusDisplay(); !display_status.ok()) {
             ESP_LOGW(kTag, "OLED 状态屏初始化失败: %s", display_status.message.c_str());
         }
-        (void)display_esp::SetStatus("WIFI");
+        (void)display_esp::SetEmotion("thinking", "联网");
         if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=secret_store code=%d", static_cast<int>(secret_store.code));
-            (void)display_esp::SetStatus("ERROR");
+            (void)display_esp::SetEmotion("sad", "错误");
             return secret_store;
         }
         auto connection = BootstrapLinxOtaConfig();
         if (!connection.ok() || !connection.value.has_value()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=linx_bootstrap code=%d", static_cast<int>(connection.status.code));
-            (void)display_esp::SetStatus("ERROR");
+            (void)display_esp::SetEmotion("sad", "错误");
             return connection.status;
         }
-        (void)display_esp::SetStatus("LINX");
+        (void)display_esp::SetEmotion("neutral", "连接");
         linx_config_ = std::move(*connection.value);
         auto result = registry.Create("xrobot-websocket", {});
 #else
@@ -296,7 +298,7 @@ class Runtime final {
         const Status session_status = session_->Start(config);
         if (!session_status.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=session_start code=%d", static_cast<int>(session_status.code));
-            (void)display_esp::SetStatus("ERROR");
+            (void)display_esp::SetEmotion("sad", "错误");
             return session_status;
         }
 
@@ -462,6 +464,9 @@ class Runtime final {
                           .generation = session_ ? session_->generation() : 0,
                           .event = "wake_detected",
                           .detail = {}});
+        // 唤醒即时反馈：先显示“收到！”，短暂停留后进入聆听。
+        (void)display_esp::SetEmotion("happy", "收到！");
+        vTaskDelay(pdMS_TO_TICKS(kWakeFeedbackMs));
         (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kWakeDetected, wake_word);
     }
 
@@ -480,6 +485,36 @@ class Runtime final {
         if (wake_queue_ == nullptr) return;
         const BoardRequest recovery{};
         (void)xQueueSend(wake_queue_, &recovery, 0);
+    }
+
+    // 聆听超时：唤醒后长时间无有效输入（无 STT/工具调用），主动结束聆听并回待机，
+    // 避免服务端对静音闲聊回复（如“时间过的真快”）。
+    static void ListenTimeoutEntry(void* context) {
+        auto* self = static_cast<Runtime*>(context);
+        if (self->interaction_.state() == voice::VoiceInteractionState::kListening) {
+            self->HandleInteractionEvent(voice::VoiceInteractionEvent::kToggleChat);
+        }
+    }
+
+    void StartListenTimer() {
+        if (listen_timer_ == nullptr) {
+            esp_timer_create_args_t args = {};
+            args.callback = &ListenTimeoutEntry;
+            args.arg = this;
+            args.name = "voicelife_listen_timeout";
+            if (esp_timer_create(&args, &listen_timer_) != ESP_OK) {
+                listen_timer_ = nullptr;
+                return;
+            }
+        }
+        (void)esp_timer_stop(listen_timer_);
+        (void)esp_timer_start_once(listen_timer_, kListenTimeoutMs * 1000ULL);
+    }
+
+    void CancelListenTimer() {
+        if (listen_timer_ != nullptr) {
+            (void)esp_timer_stop(listen_timer_);
+        }
     }
 
     void QueueInterrupt() {
@@ -528,6 +563,13 @@ class Runtime final {
                           .generation = session_ ? session_->generation() : 0,
                           .event = "standby_ready",
                           .detail = {}});
+        // 会话结束反馈：仅非首次待机显示“牛牛走了！”，短暂停留后回到空闲。
+        if (first_standby_) {
+            first_standby_ = false;
+        } else {
+            (void)display_esp::SetEmotion("happy", "牛牛走了！");
+            vTaskDelay(pdMS_TO_TICKS(kWakeFeedbackMs));
+        }
         if (interaction_.state() == voice::VoiceInteractionState::kError ||
             interaction_.state() == voice::VoiceInteractionState::kInterrupting) {
             (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kStandbyReady);
@@ -611,7 +653,33 @@ class Runtime final {
             ESP_LOGW(kTag, "忽略乱序板端交互事件=%d: %s", static_cast<int>(event), transition.status.message.c_str());
             return transition.status;
         }
-        (void)display_esp::SetStatus(interaction_.display_text());
+        // 牛头常驻：表情随状态变化，右侧显示中文状态词。
+        const auto state = interaction_.state();
+        const char* mood = "neutral";
+        switch (state) {
+            case voice::VoiceInteractionState::kListening:
+                mood = "thinking";
+                break;
+            case voice::VoiceInteractionState::kThinking:
+                mood = "thinking";
+                break;
+            case voice::VoiceInteractionState::kSpeaking:
+                mood = "speaking";
+                break;
+            case voice::VoiceInteractionState::kInterrupting:
+                mood = "surprised";
+                break;
+            case voice::VoiceInteractionState::kReconnecting:
+                mood = "thinking";
+                break;
+            case voice::VoiceInteractionState::kError:
+                mood = "sad";
+                break;
+            default:
+                mood = "neutral";
+                break;
+        }
+        (void)display_esp::SetEmotion(mood, interaction_.display_text());
         switch (transition.value->action) {
             case voice::VoiceInteractionAction::kNone:
                 return Status::Ok();
@@ -645,6 +713,7 @@ class Runtime final {
         // only lifecycle names and numeric counters needed for board review.
         if (evidence.event == "capture_started") {
             capture_started_us_.store(esp_timer_get_time());
+            StartListenTimer();
         }
         const int64_t started_at = capture_started_us_.load();
         const int64_t now = esp_timer_get_time();
@@ -670,18 +739,26 @@ class Runtime final {
         if (evidence.event == "capture_started") {
             (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kCaptureStarted);
         } else if (evidence.event == "stt_text_received" || evidence.event == "tool_call_received") {
+            // 收到有效输入（STT 文本或工具调用），取消聆听超时，等待服务端回复。
+            CancelListenTimer();
             (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kIntentReceived);
         } else if (evidence.event == "tts_started") {
+            CancelListenTimer();
             (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kTtsStarted);
         } else if (evidence.event == "tts_stopped" || evidence.event == "tts_aborted") {
+            CancelListenTimer();
             (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kTtsStopped);
         } else if (evidence.event == "transport_disconnected") {
+            CancelListenTimer();
             (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kTransportDisconnected);
         } else if (evidence.event == "transport_connected") {
             (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kTransportConnected);
         } else if (evidence.event == "provider_error" || evidence.event == "capture_stop_failed" ||
                    evidence.event == "tts_capture_stop_failed") {
+            CancelListenTimer();
             (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+        } else if (evidence.event == "capture_stopped") {
+            CancelListenTimer();
         }
     }
 
@@ -702,6 +779,8 @@ class Runtime final {
     std::array<ButtonSample, 4> buttons_{};
     int volume_ = 70;
     std::atomic<int64_t> capture_started_us_{0};
+    bool first_standby_ = true;
+    esp_timer_handle_t listen_timer_ = nullptr;
 #else
     ScaffoldAudioInput audio_input_;
     ScaffoldAudioOutput audio_output_;
