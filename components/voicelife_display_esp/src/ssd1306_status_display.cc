@@ -26,6 +26,15 @@ constexpr uint8_t kAddress = 0x3c;
 constexpr int kWidth = 128;
 constexpr int kHeight = 32;
 constexpr int kPages = kHeight / 8;
+constexpr int kTextChineseSize = 20;
+constexpr int kTextChineseAdvance = 21;
+constexpr int kTextAsciiScale = 2;
+constexpr int kTextAsciiWidth = 5 * kTextAsciiScale;
+constexpr int kTextAsciiHeight = 7 * kTextAsciiScale;
+constexpr int kTextAsciiAdvance = kTextAsciiWidth + 2;
+constexpr int kTextChineseTop = (kHeight - kTextChineseSize) / 2;
+constexpr int kTextAsciiTop = (kHeight - kTextAsciiHeight) / 2;
+constexpr int kMascotTop = (kHeight - 16) / 2;
 
 // 5x7 ASCII 字形（原字形表保持兼容，补充常用标点）。
 std::array<uint8_t, 5> Glyph(char value) {
@@ -288,6 +297,37 @@ void DrawChinese(DisplayState& state, int x, int page, const std::array<uint8_t,
     }
 }
 
+bool ChinesePixel(const std::array<uint8_t, 32>& glyph, int x, int y) {
+    return (glyph[(y / 8) * 16 + x] & (1U << (y % 8))) != 0;
+}
+
+void SetPixel(DisplayState& state, int x, int y) {
+    if (x < 0 || x >= kWidth || y < 0 || y >= kHeight) return;
+    state.buffer[(y / 8) * kWidth + x] |= static_cast<uint8_t>(1U << (y % 8));
+}
+
+// Scale the compact 16x16 Chinese glyphs to a readable 20x20 text glyph.
+void DrawChineseLarge(DisplayState& state, int x, int y, const std::array<uint8_t, 32>& glyph) {
+    for (int dy = 0; dy < kTextChineseSize; ++dy) {
+        const int source_y = dy * 16 / kTextChineseSize;
+        for (int dx = 0; dx < kTextChineseSize; ++dx) {
+            const int source_x = dx * 16 / kTextChineseSize;
+            if (ChinesePixel(glyph, source_x, source_y)) SetPixel(state, x + dx, y + dy);
+        }
+    }
+}
+
+void DrawAsciiLarge(DisplayState& state, int x, int y, char raw) {
+    const auto glyph = Glyph(static_cast<char>(std::toupper(static_cast<unsigned char>(raw))));
+    for (int dy = 0; dy < kTextAsciiHeight; ++dy) {
+        const int source_y = dy / kTextAsciiScale;
+        for (int dx = 0; dx < kTextAsciiWidth; ++dx) {
+            const int source_x = dx / kTextAsciiScale;
+            if ((glyph[source_x] & (1U << source_y)) != 0) SetPixel(state, x + dx, y + dy);
+        }
+    }
+}
+
 Status Flush(DisplayState& state, std::string_view text) {
     const esp_err_t error = esp_lcd_panel_draw_bitmap(state.panel, 0, 0, kWidth, kHeight, state.buffer.data());
     if (error != ESP_OK) {
@@ -299,37 +339,26 @@ Status Flush(DisplayState& state, std::string_view text) {
 
 Status DrawText(DisplayState& state, std::string_view text) {
     state.buffer.fill(0);
-    // 中文 16x16 占 2 页，ASCII 5x7 占 1 页；统一从页 1 开始以获得垂直居中。
-    int page = 1;
+    // Keep the status as one centered line; the 128x32 panel cannot fit two large lines.
     int x = 0;
     size_t index = 0;
-    while (index < text.size() && page < kPages) {
+    while (index < text.size()) {
         if (text[index] == '\n') {
             ++index;
-            x = 0;
-            ++page;
-            continue;
+            break;
         }
         size_t width = 0;
         const uint32_t cp = DecodeUtf8(text.substr(index), width);
         if (cp >= 0x4e00 && cp <= 0x9fff) {
             const auto glyph = ChineseGlyph(cp);
             const bool blank = std::all_of(glyph.begin(), glyph.end(), [](uint8_t b) { return b == 0; });
-            if (!blank && x + 16 > kWidth) {
-                x = 0;
-                page += 2;
-                if (page >= kPages) break;
-            }
-            DrawChinese(state, x, page, glyph);
-            x += blank ? 16 : 17;
+            if (x + kTextChineseSize > kWidth) break;
+            if (!blank) DrawChineseLarge(state, x, kTextChineseTop, glyph);
+            x += kTextChineseAdvance;
         } else {
-            if (x + 6 > kWidth) {
-                x = 0;
-                ++page;
-                if (page >= kPages) break;
-            }
-            DrawAscii(state, x, page, text[index]);
-            x += 6;
+            if (x + kTextAsciiWidth > kWidth) break;
+            DrawAsciiLarge(state, x, kTextAsciiTop, text[index]);
+            x += kTextAsciiAdvance;
         }
         index += width;
     }
@@ -401,25 +430,24 @@ Status SetEmotion(std::string_view mood, std::string_view text) {
     std::lock_guard<std::mutex> lock(state.mutex);
     if (!state.initialized) return Status::Error(ErrorCode::kUnavailable, "OLED 状态屏尚未初始化");
     state.buffer.fill(0);
-    // 左侧 16x16 牛头表情区，右侧文本区（从 x=20 起，页 1 开始）。
+    // 左侧 16x16 牛头表情区，右侧 20x20 大字状态区。
     const auto mascot = MoodGlyph(mood);
-    DrawChinese(state, 0, 1, mascot);
+    DrawChinese(state, 0, kMascotTop / 8, mascot);
     int x = 20;
-    int page = 1;
     size_t index = 0;
-    while (index < text.size() && page + 2 <= kPages) {
+    while (index < text.size()) {
         size_t width = 0;
         const uint32_t cp = DecodeUtf8(text.substr(index), width);
         if (cp >= 0x4e00 && cp <= 0x9fff) {
             const auto glyph = ChineseGlyph(cp);
             const bool blank = std::all_of(glyph.begin(), glyph.end(), [](uint8_t b) { return b == 0; });
-            if (!blank && x + 16 > kWidth) break;
-            DrawChinese(state, x, page, glyph);
-            x += blank ? 16 : 17;
+            if (x + kTextChineseSize > kWidth) break;
+            if (!blank) DrawChineseLarge(state, x, kTextChineseTop, glyph);
+            x += kTextChineseAdvance;
         } else {
-            if (x + 6 > kWidth) break;
-            DrawAscii(state, x, page, text[index]);
-            x += 6;
+            if (x + kTextAsciiWidth > kWidth) break;
+            DrawAsciiLarge(state, x, kTextAsciiTop, text[index]);
+            x += kTextAsciiAdvance;
         }
         index += width;
     }
