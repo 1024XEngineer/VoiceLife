@@ -1,6 +1,6 @@
-# 调度中心模块需求与设计文档 V2
+# 调度中心模块需求与设计文档 V3
 
-本文档定义声活 VoiceLife 的调度中心。它不是为了把旧定时任务拆成更多对象，而是把“什么时候触发某种行为”从日程和动作中拿出来，保留最少的两类调度事实：触发规则与单次触发。
+本文档定义 VoiceLife 的调度中心。目标不是把旧定时任务拆成更多对象，而是重新分配和简化边界：日程负责用户安排及周期规则，调度中心负责某个时刻是否应触发，语音提醒和 IM 负责输出。MVP 不保留动作模块。
 
 ## 1. 行业调研及成熟方案
 
@@ -8,104 +8,103 @@
 2. iCalendar (RFC 5545): <https://icalendar.org/RFC-Specifications/iCalendar-RFC-5545/>
 3. Microsoft Graph calendar resource: <https://learn.microsoft.com/en-us/graph/api/resources/calendar?view=graph-rest-1.0&preserve-view=true>
 
-日历产品通常将用户意图、某次发生时间和通知投递分开。VoiceLife 的三模块边界应当服务于这个目标，而非复制完整的日历平台对象模型：
+成熟日历系统会把用户意图、周期展开和实际通知分开。VoiceLife 只保留完成当前设备侧提醒所需的最小边界：
 
-| 模块 | 权威实体 | 回答的问题 |
+| 边界 | 权威事实 | 回答的问题 |
 | --- | --- | --- |
-| 日程 | `schedule`、`recurrence_rule`、日程例外 | 用户安排了什么，周期和某次改动是什么？ |
-| 调度中心 | `trigger_rule`、`action_trigger` | 哪种行为何时触发？ |
-| 动作 | `action_execution`、IM `delivery` | 触发后做了什么，IM 是否送达？ |
+| 日程模块 | `schedule`、`recurrence_rule`、日程例外 | 用户安排了什么；某个日期有哪些 occurrence？ |
+| 调度中心 | `trigger`、`notification_outbox` | 哪个具体时刻需要输出；该输出是否需要重试？ |
+| 语音提醒与 IM | 各自的输出 Port 和 Adapter | 如何把已到期的内容播放或投递出去？ |
 
-旧模型的迁移原则如下：
+旧对象的迁移原则如下：
 
-| 旧对象 | 新归属 | 简化后的处理 |
-| --- | --- | --- |
-| `timer_task` | 不再独立持有 | 日程与周期规则是日程模块事实；调度中心按需读取/缓存其版本，不创建第二套任务生命周期 |
-| `timer_instance` | 不再独立持有 | 某次 occurrence 由日程模块展开；仅当需要触发动作时，用 `action_trigger.occurrence_at` 引用它 |
-| `reminder_rule` | `trigger_rule` | 保留“提前多久触发”的必要配置 |
-| `reminder_trigger` | `action_trigger` + `action_execution` | 前者保存时间和 snooze/dismiss，后者保存实际执行和投递 |
+| 旧对象 | 简化后的处理 |
+| --- | --- |
+| `timer_task` | 不再独立持有。周期、时区和例外均为日程模块事实。 |
+| `timer_instance` | 不再独立持有。日程模块按查询范围展开 occurrence。 |
+| `reminder_rule` | 不再是独立实体；其偏移、提醒等级和输出目标成为注册 `trigger` 的参数。 |
+| `reminder_trigger` | 收敛为 `trigger`，仅记录一个具体 occurrence 的触发时间和运行态。 |
+| `reminder instance`、`action_execution` | 不再建模。输出受理、重试与幂等由 `notification_outbox` 表达，不再引入动作业务实体。 |
 
-因此，`action_trigger` 不是又一种 Reminder Instance，而是旧 `reminder_trigger` 的调度部分。它和 `action_execution` 之间只有一次跨模块交接。
+因此，`trigger` 不是日程 occurrence，也不是 Reminder Instance；它只是一条“在某个时刻把该 occurrence 输出到指定 Port”的调度事实。
 
 ## 2. 核心目标
 
-将日程模块已经确认的 occurrence 与简单的触发规则结合，在到期时发布一个可幂等消费的动作请求。
+调度中心通过两个入口工作：`RegisterTrigger` 注册或改变触发，`RunDueTriggers` 由 Runner 在到点时推进。Runner 在本地事务内确认触发并写入 Outbox，提交后直接调用语音提醒和 IM Port。
 
-调度中心只解决 When：
+调度中心负责：
 
-- 使用日程模块拥有的开始时间、时区、周期规则和例外展开 occurrence。
-- 用 `trigger_rule.offset_minutes` 计算某次 occurrence 的动作时间。
-- 在需要 snooze、dismiss、取消或恢复时保存单次 `action_trigger`。
-- 原子提交已发布触发和 `action_requested` 事件，保证崩溃恢复可以安全重放。
+- 向日程模块查询某日程下一次有效 occurrence，并按偏移计算具体 `trigger_at`。
+- 保存尚未完成的具体 `trigger`，接受取消、稍后和关闭等单次运行态改变。
+- 原子写入 `trigger` 状态和每个输出目标的 `notification_outbox`，在重启或调用失败后安全重放。
+- 计算下一次唤醒时间，让硬件定时器只在需要时唤醒 Runner。
 
-它不创建或修改日程，不保存日程的周期规则副本，不定义动作内容或渠道，也不记录 IM 投递和平台回执。
+调度中心不创建或修改日程，不保存 RRULE、时区或日程例外的副本，不提供“明天有什么安排”的查询，也不直接调用 HTTP、IM SDK、设备驱动或语音 SDK。
 
 ## 3. 核心概念定义
 
 - **`schedule_id` 日程标识**
-  - 日程模块拥有的业务意图引用。调度中心只引用，不能直接修改。
-  - 跨模块以不透明标识传递；内部 ID 类型和 Adapter 映射不在本模块规定。
+  - 日程模块拥有的业务意图引用；调度中心只能引用，不能修改。
 
 - **`schedule_revision` 日程版本**
-  - 日程模块已确认变更的版本或等价事件标识。
-  - 调度中心用它拒绝旧变更，并使已缓存的展开结果失效。
+  - 日程模块确认后的版本标识。注册新版本时，调度中心取消尚未释放的旧版本触发，并按日程模块给出的 occurrence 重新注册。
 
 - **`occurrence_at` 日程发生时间**
-  - 日程模块根据 `recurrence_rule` 和例外得到的一次实际 occurrence 时间。
-  - 它不是调度中心的实体；调度中心只将其作为触发的稳定定位键。
+  - 日程模块依据 RRULE、时区和例外得出的某次实际发生时间。
+  - 它不是调度中心实体；调度中心只在 `trigger` 中引用它作为稳定定位键。
 
-- **`trigger_rule` 触发规则**
-  - 属于一个日程的简单配置：什么动作在 occurrence 前/后多少分钟触发。
-  - 当前 MVP 使用 `action_kind=reminder` 与 `reminder_level=weak/strong`；IM 是动作模块对提醒的渠道能力，不另建 IM 调度规则。
-  - 周期由日程模块定义，偏移由本规则定义，两者不相互复制。
+- **`trigger` 触发**
+  - 调度中心唯一的业务调度实体：某条日程的某次 `occurrence_at`，应在 `trigger_at` 向一个或多个输出目标发出提醒。
+  - 创建时只物化下一次需要处理的 occurrence；周期日程在该触发被释放后，才由 Runner 向日程模块请求下一次并注册新的 `trigger`。
+  - `snooze` 和 `dismiss` 只作用于该条 `trigger`，不修改日程及后续 occurrence。
 
-- **`action_trigger` 动作触发**
-  - 针对一条 `trigger_rule` 和一次 `occurrence_at` 的单次调度事实。
-  - 它保存计划/实际触发时间以及 `snooze`、`dismiss`、取消和过期状态。
-  - 未发生单次操作时，未来触发可由规则按需计算；不要求为所有未来 occurrence 预建记录。
+- **`notification_outbox` 通知发件箱**
+  - `trigger` 释放时与其原子写入的可靠投递记录，每个输出目标一条。
+  - 它是技术可靠性事实，不是动作模块或 Reminder Instance；记录只说明某个 Port 是否仍需调用，不声称用户一定已看到通知。
+
+- **`ReminderOutputPort`、`ImNotificationPort` 输出 Port**
+  - Runner 提交 Outbox 后调用的两个边界。Port 必须以 `delivery_id` 幂等：重复调用不得重复创建不可接受的外部效果。
+  - 具体语音设备、IM 平台、HTTP、SDK、凭据和回执由各 Adapter 负责，不能进入 Runner 业务逻辑。
 
 ## 4. 核心业务流程
 
-### 4.1 日程接入与规则维护
+### 4.1 注册与日程变更
 
-1. 日程模块在创建、修改、取消或恢复日程后，向调度中心发送 `schedule_id`、`schedule_revision` 和已确认的时间变化。
-2. 调度中心只记录已处理版本，必要时使该日程未来的计算缓存失效；它不保存可编辑的周期规则副本。
-3. 调用方以 `ReplaceTriggerRules` 一次提交一个日程当前完整的触发规则集，避免规则的增删改接口扩散。
-4. 每条规则只说明动作种类、强弱等级和相对 occurrence 的偏移；内容、渠道、账户和凭据不是规则字段。
-5. 规则变更只影响尚未发布的未来触发；已发生的 `action_trigger` 保留历史。
+1. 日程创建、修改、取消或恢复完成后，应用层调用 `RegisterTrigger`，提交 `schedule_id`、`schedule_revision` 和当前提醒配置。
+2. 调度中心通过日程查询 Port 获取下一次有效 `occurrence_at`，按 `offset_minutes` 算出 `trigger_at`，只保存这一条具体 `trigger`。
+3. 相同 `request_id` 必须返回首次处理结果；较旧的 `schedule_revision` 不得覆盖较新的触发。
+4. 日程版本变化或整条规则取消时，尚未释放的旧触发进入 `cancelled`；已释放的 Outbox 不被日程变更倒写。
+5. 用户的“本次”“本次及以后”“全部”修改先由日程模块形成例外和新版本，再由本入口重新计算触发；调度中心不解释 RRULE 或例外范围。
 
-### 4.2 到期推进与动作请求
+### 4.2 周期日程与日历查询
 
-1. Runner 查询活动触发规则，并向日程模块请求近端时间窗内的 occurrence。
-2. 调度中心以 `occurrence_at + offset_minutes` 计算到期时间；已有单次 `action_trigger` 覆盖优先于规则计算。
-3. 到期时，模块创建或更新该次 `action_trigger` 为 `released`。
-4. 在同一原子提交中写入稳定 `event_id` 的 `action_requested` 事件。
-5. 动作模块可重复接收该事件，但按 `event_id` 只创建一条 `action_execution`；这提供幂等，而不承诺外部渠道的 exactly-once 投递。
-6. 调度中心推进下一段扫描窗口，不为远期周期日程批量生成实例。
+1. 周期规则、时区和例外始终由日程模块保存及展开；调度中心没有 RRULE 副本。
+2. Runner 释放一个周期日程的 `trigger` 后，调用日程查询 Port 的 `NextOccurrenceAfter(schedule_id, occurrence_at)` 获取下一次有效 occurrence。
+3. 若日程仍有效且版本仍与来源触发一致，Runner 用同一提醒配置注册下一条具体 `trigger` 并重设最近唤醒时间；日程模块已返回较新版本时，以新版本注册结果为准。不存在远期批量生成的实例表。
+4. “明天有什么安排”“下个月 5 号有哪些安排”由日程模块按目标时间范围展开 RRULE 和例外后回答。调度中心仅为到点输出服务，不能成为第二个日历查询源。
 
-### 4.3 日程修改、例外与取消
+### 4.3 到期推进与直接输出
 
-1. 用户对“本次”“本次及以后”“全部”的修改，先由日程模块完成并形成新的 `schedule_revision`。
-2. 日程模块在展开 occurrence 时已叠加本次例外；调度中心不再维护第二份 `timer_instance` 或例外模型。
-3. 调度中心收到新版本后，取消或重算尚未发布、且受影响的未来 `action_trigger`。
-4. 日程取消停止新的触发计算，并将尚未发布的单次触发标记为 `cancelled`。
-5. 已发布动作的处理结果由动作模块保留；日程变更不得倒写它的投递或执行状态。
+1. 定时器唤醒、设备启动、日程注册完成或 Outbox 重试到期时，Runtime 调用 `RunDueTriggers(now)`。
+2. Runner 取得 `trigger_at <= now` 的活动触发；对每条触发原子地标记为 `released`，并为 `voice_reminder`、`im_notification` 等目标写入稳定 `delivery_id` 的 Outbox 记录。
+3. 本地事务提交后，Runner 依次读取待投递 Outbox，通过 `ReminderOutputPort` 和 `ImNotificationPort` 直接输出。这里没有动作模块、`action_requested` 事件或 `action_execution` 实体。
+4. Port 调用成功后，Outbox 标记为 `delivered`；调用失败则按退避策略标记为 `retry_pending`，下次 Runner 重试同一 `delivery_id`。
+5. 崩溃发生在提交前时，触发仍可再次取得；发生在提交后、Port 调用前或调用中时，Outbox 重放。语义为至少一次调用加 Port 幂等，不承诺外部渠道的 exactly-once。
 
-### 4.4 强提醒的稍后与关闭
+### 4.4 稍后、关闭与恢复
 
-1. 动作模块仅在强提醒的有效窗口内受理 `snooze` 或 `dismiss`，并生成带 `command_id` 的调度命令。
-2. `SnoozeActionTrigger` 依据 `action_trigger_id` 将 `actual_trigger_at` 向后移动；重复 `command_id` 返回原结果。
-3. `DismissActionTrigger` 使该次触发进入 `dismissed`，不影响日程本身或后续周期 occurrence。
-4. 弱提醒不接受上述命令；参数、过期、终态和非强提醒请求必须明确拒绝。
-5. snooze 后再次到期会为同一 `action_trigger` 发布新的 `event_id`，动作模块因而创建一次新的执行记录。
+1. 语音或 IM 的用户交互入口直接调用 `RegisterTrigger`，以 `operation=snooze` 或 `operation=dismiss` 提交 `command_id`；不存在动作模块中转。
+2. `snooze` 只接受仍可交互的强提醒，将该 `trigger.trigger_at` 延后，并递增其 `delivery_sequence`；下一次到期产生新的 Outbox 记录。
+3. `dismiss` 将该次 `trigger` 标为 `dismissed`，不影响日程和后续周期触发。弱提醒、已取消或终态触发必须拒绝这些操作。
+4. `command_id` 幂等：同一命令重复到达返回首次结果；同一标识但不同内容必须拒绝。
+5. 设备重启后，Runner 从持久化的活动触发和待投递 Outbox 恢复；任一输出渠道失败不回滚日程或另一输出渠道的结果。
 
-### 4.5 查询与恢复
+### 4.5 硬件定时与唤醒
 
-1. 用户的“明天有什么安排”查询由日程模块负责；调度中心不提供第二个日历视图。
-2. 调度中心仅查询触发历史或待处理触发，返回计划时间、实际时间、规则和调度状态。
-3. IM 是否接受、送达、失败或重试由动作模块查询。
-4. 服务重启后，调度中心扫描未终态触发和近端 occurrence；唯一键防止重复创建触发。
-5. 任一渠道失败不回滚日程、规则或已发布的调度事实。
+1. Runtime 从持久化 `trigger.trigger_at` 与 Outbox 的下次重试时间中选出最近时间，使用 `esp_timer` 设置一次性唤醒。
+2. `esp_timer` 回调只通知或唤醒 Runner；它不展开 RRULE、不改变触发状态，也不调用语音或 IM Port。
+3. 设备进入深度睡眠时，以 RTC Timer 设置最近唤醒；唤醒后重新加载持久化状态并调用 `RunDueTriggers(now)`，从而处理睡眠期间已到期的记录。
+4. `GPTimer` 仅用于唤醒后的短时精度延迟，不作为日程调度器。正常运行不采用固定周期的软件轮询。
 
 ---
 
@@ -115,204 +114,126 @@
 
 | 接口 | 调用方 | 说明 |
 | --- | --- | --- |
-| ApplyScheduleChange | 日程模块 | 通知已确认的日程版本变化 |
-| ReplaceTriggerRules | 日程应用层 | 整体替换一个日程的触发规则 |
-| AdvanceDueTriggers | Runner | 扫描到期触发并发布动作请求 |
-| SnoozeActionTrigger | 动作模块 | 推迟一次强提醒触发 |
-| DismissActionTrigger | 动作模块 | 关闭一次强提醒触发 |
-| ListActionTriggers | 查询层 | 查询调度事实，不承担日历查询 |
+| `RegisterTrigger` | 日程应用层、语音/IM 交互入口 | 统一注册、更新、取消、稍后或关闭触发的命令入口 |
+| `RunDueTriggers` | Runtime Runner | 推进到期触发与待投递 Outbox；不是面向业务调用方的查询 API |
+
+Outbox Repository、日程查询 Port、`ReminderOutputPort` 和 `ImNotificationPort` 是调度中心内部依赖，不是额外的业务模块接口。
 
 ### 5.2 接口参数
 
-#### 5.2.1 ApplyScheduleChange
+#### 5.2.1 `RegisterTrigger`
 
 **请求参数**
 
 | 参数名 | 类型 | 必填 | 约束 | 说明 |
 | --- | --- | --- | --- | --- |
-| request_id | string | 是 | 非空，幂等 | 日程变更事件标识 |
-| schedule_id | string | 是 | 不透明引用 | 日程标识 |
-| schedule_revision | string | 是 | 可比较的新版本 | 已确认日程版本 |
-| change_type | string | 是 | `created` / `updated` / `cancelled` / `restored` | 变更类型 |
-| effective_from | datetime | 否 | 周期局部变更时提供 | 重算起点 |
+| `request_id` | string | 是 | 非空，幂等 | 注册或变更请求标识 |
+| `operation` | string | 是 | `upsert` / `cancel` / `snooze` / `dismiss` | 统一命令类型 |
+| `trigger_id` | string | 条件必填 | `cancel`、`snooze`、`dismiss` 必填 | 已注册触发标识 |
+| `schedule_id` | string | `upsert` 必填 | 不透明引用 | 所属日程 |
+| `schedule_revision` | string | `upsert` 必填 | 单调递增或可比较 | 日程确认版本 |
+| `offset_minutes` | integer | `upsert` 必填 | 相对 occurrence 的分钟偏移 | 触发偏移 |
+| `reminder_level` | string | `upsert` 必填 | `weak` / `strong` | 提醒等级 |
+| `output_targets` | array<string> | `upsert` 必填 | 当前为 `voice_reminder`、`im_notification` 的非空集合 | 本次到期需要调用的 Port |
+| `scope` | string | `cancel` 可选 | `occurrence` / `series`，默认 `occurrence` | 取消范围 |
+| `delay_minutes` | integer | `snooze` 必填 | 大于 0 | 推迟时长 |
+| `command_id` | string | `snooze`、`dismiss` 必填 | 非空，幂等 | 用户操作标识 |
+| `requested_at` | datetime | 否 | ISO 8601 | 命令接收时间，默认当前时间 |
 
 **返回参数**
 
 | 参数名 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| schedule_id | string | 非空 | 已处理日程 |
-| applied_revision | string | 非空 | 当前已应用版本 |
-| cancelled_trigger_count | integer | >= 0 | 受影响的未来未发布触发数 |
+| `trigger_id` | string | 非空 | 当前或新建触发标识 |
+| `status` | string | 触发状态枚举 | 处理后的状态 |
+| `occurrence_at` | datetime | 可空 | 当前关联的日程 occurrence |
+| `trigger_at` | datetime | 可空 | 当前实际到期时间 |
+| `result` | string | `registered` / `updated` / `cancelled` / `snoozed` / `dismissed` / `duplicate` | 命令结果 |
 
-#### 5.2.2 ReplaceTriggerRules
+约束：`upsert` 只能引用日程模块已确认的版本；`snooze` 与 `dismiss` 不接受日程内容、RRULE 或输出凭据。配置变化只影响尚未释放的未来触发。
+
+#### 5.2.2 `RunDueTriggers`
 
 **请求参数**
 
 | 参数名 | 类型 | 必填 | 约束 | 说明 |
 | --- | --- | --- | --- | --- |
-| request_id | string | 是 | 非空，幂等 | 规则集修改标识 |
-| schedule_id | string | 是 | 活动日程 | 规则所属日程 |
-| rules | array<object> | 是 | 可为空，表示关闭全部规则 | 当前完整规则集 |
-
-`rules` 子项：
-
-| 字段名 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| trigger_rule_id | string | 可空 | 更新已有规则时传入 |
-| action_kind | string | 必填 | 当前仅 `reminder` | 目标动作 |
-| reminder_level | string | 必填 | `weak` / `strong` | 提醒等级 |
-| offset_minutes | integer | 必填 | 相对 occurrence 时间 | 提前/延后分钟数 |
-| enabled | boolean | 必填 | 非空 | 是否继续派生未来触发 |
+| `now` | datetime | 是 | ISO 8601 | 本轮到期边界 |
+| `limit` | integer | 否 | 1 到 1000 | 本轮最多推进的触发与 Outbox 记录数 |
 
 **返回参数**
 
 | 参数名 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| schedule_id | string | 非空 | 所属日程 |
-| rules | array<object> | 可空 | 保存后的完整规则集 |
+| `released_trigger_count` | integer | >= 0 | 已释放的到期触发数 |
+| `delivered_count` | integer | >= 0 | 本轮成功确认的 Outbox 投递数 |
+| `retry_pending_count` | integer | >= 0 | 仍待重试的 Outbox 数 |
+| `next_wake_at` | datetime | 可空 | Runtime 应设置的最近唤醒时间 |
 
-约束：同一日程最多一条启用的 `strong` 且 `offset_minutes=0` 规则；弱提醒规则不得携带交互配置。
+### 5.3 内部 Port 契约
 
-#### 5.2.3 AdvanceDueTriggers
+Runner 仅依赖以下 Port，不接触外部 SDK：
 
-**请求参数**
+| Port | 输入 | 关键约束 |
+| --- | --- | --- |
+| `ScheduleQueryPort` | `schedule_id`、时间边界或 `occurrence_at` | 返回日程模块已经叠加 RRULE、时区和例外后的 occurrence；无下一次 occurrence 时返回空。 |
+| `ReminderOutputPort` | `delivery_id`、日程内容快照、提醒等级 | 同一 `delivery_id` 必须幂等。 |
+| `ImNotificationPort` | `delivery_id`、日程内容快照、提醒等级 | 同一 `delivery_id` 必须幂等；平台回执和凭据留在 IM Adapter。 |
 
-| 参数名 | 类型 | 必填 | 约束 | 说明 |
-| --- | --- | --- | --- | --- |
-| now | datetime | 是 | ISO 8601 | 本次到期边界 |
-| limit | integer | 否 | 1 到 1000 | 最多处理规则/触发数 |
-
-**返回参数**
-
-| 参数名 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| released_trigger_count | integer | >= 0 | 已发布触发数 |
-| emitted_event_count | integer | >= 0 | 动作请求事件数 |
-
-#### 5.2.4 SnoozeActionTrigger
-
-**请求参数**
-
-| 参数名 | 类型 | 必填 | 约束 | 说明 |
-| --- | --- | --- | --- | --- |
-| command_id | string | 是 | 非空，幂等 | 动作模块命令标识 |
-| action_trigger_id | string | 是 | 非空 | 要推迟的触发 |
-| delay_minutes | integer | 是 | 大于 0 | 推迟时长 |
-| requested_at | datetime | 是 | ISO 8601 | 命令受理时间 |
-
-**返回参数**
-
-| 参数名 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| action_trigger_id | string | 非空 | 已重排触发 |
-| actual_trigger_at | datetime | 非空 | 新的触发时间 |
-| snooze_count | integer | >= 0 | 累计推迟次数 |
-
-#### 5.2.5 DismissActionTrigger
-
-**请求参数**
-
-| 参数名 | 类型 | 必填 | 约束 | 说明 |
-| --- | --- | --- | --- | --- |
-| command_id | string | 是 | 非空，幂等 | 动作模块命令标识 |
-| action_trigger_id | string | 是 | 非空 | 要关闭的触发 |
-| requested_at | datetime | 是 | ISO 8601 | 命令受理时间 |
-
-**返回参数**
-
-| 参数名 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| action_trigger_id | string | 非空 | 已关闭触发 |
-| status | string | `dismissed` | 当前终态 |
-
-#### 5.2.6 ListActionTriggers
-
-**请求参数**
-
-| 参数名 | 类型 | 必填 | 约束 | 说明 |
-| --- | --- | --- | --- | --- |
-| schedule_id | string | 否 | 可为空 | 日程过滤 |
-| trigger_rule_id | string | 否 | 可为空 | 规则过滤 |
-| status | string | 否 | 触发状态枚举 | 状态过滤 |
-| range_start | datetime | 否 | 与 `range_end` 成对提供 | 实际触发范围起点 |
-| range_end | datetime | 否 | 大于 `range_start` | 实际触发范围终点 |
-| page | integer | 否 | >= 1 | 页码 |
-| page_size | integer | 否 | 1 到 100 | 每页数量 |
-
-**返回参数**
-
-| 参数名 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| action_triggers | array<object> | 可空 | 触发事实列表 |
-| total | integer | >= 0 | 总数 |
-| has_more | boolean | 非空 | 是否还有下一页 |
-
-### 5.3 下游契约
-
-调度中心向动作模块发布 `action_requested`。它只表示到期，不代表动作已执行或消息已送达。
-
-| 字段名 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| event_id | string | 是 | 唯一且稳定，用于幂等消费 |
-| event_type | string | 是 | 固定为 `action_requested` |
-| occurred_at | datetime | 是 | 事件提交时间 |
-| action_trigger_id | string | 是 | 本次触发 |
-| schedule_id | string | 是 | 关联日程 |
-| occurrence_at | datetime | 是 | 所属日程 occurrence |
-| action_kind | string | 是 | 当前为 `reminder` |
-| reminder_level | string | 是 | `weak` / `strong` |
-| trigger_at | datetime | 是 | 本次实际触发时间 |
-| context | object | 否 | 动作所需的日程内容快照 |
-
-约束：
-
-- `event_id` 与 `action_trigger` 的一次 `released` 转换原子提交。
-- 动作模块按 `event_id` 幂等受理；相同标识但不同内容必须拒绝。
-- 调度中心不等待动作执行或渠道投递结果。
+Outbox 载荷中的日程内容是释放时的只读快照。日程后续修改不修改已提交的 Outbox；未释放的触发则在新 `schedule_revision` 下重算。
 
 ### 5.4 状态约定
 
-- `trigger_rule.status`
-  - `active`：继续从日程 occurrence 派生未来触发。
-  - `disabled`：不再产生未来触发。
-
-- `action_trigger.status`
-  - 非终态：`pending`、`released`、`snoozed`。
+- `trigger.status`
+  - 非终态：`pending`、`snoozed`、`released`。
   - 终态：`dismissed`、`cancelled`、`expired`。
   - 允许流转：`pending -> released / cancelled`，`released -> snoozed / dismissed / expired`，`snoozed -> released / dismissed / expired`。
-  - `released` 仅表示已发布动作请求；投递与送达状态属于动作模块。
+  - `released` 仅表示已写入 Outbox；各输出的完成情况只由 Outbox 状态表达。
+
+- `notification_outbox.status`
+  - 非终态：`pending`、`processing`、`retry_pending`。
+  - 终态：`delivered`、`failed`。
+  - Outbox 达到重试上限可进入 `failed`，但不得回写或恢复已释放的 `trigger`。
 
 ## 6. 主要数据模型
 
-### 6.1 `trigger_rule`
+### 6.1 `trigger`
 
 | 字段名 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| id | string | 主键，唯一，非空 | 触发规则标识 |
-| schedule_id | string | 外键，非空 | 所属日程 |
-| action_kind | string | 非空，枚举 | 当前仅 `reminder` |
-| reminder_level | string | 非空，枚举 | `weak` / `strong` |
-| offset_minutes | integer | 非空 | 相对 occurrence 的触发偏移 |
-| status | string | 非空，枚举 | `active` / `disabled` |
-| last_schedule_revision | string | 非空 | 最近处理的日程版本 |
-| next_occurrence_at | datetime | 可空 | 仅为扫描效率保存的游标，不是 occurrence 实体 |
-| created_at | datetime | 非空 | 创建时间 |
-| updated_at | datetime | 非空 | 最后更新时间 |
+| `id` | string | 主键，唯一，非空 | 触发标识 |
+| `lineage_id` | string | 非空 | 同一周期提醒链的稳定标识，用于取消后续触发 |
+| `schedule_id` | string | 非空 | 日程引用 |
+| `schedule_revision` | string | 非空 | 注册时对应的日程版本 |
+| `occurrence_at` | datetime | 非空 | 日程模块展开的具体 occurrence |
+| `planned_trigger_at` | datetime | 非空 | 按偏移计算的原始时间 |
+| `trigger_at` | datetime | 非空 | 当前实际到期时间；snooze 后改变 |
+| `offset_minutes` | integer | 非空 | 相对 occurrence 的偏移 |
+| `reminder_level` | string | 非空，枚举 | `weak` / `strong` |
+| `output_targets` | array<string> | 非空 | 要投递到的 Port 集合 |
+| `delivery_sequence` | integer | 非空，>= 0 | 同一触发第几次释放；snooze 后递增 |
+| `status` | string | 非空，枚举 | 调度状态 |
+| `created_at` | datetime | 非空 | 创建时间 |
+| `updated_at` | datetime | 非空 | 最后更新时间 |
 
-### 6.2 `action_trigger`
+约束：同一 `lineage_id + occurrence_at` 最多一条非取消的触发；同一日程版本的旧触发不能覆盖新版本触发。周期的下一条触发由已释放触发派生，但每条记录都只代表一个明确 occurrence。
+
+### 6.2 `notification_outbox`
 
 | 字段名 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| id | string | 主键，唯一，非空 | 动作触发标识 |
-| trigger_rule_id | string | 外键，非空 | 来源触发规则 |
-| schedule_id | string | 非空 | 所属日程 |
-| occurrence_at | datetime | 非空 | 日程模块展开的 occurrence 时间 |
-| planned_trigger_at | datetime | 非空 | 规则计算出的时间 |
-| actual_trigger_at | datetime | 非空 | 当前实际触发时间 |
-| status | string | 非空，枚举 | 调度状态 |
-| snooze_count | integer | 非空，>= 0 | 累计推迟次数 |
-| last_event_id | string | 可空，唯一 | 最近一次发布的动作请求 |
-| created_at | datetime | 非空 | 创建时间 |
-| updated_at | datetime | 非空 | 最后更新时间 |
+| `id` | string | 主键，唯一，非空 | Outbox 记录标识 |
+| `delivery_id` | string | 唯一，非空 | 传给输出 Port 的幂等键 |
+| `trigger_id` | string | 外键，非空 | 来源触发 |
+| `delivery_sequence` | integer | 非空，>= 0 | 对应触发的释放序号 |
+| `target` | string | 非空，枚举 | `voice_reminder` / `im_notification` |
+| `payload_snapshot` | object | 非空，不含凭据 | 输出所需日程上下文快照 |
+| `status` | string | 非空，枚举 | 投递状态 |
+| `attempt_count` | integer | 非空，>= 0 | 已尝试次数 |
+| `next_attempt_at` | datetime | 可空 | 重试或唤醒时间 |
+| `lease_until` | datetime | 可空 | 防止并发 Runner 重复处理中使用的租约 |
+| `last_error_code` | string | 可空 | 稳定的失败分类，不保存敏感原始响应 |
+| `created_at` | datetime | 非空 | 创建时间 |
+| `updated_at` | datetime | 非空 | 最后更新时间 |
 
-约束：同一 `trigger_rule_id + occurrence_at` 最多一条未删除触发。snooze 后再次发布必须生成新的 `event_id`，但仍复用同一 `action_trigger_id`。
+约束：`trigger` 变为 `released` 与其目标集合的 Outbox 记录必须原子提交；同一 `trigger_id + delivery_sequence + target` 最多一条记录。Port 的调用发生在提交之后，重复调用依赖 `delivery_id` 幂等。
