@@ -154,7 +154,6 @@ README 只保留项目入口和跨模块信息。语音架构、语音迁移研�
 - [ADR 0002：能力驱动的适配器 Profile](./docs/adr/0002-capability-driven-adapters.md)
 - [SQLite 实板验证与 Flash 恢复手册](./docs/engineering/board-storage-validation.md)
 - [协同开发规范](./docs/engineering/collaboration.md)
-- [上游复用与证据驱动开发规范](./docs/engineering/upstream-reuse-and-evidence-standard.md)
 - [提交描述规范](./docs/engineering/commit-convention.md)
 - [参与开发](./CONTRIBUTING.md)
 

@@ -432,6 +432,10 @@ void LinxSpeechProviderAdapter::OnBinary(const std::vector<uint8_t>& payload) {
     if (sink) {
         const Status status = sink(std::move(frame));
         if (!status.ok()) {
+            // The board's output queue is deliberately bounded. A burst can
+            // reject one frame while playback remains healthy; metrics record
+            // that loss, so do not turn it into a provider lifecycle failure.
+            if (status.code == ErrorCode::kConflict) return;
             Emit(Event(voice::VoiceEventKind::kError, status.message));
         }
     } else {

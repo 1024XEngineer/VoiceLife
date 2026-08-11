@@ -126,7 +126,9 @@ int main() {
     voicelife::linx::LinxSpeechProviderAdapter provider(transport, codec, connection);
     std::vector<voicelife::voice::VoiceEvent> events;
     std::vector<voicelife::voice::AudioFrame> received_audio;
-    provider.SetAudioSink([&received_audio](voicelife::voice::AudioFrame frame) {
+    bool reject_output = false;
+    provider.SetAudioSink([&received_audio, &reject_output](voicelife::voice::AudioFrame frame) {
+        if (reject_output) return Status::Error(ErrorCode::kConflict, "测试播放队列已满");
         received_audio.push_back(std::move(frame));
         return Status::Ok();
     });
@@ -204,6 +206,12 @@ int main() {
               received_audio.front().sequence == 0 && received_audio.front().payload.size() == 3 &&
               received_audio.front().format.sample_rate_hz == 24000,
           "二进制下行音频应使用协商格式并携带 generation");
+    const auto events_before_output_backpressure = events.size();
+    reject_output = true;
+    transport.EmitBinary({5, 6, 7});
+    reject_output = false;
+    Check(events.size() == events_before_output_backpressure,
+          "有界播放队列拒绝单帧应只计入端口指标，不能伪装成 Provider 失败");
     transport.EmitDisconnected();
     Check(events.back().kind == voicelife::voice::VoiceEventKind::kDisconnected, "物理断线必须向会话上报生命周期事件");
     Check(provider.SendAudio(uplink).code == ErrorCode::kUnavailable, "断线后必须立即阻断音频上行");
