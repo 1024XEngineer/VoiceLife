@@ -323,4 +323,8 @@ voice::AudioOutputPort& Esp32s3PcmAudioPorts::output() { return impl_->output();
 
 AudioPortStats Esp32s3PcmAudioPorts::stats() const { return impl_->stats(); }
 
+void Esp32s3PcmAudioPorts::SetOutputVolume(uint8_t volume) { impl_->SetOutputVolume(volume); }
+
+uint8_t Esp32s3PcmAudioPorts::output_volume() const { return impl_->output_volume(); }
+
 }  // namespace voicelife::audio_esp

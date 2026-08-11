@@ -11,6 +11,7 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_ssd1306.h"
+#include "esp_log.h"
 
 namespace voicelife::display_esp {
 namespace {
@@ -55,6 +56,8 @@ std::array<uint8_t, 5> Glyph(char value) {
             return {0x01, 0x7f, 0x01, 0x01, 0x00};
         case 'W':
             return {0x7f, 0x20, 0x18, 0x20, 0x7f};
+        case 'V':
+            return {0x07, 0x38, 0x40, 0x38, 0x07};
         case 'Y':
             return {0x03, 0x04, 0x78, 0x04, 0x03};
         case '0':
@@ -100,7 +103,7 @@ DisplayState& State() {
     return state;
 }
 
-void DrawText(DisplayState& state, std::string_view text) {
+Status DrawText(DisplayState& state, std::string_view text) {
     state.buffer.fill(0);
     int x = 0;
     int page = 0;
@@ -117,7 +120,12 @@ void DrawText(DisplayState& state, std::string_view text) {
         }
         x += 6;
     }
-    (void)esp_lcd_panel_draw_bitmap(state.panel, 0, 0, kWidth, kHeight, state.buffer.data());
+    const esp_err_t error = esp_lcd_panel_draw_bitmap(state.panel, 0, 0, kWidth, kHeight, state.buffer.data());
+    if (error != ESP_OK) {
+        return Status::Error(ErrorCode::kUnavailable, "OLED SSD1306 绘制失败");
+    }
+    ESP_LOGI("VoiceLifeDisplay", "DISPLAY_DRAW=1 text=%.*s", static_cast<int>(text.size()), text.data());
+    return Status::Ok();
 }
 
 }  // namespace
@@ -164,7 +172,12 @@ Status InitializeStatusDisplay() {
         return Status::Error(ErrorCode::kUnavailable, "OLED SSD1306 显示方向配置失败");
     }
     state.initialized = true;
-    DrawText(state, "BOOT");
+    const Status draw_status = DrawText(state, "BOOT");
+    if (!draw_status.ok()) {
+        state.initialized = false;
+        return draw_status;
+    }
+    ESP_LOGI("VoiceLifeDisplay", "DISPLAY_READY=1 bus=0 sda=41 scl=42 addr=0x3c size=128x32 mirror=1,1");
     return Status::Ok();
 }
 
@@ -172,8 +185,7 @@ Status SetStatus(std::string_view status) {
     auto& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
     if (!state.initialized) return Status::Error(ErrorCode::kUnavailable, "OLED 状态屏尚未初始化");
-    DrawText(state, status);
-    return Status::Ok();
+    return DrawText(state, status);
 }
 
 }  // namespace voicelife::display_esp

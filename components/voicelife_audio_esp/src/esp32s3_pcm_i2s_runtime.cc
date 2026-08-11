@@ -253,11 +253,22 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
         std::vector<uint8_t> wire(bytes);
         if (endpoint.wire_bits_per_sample == 32) {
             auto* out = reinterpret_cast<int32_t*>(wire.data());
+            const int volume = output_volume_.load();
             for (std::size_t i = 0; i < count; ++i) {
-                out[i] = detail::ToWire(pcm[offset + i], endpoint);
+                const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume / 100;
+                out[i] = detail::ToWire(static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767)), endpoint);
             }
         } else {
-            std::memcpy(wire.data(), pcm + offset, bytes);
+            const int volume = output_volume_.load();
+            if (volume == 100) {
+                std::memcpy(wire.data(), pcm + offset, bytes);
+            } else {
+                auto* out = reinterpret_cast<int16_t*>(wire.data());
+                for (std::size_t i = 0; i < count; ++i) {
+                    const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume / 100;
+                    out[i] = static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767));
+                }
+            }
         }
         size_t bytes_written = 0;
         const esp_err_t error =

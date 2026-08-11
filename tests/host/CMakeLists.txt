@@ -88,6 +88,7 @@ target_link_libraries(mcp PRIVATE yyjson)
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/audio_frame_queue.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/wake_gate_audio_input.cc"
+    "${ROOT_DIR}/components/voicelife_voice/src/voice_interaction_controller.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_provider_registry.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
@@ -223,6 +224,10 @@ target_link_libraries(audio_frame_queue_contract_test PRIVATE voice)
 add_voicelife_test(wake_gate_audio_input_test "unit;voice;audio;contract"
     wake_gate_audio_input_test.cc)
 target_link_libraries(wake_gate_audio_input_test PRIVATE voice)
+
+add_voicelife_test(voice_interaction_controller_test "unit;voice;interaction;contract"
+    voice_interaction_controller_test.cc)
+target_link_libraries(voice_interaction_controller_test PRIVATE voice)
 
 add_voicelife_test(linx_provider_contract_test "unit;voice;linx;contract" linx_provider_contract_test.cc)
 target_link_libraries(linx_provider_contract_test PRIVATE linx)

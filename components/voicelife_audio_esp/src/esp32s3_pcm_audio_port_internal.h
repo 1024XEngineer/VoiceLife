@@ -84,6 +84,8 @@ class Esp32s3PcmAudioPorts::Impl final {
     OutputPort& output() { return output_port_; }
 
     AudioPortStats stats() const;
+    void SetOutputVolume(uint8_t volume) { output_volume_.store(volume > 100 ? 100 : volume); }
+    uint8_t output_volume() const { return output_volume_.load(); }
 
    private:
     friend class InputPort;
@@ -143,6 +145,7 @@ class Esp32s3PcmAudioPorts::Impl final {
     std::atomic<std::size_t> short_writes_{0};
     std::atomic<std::size_t> input_high_watermark_{0};
     std::atomic<std::size_t> output_high_watermark_{0};
+    std::atomic<uint8_t> output_volume_{70};
 
 #ifdef ESP_PLATFORM
     i2s_chan_handle_t tx_channel_ = nullptr;
