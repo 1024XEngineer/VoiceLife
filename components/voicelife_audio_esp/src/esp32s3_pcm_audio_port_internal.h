@@ -31,6 +31,8 @@
 namespace voicelife::audio_esp {
 namespace detail {
 
+constexpr char kAudioRuntimeTag[] = "VoiceLifeAudioRuntime";
+
 Status Invalid(std::string message);
 Status Unavailable(std::string message);
 
@@ -141,6 +143,7 @@ class Esp32s3PcmAudioPorts::Impl final {
     std::atomic<std::size_t> dropped_input_frames_{0};
     std::atomic<std::size_t> played_frames_{0};
     std::atomic<std::size_t> rejected_output_frames_{0};
+    std::atomic<std::size_t> resampled_frames_{0};
     std::atomic<std::size_t> short_reads_{0};
     std::atomic<std::size_t> short_writes_{0};
     std::atomic<std::size_t> input_high_watermark_{0};

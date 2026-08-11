@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "esp_err.h"
+#include "esp_log.h"
 
 namespace voicelife::audio_esp {
 
@@ -245,6 +246,16 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
     }
     const std::size_t sample_count = frame.payload.size() / (sizeof(int16_t) * endpoint.format.channels);
     const auto* pcm = reinterpret_cast<const int16_t*>(frame.payload.data());
+    static bool s_first_write_logged = false;
+    if (!s_first_write_logged) {
+        s_first_write_logged = true;
+        const int vol = output_volume_.load();
+        ESP_LOGI(voicelife::audio_esp::detail::kAudioRuntimeTag,
+                 "I2S_WRITE first_frame bytes=%u samples=%u volume=%d sr=%u wire=%u shift=%u first_pcm=%d",
+                 static_cast<unsigned>(frame.payload.size()), static_cast<unsigned>(sample_count), vol,
+                 endpoint.format.sample_rate_hz, endpoint.wire_bits_per_sample, endpoint.pcm_shift_bits,
+                 sample_count > 0 ? pcm[0] : 0);
+    }
     const std::size_t period_samples = static_cast<std::size_t>(endpoint.format.sample_rate_hz) *
                                        endpoint.format.frame_duration_ms / 1000U * endpoint.format.channels;
     for (std::size_t offset = 0; offset < sample_count; offset += period_samples) {

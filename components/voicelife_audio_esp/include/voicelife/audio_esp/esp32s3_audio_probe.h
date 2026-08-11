@@ -30,6 +30,10 @@ struct AudioProbeReport {
     std::size_t bytes_read = 0;
     /** @brief 回放写入字节数。 */
     std::size_t replay_bytes_written = 0;
+    /** @brief 1kHz 正弦探针写入字节数。 */
+    std::size_t probe_tone_written = 0;
+    /** @brief 1kHz 正弦探针是否完整写入。 */
+    bool probe_tone_ok = false;
     /** @brief 采集样本数。 */
     std::size_t capture_samples = 0;
     /** @brief 非零样本数。 */

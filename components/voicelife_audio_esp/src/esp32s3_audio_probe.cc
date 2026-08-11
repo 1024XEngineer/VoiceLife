@@ -3,6 +3,7 @@
 #ifdef ESP_PLATFORM
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -177,6 +178,36 @@ class Esp32s3AudioProbe::Impl final {
                                                      EspFailure("启动 I2S 通道", error).message);
         }
         report.i2s_channels_started = true;
+
+        // 1kHz/1s 正弦探针：直接写最终 I2S 播放链路，验证功放/扬声器硬件。
+        // 24kHz mono S16LE 峰值 12000（32-bit wire 左移 pcm_shift_bits）。
+        {
+            const uint32_t tone_rate = profile.playback_i2s.format.sample_rate_hz;
+            const size_t tone_samples = static_cast<size_t>(tone_rate);  // 1 秒
+            constexpr int16_t kTonePeak = 12000;
+            constexpr double kToneFreq = 1000.0;
+            std::vector<uint8_t> tone(tone_samples * WireBytes(profile.playback_i2s));
+            const int shift = profile.playback_i2s.pcm_shift_bits;
+            if (profile.playback_i2s.wire_bits_per_sample == 32) {
+                auto* out = reinterpret_cast<int32_t*>(tone.data());
+                for (size_t i = 0; i < tone_samples; ++i) {
+                    const int16_t sample =
+                        static_cast<int16_t>(kTonePeak * std::sin(2.0 * 3.141592653589793 * kToneFreq * i / tone_rate));
+                    out[i] = static_cast<int32_t>(sample) << shift;
+                }
+            } else {
+                auto* out = reinterpret_cast<int16_t*>(tone.data());
+                for (size_t i = 0; i < tone_samples; ++i) {
+                    out[i] =
+                        static_cast<int16_t>(kTonePeak * std::sin(2.0 * 3.141592653589793 * kToneFreq * i / tone_rate));
+                }
+            }
+            size_t tone_written = 0;
+            const esp_err_t tone_error =
+                i2s_channel_write(tx_channel_, tone.data(), tone.size(), &tone_written, options.timeout_ms);
+            report.probe_tone_written = tone_written;
+            report.probe_tone_ok = (tone_error == ESP_OK && tone_written == tone.size());
+        }
 
         const size_t playback_frames = static_cast<size_t>(profile.playback_i2s.format.sample_rate_hz *
                                                            profile.playback_i2s.format.frame_duration_ms / 1000U);

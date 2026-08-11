@@ -102,6 +102,58 @@ void EspWebSocketTransport::Impl::HandleQueueOverflow() {
     }
 }
 
+void EspWebSocketTransport::Impl::TxEntry(void* argument) {
+    static_cast<Impl*>(argument)->TxLoop();
+    vTaskDelete(nullptr);
+}
+
+void EspWebSocketTransport::Impl::TxLoop() {
+    // 唯一 TX 任务：按队列顺序发送文本/音频，TLS 只在本任务运行。
+    // 短超时（network_timeout_ms 已配置，通常 ≤1s）避免写阻塞拖垮采集。
+    while (running_.load()) {
+        detail::LinxTxItem* item = nullptr;
+        // 高优先级控制队列优先（listen.stop/abort 不被音频队列阻塞）。
+        if (tx_control_queue_ != nullptr && xQueueReceive(tx_control_queue_, &item, 0) == pdTRUE) {
+            // 从控制队列取到 item，直接发送。
+        } else if (tx_queue_ != nullptr && xQueueReceive(tx_queue_, &item, pdMS_TO_TICKS(100)) != pdTRUE) {
+            continue;
+        }
+        if (item == nullptr) {
+            continue;
+        }
+        if (item->kind == detail::LinxTxItem::Kind::kBarrier) {
+            // barrier：文本/音频序列的分界（如 listen.stop 排在本轮音频之后）。
+            delete item;
+            continue;
+        }
+        const int sent = item->kind == detail::LinxTxItem::Kind::kText
+                             ? esp_websocket_client_send_text(
+                                   client_, reinterpret_cast<const char*>(item->payload.data()),
+                                   static_cast<int>(item->payload.size()), pdMS_TO_TICKS(options_.network_timeout_ms))
+                             : esp_websocket_client_send_bin(
+                                   client_, reinterpret_cast<const char*>(item->payload.data()),
+                                   static_cast<int>(item->payload.size()), pdMS_TO_TICKS(options_.network_timeout_ms));
+        const size_t want = item->payload.size();
+        delete item;
+        item = nullptr;
+        if (sent < 0 || static_cast<size_t>(sent) != want) {
+            // 发送失败（写阻塞/短写/连接已断）：主动关闭连接，让 transport 走
+            // 自动重连重新 hello，避免 session 误以为连接仍可用而无法二次唤醒。
+            ESP_LOGW(detail::kTag, "LINX_TX_SEND_FAIL sent=%d want=%u, closing for reconnect", sent,
+                     static_cast<unsigned>(want));
+            if (client_ != nullptr && !closing_.load()) {
+                (void)esp_websocket_client_stop(client_);
+            }
+            // 清理队列中剩余项，避免堆积。
+            detail::LinxTxItem* remaining = nullptr;
+            while (tx_queue_ != nullptr && xQueueReceive(tx_queue_, &remaining, 0) == pdTRUE) {
+                delete remaining;
+            }
+            continue;
+        }
+    }
+}
+
 void EspWebSocketTransport::Impl::HandleEnvelope(const detail::EventEnvelope& envelope) {
     if (envelope.generation != generation_.load()) {
         return;

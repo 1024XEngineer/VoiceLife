@@ -142,10 +142,32 @@ Status EspWebSocketTransport::Impl::SendText(std::string_view message) {
         message.size() > static_cast<size_t>(INT_MAX)) {
         return Status::Error(ErrorCode::kUnavailable, "ESP Linx Transport 尚未连接或消息过大");
     }
-    const int sent = esp_websocket_client_send_text(client_, message.data(), static_cast<int>(message.size()),
-                                                    pdMS_TO_TICKS(options_.network_timeout_ms));
-    if (sent < 0 || static_cast<size_t>(sent) != message.size()) {
-        return Status::Error(ErrorCode::kUnavailable, "发送 Linx 文本消息短写或失败");
+    // 脱敏诊断：仅记录控制消息的 type/state 字段，不输出 token、设备 ID 或完整消息。
+    const bool is_listen = message.find("\"type\":\"listen\"") != std::string_view::npos;
+    const bool is_abort = message.find("\"type\":\"abort\"") != std::string_view::npos;
+    const bool is_control = is_listen || is_abort;
+    // 统一 TX 队列：文本也入队，由 TxTask 顺序发送（TLS 只在 TxTask 运行）。
+    // 控制帧（listen.stop/abort）走高优先级队列，音频占满时仍能排队发送。
+    QueueHandle_t target = is_control ? tx_control_queue_ : tx_queue_;
+    if (target == nullptr) {
+        return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列未就绪");
+    }
+    auto* item = new detail::LinxTxItem();
+    item->kind = detail::LinxTxItem::Kind::kText;
+    item->payload.assign(message.begin(), message.end());
+    if (xQueueSend(target, &item, 0) != pdTRUE) {
+        delete item;
+        return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列已满");
+    }
+    // 入队成功后打印（此前在入队前打印，队列满时会误报“已发送”）。
+    if (is_listen) {
+        const char* state = message.find("\"state\":\"detect\"") != std::string_view::npos  ? "detect"
+                            : message.find("\"state\":\"start\"") != std::string_view::npos ? "start"
+                            : message.find("\"state\":\"stop\"") != std::string_view::npos  ? "stop"
+                                                                                            : "?";
+        ESP_LOGI(detail::kTag, "LINX_SEND listen state=%s", state);
+    } else if (is_abort) {
+        ESP_LOGI(detail::kTag, "LINX_SEND abort");
     }
     return Status::Ok();
 }
@@ -156,11 +178,18 @@ Status EspWebSocketTransport::Impl::SendAudio(const voice::AudioFrame& frame) {
         frame.payload.size() > static_cast<size_t>(INT_MAX)) {
         return Status::Error(ErrorCode::kUnavailable, "ESP Linx Transport 尚未连接");
     }
-    const int sent = esp_websocket_client_send_bin(client_, reinterpret_cast<const char*>(frame.payload.data()),
-                                                   static_cast<int>(frame.payload.size()),
-                                                   pdMS_TO_TICKS(options_.network_timeout_ms));
-    if (sent < 0 || static_cast<size_t>(sent) != frame.payload.size()) {
-        return Status::Error(ErrorCode::kUnavailable, "发送 Linx 音频短写或失败");
+    // 统一 TX 队列：音频帧复制入队后立即返回，网络写由 TxTask 执行，
+    // 避免 esp_websocket_client_send_bin 同步阻塞 I2S 采集链导致大量丢帧。
+    if (tx_queue_ == nullptr) {
+        return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列未就绪");
+    }
+    auto* item = new detail::LinxTxItem();
+    item->kind = detail::LinxTxItem::Kind::kAudio;
+    item->generation = frame.generation;
+    item->payload = frame.payload;
+    if (xQueueSend(tx_queue_, &item, 0) != pdTRUE) {
+        delete item;
+        return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列已满");
     }
     return Status::Ok();
 }
@@ -283,6 +312,37 @@ bool EspWebSocketTransport::Impl::PrepareWorker() {
         CleanupWorker();
         return false;
     }
+    // 统一 TX 队列：文本/音频/barrier 由唯一 TxTask 顺序发送。
+    // 容量 50 帧（20ms 帧 → 1 秒，对齐播放队列），放 PSRAM 优先。
+    constexpr int kTxQueueDepth = 64;
+#if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
+    tx_queue_ = xQueueCreateWithCaps(kTxQueueDepth, sizeof(detail::LinxTxItem*), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    tx_queue_uses_caps_ = tx_queue_ != nullptr;
+    if (tx_queue_ == nullptr) {
+        ESP_LOGW(detail::kTag, "LINX_TX_QUEUE_PSRAM_ALLOC_FAILED");
+    }
+#endif
+    if (tx_queue_ == nullptr) {
+        tx_queue_ = xQueueCreate(kTxQueueDepth, sizeof(detail::LinxTxItem*));
+    }
+    // 高优先级控制队列（listen.stop/abort），深度 8；音频占满时控制帧仍可入队。
+    constexpr int kTxControlQueueDepth = 8;
+#if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
+    tx_control_queue_ =
+        xQueueCreateWithCaps(kTxControlQueueDepth, sizeof(detail::LinxTxItem*), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#endif
+    if (tx_control_queue_ == nullptr) {
+        tx_control_queue_ = xQueueCreate(kTxControlQueueDepth, sizeof(detail::LinxTxItem*));
+    }
+    if (tx_control_queue_ == nullptr) {
+        CleanupWorker();
+        return false;
+    }
+    if (tx_queue_ == nullptr || xTaskCreate(&TxEntry, "linx_ws_tx", 16384, this, 5, &tx_task_) != pdPASS) {
+        CleanupWorker();
+        return false;
+    }
+
     return true;
 }
 
@@ -290,6 +350,41 @@ void EspWebSocketTransport::Impl::CleanupWorker() {
     if (worker_ != nullptr) {
         return;
     }
+    if (tx_task_ != nullptr) {
+        vTaskDelete(tx_task_);
+        tx_task_ = nullptr;
+    }
+    if (tx_queue_ != nullptr) {
+        // 丢弃仍排队的 TX 项，释放各自 payload。
+        detail::LinxTxItem* pending = nullptr;
+        while (xQueueReceive(tx_queue_, &pending, 0) == pdTRUE) {
+            delete pending;
+        }
+#if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
+        if (tx_queue_uses_caps_) {
+            vQueueDeleteWithCaps(tx_queue_);
+        } else {
+            vQueueDelete(tx_queue_);
+        }
+#else
+        vQueueDelete(tx_queue_);
+#endif
+        tx_queue_ = nullptr;
+        tx_queue_uses_caps_ = false;
+    }
+    if (tx_control_queue_ != nullptr) {
+        detail::LinxTxItem* pending_ctl = nullptr;
+        while (xQueueReceive(tx_control_queue_, &pending_ctl, 0) == pdTRUE) {
+            delete pending_ctl;
+        }
+#if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
+        vQueueDeleteWithCaps(tx_control_queue_);
+#else
+        vQueueDelete(tx_control_queue_);
+#endif
+        tx_control_queue_ = nullptr;
+    }
+
     if (event_queue_ != nullptr) {
 #if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
         if (event_queue_uses_caps_) {

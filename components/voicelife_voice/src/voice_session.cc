@@ -3,6 +3,10 @@
 #include <string>
 #include <utility>
 
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
+
 namespace voicelife::voice {
 
 VoiceSession::VoiceSession(AudioInputPort& input, AudioOutputPort& output, SpeechProviderAdapter& provider,
@@ -286,9 +290,28 @@ Status VoiceSession::EndCapture() {
         Emit("capture_stopped", "");
         return Status::Ok();
     }
-    // Input is already stopped but provider stop failed: the session cannot
-    // safely return to kReady or kCapturing. Transition to kFailed so the
-    // caller does not attempt further capture on a half-closed session.
+    // Input is already stopped but provider stop failed (e.g. the WebSocket was
+    // torn down mid-turn). The transport auto-reconnects and hello re-arms the
+    // session, so keep the session usable for the next wake word instead of
+    // stranding it in kFailed. Invalidate the old turn generation so any
+    // residual TTS frames or stale listen state from the failed round are
+    // rejected, and the next BeginCapture starts a fresh turn.
+    // 注意：本地输入已停止，会话可复用，必须返回成功——调用方若看到失败会
+    // 映射 kFailure 把控制器拖进 Error，导致后续无法恢复聆听。
+    if (input_status.ok()) {
+        uint64_t next_generation = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            ++generation_;
+            config_.generation = generation_;
+            next_sequence_ = 0;
+            next_generation = generation_;
+            state_ = VoiceSessionState::kReady;
+        }
+        provider_.SetGeneration(next_generation);
+        Emit("capture_stopped", "");
+        return Status::Ok();
+    }
     {
         std::lock_guard<std::mutex> lock(mutex_);
         state_ = VoiceSessionState::kFailed;

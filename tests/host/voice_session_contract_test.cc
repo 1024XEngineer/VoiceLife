@@ -277,9 +277,11 @@ int main() {
     Check(stop_capture_failure.Start(Config()).ok() && stop_capture_failure.BeginCapture().ok(),
           "停止采集失败用例应先进入 capturing");
     stop_capture_failure_provider.stop_result = Status::Error(ErrorCode::kUnavailable, "远端停止失败");
-    Check(stop_capture_failure.EndCapture().code == ErrorCode::kUnavailable &&
-              stop_capture_failure.state() == voicelife::voice::VoiceSessionState::kFailed,
-          "本地已停止而远端停止失败时不得继续保持 capturing");
+    const uint64_t gen_before_stop_fail = stop_capture_failure.generation();
+    Check(stop_capture_failure.EndCapture().ok() &&
+              stop_capture_failure.state() == voicelife::voice::VoiceSessionState::kReady &&
+              stop_capture_failure.generation() == gen_before_stop_fail + 1,
+          "本地已停止而远端停止失败时回 ready 并使旧代次失效，不得卡死在 capturing");
 
     FakeInput disconnect_failure_input;
     FakeOutput disconnect_failure_output;

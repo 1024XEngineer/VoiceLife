@@ -18,6 +18,9 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "generated/farewell_pcm.h"
+#include "generated/wake_ack_pcm.h"
+#include "led_strip.h"
 #include "nvs.h"
 #include "voicelife/audio_esp/audio_board_profile.h"
 #include "voicelife/audio_esp/esp32s3_audio_probe.h"
@@ -272,6 +275,26 @@ class Runtime final {
 
 #ifdef ESP_PLATFORM
         audio_ports_ = std::make_unique<audio_esp::Esp32s3PcmAudioPorts>(audio_esp::VoiceLifePcbEsp32s3Profile());
+        audio_ports_->SetOutputVolume(static_cast<uint8_t>(volume_));
+        // 板载 WS2812（GPIO48）用 RMT 初始化并 clear（GRB 全零），真正关闭灯珠；
+        // 普通 GPIO 拉低无法关闭已锁存的 WS2812。
+        {
+            led_strip_config_t strip_config = {};
+            strip_config.strip_gpio_num = GPIO_NUM_48;
+            strip_config.max_leds = 1;
+            strip_config.color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB;
+            strip_config.led_model = LED_MODEL_WS2812;
+            led_strip_rmt_config_t rmt_config = {};
+            rmt_config.resolution_hz = 10 * 1000 * 1000;
+            led_strip_handle_t strip = nullptr;
+            if (led_strip_new_rmt_device(&strip_config, &rmt_config, &strip) == ESP_OK) {
+                (void)led_strip_clear(strip);
+                (void)led_strip_del(strip);
+                ESP_LOGI(kTag, "BUILTIN_LED_GPIO48_CLEAR=1");
+            } else {
+                ESP_LOGW(kTag, "BUILTIN_LED_GPIO48_INIT_FAILED");
+            }
+        }
         wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
         wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_->input(), *wake_detector_);
         wake_gate_->SetWakeSink([this](std::string_view wake_word) { QueueWakeWord(wake_word); });
@@ -321,7 +344,7 @@ class Runtime final {
                  "音频探针：profile=%s codec_required=%d I2C=%d ES8311=%d ES7210=%d "
                  "PCA9557=%d I2S_READY=%d I2S_STARTED=%d bus_write=%u bus_read=%u "
                  "pcm_samples=%u nonzero=%u changed=%u saturated=%u saturation_ppm=%llu "
-                 "peak=%u mean_square=%llu signal=%d replay=%u min_heap=%u",
+                 "peak=%u mean_square=%llu signal=%d replay=%u tone_written=%u tone_ok=%d min_heap=%u",
                  profile.id.c_str(), report.codec_control_required, report.i2c_bus_ready, report.es8311_ack,
                  report.es7210_ack, report.pca9557_ack, report.i2s_channels_ready, report.i2s_channels_started,
                  static_cast<unsigned>(report.bytes_written), static_cast<unsigned>(report.bytes_read),
@@ -329,8 +352,8 @@ class Runtime final {
                  static_cast<unsigned>(report.changed_samples), static_cast<unsigned>(report.saturated_samples),
                  static_cast<unsigned long long>(report.saturation_ratio_ppm()), static_cast<unsigned>(report.peak_abs),
                  static_cast<unsigned long long>(report.mean_square()), report.capture_signal_detected(),
-                 static_cast<unsigned>(report.replay_bytes_written),
-                 static_cast<unsigned>(report.minimum_free_heap_bytes));
+                 static_cast<unsigned>(report.replay_bytes_written), static_cast<unsigned>(report.probe_tone_written),
+                 report.probe_tone_ok ? 1 : 0, static_cast<unsigned>(report.minimum_free_heap_bytes));
         if (!report.hardware_ready()) {
             return Status::Error(ErrorCode::kUnavailable, "音频探针硬件未就绪，Codec ACK 或 I2S 状态不完整");
         }
@@ -457,11 +480,36 @@ class Runtime final {
         (void)display_esp::SetStatus(text);
     }
 
+    // 播放本地提示音（裸 PCM 16kHz mono）：直接入队，播放端口统一重采样到 24kHz。
+    void PlayPrompt(const int16_t* pcm, size_t sample_count) {
+        if (!audio_ports_ || pcm == nullptr || sample_count == 0) return;
+        voice::AudioFrame frame;
+        frame.format = {.codec = voice::AudioCodec::kPcmS16Le,
+                        .sample_rate_hz = 16000,
+                        .channels = 1,
+                        .bits_per_sample = 16,
+                        .frame_duration_ms = 0};
+        frame.generation = 0;
+        frame.sequence = 0;
+        frame.payload.resize(sample_count * sizeof(int16_t));
+        std::memcpy(frame.payload.data(), pcm, sample_count * sizeof(int16_t));
+        const Status push_status = audio_ports_->output().Push(frame);
+        ESP_LOGI(kTag, "PROMPT_PUSH result=%d bytes=%u", push_status.ok() ? 1 : 0,
+                 static_cast<unsigned>(frame.payload.size()));
+    }
+
+    // 唤醒“收到”提示音。
+    void PlayWakeAck() { PlayPrompt(wake_ack::kPcm, wake_ack::kSampleCount); }
+
+    // 告别“牛牛走了”提示音。
+    void PlayFarewell() { PlayPrompt(farewell::kPcm, farewell::kSampleCount); }
+
     void QueueWakeWord(std::string_view wake_word) {
         LogVoiceEvidence({.session_id = session_ ? session_->config().session_id : "",
                           .generation = session_ ? session_->generation() : 0,
                           .event = "wake_detected",
                           .detail = {}});
+        PlayWakeAck();
         (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kWakeDetected, wake_word);
     }
 
@@ -528,6 +576,11 @@ class Runtime final {
                           .generation = session_ ? session_->generation() : 0,
                           .event = "standby_ready",
                           .detail = {}});
+        if (!first_standby_) {
+            PlayFarewell();
+        } else {
+            first_standby_ = false;
+        }
         if (interaction_.state() == voice::VoiceInteractionState::kError ||
             interaction_.state() == voice::VoiceInteractionState::kInterrupting) {
             (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kStandbyReady);
@@ -697,6 +750,7 @@ class Runtime final {
     TaskHandle_t button_task_ = nullptr;
     std::array<ButtonSample, 4> buttons_{};
     int volume_ = 70;
+    bool first_standby_ = true;
     std::atomic<int64_t> capture_started_us_{0};
 #else
     ScaffoldAudioInput audio_input_;
