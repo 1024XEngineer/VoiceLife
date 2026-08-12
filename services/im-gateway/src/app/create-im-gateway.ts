@@ -1,14 +1,14 @@
 import type { ImGatewayApplication } from '../application/api.js';
-import { DefaultBindingApplication } from '../application/binding-application.js';
-import { DefaultChannelAccountApplication } from '../application/channel-account-application.js';
-import { DefaultPairingApplication } from '../application/pairing-application.js';
 import {
     DefaultActionApplication,
     DefaultActionUiApplication,
+    DefaultBindingApplication,
+    DefaultChannelAccountApplication,
     DefaultDeliveryApplication,
     DefaultDeliveryDispatchApplication,
     DefaultInboundEventApplication,
     DefaultNotificationApplication,
+    DefaultPairingApplication,
     DefaultPlatformEventApplication,
     DefaultReceiptApplication,
 } from '../application/services.js';
