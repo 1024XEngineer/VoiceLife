@@ -353,15 +353,13 @@ class Runtime final {
         provider_ = std::move(*result.value);
 
 #ifdef ESP_PLATFORM
-        audio_ports_ = std::make_unique<audio_esp::Esp32s3PcmAudioPorts>(
-            assembly_->audio_profile(), audio_esp::AudioPortOptions{},
-            [this](bool enabled) { (void)assembly_->SetAudioOutputEnabled(enabled); });
-        audio_ports_->SetOutputVolume(static_cast<uint8_t>(volume_));
+        // 音频端口由 Assembly 注入（业务 PCM 语义，不暴露 I2S/Codec）。
+        assembly_->SetOutputVolume(static_cast<uint8_t>(volume_));
         wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
-        wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_->input(), *wake_detector_);
+        wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(assembly_->audio_input(), *wake_detector_);
         wake_gate_->SetWakeSink([this](std::string_view wake_word) { QueueWakeWord(wake_word); });
         session_ = std::make_unique<voice::VoiceSession>(
-            *wake_gate_, audio_ports_->output(), *provider_,
+            *wake_gate_, assembly_->audio_output(), *provider_,
             [this](const voice::VoiceEvidence& evidence) { LogVoiceEvidence(evidence); });
         voice::VoiceSessionConfig config;
         config.session_id = "voicelife-linx-session";
@@ -610,7 +608,7 @@ class Runtime final {
 
     void SetVolume(int volume) {
         volume_ = std::clamp(volume, 0, 100);
-        if (audio_ports_) audio_ports_->SetOutputVolume(volume_);
+        if (assembly_ != nullptr) assembly_->SetOutputVolume(volume_);
         // 音量通知 overlay：临时覆盖显示，1.5s 后恢复最新快照（不修改会话状态）。
         // 连续调音量只重置同一个计时器。
         char text[16] = {};
@@ -633,7 +631,7 @@ class Runtime final {
     // 本地提示音：播放 popup.ogg 解码的 PCM（16kHz S16LE），按协商播放格式重采样。
     // 播放本地提示音（裸 PCM 16kHz mono）：直接入队，播放端口统一重采样到 24kHz。
     void PlayPrompt(const int16_t* pcm, size_t sample_count) {
-        if (!audio_ports_ || pcm == nullptr || sample_count == 0) return;
+        if (assembly_ == nullptr || pcm == nullptr || sample_count == 0) return;
         voice::AudioFrame frame;
         frame.format = {.codec = voice::AudioCodec::kPcmS16Le,
                         .sample_rate_hz = 16000,
@@ -644,7 +642,7 @@ class Runtime final {
         frame.sequence = 0;
         frame.payload.resize(sample_count * sizeof(int16_t));
         std::memcpy(frame.payload.data(), pcm, sample_count * sizeof(int16_t));
-        const Status push_status = audio_ports_->output().Push(frame);
+        const Status push_status = assembly_->audio_output().Push(frame);
         ESP_LOGI(kTag, "PROMPT_PUSH result=%d bytes=%u", push_status.ok() ? 1 : 0,
                  static_cast<unsigned>(frame.payload.size()));
     }
@@ -796,8 +794,8 @@ class Runtime final {
                           .detail = {}});
         // 会话结束反馈：先等播放排空（避免 TTS 还在播就显示“牛牛走了！”），
         // 仅非首次待机显示反馈，短暂停留后回到空闲。
-        if (audio_ports_) {
-            for (int i = 0; i < 30 && !audio_ports_->output().IsIdle(); ++i) {
+        if (assembly_ != nullptr) {
+            for (int i = 0; i < 30 && !assembly_->audio_output().IsIdle(); ++i) {
                 vTaskDelay(pdMS_TO_TICKS(50));
             }
         }
@@ -874,8 +872,8 @@ class Runtime final {
             if (request.kind == BoardRequestKind::kStartCapture) {
                 // 开麦前等待播放排空（I2S 实际播完，而非队列空），避免把残留
                 // TTS 重新采进 follow-up（NoAudioCodec 无 AEC）。
-                if (audio_ports_) {
-                    for (int i = 0; i < 30 && !audio_ports_->output().IsIdle(); ++i) {
+                if (assembly_ != nullptr) {
+                    for (int i = 0; i < 30 && !assembly_->audio_output().IsIdle(); ++i) {
                         vTaskDelay(pdMS_TO_TICKS(50));
                     }
                 }
@@ -1159,15 +1157,10 @@ class Runtime final {
         const int64_t now = esp_timer_get_time();
         const uint64_t latency_ms =
             started_at > 0 && now >= started_at ? static_cast<uint64_t>((now - started_at) / 1000) : 0;
-        const auto stats = audio_ports_ ? audio_ports_->stats() : audio_esp::AudioPortStats{};
-        ESP_LOGI(kTag,
-                 "VOICE_EVENT session=%s generation=%llu event=%s detail_present=%d latency_from_capture_ms=%llu "
-                 "audio_captured=%u audio_dropped=%u audio_played=%u audio_rejected=%u min_heap=%u",
+        if (assembly_ != nullptr) assembly_->LogAudioStats();
+        ESP_LOGI(kTag, "VOICE_EVENT session=%s generation=%llu event=%s detail_present=%d latency_from_capture_ms=%llu",
                  evidence.session_id.c_str(), static_cast<unsigned long long>(evidence.generation),
-                 evidence.event.c_str(), evidence.detail.empty() ? 0 : 1, static_cast<unsigned long long>(latency_ms),
-                 static_cast<unsigned>(stats.captured_frames), static_cast<unsigned>(stats.dropped_input_frames),
-                 static_cast<unsigned>(stats.played_frames), static_cast<unsigned>(stats.rejected_output_frames),
-                 static_cast<unsigned>(stats.minimum_free_heap_bytes));
+                 evidence.event.c_str(), evidence.detail.empty() ? 0 : 1, static_cast<unsigned long long>(latency_ms));
         if (evidence.event == "provider_error") {
             // 板端诊断：只输出本地错误消息（不包含 STT 文本、凭据或原始响应）。
             ESP_LOGW(kTag, "PROVIDER_ERROR_DETAIL=%.160s", evidence.detail.c_str());
@@ -1299,7 +1292,6 @@ class Runtime final {
     linx::LinxConnectionConfig linx_config_;
     std::unique_ptr<linx_esp::EspWebSocketTransport> linx_transport_ =
         std::make_unique<linx_esp::EspWebSocketTransport>(linx_secrets_);
-    std::unique_ptr<audio_esp::Esp32s3PcmAudioPorts> audio_ports_;
     std::unique_ptr<audio_esp::EspMultiNetWakeDetector> wake_detector_;
     std::unique_ptr<voice::WakeGateAudioInput> wake_gate_;
     QueueHandle_t wake_queue_ = nullptr;

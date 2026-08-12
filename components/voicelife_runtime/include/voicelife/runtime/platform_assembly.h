@@ -49,6 +49,29 @@ class PlatformAssembly {
     virtual audio_esp::AudioBoardProfile audio_profile() const = 0;
 
     /**
+     * @brief 返回板级音频采集端口（业务 PCM 语义，不暴露 I2S/Codec）。
+     * @return 音频输入端口引用。
+     */
+    virtual voicelife::voice::AudioInputPort& audio_input() = 0;
+
+    /**
+     * @brief 返回板级音频播放端口（业务 PCM 语义）。
+     * @return 音频输出端口引用。
+     */
+    virtual voicelife::voice::AudioOutputPort& audio_output() = 0;
+
+    /**
+     * @brief 设置输出音量（0-100）。默认空实现。
+     * @param volume 音量值。
+     */
+    virtual void SetOutputVolume(uint8_t /*volume*/) {}
+
+    /**
+     * @brief 打印板级音频统计日志。默认空实现。
+     */
+    virtual void LogAudioStats() {}
+
+    /**
      * @brief 返回板级按键 GPIO 列表。
      *
      * 顺序语义：boot / touch / volume_up / volume_down；无按键的板型返回

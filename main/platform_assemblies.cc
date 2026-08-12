@@ -40,20 +40,48 @@ voicelife::display_sparkbot::SparkBotLcdConfig MakeSparkBotLcdConfig() {
 
 }  // namespace
 
+VoiceLifePcbAssembly::VoiceLifePcbAssembly() : audio_ports_(audio_esp::VoiceLifePcbEsp32s3Profile()) {}
+
 voicelife::voice::PresentationPort& VoiceLifePcbAssembly::presentation() { return ssd1306_adapter_; }
 
 audio_esp::AudioBoardProfile VoiceLifePcbAssembly::audio_profile() const {
     return audio_esp::VoiceLifePcbEsp32s3Profile();
 }
 
+voicelife::voice::AudioInputPort& VoiceLifePcbAssembly::audio_input() { return audio_ports_.input(); }
+voicelife::voice::AudioOutputPort& VoiceLifePcbAssembly::audio_output() { return audio_ports_.output(); }
+void VoiceLifePcbAssembly::SetOutputVolume(uint8_t volume) { audio_ports_.SetOutputVolume(volume); }
+void VoiceLifePcbAssembly::LogAudioStats() {
+#ifdef ESP_PLATFORM
+    const auto stats = audio_ports_.stats();
+    ESP_LOGI("voicelife_pcb_audio", "AUDIO_STATS input=%llu output=%llu short_write=%llu",
+             static_cast<unsigned long long>(stats.input_frames), static_cast<unsigned long long>(stats.output_frames),
+             static_cast<unsigned long long>(stats.output_short_writes));
+#endif
+}
+
 SparkBotAssembly::SparkBotAssembly()
-    : arbiter_(voicelife::board_esp::SparkBotProfile().shared_power),
+    : audio_ports_(audio_esp::SparkBotEsp32s3AudioProfile(), {},
+                   [this](bool enabled) { (void)SetAudioOutputEnabled(enabled); }),
+      arbiter_(voicelife::board_esp::SparkBotProfile().shared_power),
       adapter_(MakeSparkBotLcdConfig(), [this](bool enabled) { ApplyBacklight(enabled); }) {}
 
 voicelife::voice::PresentationPort& SparkBotAssembly::presentation() { return adapter_; }
 
 audio_esp::AudioBoardProfile SparkBotAssembly::audio_profile() const {
     return audio_esp::SparkBotEsp32s3AudioProfile();
+}
+
+voicelife::voice::AudioInputPort& SparkBotAssembly::audio_input() { return audio_ports_.input(); }
+voicelife::voice::AudioOutputPort& SparkBotAssembly::audio_output() { return audio_ports_.output(); }
+void SparkBotAssembly::SetOutputVolume(uint8_t volume) { audio_ports_.SetOutputVolume(volume); }
+void SparkBotAssembly::LogAudioStats() {
+#ifdef ESP_PLATFORM
+    const auto stats = audio_ports_.stats();
+    ESP_LOGI(kPowerTag, "AUDIO_STATS input=%llu output=%llu short_write=%llu",
+             static_cast<unsigned long long>(stats.input_frames), static_cast<unsigned long long>(stats.output_frames),
+             static_cast<unsigned long long>(stats.output_short_writes));
+#endif
 }
 
 voicelife::Status SparkBotAssembly::Start() {

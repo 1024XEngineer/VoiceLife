@@ -2,6 +2,7 @@
 
 #include <mutex>
 
+#include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #include "voicelife/board_esp/gpio46_power_arbiter.h"
 #include "voicelife/display_esp/ssd1306_presentation_adapter.h"
 #include "voicelife/display_sparkbot/sparkbot_presentation_adapter.h"
@@ -17,6 +18,9 @@ namespace voicelife::runtime {
  */
 class VoiceLifePcbAssembly : public PlatformAssembly {
    public:
+    /** @brief 构造函数：按 PCB 音频 Profile 装配 PCM 端口。 */
+    VoiceLifePcbAssembly();
+
     /** @brief 虚析构函数。 */
     ~VoiceLifePcbAssembly() override = default;
 
@@ -29,7 +33,17 @@ class VoiceLifePcbAssembly : public PlatformAssembly {
     /** @brief 返回 VoiceLife PCB 按键 GPIO（boot/touch/volume_up/volume_down）。 @return 按键列表。 */
     std::vector<int> button_gpios() const override { return {0, 47, 40, 39}; }
 
+    /** @brief 返回板级音频采集端口。 @return PCM 输入端口。 */
+    voicelife::voice::AudioInputPort& audio_input() override;
+    /** @brief 返回板级音频播放端口。 @return PCM 输出端口。 */
+    voicelife::voice::AudioOutputPort& audio_output() override;
+    /** @brief 设置输出音量。 @param volume 音量 0-100。 */
+    void SetOutputVolume(uint8_t volume) override;
+    /** @brief 打印 PCM 音频统计。 */
+    void LogAudioStats() override;
+
    private:
+    voicelife::audio_esp::Esp32s3PcmAudioPorts audio_ports_;
     voicelife::display_esp::Ssd1306PresentationAdapter ssd1306_adapter_;
 };
 
@@ -63,6 +77,15 @@ class SparkBotAssembly : public PlatformAssembly {
     /** @brief 音频功放请求（经统一仲裁）。 @param enabled 是否启用功放。 @return 仲裁结果。 */
     voicelife::Status SetAudioOutputEnabled(bool enabled) override;
 
+    /** @brief 返回板级音频采集端口。 @return ES8311 输入端口。 */
+    voicelife::voice::AudioInputPort& audio_input() override;
+    /** @brief 返回板级音频播放端口。 @return ES8311 输出端口。 */
+    voicelife::voice::AudioOutputPort& audio_output() override;
+    /** @brief 设置输出音量。 @param volume 音量 0-100。 */
+    void SetOutputVolume(uint8_t volume) override;
+    /** @brief 打印 ES8311 音频统计。 */
+    void LogAudioStats() override;
+
    private:
     /** @brief 经板级仲裁更新 GPIO46 背光（ESP 构建写 GPIO）。 */
     void ApplyBacklight(bool enabled);
@@ -75,6 +98,7 @@ class SparkBotAssembly : public PlatformAssembly {
 
     /** @brief GPIO46 仲裁与写入互斥（显示回调与音频任务并发保护）。 */
     mutable std::mutex power_mutex_;
+    voicelife::audio_esp::Esp32s3PcmAudioPorts audio_ports_;
     voicelife::board_esp::Gpio46PowerArbiter arbiter_;
     voicelife::display_sparkbot::SparkBotPresentationAdapter adapter_;
 };
