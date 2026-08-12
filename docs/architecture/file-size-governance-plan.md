@@ -1,8 +1,8 @@
 # 单文件规模治理与拆分计划
 
-这份计划把“超过 500 行”变成需要解释和拆分设计的信号，而不是把代码机械切成小块。先处理 Runtime、显示和会话这些会阻碍多板卡适配的文件；生成资源、第三方代码和测试大样本不参与同一阈值。
+这份计划把“超过 500 行”变成需要解释和拆分设计的信号，而不是把代码机械切成小块。Runtime 的板级输入、显示投影、语音装配和 Linx 启动协调已经拆出；接下来先补 SSD1306 的回归保护，再处理仍然超线的显示和会话文件。生成资源、第三方代码和测试大样本不参与同一阈值。
 
-下一步：新功能 PR 从本计划的分级阈值执行；涉及高风险板级代码的拆分，必须先保留现有行为的回归测试和对应 Profile 的回退证据。
+下一步：新功能 PR 从本计划的分级阈值执行；涉及高风险板级代码的拆分，必须先保留现有行为的回归测试和对应 Profile 的回退证据。SparkBot 应实现并列的 ST7789/LVGL 呈现与板级装配，不得复用 VoiceLife PCB 的 SSD1306、GPIO 或 Codec 适配器。
 
 ## 为什么不只定一个数字
 
@@ -28,8 +28,8 @@
 
 | 优先级 | 文件 | 当前规模 | 拆分方向 | 保护条件 |
 | --- | --- | ---: | --- | --- |
-| P0 | `components/voicelife_runtime/src/runtime.cc` | 1,237 | 拆成 `runtime_bootstrap`、`runtime_board_input`、`runtime_presentation`、`runtime_voice_wiring`；Runtime 保留 Composition Root | VoiceLife PCB 的 GPIO、I2S、Codec 初始化和 SSD1306 默认交互先由现有契约/真机证据锁定；每个移动步骤可单独回退 |
-| P0 | `components/voicelife_display_esp/src/ssd1306_status_display.cc` | 847 | 拆成 SSD1306 总线初始化、字形/布局、状态渲染；对外仅保留语义化显示入口 | 保留当前像素/文本滚动行为的主机测试或捕获证据；不混入 SparkBot/LVGL |
+| P0 | `components/voicelife_runtime/src/runtime.cc` | 1,237 -> 693 | 已拆为 `runtime_linx_bootstrap`、`runtime_board_input`、`runtime_presentation`、`runtime_voice_wiring`；Runtime 暂保留启动编排和交互状态机。后续若再触及第二项职责，拆出 `runtime_interaction_coordinator` | 已保持 GPIO、I2S、Codec 初始化和 SSD1306 默认交互的调用顺序；每个移动步骤都有独立提交。ESP-IDF 构建和旧板真机回归仍待工具链/设备可用时补齐 |
+| P0 | `components/voicelife_display_esp/src/ssd1306_status_display.cc` | 847 | 拆成 SSD1306 总线初始化、字形/布局、状态渲染；对外仅保留语义化显示入口 | 尚未开始。先补当前像素/文本滚动的主机测试或捕获证据；不得混入 SparkBot/LVGL |
 | P1 | `components/voicelife_voice/src/voice_session.cc` | 539 | 将状态迁移规则与协议事件映射分离，保持 `VoiceSession` 为会话语义所有者 | 每个状态迁移和 generation 隔离的现有契约测试必须不变 |
 | P1 | `components/voicelife_runtime/src/linx_ota_bootstrap.cc` | 521 | 拆出设备身份、OTA 配置解析和 ESP 启动协调 | OTA 签名、目标分区与回退流程不能随文件拆分改变 |
 | P1 | `services/im-gateway/src/application/services.ts` | 1,754 | 按通知投递、动作执行、幂等/事务协调拆成应用服务；不拆散同一业务事务 | TypeScript 契约、持久化回归与 IM Gateway CI 全量通过 |
@@ -47,6 +47,6 @@
 
 ## 自动化与例外
 
-下一阶段新增 `scripts/check_file_size.py` 和受版本控制的基线清单：CI 阻止新增手写生产文件超过 500 行，也阻止既有超标文件继续增长；不会因历史债务一次性阻塞全仓库。例外仅限生成物、第三方镜像、自动生成的契约 fixture 或经过架构 Review 的单一表驱动文件，PR 要写明原因、到期迁移计划和测试证据。
+下一阶段新增 `scripts/check_file_size.py` 和受版本控制的基线清单：CI 阻止新增手写生产文件超过 500 行，也阻止既有超标文件继续增长；不会因历史债务一次性阻塞全仓库。`runtime.cc` 当前 693 行的例外理由是它仍是唯一的交互状态机协调点，下一次同时涉及启动、队列或证据处理的改动必须先拆出协调器。例外仅限生成物、第三方镜像、自动生成的契约 fixture 或经过架构 Review 的单一表驱动文件，PR 要写明原因、到期迁移计划和测试证据。
 
 不以“低于 500 行”为合并标准。以下情况仍必须拆：一个文件同时拥有 GPIO 初始化、会话状态、协议解析和渲染；一个函数跨越多个业务事务；或任何改动已经无法由 Reviewer 在一个明确场景内理解和回退。
