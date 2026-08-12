@@ -122,8 +122,9 @@ add_voicelife_library(display_esp voicelife_display_esp
     "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_presentation_adapter.cc")
 target_link_libraries(display_esp PUBLIC contracts voice)
 add_voicelife_library(display_sparkbot voicelife_display_sparkbot
-    "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_lvgl_display.cc")
-target_link_libraries(display_sparkbot PUBLIC contracts)
+    "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_lvgl_display.cc"
+    "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_lvgl_renderer.cc")
+target_link_libraries(display_sparkbot PUBLIC contracts voice)
 
 enable_testing()
 
@@ -276,6 +277,10 @@ target_include_directories(platform_assembly_test PRIVATE
     "${ROOT_DIR}/components/voicelife_runtime/src"
     "${ROOT_DIR}/components/voicelife_runtime/include")
 target_link_libraries(platform_assembly_test PRIVATE display_esp display_sparkbot voice board_esp)
+
+add_voicelife_test(sparkbot_lvgl_renderer_test "unit;display;sparkbot;contract"
+    sparkbot_lvgl_renderer_test.cc)
+target_link_libraries(sparkbot_lvgl_renderer_test PRIVATE display_sparkbot)
 
 add_voicelife_test(pcm_frame_assembler_contract_test "unit;voice;audio;esp;contract"
     pcm_frame_assembler_contract_test.cc)
