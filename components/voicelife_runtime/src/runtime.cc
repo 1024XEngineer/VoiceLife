@@ -441,6 +441,9 @@ class Runtime final {
             return interaction_status;
         }
         StartBoardControls();
+        if (xTaskCreate(&Runtime::EventLoopTaskEntry, "voicelife_interaction", 8192, this, 5, &event_task_) != pdPASS) {
+            ESP_LOGW(kTag, "创建交互事件循环任务失败");
+        }
 #endif
         return Status::Ok();
     }
@@ -576,7 +579,7 @@ class Runtime final {
                     button.long_fired = false;
                     ESP_LOGI(kTag, "BUTTON_EVENT gpio=%d action=down", static_cast<int>(button.gpio));
                     if (index == 1) {
-                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kPressDown);
+                        (void)EnqueueEvent(voice::VoiceInteractionEvent::kPressDown);
                     }
                 } else if (pressed && !button.long_fired && now - button.pressed_at_us >= kLongPressUs) {
                     button.long_fired = true;
@@ -590,9 +593,9 @@ class Runtime final {
                     ESP_LOGI(kTag, "BUTTON_EVENT gpio=%d action=up duration_ms=%lld", static_cast<int>(button.gpio),
                              static_cast<long long>((now - button.pressed_at_us) / 1000));
                     if (index == 0 && !button.long_fired) {
-                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kToggleChat);
+                        (void)EnqueueEvent(voice::VoiceInteractionEvent::kToggleChat);
                     } else if (index == 1) {
-                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kPressUp);
+                        (void)EnqueueEvent(voice::VoiceInteractionEvent::kPressUp);
                     } else if (index == 2 && !button.long_fired) {
                         SetVolume(std::min(volume_ + 10, 100));
                     } else if (index == 3 && !button.long_fired) {
@@ -661,20 +664,8 @@ class Runtime final {
         // 记录唤醒词与时间，用于抑制服务端把唤醒词回传为 STT。
         last_wake_word_ = wake_word;
         last_wake_at_ = esp_timer_get_time();
-        // WakeAck 显示租约：开麦（kWakeDetected 动作）不延迟；在租约期内
-        // CommitSnapshot 把下行内容栏显示为“收到！”，到期后切换普通聆听。
-        wake_ack_until_us_ = esp_timer_get_time() + kWakeAckDisplayUs;
-        PlayWakeAck();
-        const Status wake_status = HandleInteractionEvent(voice::VoiceInteractionEvent::kWakeDetected, wake_word);
-        if (!wake_status.ok()) {
-            // 唤醒被拒（如控制器不在 kStandby，可能是假待机残留）：MultiNet 已一次性
-            // 停止，必须重启检测器，否则后续永远叫不醒。
-            ESP_LOGW(kTag, "WAKE_REJECTED state=%d err=%s", static_cast<int>(interaction_.state()),
-                     wake_status.message.c_str());
-            if (wake_gate_) {
-                (void)wake_gate_->StartStandby();
-            }
-        }
+        // 只投递事件：WakeAck 租约、提示音与拒绝重启由事件循环唯一处理。
+        EnqueueEvent(voice::VoiceInteractionEvent::kWakeDetected, wake_word);
     }
 
     void QueueVoiceTurn(std::string_view wake_word) {
@@ -713,7 +704,7 @@ class Runtime final {
             // 结束服务端回合并回待机）。不得先 Interrupt() 再 kPressUp：Interrupt
             // 已把 Session 置回 Ready，随后 EndCapture 会返回“当前没有采集”并进
             // Error，造成双重收尾竞态。
-            self->HandleInteractionEvent(voice::VoiceInteractionEvent::kPressUp);
+            self->EnqueueEvent(voice::VoiceInteractionEvent::kPressUp);
         } else if (self->interaction_.state() == voice::VoiceInteractionState::kFinalizing) {
             // 最终 STT 超时：先 abort 清理服务端残留回合，再走状态机
             // kFinalizationTimedOut（kFinalizing→kStandby）恢复待机。
@@ -721,7 +712,7 @@ class Runtime final {
             if (self->session_) {
                 (void)self->session_->Interrupt();
             }
-            (void)self->HandleInteractionEvent(voice::VoiceInteractionEvent::kFinalizationTimedOut);
+            (void)self->EnqueueEvent(voice::VoiceInteractionEvent::kFinalizationTimedOut);
         }
     }
 
@@ -779,13 +770,13 @@ class Runtime final {
         const Status stop_status = wake_gate_->StopCapture();
         if (!stop_status.ok()) {
             ESP_LOGW(kTag, "本地待机恢复停止上行失败: %s", stop_status.message.c_str());
-            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+            (void)EnqueueEvent(voice::VoiceInteractionEvent::kFailure);
             return;
         }
         const Status standby_status = wake_gate_->StartStandby();
         if (!standby_status.ok()) {
             ESP_LOGW(kTag, "本地待机恢复失败: %s", standby_status.message.c_str());
-            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+            (void)EnqueueEvent(voice::VoiceInteractionEvent::kFailure);
             return;
         }
         LogVoiceEvidence({.session_id = session_ ? session_->config().session_id : "",
@@ -810,8 +801,9 @@ class Runtime final {
         // 避免 RestoreStandby 直接写快照造成控制器仍停 Error 的假待机
         // （WAKE_REARM atomic=0）。Controller 回 Standby 后由状态机动作
         // 统一提交时间快照。
-        const Status ready_status = HandleInteractionEvent(voice::VoiceInteractionEvent::kStandbyReady);
-        if (!ready_status.ok()) {
+        // 事件化：状态迁移由事件循环唯一执行，拒绝日志在事件循环统一输出。
+        EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
+        if (false) {
             ESP_LOGW(kTag, "STAND_BY_READY_REJECTED state=%d err=%s", static_cast<int>(interaction_.state()),
                      ready_status.message.c_str());
         }
@@ -859,7 +851,7 @@ class Runtime final {
                 const Status interrupt = session_->Interrupt();
                 if (interrupt.ok()) {
                     if (interaction_.state() == voice::VoiceInteractionState::kInterrupting) {
-                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kInterruptCompleted);
+                        (void)EnqueueEvent(voice::VoiceInteractionEvent::kInterruptCompleted);
                     } else {
                         QueueStandbyRecovery();
                     }
@@ -882,7 +874,7 @@ class Runtime final {
                 if (!capture.ok()) {
                     ESP_LOGW(kTag, "板级按键开始采集失败: %s", capture.message.c_str());
                     // 事务式启动失败：回待机（kStandbyReady），不显示"出错了/牛牛走了"。
-                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kStandbyReady);
+                    (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
                 }
                 continue;
             }
@@ -891,7 +883,7 @@ class Runtime final {
                     session_ ? session_->EndCapture() : Status::Error(ErrorCode::kUnavailable, "语音会话尚未启动");
                 if (!stop.ok()) {
                     ESP_LOGW(kTag, "板级按键结束采集失败: %s", stop.message.c_str());
-                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+                    (void)EnqueueEvent(voice::VoiceInteractionEvent::kFailure);
                 } else {
                     // 仅当已离开 kFinalizing（VAD 端点后等待最终 STT 中）才恢复待机：
                     // kFinalizing 表示本轮还在等最终 STT/TTS，不能提前回待机。
@@ -909,7 +901,7 @@ class Runtime final {
                 if (!capture.ok()) {
                     ESP_LOGW(kTag, "板级打断后开始采集失败: %s", capture.message.c_str());
                     // 打断后启动失败：回待机，不显示"出错了/牛牛走了"。
-                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kStandbyReady);
+                    (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
                 }
                 continue;
             }
@@ -921,7 +913,7 @@ class Runtime final {
             if (!capture.ok()) {
                 ESP_LOGW(kTag, "唤醒后开始采集失败: %s", capture.message.c_str());
                 // 唤醒启动失败：回待机，不显示"出错了/牛牛走了"。
-                (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kStandbyReady);
+                (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
             }
         }
     }
@@ -1170,7 +1162,7 @@ class Runtime final {
             capture_started_us_.store(0);
         }
         if (evidence.event == "capture_started") {
-            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kCaptureStarted);
+            (void)EnqueueEvent(voice::VoiceInteractionEvent::kCaptureStarted);
         } else if (evidence.event == "stt_text_received") {
             // 收到用户语音转写（STT）：取消聆听超时，等待服务端回复。
             CancelListenTimer();
@@ -1196,14 +1188,14 @@ class Runtime final {
                                   evidence.detail.find("拜") != std::string::npos ||
                                   evidence.detail.find("走了") != std::string::npos);
             }
-            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kIntentReceived);
+            (void)EnqueueEvent(voice::VoiceInteractionEvent::kIntentReceived);
         } else if (evidence.event == "tool_call_received") {
             // MCP 工具调用（服务端发现/工具执行）不是用户语音意图：
             // 仅取消聆听超时，不武装回复、不触发 kIntentReceived。
             CancelListenTimer();
         } else if (evidence.event == "tts_started") {
             CancelListenTimer();
-            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kTtsStarted);
+            (void)EnqueueEvent(voice::VoiceInteractionEvent::kTtsStarted);
         } else if (evidence.event == "tts_sentence_started") {
             // 回写服务端回复句子到屏幕（detail 为 TTS 文本），并立即提交快照
             // 让“说话中 + 助手文本”可见（不再停留显示用户 STT）。
@@ -1231,24 +1223,16 @@ class Runtime final {
                 // 终止回合（再见/拜拜）：告别播报完成走状态机 kFarewellCompleted
                 // （kSpeaking→kStandby）恢复待机，不直接 QueueStandbyRecovery。
                 terminal_turn_ = false;
-                (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFarewellCompleted);
+                (void)EnqueueEvent(voice::VoiceInteractionEvent::kFarewellCompleted);
             } else {
-                const Status stop_status = HandleInteractionEvent(voice::VoiceInteractionEvent::kTtsStopped);
-                if (!stop_status.ok()) {
-                    // Controller 已不在 kSpeaking（如迟到 TTS 触发时已回 Standby/
-                    // Error）：强制清内容栏，避免屏幕卡在“说话中”。
-                    ESP_LOGI(kTag, "TTS_STOPPED_STALE state=%d 强制回内容栏", static_cast<int>(interaction_.state()));
-                    snapshot_.content_text.clear();
-                    snapshot_.role = voice::VoiceContentRole::kNone;
-                    ++snapshot_.revision;
-                    CommitSnapshot();
-                }
+                // 事件化：kTtsStopped 由事件循环唯一执行状态迁移。
+                EnqueueEvent(voice::VoiceInteractionEvent::kTtsStopped);
             }
         } else if (evidence.event == "transport_disconnected") {
             CancelListenTimer();
-            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kTransportDisconnected);
+            (void)EnqueueEvent(voice::VoiceInteractionEvent::kTransportDisconnected);
         } else if (evidence.event == "transport_connected") {
-            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kTransportConnected);
+            (void)EnqueueEvent(voice::VoiceInteractionEvent::kTransportConnected);
         } else if (evidence.event == "provider_error" || evidence.event == "capture_stop_failed" ||
                    evidence.event == "tts_capture_stop_failed") {
             CancelListenTimer();
@@ -1257,7 +1241,7 @@ class Runtime final {
             // 仅会话进行中（聆听/处理/播报）的 provider_error 才算真正故障。
             const auto phase = interaction_.state();
             if (phase != voice::VoiceInteractionState::kStandby) {
-                (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+                (void)EnqueueEvent(voice::VoiceInteractionEvent::kFailure);
             }
         } else if (evidence.event == "capture_stopped") {
             // kFinalizing（等最终 STT）时不得取消 5s 最终 STT 定时器，
@@ -1271,7 +1255,7 @@ class Runtime final {
             // 启动 5s 最终 STT 超时：无 STT 则 abort 收尾。
             CancelListenTimer();
             if (interaction_.state() == voice::VoiceInteractionState::kListening) {
-                (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kEndpointDetected);
+                (void)EnqueueEvent(voice::VoiceInteractionEvent::kEndpointDetected);
                 StartListenTimer(kFinalSttTimeoutMs);
             }
         }
@@ -1297,6 +1281,72 @@ class Runtime final {
     QueueHandle_t wake_queue_ = nullptr;
     TaskHandle_t wake_task_ = nullptr;
     TaskHandle_t button_task_ = nullptr;
+    // 交互事件单写者（InteractionEventLoop）：外部线程只投递事件。
+    struct InteractionEventItem {
+        voice::VoiceInteractionEvent event = voice::VoiceInteractionEvent::kBootCompleted;
+        std::string wake_word;
+    };
+    static constexpr std::size_t kEventQueueCapacity = 16;
+    std::deque<InteractionEventItem> event_queue_;
+    mutable std::mutex event_mutex_;
+    std::condition_variable event_cv_;
+    TaskHandle_t event_task_ = nullptr;
+    bool event_loop_stop_ = false;
+    bool event_loop_stopped_ = false;
+
+    /** @brief 投递交互事件（有界队列，满丢最旧；任何线程可调用）。 */
+    void EnqueueEvent(voice::VoiceInteractionEvent event, std::string_view wake_word = {}) {
+        InteractionEventItem item{event, std::string(wake_word)};
+        {
+            std::lock_guard<std::mutex> lock(event_mutex_);
+            if (event_queue_.size() >= kEventQueueCapacity) {
+                event_queue_.pop_front();
+            }
+            event_queue_.push_back(std::move(item));
+        }
+        event_cv_.notify_one();
+    }
+
+    /** @brief 事件循环任务入口（唯一调用 HandleInteractionEvent 的线程）。 */
+    static void EventLoopTaskEntry(void* arg) { static_cast<Runtime*>(arg)->EventLoopLoop(); }
+
+    /** @brief 事件循环：消费事件 -> 状态迁移 -> 快照 -> 显示提交。 */
+    void EventLoopLoop() {
+#ifdef ESP_PLATFORM
+        while (true) {
+            InteractionEventItem item;
+            {
+                std::unique_lock<std::mutex> lock(event_mutex_);
+                event_cv_.wait(lock, [this] { return event_loop_stop_ || !event_queue_.empty(); });
+                if (event_loop_stop_ && event_queue_.empty()) {
+                    break;
+                }
+                item = std::move(event_queue_.front());
+                event_queue_.pop_front();
+            }
+            if (item.event == voice::VoiceInteractionEvent::kWakeDetected) {
+                // 唤醒前置（唯一状态写者内）：显示租约 + 提示音。
+                wake_ack_until_us_ = esp_timer_get_time() + kWakeAckDisplayUs;
+                PlayWakeAck();
+            }
+            const Status wake_status = HandleInteractionEvent(item.event, item.wake_word);
+            if (item.event != voice::VoiceInteractionEvent::kWakeDetected && !wake_status.ok()) {
+                ESP_LOGW(kTag, "INTERACTION_REJECTED event=%d state=%d err=%s", static_cast<int>(item.event),
+                         static_cast<int>(interaction_.state()), wake_status.message.c_str());
+            }
+            if (item.event == voice::VoiceInteractionEvent::kWakeDetected && !wake_status.ok()) {
+                // 唤醒被拒（如控制器不在 kStandby）：重启检测器，否则后续永远叫不醒。
+                ESP_LOGW(kTag, "WAKE_REJECTED state=%d err=%s", static_cast<int>(interaction_.state()),
+                         wake_status.message.c_str());
+                if (wake_detector_ != nullptr) {
+                    (void)wake_detector_->Start();
+                }
+            }
+        }
+        event_loop_stopped_ = true;
+        vTaskDelete(nullptr);
+#endif
+    }
     std::array<ButtonSample, 4> buttons_{};
     std::size_t button_count_ = 0;
     int volume_ = 70;
@@ -1332,7 +1382,8 @@ class Runtime final {
     Status RequestInterrupt() {
         if (!session_) return Status::Error(ErrorCode::kUnavailable, "设备运行时尚未启动");
 #ifdef ESP_PLATFORM
-        return HandleInteractionEvent(voice::VoiceInteractionEvent::kInterruptRequested);
+        EnqueueEvent(voice::VoiceInteractionEvent::kInterruptRequested);
+        return Status::Ok();  // 事件已投递，状态迁移由事件循环执行。
 #else
         return Status::Error(ErrorCode::kUnavailable, "板端打断仅支持 ESP 平台");
 #endif
