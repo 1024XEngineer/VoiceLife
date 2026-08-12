@@ -51,8 +51,8 @@ constexpr uint32_t kDisplayTaskPriority = 1;
 
 }  // namespace
 
-SparkBotPresentationAdapter::SparkBotPresentationAdapter(const SparkBotLcdConfig& config)
-    : display_(config), queue_(kQueueCapacity) {}
+SparkBotPresentationAdapter::SparkBotPresentationAdapter(const SparkBotLcdConfig& config, BacklightCallback backlight)
+    : display_(config), queue_(kQueueCapacity), backlight_cb_(std::move(backlight)) {}
 
 SparkBotPresentationAdapter::~SparkBotPresentationAdapter() { (void)Stop(); }
 
@@ -62,7 +62,17 @@ const voicelife::voice::DisplayCapabilities& SparkBotPresentationAdapter::capabi
 
 voicelife::Status SparkBotPresentationAdapter::Render(const voicelife::voice::DisplaySnapshot& snapshot) {
     queue_.Push(snapshot);
+    UpdateBacklight(snapshot);
     return voicelife::Status::Ok();
+}
+
+void SparkBotPresentationAdapter::UpdateBacklight(const voicelife::voice::DisplaySnapshot& snapshot) {
+    // 待机时经板级仲裁关闭背光（功放由音频侧仲裁，本阶段仅背光）。
+    const bool want_on = snapshot.phase != voicelife::voice::VoiceInteractionState::kStandby;
+    if (want_on != backlight_on_ && backlight_cb_) {
+        backlight_cb_(want_on);
+        backlight_on_ = want_on;
+    }
 }
 
 voicelife::Status SparkBotPresentationAdapter::Submit(voicelife::voice::PresentationCommand command) {

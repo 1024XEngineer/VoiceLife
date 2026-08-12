@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 
 #include "voicelife/contracts/status.h"
 #include "voicelife/display_sparkbot/display_snapshot_queue.h"
@@ -30,8 +31,15 @@ namespace voicelife::display_sparkbot {
  */
 class SparkBotPresentationAdapter : public voicelife::voice::PresentationPort {
    public:
-    /** @brief 构造函数。 @param config 官方 SparkBot 板级显示参数。 */
-    explicit SparkBotPresentationAdapter(const SparkBotLcdConfig& config);
+    /** @brief 背光回调（板级仲裁入口，待机时关闭）。 */
+    using BacklightCallback = std::function<void(bool)>;
+
+    /**
+     * @brief 构造函数。
+     * @param config 官方 SparkBot 板级显示参数。
+     * @param backlight 可选背光回调（经板级仲裁更新 GPIO46；不传则不控制）。
+     */
+    explicit SparkBotPresentationAdapter(const SparkBotLcdConfig& config, BacklightCallback backlight = {});
 
     /** @brief 虚析构函数：停止显示任务并释放资源。 */
     ~SparkBotPresentationAdapter() override;
@@ -98,6 +106,13 @@ class SparkBotPresentationAdapter : public voicelife::voice::PresentationPort {
     [[maybe_unused]] uint64_t last_rendered_revision_ = 0;
     /** @brief 是否已启动。 */
     [[maybe_unused]] bool started_ = false;
+    /** @brief 背光回调（板级仲裁）。 */
+    [[maybe_unused]] BacklightCallback backlight_cb_;
+    /** @brief 上次背光请求状态。 */
+    [[maybe_unused]] bool backlight_on_ = true;
+
+    /** @brief 按快照阶段更新背光（待机关闭）。 */
+    void UpdateBacklight(const voicelife::voice::DisplaySnapshot& snapshot);
 };
 
 }  // namespace voicelife::display_sparkbot

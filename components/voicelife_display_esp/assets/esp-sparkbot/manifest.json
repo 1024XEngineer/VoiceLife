@@ -27,7 +27,9 @@
     "assets_partition_bytes": 1048576,
     "single_frame_rgb565_bytes": 18432,
     "psram_decode_peak_bytes": null,
-    "psram_note": "GIF 解码峰值内存尚未测量；Renderer 移植时以真机 heap 证据补充。"
+    "psram_note": "GIF 解码峰值内存尚未测量；Renderer 移植时以真机 heap 证据补充。",
+    "assets_image_sha256": "292d20d48616ba9132908b6664e2b3d9d77106bdb2f1ac2b4140e217978005df",
+    "assets_image_bytes": 143155
   },
   "verification": {
     "verified_on_device": false,

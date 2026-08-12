@@ -1,5 +1,6 @@
 #pragma once
 
+#include "voicelife/board_esp/gpio46_power_arbiter.h"
 #include "voicelife/display_esp/ssd1306_presentation_adapter.h"
 #include "voicelife/display_sparkbot/sparkbot_presentation_adapter.h"
 #include "voicelife/runtime/platform_assembly.h"
@@ -46,6 +47,10 @@ class SparkBotAssembly : public PlatformAssembly {
     voicelife::Status Start() override;
 
    private:
+    /** @brief 经板级仲裁更新 GPIO46 背光（ESP 构建写 GPIO）。 */
+    void ApplyBacklight(bool enabled);
+
+    voicelife::board_esp::Gpio46PowerArbiter arbiter_;
     voicelife::display_sparkbot::SparkBotPresentationAdapter adapter_;
 };
 

@@ -46,5 +46,26 @@ int main() {
           "host 构建 Start 必须返回 kUnavailable（不创建真实显示任务）");
     Check(adapter.Stop().ok(), "host 构建 Stop 必须成功（无任务可停）");
 
+    // 背光仲裁回调：待机快照关闭背光，非待机恢复。
+    bool backlight_requests[2] = {false, false};
+    int backlight_calls = 0;
+    SparkBotPresentationAdapter backlight_adapter(config, [&](bool on) {
+        if (backlight_calls < 2) {
+            backlight_requests[backlight_calls] = on;
+        }
+        ++backlight_calls;
+    });
+    DisplaySnapshot standby;
+    standby.revision = 2;
+    standby.phase = voicelife::voice::VoiceInteractionState::kStandby;
+    Check(backlight_adapter.Render(standby).ok(), "待机快照必须可提交");
+    Check(backlight_calls == 1 && !backlight_requests[0], "待机必须请求关闭背光（经板级仲裁）");
+    DisplaySnapshot listening;
+    listening.revision = 3;
+    listening.phase = voicelife::voice::VoiceInteractionState::kListening;
+    Check(backlight_adapter.Render(listening).ok(), "聆听快照必须可提交");
+    Check(backlight_calls == 2 && backlight_requests[1], "非待机必须请求开启背光");
+    Check(backlight_adapter.Render(listening).ok() && backlight_calls == 2, "相同背光状态不得重复请求");
+
     return 0;
 }
