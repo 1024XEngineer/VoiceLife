@@ -52,11 +52,23 @@ voicelife::Status InitializeEs8311(const Es8311ControlConfig& config) {
     if (bus_err != ESP_OK) {
         return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "创建 ES8311 I2C 总线失败");
     }
+    // 等 MCLK/上电稳定（I2S 已 enable，MCLK x256 输出）。
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // 诊断：I2C ACK 探测（0x18 7bit / 0x30 8bit 同址）。
+    const esp_err_t probe_err = i2c_master_probe(bus, static_cast<uint16_t>(config.es8311_8bit >> 1), 50);
+    if (probe_err != ESP_OK) {
+        ESP_LOGE(kTag, "ES8311_I2C_NAK addr=0x%02X err=%s 检查 MCLK/电源/引脚", config.es8311_8bit >> 1,
+                 esp_err_to_name(probe_err));
+    } else {
+        ESP_LOGI(kTag, "ES8311_I2C_ACK addr=0x%02X", config.es8311_8bit >> 1);
+    }
 
     // I2C 控制接口（官方 audio_codec）。
     audio_codec_i2c_cfg_t i2c_cfg = {};
     i2c_cfg.port = static_cast<int>(config.i2c_port);
-    i2c_cfg.addr = static_cast<uint16_t>(config.es8311_8bit >> 1);
+    // audio_codec_ctrl_i2c 内部对 addr >> 1，这里必须传 8-bit 地址（0x30）。
+    i2c_cfg.addr = static_cast<uint16_t>(config.es8311_8bit);
     i2c_cfg.bus_handle = bus;
     const audio_codec_ctrl_if_t* ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
     if (ctrl_if == nullptr) {

@@ -24,12 +24,18 @@ bool SameFormat(const voice::AudioFormat& left, const voice::AudioFormat& right,
 
 size_t WireBytes(const I2sEndpointProfile& endpoint) { return endpoint.wire_bits_per_sample / 8U; }
 
+namespace {
+uint8_t WireSlotCount(const I2sEndpointProfile& endpoint) {
+    return endpoint.wire_slot_count == 0 ? endpoint.format.channels : endpoint.wire_slot_count;
+}
+}  // namespace
+
 i2s_data_bit_width_t WireWidth(const I2sEndpointProfile& endpoint) {
     return endpoint.wire_bits_per_sample == 32 ? I2S_DATA_BIT_WIDTH_32BIT : I2S_DATA_BIT_WIDTH_16BIT;
 }
 
 i2s_std_config_t MakeStdConfig(const I2sEndpointProfile& endpoint, bool tx, const I2sEndpointProfile* peer) {
-    const i2s_slot_mode_t mode = endpoint.format.channels == 1 ? I2S_SLOT_MODE_MONO : I2S_SLOT_MODE_STEREO;
+    const i2s_slot_mode_t mode = WireSlotCount(endpoint) == 1 ? I2S_SLOT_MODE_MONO : I2S_SLOT_MODE_STEREO;
     // 全双工（外部 Codec）时两侧 init 都填 dout+din，对齐官方 CreateDuplexChannels
     // 的同一 config 双 init 做法，避免 ESP-IDF 双工通道 GPIO 一致性校验失败。
     const int peer_data = peer != nullptr ? peer->data : I2S_GPIO_UNUSED;
@@ -48,7 +54,14 @@ i2s_std_config_t MakeStdConfig(const I2sEndpointProfile& endpoint, bool tx, cons
                 .invert_flags = {},
             },
     };
-    config.slot_cfg.slot_mask = endpoint.format.channels == 1 ? I2S_STD_SLOT_LEFT : I2S_STD_SLOT_BOTH;
+    config.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256;
+    // 板级 I2S 配置审计（MCLK 频率/slot mode/mask）。
+    ESP_LOGI("sparkbot_i2s", "I2S_CFG mclk=%d mclk_hz=%llu slot_mode=%d slot_mask=%d bits=%d sample_rate=%d",
+             static_cast<int>(endpoint.mclk), static_cast<unsigned long long>(endpoint.format.sample_rate_hz) * 256ULL,
+             static_cast<int>(mode),
+             static_cast<int>(WireSlotCount(endpoint) == 1 ? I2S_STD_SLOT_LEFT : I2S_STD_SLOT_BOTH),
+             static_cast<int>(WireWidth(endpoint)), static_cast<int>(endpoint.format.sample_rate_hz));
+    config.slot_cfg.slot_mask = WireSlotCount(endpoint) == 1 ? I2S_STD_SLOT_LEFT : I2S_STD_SLOT_BOTH;
     // 与官方小智/MVP 的 NoAudioCodec 一致：数据左对齐（MSB 对齐 slot 高位）。
     // 我们写 32bit wire（16bit PCM << pcm_shift_bits），若 left_align=false（右对齐）
     // 高 16 位数据会被当作低位处理，导致功放无声。
@@ -138,11 +151,15 @@ void Esp32s3PcmAudioPorts::Impl::DestroyChannels() {
 
 void Esp32s3PcmAudioPorts::Impl::DestroyChannelsLocked() {
     if (tx_channel_ != nullptr) {
-        i2s_channel_disable(tx_channel_);
+        if (output_running_) {
+            i2s_channel_disable(tx_channel_);
+        }
         i2s_del_channel(tx_channel_);
     }
     if (rx_channel_ != nullptr) {
-        i2s_channel_disable(rx_channel_);
+        if (input_running_) {
+            i2s_channel_disable(rx_channel_);
+        }
         i2s_del_channel(rx_channel_);
     }
     tx_channel_ = nullptr;
@@ -190,11 +207,14 @@ void Esp32s3PcmAudioPorts::Impl::MarkTaskDone(TaskHandle_t* task) {
 
 void Esp32s3PcmAudioPorts::Impl::CaptureLoop() {
     const auto& endpoint = profile_.capture_i2s;
-    const std::size_t samples_per_period = static_cast<std::size_t>(endpoint.format.sample_rate_hz) *
-                                           endpoint.format.frame_duration_ms / 1000U * endpoint.format.channels;
-    const std::size_t wire_size = samples_per_period * detail::WireBytes(endpoint);
+    const std::size_t pcm_samples_per_period = static_cast<std::size_t>(endpoint.format.sample_rate_hz) *
+                                               endpoint.format.frame_duration_ms / 1000U * endpoint.format.channels;
+    const std::size_t wire_samples_per_period = static_cast<std::size_t>(endpoint.format.sample_rate_hz) *
+                                                endpoint.format.frame_duration_ms / 1000U *
+                                                detail::WireSlotCount(endpoint);
+    const std::size_t wire_size = wire_samples_per_period * detail::WireBytes(endpoint);
     std::vector<uint8_t> wire(wire_size);
-    std::vector<int16_t> pcm(samples_per_period);
+    std::vector<int16_t> pcm(pcm_samples_per_period);
     while (true) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -213,11 +233,14 @@ void Esp32s3PcmAudioPorts::Impl::CaptureLoop() {
         }
         if (endpoint.wire_bits_per_sample == 32) {
             const auto* raw = reinterpret_cast<const int32_t*>(wire.data());
-            for (std::size_t i = 0; i < samples_per_period; ++i) {
-                pcm[i] = detail::ToPcm16(raw[i], endpoint);
+            for (std::size_t i = 0; i < pcm_samples_per_period; ++i) {
+                pcm[i] = detail::ToPcm16(raw[i * detail::WireSlotCount(endpoint)], endpoint);
             }
         } else {
-            std::memcpy(pcm.data(), wire.data(), wire.size());
+            const auto* raw = reinterpret_cast<const int16_t*>(wire.data());
+            for (std::size_t i = 0; i < pcm_samples_per_period; ++i) {
+                pcm[i] = raw[i * detail::WireSlotCount(endpoint)];
+            }
         }
         const Status status = assembler_->Push(pcm.data(), pcm.size(), [this](voice::AudioFrame frame) {
             EnqueueInput(std::move(frame));
@@ -274,7 +297,8 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
                                        endpoint.format.frame_duration_ms / 1000U * endpoint.format.channels;
     for (std::size_t offset = 0; offset < sample_count; offset += period_samples) {
         const std::size_t count = std::min(period_samples, sample_count - offset);
-        const std::size_t bytes = count * detail::WireBytes(endpoint);
+        const std::size_t wire_samples = count * detail::WireSlotCount(endpoint) / endpoint.format.channels;
+        const std::size_t bytes = wire_samples * detail::WireBytes(endpoint);
         std::vector<uint8_t> wire(bytes);
         if (endpoint.wire_bits_per_sample == 32) {
             auto* out = reinterpret_cast<int32_t*>(wire.data());
@@ -284,17 +308,20 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
                 // volume=100 时补 4 倍（+12dB）数字增益，clamp 防削波。
                 const int32_t gain = 4;
                 const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume * gain / 100;
-                out[i] = detail::ToWire(static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767)), endpoint);
+                const int32_t value =
+                    detail::ToWire(static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767)), endpoint);
+                for (uint8_t slot = 0; slot < detail::WireSlotCount(endpoint); ++slot) {
+                    out[i * detail::WireSlotCount(endpoint) + slot] = value;
+                }
             }
         } else {
             const int volume = output_volume_.load();
-            if (volume == 100) {
-                std::memcpy(wire.data(), pcm + offset, bytes);
-            } else {
-                auto* out = reinterpret_cast<int16_t*>(wire.data());
-                for (std::size_t i = 0; i < count; ++i) {
-                    const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume / 100;
-                    out[i] = static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767));
+            auto* out = reinterpret_cast<int16_t*>(wire.data());
+            for (std::size_t i = 0; i < count; ++i) {
+                const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume / 100;
+                const int16_t value = static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767));
+                for (uint8_t slot = 0; slot < detail::WireSlotCount(endpoint); ++slot) {
+                    out[i * detail::WireSlotCount(endpoint) + slot] = value;
                 }
             }
         }
