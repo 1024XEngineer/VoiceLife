@@ -37,28 +37,67 @@ voicelife::display_sparkbot::SparkBotLcdConfig MakeSparkBotLcdConfig() {
 
 voicelife::voice::PresentationPort& VoiceLifePcbAssembly::presentation() { return ssd1306_adapter_; }
 
+audio_esp::AudioBoardProfile VoiceLifePcbAssembly::audio_profile() const {
+    return audio_esp::VoiceLifePcbEsp32s3Profile();
+}
+
 SparkBotAssembly::SparkBotAssembly()
     : arbiter_(voicelife::board_esp::SparkBotProfile().shared_power),
       adapter_(MakeSparkBotLcdConfig(), [this](bool enabled) { ApplyBacklight(enabled); }) {}
 
 voicelife::voice::PresentationPort& SparkBotAssembly::presentation() { return adapter_; }
 
+audio_esp::AudioBoardProfile SparkBotAssembly::audio_profile() const {
+    return audio_esp::SparkBotEsp32s3AudioProfile();
+}
+
 voicelife::Status SparkBotAssembly::Start() {
+    ConfigureSharedPowerGpio();
     // 显示启动：经统一仲裁启用背光。
     ApplyBacklight(true);
     return adapter_.Start();
 }
 
+voicelife::Status SparkBotAssembly::SetAudioOutputEnabled(bool enabled) {
+    (void)arbiter_.SetAudioOutputEnabled(enabled);
+    WriteSharedPowerLine();
+    return voicelife::Status::Ok();
+}
+
 void SparkBotAssembly::ApplyBacklight(bool enabled) {
     (void)arbiter_.SetBacklightEnabled(enabled);
+    WriteSharedPowerLine();
+}
+
+void SparkBotAssembly::ConfigureSharedPowerGpio() {
 #ifdef ESP_PLATFORM
     const auto profile = voicelife::board_esp::SparkBotProfile().shared_power;
-    if (profile.gpio >= 0) {
-        const int level = arbiter_.line_enabled() ? (profile.active_high ? 1 : 0) : (profile.active_high ? 0 : 1);
-        (void)gpio_set_level(static_cast<gpio_num_t>(profile.gpio), level);
+    if (profile.gpio < 0) {
+        return;
     }
+    const gpio_config_t config = {
+        .pin_bit_mask = 1ULL << profile.gpio,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    (void)gpio_config(&config);
 #else
-    (void)enabled;
+    (void)0;
+#endif
+}
+
+void SparkBotAssembly::WriteSharedPowerLine() {
+#ifdef ESP_PLATFORM
+    const auto profile = voicelife::board_esp::SparkBotProfile().shared_power;
+    if (profile.gpio < 0) {
+        return;
+    }
+    const int level = arbiter_.line_enabled() ? (profile.active_high ? 1 : 0) : (profile.active_high ? 0 : 1);
+    (void)gpio_set_level(static_cast<gpio_num_t>(profile.gpio), level);
+#else
+    (void)0;
 #endif
 }
 

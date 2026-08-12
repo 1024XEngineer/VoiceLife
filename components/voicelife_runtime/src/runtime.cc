@@ -314,7 +314,7 @@ class Runtime final {
         provider_ = std::move(*result.value);
 
 #ifdef ESP_PLATFORM
-        audio_ports_ = std::make_unique<audio_esp::Esp32s3PcmAudioPorts>(audio_esp::VoiceLifePcbEsp32s3Profile());
+        audio_ports_ = std::make_unique<audio_esp::Esp32s3PcmAudioPorts>(assembly_->audio_profile());
         audio_ports_->SetOutputVolume(static_cast<uint8_t>(volume_));
         wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
         wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_->input(), *wake_detector_);
@@ -429,28 +429,33 @@ class Runtime final {
         int64_t pressed_at_us = 0;
     };
 
-    static constexpr gpio_num_t kBootButtonGpio = GPIO_NUM_0;
-    static constexpr gpio_num_t kTouchButtonGpio = GPIO_NUM_47;
-    static constexpr gpio_num_t kVolumeUpButtonGpio = GPIO_NUM_40;
-    static constexpr gpio_num_t kVolumeDownButtonGpio = GPIO_NUM_39;
     static constexpr int64_t kLongPressUs = 2000000;
 
     static void BoardTaskEntry(void* context) { static_cast<Runtime*>(context)->BoardTask(); }
 
     void StartBoardControls() {
+        const std::vector<int> gpios = assembly_->button_gpios();
+        if (gpios.empty()) {
+            ESP_LOGI(kTag, "板型无按键，跳过按键任务");
+            return;
+        }
+        uint64_t pin_mask = 0;
+        for (int gpio : gpios) {
+            pin_mask |= 1ULL << static_cast<unsigned>(gpio);
+        }
         const gpio_config_t config = {
-            .pin_bit_mask = (1ULL << kBootButtonGpio) | (1ULL << kTouchButtonGpio) | (1ULL << kVolumeUpButtonGpio) |
-                            (1ULL << kVolumeDownButtonGpio),
+            .pin_bit_mask = pin_mask,
             .mode = GPIO_MODE_INPUT,
             .pull_up_en = GPIO_PULLUP_ENABLE,
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
             .intr_type = GPIO_INTR_DISABLE,
         };
         ESP_ERROR_CHECK(gpio_config(&config));
-        buttons_[0].gpio = kBootButtonGpio;
-        buttons_[1].gpio = kTouchButtonGpio;
-        buttons_[2].gpio = kVolumeUpButtonGpio;
-        buttons_[3].gpio = kVolumeDownButtonGpio;
+        // 只启用注入的按键；SPI/音频复用引脚（SparkBot GPIO47/40/39）不得重配。
+        button_count_ = std::min(gpios.size(), buttons_.size());
+        for (std::size_t index = 0; index < button_count_; ++index) {
+            buttons_[index].gpio = static_cast<gpio_num_t>(gpios[index]);
+        }
         if (xTaskCreate(&BoardTaskEntry, "voicelife_buttons", 3072, this, 5, &button_task_) != pdPASS) {
             ESP_LOGW(kTag, "创建板级按键任务失败");
         }
@@ -459,7 +464,7 @@ class Runtime final {
     void BoardTask() {
         while (true) {
             const int64_t now = esp_timer_get_time();
-            for (std::size_t index = 0; index < buttons_.size(); ++index) {
+            for (std::size_t index = 0; index < button_count_; ++index) {
                 auto& button = buttons_[index];
                 const bool pressed = gpio_get_level(button.gpio) == 0;
                 if (pressed && !button.previous_pressed) {
@@ -1133,6 +1138,7 @@ class Runtime final {
     TaskHandle_t wake_task_ = nullptr;
     TaskHandle_t button_task_ = nullptr;
     std::array<ButtonSample, 4> buttons_{};
+    std::size_t button_count_ = 0;
     int volume_ = 70;
     std::atomic<int64_t> capture_started_us_{0};
     bool first_standby_ = true;

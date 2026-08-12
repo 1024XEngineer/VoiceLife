@@ -48,5 +48,17 @@ int main() {
     Check(sparkbot_start.code == voicelife::ErrorCode::kUnavailable,
           "SparkBot Assembly Start 在 host 构建必须返回 kUnavailable（不触碰硬件）");
 
+    // 板级注入：音频 Profile 与按键 GPIO 由各 Assembly 构建期提供，
+    // Runtime 不固定板型（SparkBot 不得重配 LCD/音频复用引脚）。
+    Check(pcb_as_interface.audio_profile().id == "esp32s3-voicelife-pcb-pcm",
+          "VoiceLife PCB 必须注入 PCM 音频 Profile");
+    const auto pcb_buttons = pcb_as_interface.button_gpios();
+    Check(pcb_buttons == std::vector<int>({0, 47, 40, 39}), "VoiceLife PCB 必须注入 boot/touch/volume 按键 GPIO");
+    Check(sparkbot_as_interface.audio_profile().id == "esp32s3-esp-sparkbot",
+          "SparkBot 必须注入 ES8311 双工音频 Profile");
+    const auto sparkbot_buttons = sparkbot_as_interface.button_gpios();
+    Check(sparkbot_buttons == std::vector<int>({0}), "SparkBot 只能注入 BOOT 按键，不得包含 LCD/音频复用引脚");
+    Check(sparkbot_as_interface.SetAudioOutputEnabled(true).ok(), "SparkBot 音频功放请求必须经仲裁接口接受");
+
     return 0;
 }

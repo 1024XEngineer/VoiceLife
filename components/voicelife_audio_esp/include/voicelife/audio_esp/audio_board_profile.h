@@ -117,4 +117,15 @@ struct AudioBoardProfile {
  */
 [[nodiscard]] AudioBoardProfile VoiceLifePcbEsp32s3Profile();
 
+/**
+ * @brief ESP-SparkBot 板的 ES8311 双工音频 Profile。
+ *
+ * 引脚与采样率取自官方 xiaozhi-esp32@37d1aee esp_sparkbot_board.cc /
+ * config.h（I2S mclk45/bclk39/ws41/din40/dout42，I2C sda4/scl5，
+ * ES8311 0x18，16kHz）。音频主链实板验证属于后续阶段；本 Profile 用于
+ * 保证 Runtime 不再固定 VoiceLife PCB 引脚。
+ * @return SparkBot 音频 Profile。
+ */
+[[nodiscard]] AudioBoardProfile SparkBotEsp32s3AudioProfile();
+
 }  // namespace voicelife::audio_esp

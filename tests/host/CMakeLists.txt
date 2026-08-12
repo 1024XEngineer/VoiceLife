@@ -282,7 +282,7 @@ add_voicelife_test(platform_assembly_test "unit;platform;assembly;contract"
 target_include_directories(platform_assembly_test PRIVATE
     "${ROOT_DIR}/main"
     "${ROOT_DIR}/components/voicelife_runtime/include")
-target_link_libraries(platform_assembly_test PRIVATE display_esp display_sparkbot voice board_esp)
+target_link_libraries(platform_assembly_test PRIVATE display_esp display_sparkbot voice board_esp audio_esp)
 
 add_voicelife_test(sparkbot_lvgl_renderer_test "unit;display;sparkbot;contract"
     sparkbot_lvgl_renderer_test.cc)

@@ -196,4 +196,40 @@ AudioBoardProfile VoiceLifePcbEsp32s3Profile() {
     return profile;
 }
 
+AudioBoardProfile SparkBotEsp32s3AudioProfile() {
+    AudioBoardProfile profile;
+    profile.id = "esp32s3-esp-sparkbot";
+    profile.topology = AudioBoardTopology::kExternalCodecDuplex;
+    profile.capture_i2s.port = 0;
+    profile.capture_i2s.mclk = 45;
+    profile.capture_i2s.bclk = 39;
+    profile.capture_i2s.ws = 41;
+    profile.capture_i2s.data = 40;
+    profile.capture_i2s.format = {.codec = voice::AudioCodec::kPcmS16Le,
+                                  .sample_rate_hz = 16000,
+                                  .channels = 1,
+                                  .bits_per_sample = 16,
+                                  .frame_duration_ms = 20};
+    profile.playback_i2s.port = 0;
+    profile.playback_i2s.mclk = 45;
+    profile.playback_i2s.bclk = 39;
+    profile.playback_i2s.ws = 41;
+    profile.playback_i2s.data = 42;
+    profile.playback_i2s.format = {.codec = voice::AudioCodec::kPcmS16Le,
+                                   .sample_rate_hz = 16000,
+                                   .channels = 1,
+                                   .bits_per_sample = 16,
+                                   .frame_duration_ms = 20};
+    CodecControlProfile codec_control;
+    codec_control.i2c_port = 0;
+    codec_control.i2c.sda = 4;
+    codec_control.i2c.scl = 5;
+    codec_control.addresses.es8311_8bit = 0x30;  // ES8311 7bit 0x18 含读写位
+    profile.codec_control = codec_control;
+    profile.dma_desc_num = 6;
+    profile.dma_frame_num = 240;
+    profile.input_reference = false;
+    return profile;
+}
+
 }  // namespace voicelife::audio_esp
