@@ -32,13 +32,15 @@ int main() {
 
     // Submit 契约：非法格式 kInvalidArgument、未知资源 kNotFound、
     // 受控资源 kUnavailable（独立资源命令未实现）。
-    Check(adapter.Submit(PresentationCommand{.asset_id = ""}).code == ErrorCode::kInvalidArgument,
+    Check(adapter.Submit(PresentationCommand{.asset_id = "", .request_id = {}}).code == ErrorCode::kInvalidArgument,
           "空 asset_id 必须返回 kInvalidArgument");
-    Check(adapter.Submit(PresentationCommand{.asset_id = "../evil.gif"}).code == ErrorCode::kInvalidArgument,
+    Check(adapter.Submit(PresentationCommand{.asset_id = "../evil.gif", .request_id = {}}).code ==
+              ErrorCode::kInvalidArgument,
           "路径特征 asset_id 必须返回 kInvalidArgument");
-    Check(adapter.Submit(PresentationCommand{.asset_id = "not_in_manifest"}).code == ErrorCode::kNotFound,
+    Check(adapter.Submit(PresentationCommand{.asset_id = "not_in_manifest", .request_id = {}}).code ==
+              ErrorCode::kNotFound,
           "未知资源必须返回 kNotFound");
-    Check(adapter.Submit(PresentationCommand{.asset_id = "idle"}).code == ErrorCode::kUnavailable,
+    Check(adapter.Submit(PresentationCommand{.asset_id = "idle", .request_id = {}}).code == ErrorCode::kUnavailable,
           "受控资源命令未实现必须返回 kUnavailable");
 
     // host 构建不启动真实显示任务。
