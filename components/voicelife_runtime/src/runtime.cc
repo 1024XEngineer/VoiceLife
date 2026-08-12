@@ -20,8 +20,6 @@
 #include "led_strip.h"
 #include "voicelife/audio_esp/audio_board_profile.h"
 #include "voicelife/audio_esp/esp32s3_audio_probe.h"
-#include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
-#include "voicelife/audio_esp/esp_multinet_wake_detector.h"
 #include "voicelife/display_esp/ssd1306_status_display.h"
 #include "voicelife/linx/linx_speech_provider.h"
 #include "voicelife/linx/linx_types.h"
@@ -37,6 +35,7 @@
 #include "runtime_board_input.h"
 #include "runtime_presentation.h"
 #include "runtime_scaffold.h"
+#include "runtime_voice_wiring.h"
 #include "schedule_mcp_tools.h"
 #include "voicelife/voice/voice_interaction_controller.h"
 #include "voicelife/voice/voice_ports.h"
@@ -138,35 +137,29 @@ class Runtime final {
         provider_ = std::move(*result.value);
 
 #ifdef ESP_PLATFORM
-        audio_ports_ = std::make_unique<audio_esp::Esp32s3PcmAudioPorts>(audio_esp::VoiceLifePcbEsp32s3Profile());
-        audio_ports_->SetOutputVolume(static_cast<uint8_t>(volume_));
-        wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
-        wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_->input(), *wake_detector_);
-        wake_gate_->SetWakeSink([this](std::string_view wake_word) { QueueWakeWord(wake_word); });
-        session_ = std::make_unique<voice::VoiceSession>(
-            *wake_gate_, audio_ports_->output(), *provider_,
-            [this](const voice::VoiceEvidence& evidence) { LogVoiceEvidence(evidence); });
-        voice::VoiceSessionConfig config;
-        config.session_id = "voicelife-linx-session";
-        config.provider_id = "xrobot-websocket";
-        config.mode = voice::VoiceMode::kRealtime;
-        config.audio.codec = voice::AudioCodec::kPcmS16Le;
-        config.audio.sample_rate_hz = 16000;
-        config.audio.channels = 1;
-        config.audio.bits_per_sample = 16;
-        config.audio.frame_duration_ms = 20;
-#else
-        session_ = std::make_unique<voice::VoiceSession>(audio_input_, audio_output_, *provider_);
-        voice::VoiceSessionConfig config;
-        config.session_id = "scaffold-session";
-        config.provider_id = "scaffold";
-#endif
-        const Status session_status = session_->Start(config);
+        voice_wiring_.Assemble(
+            *provider_, [this](const voice::VoiceEvidence& evidence) { LogVoiceEvidence(evidence); },
+            [this](std::string_view wake_word) { QueueWakeWord(wake_word); }, volume_);
+        session_ = voice_wiring_.session();
+        const Status session_status = voice_wiring_.StartSession();
         if (!session_status.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=session_start code=%d", static_cast<int>(session_status.code));
             (void)display_esp::SetEmotion("sad", "错误", {});
             return session_status;
         }
+#else
+        host_session_ = std::make_unique<voice::VoiceSession>(audio_input_, audio_output_, *provider_);
+        voice::VoiceSessionConfig config;
+        config.session_id = "scaffold-session";
+        config.provider_id = "scaffold";
+        session_ = host_session_.get();
+        const Status session_status = host_session_->Start(config);
+        if (!session_status.ok()) {
+            ESP_LOGW(kTag, "STARTUP_ERROR stage=session_start code=%d", static_cast<int>(session_status.code));
+            (void)display_esp::SetEmotion("sad", "错误", {});
+            return session_status;
+        }
+#endif
 
 #if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_AUDIO_PROBE
         audio_esp::Esp32s3AudioProbe probe;
@@ -257,14 +250,14 @@ class Runtime final {
 
     void SetVolume(int volume) {
         volume_ = std::clamp(volume, 0, 100);
-        if (audio_ports_) audio_ports_->SetOutputVolume(volume_);
+        voice_wiring_.SetOutputVolume(volume_);
         presentation_.ShowVolume(volume_);
     }
 
     // 本地提示音：播放 popup.ogg 解码的 PCM（16kHz S16LE），按协商播放格式重采样。
     // 播放本地提示音（裸 PCM 16kHz mono）：直接入队，播放端口统一重采样到 24kHz。
     void PlayPrompt(const int16_t* pcm, size_t sample_count) {
-        if (!audio_ports_ || pcm == nullptr || sample_count == 0) return;
+        if (voice_wiring_.audio_ports() == nullptr || pcm == nullptr || sample_count == 0) return;
         voice::AudioFrame frame;
         frame.format = {.codec = voice::AudioCodec::kPcmS16Le,
                         .sample_rate_hz = 16000,
@@ -275,7 +268,7 @@ class Runtime final {
         frame.sequence = 0;
         frame.payload.resize(sample_count * sizeof(int16_t));
         std::memcpy(frame.payload.data(), pcm, sample_count * sizeof(int16_t));
-        const Status push_status = audio_ports_->output().Push(frame);
+        const Status push_status = voice_wiring_.audio_ports()->output().Push(frame);
         ESP_LOGI(kTag, "PROMPT_PUSH result=%d bytes=%u", push_status.ok() ? 1 : 0,
                  static_cast<unsigned>(frame.payload.size()));
     }
@@ -304,8 +297,8 @@ class Runtime final {
             // 停止，必须重启检测器，否则后续永远叫不醒。
             ESP_LOGW(kTag, "WAKE_REJECTED state=%d err=%s", static_cast<int>(interaction_.state()),
                      wake_status.message.c_str());
-            if (wake_gate_) {
-                (void)wake_gate_->StartStandby();
+            if (auto* wake_gate = voice_wiring_.wake_gate()) {
+                (void)wake_gate->StartStandby();
             }
         }
     }
@@ -399,14 +392,15 @@ class Runtime final {
     }
 
     void RestoreStandby() {
-        if (!wake_gate_) return;
-        const Status stop_status = wake_gate_->StopCapture();
+        auto* wake_gate = voice_wiring_.wake_gate();
+        if (wake_gate == nullptr) return;
+        const Status stop_status = wake_gate->StopCapture();
         if (!stop_status.ok()) {
             ESP_LOGW(kTag, "本地待机恢复停止上行失败: %s", stop_status.message.c_str());
             (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
             return;
         }
-        const Status standby_status = wake_gate_->StartStandby();
+        const Status standby_status = wake_gate->StartStandby();
         if (!standby_status.ok()) {
             ESP_LOGW(kTag, "本地待机恢复失败: %s", standby_status.message.c_str());
             (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
@@ -418,8 +412,8 @@ class Runtime final {
                           .detail = {}});
         // 会话结束反馈：先等播放排空（避免 TTS 还在播就显示“牛牛走了！”），
         // 仅非首次待机显示反馈，短暂停留后回到空闲。
-        if (audio_ports_) {
-            for (int i = 0; i < 30 && !audio_ports_->output().IsIdle(); ++i) {
+        if (auto* audio_ports = voice_wiring_.audio_ports()) {
+            for (int i = 0; i < 30 && !audio_ports->output().IsIdle(); ++i) {
                 vTaskDelay(pdMS_TO_TICKS(50));
             }
         }
@@ -443,7 +437,7 @@ class Runtime final {
         // 仅全部满足才显示 Standby 时间快照；不满足则为假待机，保留告警文案并记录。
         const bool controller_ok = interaction_.state() == voice::VoiceInteractionState::kStandby;
         const bool session_ok = session_ && session_->state() == voice::VoiceSessionState::kReady;
-        const bool gate_ok = wake_gate_ && wake_gate_->standby();
+        const bool gate_ok = wake_gate && wake_gate->standby();
         const bool atomic_ok = controller_ok && session_ok && gate_ok;
         ESP_LOGI(kTag, "WAKE_REARM controller=%d session=%d gate=%d atomic=%d", controller_ok ? 1 : 0,
                  session_ok ? 1 : 0, gate_ok ? 1 : 0, atomic_ok ? 1 : 0);
@@ -481,8 +475,8 @@ class Runtime final {
             if (request.kind == BoardRequestKind::kStartCapture) {
                 // 开麦前等待播放排空（I2S 实际播完，而非队列空），避免把残留
                 // TTS 重新采进 follow-up（NoAudioCodec 无 AEC）。
-                if (audio_ports_) {
-                    for (int i = 0; i < 30 && !audio_ports_->output().IsIdle(); ++i) {
+                if (auto* audio_ports = voice_wiring_.audio_ports()) {
+                    for (int i = 0; i < 30 && !audio_ports->output().IsIdle(); ++i) {
                         vTaskDelay(pdMS_TO_TICKS(50));
                     }
                 }
@@ -583,7 +577,7 @@ class Runtime final {
         const int64_t now = esp_timer_get_time();
         const uint64_t latency_ms =
             started_at > 0 && now >= started_at ? static_cast<uint64_t>((now - started_at) / 1000) : 0;
-        const auto stats = audio_ports_ ? audio_ports_->stats() : audio_esp::AudioPortStats{};
+        const auto stats = voice_wiring_.audio_stats();
         ESP_LOGI(kTag,
                  "VOICE_EVENT session=%s generation=%llu event=%s detail_present=%d latency_from_capture_ms=%llu "
                  "audio_captured=%u audio_dropped=%u audio_played=%u audio_rejected=%u min_heap=%u",
@@ -708,9 +702,7 @@ class Runtime final {
     linx::LinxConnectionConfig linx_config_;
     std::unique_ptr<linx_esp::EspWebSocketTransport> linx_transport_ =
         std::make_unique<linx_esp::EspWebSocketTransport>(linx_secrets_);
-    std::unique_ptr<audio_esp::Esp32s3PcmAudioPorts> audio_ports_;
-    std::unique_ptr<audio_esp::EspMultiNetWakeDetector> wake_detector_;
-    std::unique_ptr<voice::WakeGateAudioInput> wake_gate_;
+    VoiceLifePcbVoiceWiring voice_wiring_;
     QueueHandle_t wake_queue_ = nullptr;
     TaskHandle_t wake_task_ = nullptr;
     std::unique_ptr<VoiceLifePcbBoardInput> board_input_;
@@ -733,7 +725,10 @@ class Runtime final {
 #endif
     voice::VoiceInteractionController interaction_;
     std::unique_ptr<voice::SpeechProviderAdapter> provider_;
-    std::unique_ptr<voice::VoiceSession> session_;
+#ifndef ESP_PLATFORM
+    std::unique_ptr<voice::VoiceSession> host_session_;
+#endif
+    voice::VoiceSession* session_ = nullptr;
 
    public:
     Status RequestInterrupt() {
