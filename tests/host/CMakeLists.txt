@@ -118,13 +118,14 @@ add_voicelife_library(board_esp voicelife_board_esp
     "${ROOT_DIR}/components/voicelife_board_esp/src/esp32s3_board_probe.cc")
 target_link_libraries(board_esp PUBLIC contracts)
 add_voicelife_library(display_esp voicelife_display_esp
-    "${ROOT_DIR}/components/voicelife_display_esp/src/sparkbot_presentation_adapter.cc"
     "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_presentation_adapter.cc")
 target_link_libraries(display_esp PUBLIC contracts voice)
 add_voicelife_library(display_sparkbot voicelife_display_sparkbot
     "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_lvgl_display.cc"
     "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_lvgl_renderer.cc"
-    "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_emoji_assets.cc")
+    "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_emoji_assets.cc"
+    "${ROOT_DIR}/components/voicelife_display_sparkbot/src/display_snapshot_queue.cc"
+    "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_presentation_adapter.cc")
 target_link_libraries(display_sparkbot PUBLIC contracts voice)
 
 enable_testing()
@@ -262,13 +263,17 @@ add_voicelife_test(sparkbot_profile_contract_test "unit;board;esp;contract"
     sparkbot_profile_contract_test.cc)
 target_link_libraries(sparkbot_profile_contract_test PRIVATE board_esp)
 
-add_voicelife_test(sparkbot_presentation_adapter_test "unit;display;esp;board;contract"
+add_voicelife_test(sparkbot_presentation_adapter_test "unit;display;sparkbot;board;contract"
     sparkbot_presentation_adapter_test.cc)
-target_link_libraries(sparkbot_presentation_adapter_test PRIVATE display_esp)
+target_link_libraries(sparkbot_presentation_adapter_test PRIVATE display_sparkbot)
+
+add_voicelife_test(display_snapshot_queue_test "unit;display;sparkbot;queue;contract"
+    display_snapshot_queue_test.cc)
+target_link_libraries(display_snapshot_queue_test PRIVATE display_sparkbot)
 
 add_voicelife_test(sparkbot_asset_manifest_test "unit;display;assets;contract"
     sparkbot_asset_manifest_test.cc)
-target_link_libraries(sparkbot_asset_manifest_test PRIVATE display_esp yyjson)
+target_link_libraries(sparkbot_asset_manifest_test PRIVATE display_esp display_sparkbot yyjson)
 target_compile_definitions(sparkbot_asset_manifest_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
 
 add_voicelife_test(platform_assembly_test "unit;platform;assembly;contract"

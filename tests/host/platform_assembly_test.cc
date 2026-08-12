@@ -27,19 +27,22 @@ int main() {
     Check(pcb_submit.code == voicelife::ErrorCode::kUnavailable,
           "SSD1306 点阵屏的资源命令必须返回 kUnavailable（能力不支持）");
 
-    // SparkBot：同一接口暴露骨架 Adapter，诚实声明不可用。
+    // SparkBot：完整显示链路（队列 -> 显示任务 -> Renderer），available=true。
     SparkBotAssembly sparkbot_assembly;
     PlatformAssembly& sparkbot_as_interface = sparkbot_assembly;
     const auto& sparkbot_caps = sparkbot_as_interface.presentation().capabilities();
-    Check(!sparkbot_caps.available && !sparkbot_caps.text && !sparkbot_caps.animation,
-          "SparkBot Assembly 骨架必须诚实声明不可用且无可用能力");
+    Check(sparkbot_caps.available && sparkbot_caps.text && sparkbot_caps.animation,
+          "SparkBot Assembly 显示链路闭合后必须声明可用能力（实板未验证另行标注）");
 
-    const auto sparkbot_render = sparkbot_as_interface.presentation().Render(voicelife::voice::DisplaySnapshot{});
-    Check(sparkbot_render.code == voicelife::ErrorCode::kUnavailable, "SparkBot 骨架 Render 必须返回 kUnavailable");
+    // Render 提交快照到有界队列：立即返回 Ok（异步渲染由显示任务执行）。
+    voicelife::voice::DisplaySnapshot snapshot;
+    snapshot.revision = 1;
+    snapshot.status_text = "测试";
+    Check(sparkbot_as_interface.presentation().Render(snapshot).ok(), "SparkBot Render 必须接受快照并入队");
 
     // Start() 生命周期：VoiceLife PCB 默认空实现成功；SparkBot 的
-    // ST7789/LVGL 初始化已移植，但 host 构建不触碰硬件，必须返回
-    // kUnavailable 而非伪装成功（真实初始化由 ESP 构建 + 实板验证）。
+    // ST7789/LVGL 初始化与显示任务仅 ESP 构建启用，host 下返回
+    // kUnavailable（不触碰硬件，不伪装成功）。
     Check(pcb_as_interface.Start().ok(), "VoiceLife PCB Assembly Start 必须成功（默认空实现）");
     const auto sparkbot_start = sparkbot_as_interface.Start();
     Check(sparkbot_start.code == voicelife::ErrorCode::kUnavailable,

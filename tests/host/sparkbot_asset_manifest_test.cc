@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "support/test_support.h"
-#include "voicelife/display_esp/sparkbot_presentation_adapter.h"
+#include "voicelife/display_sparkbot/sparkbot_emoji_assets.h"
 #include "yyjson.h"
 
 using voicelife::test::Check;
@@ -295,7 +295,7 @@ int main() {
         std::set<std::string> expected_ids(kExpectedIds, kExpectedIds + 10);
         Check(expected_ids == asset_ids, "manifest asset_id 集合必须与受控 allowlist 一致");
         for (const std::string& id : asset_ids) {
-            Check(voicelife::display_esp::ParseSparkBotAssetId(id).ok(), "每个清单 asset_id 必须能被受控解析器接受");
+            Check(voicelife::display_sparkbot::IsControlledAssetId(id), "每个清单 asset_id 必须能被受控解析器接受");
         }
     }
 

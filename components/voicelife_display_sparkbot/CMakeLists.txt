@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS "src/sparkbot_lvgl_display.cc" "src/sparkbot_lvgl_renderer.cc" "src/sparkbot_emoji_assets.cc"
-         "src/display_snapshot_queue.cc"
+         "src/display_snapshot_queue.cc" "src/sparkbot_presentation_adapter.cc"
          "src/gif/gifdec.c" "src/gif/lvgl_gif.cc"
     INCLUDE_DIRS "include" "src"
     REQUIRES voicelife_contracts voicelife_voice

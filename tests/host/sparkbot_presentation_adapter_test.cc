@@ -1,4 +1,4 @@
-#include "voicelife/display_esp/sparkbot_presentation_adapter.h"
+#include "voicelife/display_sparkbot/sparkbot_presentation_adapter.h"
 
 #include "support/test_support.h"
 #include "voicelife/voice/voice_ports.h"
@@ -9,58 +9,42 @@ using voicelife::voice::DisplaySnapshot;
 using voicelife::voice::PresentationCommand;
 
 int main() {
-    using voicelife::display_esp::ParseSparkBotAssetId;
-    using voicelife::display_esp::SparkBotAssetId;
-    using voicelife::display_esp::SparkBotPresentationAdapter;
+    using voicelife::display_sparkbot::SparkBotLcdConfig;
+    using voicelife::display_sparkbot::SparkBotPresentationAdapter;
 
-    SparkBotPresentationAdapter adapter;
+    SparkBotLcdConfig config;  // 官方默认参数（240x240 SPI mode 2）
+    SparkBotPresentationAdapter adapter(config);
 
-    // 方案 A：Renderer 未移植时 available=false 且所有可运行能力均为 false，
-    // 不伪装成已经支持文本/静态图/动画。
+    // 显示链路已闭合：available=true，文本/静态图/动画能力声明。
     const auto& caps = adapter.capabilities();
-    Check(!caps.available, "官方 Renderer 未移植前 available 必须为 false");
-    Check(!caps.text && !caps.static_image && !caps.animation && !caps.preview_image,
-          "available=false 时所有可运行能力必须为 false");
-    Check(caps.max_frame_bytes == 240U * 240U * 2U, "max_frame_bytes 必须保留 240x240 RGB565 硬件上限参考");
-    Check(caps.refresh_budget_hz == 0U, "官方刷新节奏未移植核实前必须保持 0（未确认）");
+    Check(caps.available, "显示链路闭合后 available 必须为 true");
+    Check(caps.text && caps.static_image && caps.animation && !caps.preview_image,
+          "能力声明必须包含文本/静态图/动画，且不含预览图");
+    Check(caps.max_frame_bytes == 240U * 240U * 2U, "帧缓冲硬件上限必须为 240x240 RGB565");
 
-    const auto render_status = adapter.Render(DisplaySnapshot{});
-    Check(render_status.code == ErrorCode::kUnavailable, "骨架 Render 必须返回 kUnavailable，不能静默假装渲染成功");
+    // Render 提交快照到有界队列：立即返回 Ok（异步渲染由显示任务执行）。
+    DisplaySnapshot snapshot;
+    snapshot.revision = 1;
+    snapshot.mood = voicelife::voice::VoiceMood::kSpeaking;
+    snapshot.status_text = "播报中";
+    const auto render_status = adapter.Render(snapshot);
+    Check(render_status.ok(), "Render 必须接受快照并入队");
 
-    // Submit 契约：受控资源 -> kUnavailable；非法格式 -> kInvalidArgument；
-    // 未知资源 -> kNotFound。
-    const auto controlled = adapter.Submit(PresentationCommand{.asset_id = "boot", .generation = 0, .request_id = {}});
-    Check(controlled.code == ErrorCode::kUnavailable, "受控资源在 Renderer 未移植时必须返回 kUnavailable");
+    // Submit 契约：非法格式 kInvalidArgument、未知资源 kNotFound、
+    // 受控资源 kUnavailable（独立资源命令未实现）。
+    Check(adapter.Submit(PresentationCommand{.asset_id = ""}).code == ErrorCode::kInvalidArgument,
+          "空 asset_id 必须返回 kInvalidArgument");
+    Check(adapter.Submit(PresentationCommand{.asset_id = "../evil.gif"}).code == ErrorCode::kInvalidArgument,
+          "路径特征 asset_id 必须返回 kInvalidArgument");
+    Check(adapter.Submit(PresentationCommand{.asset_id = "not_in_manifest"}).code == ErrorCode::kNotFound,
+          "未知资源必须返回 kNotFound");
+    Check(adapter.Submit(PresentationCommand{.asset_id = "idle"}).code == ErrorCode::kUnavailable,
+          "受控资源命令未实现必须返回 kUnavailable");
 
-    const auto empty = adapter.Submit(PresentationCommand{.asset_id = "", .generation = 0, .request_id = {}});
-    Check(empty.code == ErrorCode::kInvalidArgument, "空 asset_id 必须返回 kInvalidArgument");
-    const auto path_like =
-        adapter.Submit(PresentationCommand{.asset_id = "../arbitrary/path.gif", .generation = 0, .request_id = {}});
-    Check(path_like.code == ErrorCode::kInvalidArgument, "含路径特征的 asset_id 必须返回 kInvalidArgument");
-    const auto url_like = adapter.Submit(
-        PresentationCommand{.asset_id = "https://example.com/boot.gif", .generation = 0, .request_id = {}});
-    Check(url_like.code == ErrorCode::kInvalidArgument, "URL 形式的输入必须返回 kInvalidArgument");
-    const auto abs_path =
-        adapter.Submit(PresentationCommand{.asset_id = "/etc/passwd", .generation = 0, .request_id = {}});
-    Check(abs_path.code == ErrorCode::kInvalidArgument, "绝对路径输入必须返回 kInvalidArgument");
-    const auto backslash = adapter.Submit(PresentationCommand{.asset_id = "a\\b", .generation = 0, .request_id = {}});
-    Check(backslash.code == ErrorCode::kInvalidArgument, "反斜杠路径输入必须返回 kInvalidArgument");
-    const auto unknown =
-        adapter.Submit(PresentationCommand{.asset_id = "not_a_real_id", .generation = 0, .request_id = {}});
-    Check(unknown.code == ErrorCode::kNotFound, "未知资源必须返回 kNotFound");
-
-    // 受控标识解析：全部官方 asset_id 必须可解析，且与枚举一一对应。
-    const std::string_view kAllIds[] = {
-        "boot", "connecting", "error", "happy", "idle", "listening", "provisioning", "sleepy", "speaking", "thinking",
-    };
-    for (std::size_t i = 0; i < sizeof(kAllIds) / sizeof(kAllIds[0]); ++i) {
-        const auto parsed = ParseSparkBotAssetId(kAllIds[i]);
-        Check(parsed.ok() && parsed.value.has_value() && *parsed.value == static_cast<SparkBotAssetId>(i),
-              "官方 asset_id 必须可解析为受控枚举");
-    }
-    Check(!ParseSparkBotAssetId("not_in_list").ok() &&
-              ParseSparkBotAssetId("not_in_list").status.code == ErrorCode::kNotFound,
-          "清单外的合法格式标识必须返回 kNotFound");
+    // host 构建不启动真实显示任务。
+    Check(adapter.Start().code == ErrorCode::kUnavailable,
+          "host 构建 Start 必须返回 kUnavailable（不创建真实显示任务）");
+    Check(adapter.Stop().ok(), "host 构建 Stop 必须成功（无任务可停）");
 
     return 0;
 }

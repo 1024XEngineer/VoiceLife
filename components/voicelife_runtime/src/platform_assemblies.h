@@ -1,8 +1,7 @@
 #pragma once
 
-#include "voicelife/display_esp/sparkbot_presentation_adapter.h"
 #include "voicelife/display_esp/ssd1306_presentation_adapter.h"
-#include "voicelife/display_sparkbot/sparkbot_lvgl_display.h"
+#include "voicelife/display_sparkbot/sparkbot_presentation_adapter.h"
 #include "voicelife/runtime/platform_assembly.h"
 
 namespace voicelife::runtime {
@@ -26,15 +25,15 @@ class VoiceLifePcbAssembly : public PlatformAssembly {
 };
 
 /**
- * @brief ESP-SparkBot 平台装配：SparkBotPresentationAdapter + LVGL 显示。
+ * @brief ESP-SparkBot 平台装配：完整 SparkBotPresentationAdapter。
  *
- * 官方 Renderer 未移植前，presentation() 返回的端口 available=false，
- * Render/Submit 明确返回 kUnavailable，不伪装已支持；Start() 驱动
- * ST7789/LVGL 初始化（官方移植），host 构建返回 kUnavailable。
+ * 调用链：presentation() -> 有界队列 -> 专属显示任务 -> 官方 Renderer；
+ * Start() 初始化 ST7789/LVGL 并启动显示任务。实板显示未验证，available
+ * 为 true 仅表示显示链路（代码级）闭合。
  */
 class SparkBotAssembly : public PlatformAssembly {
    public:
-    /** @brief 构造函数：按官方板级 Profile 准备 LVGL 显示配置。 */
+    /** @brief 构造函数：按官方板级 Profile 准备显示配置。 */
     SparkBotAssembly();
 
     /** @brief 虚析构函数。 */
@@ -43,12 +42,11 @@ class SparkBotAssembly : public PlatformAssembly {
     /** @brief 返回 SparkBot 彩屏显示端口。 @return SparkBotPresentationAdapter。 */
     voicelife::voice::PresentationPort& presentation() override;
 
-    /** @brief 初始化 ST7789/LVGL（官方移植）。 @return 初始化结果。 */
+    /** @brief 初始化 ST7789/LVGL 并启动专属显示任务。 @return 启动结果。 */
     voicelife::Status Start() override;
 
    private:
-    voicelife::display_esp::SparkBotPresentationAdapter sparkbot_adapter_;
-    voicelife::display_sparkbot::SparkBotLvglDisplay lvgl_display_;
+    voicelife::display_sparkbot::SparkBotPresentationAdapter adapter_;
 };
 
 }  // namespace voicelife::runtime

@@ -33,10 +33,10 @@ voicelife::display_sparkbot::SparkBotLcdConfig MakeSparkBotLcdConfig() {
 
 voicelife::voice::PresentationPort& VoiceLifePcbAssembly::presentation() { return ssd1306_adapter_; }
 
-SparkBotAssembly::SparkBotAssembly() : lvgl_display_(MakeSparkBotLcdConfig()) {}
+SparkBotAssembly::SparkBotAssembly() : adapter_(MakeSparkBotLcdConfig()) {}
 
-voicelife::voice::PresentationPort& SparkBotAssembly::presentation() { return sparkbot_adapter_; }
+voicelife::voice::PresentationPort& SparkBotAssembly::presentation() { return adapter_; }
 
-voicelife::Status SparkBotAssembly::Start() { return lvgl_display_.Initialize(); }
+voicelife::Status SparkBotAssembly::Start() { return adapter_.Start(); }
 
 }  // namespace voicelife::runtime
