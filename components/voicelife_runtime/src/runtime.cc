@@ -28,7 +28,6 @@
 #include "voicelife/audio_esp/esp32s3_audio_probe.h"
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #include "voicelife/audio_esp/esp_multinet_wake_detector.h"
-#include "voicelife/display_esp/ssd1306_status_display.h"
 #include "voicelife/linx/linx_speech_provider.h"
 #include "voicelife/linx/linx_types.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
@@ -251,7 +250,8 @@ class Runtime final {
                           []() { return std::make_unique<ScaffoldSpeechProvider>(); });
     }
 
-    Status Start() {
+    Status Start(PlatformAssembly& assembly) {
+        assembly_ = &assembly;
         auto& registry = voice::SpeechProviderRegistry::Instance();
         if (!init_status_.ok()) return init_status_;
 #ifdef ESP_PLATFORM
@@ -286,22 +286,22 @@ class Runtime final {
                 (void)gpio_set_level(GPIO_NUM_48, 0);
             }
         }
-        if (const Status display_status = display_esp::InitializeStatusDisplay(); !display_status.ok()) {
-            ESP_LOGW(kTag, "OLED 状态屏初始化失败: %s", display_status.message.c_str());
+        if (const Status display_status = assembly_->Start(); !display_status.ok()) {
+            ESP_LOGW(kTag, "显示启动失败: %s", display_status.message.c_str());
         }
-        (void)display_esp::SetEmotion("thinking", "联网", {});
+        ShowDisplay(voice::VoiceMood::kThinking, "联网", "");
         if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=secret_store code=%d", static_cast<int>(secret_store.code));
-            (void)display_esp::SetEmotion("sad", "错误", {});
+            ShowDisplay(voice::VoiceMood::kSad, "错误", "");
             return secret_store;
         }
         auto connection = BootstrapLinxOtaConfig();
         if (!connection.ok() || !connection.value.has_value()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=linx_bootstrap code=%d", static_cast<int>(connection.status.code));
-            (void)display_esp::SetEmotion("sad", "错误", {});
+            ShowDisplay(voice::VoiceMood::kSad, "错误", "");
             return connection.status;
         }
-        (void)display_esp::SetEmotion("neutral", "连接", {});
+        ShowDisplay(voice::VoiceMood::kNeutral, "连接", "");
         linx_config_ = std::move(*connection.value);
         auto result = registry.Create("xrobot-websocket", {});
 #else
@@ -340,7 +340,7 @@ class Runtime final {
         const Status session_status = session_->Start(config);
         if (!session_status.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=session_start code=%d", static_cast<int>(session_status.code));
-            (void)display_esp::SetEmotion("sad", "错误", {});
+            ShowDisplay(voice::VoiceMood::kSad, "错误", "");
             return session_status;
         }
 
@@ -504,7 +504,7 @@ class Runtime final {
         // 连续调音量只重置同一个计时器。
         char text[16] = {};
         std::snprintf(text, sizeof(text), "VOL:%d", volume_);
-        (void)display_esp::SetEmotion("neutral", "音量", text);
+        ShowOverlay(voice::VoiceMood::kNeutral, "音量", text);
         volume_overlay_until_us_ = esp_timer_get_time() + kVolumeOverlayUs;
         if (volume_overlay_timer_ == nullptr) {
             esp_timer_create_args_t args = {};
@@ -585,53 +585,11 @@ class Runtime final {
         (void)xQueueSend(wake_queue_, &recovery, 0);
     }
 
-    // UTF-8 码点计数（滚动窗口按字符而非字节）。
-    static size_t CountCodepoints(std::string_view text) {
-        size_t count = 0;
-        for (size_t i = 0; i < text.size();) {
-            const uint8_t b = static_cast<uint8_t>(text[i]);
-            size_t width = 1;
-            if ((b & 0x80) == 0) {
-                width = 1;
-            } else if ((b & 0xe0) == 0xc0) {
-                width = 2;
-            } else if ((b & 0xf0) == 0xe0) {
-                width = 3;
-            } else if ((b & 0xf8) == 0xf0) {
-                width = 4;
-            }
-            i += width;
-            ++count;
-        }
-        return count;
-    }
-
-    // 下行长文本滚动：每 400ms 推进一个字符（按码点），滚动到末尾停止并停用定时器。
+    // 下行长文本滚动由显示 Adapter 负责（Ssd1306PresentationAdapter）。
     // 音量 overlay 到期：递增 revision 触发 CommitSnapshot 恢复最新快照。
     static void VolumeOverlayEntry(void* context) {
         auto* self = static_cast<Runtime*>(context);
         self->volume_overlay_until_us_ = 0;
-        ++self->snapshot_.revision;
-        self->CommitSnapshot();
-    }
-
-    static void ScrollEntry(void* context) {
-        auto* self = static_cast<Runtime*>(context);
-        const size_t codepoints = CountCodepoints(self->scroll_content_);
-        if (codepoints <= 6) {
-            if (self->scroll_timer_ != nullptr) {
-                (void)esp_timer_stop(self->scroll_timer_);
-            }
-            return;
-        }
-        ++self->scroll_offset_;
-        // 末尾留 6 字符可见窗口后停止滚动（按码点，不用 UTF-8 字节数）。
-        if (self->scroll_offset_ + 6 >= codepoints) {
-            self->scroll_offset_ = codepoints - 6;
-            if (self->scroll_timer_ != nullptr) {
-                (void)esp_timer_stop(self->scroll_timer_);
-            }
-        }
         ++self->snapshot_.revision;
         self->CommitSnapshot();
     }
@@ -735,7 +693,7 @@ class Runtime final {
         if (first_standby_) {
             first_standby_ = false;
         } else {
-            (void)display_esp::SetEmotion("happy", "牛牛走了！", {});
+            ShowOverlay(voice::VoiceMood::kHappy, "牛牛走了！", "");
             PlayFarewell();
             vTaskDelay(pdMS_TO_TICKS(kWakeFeedbackMs));
         }
@@ -910,32 +868,32 @@ class Runtime final {
             return;
         }
         last_rendered_revision_ = snapshot_.revision;
-        // 渲染器：牛头表情 + 上行状态栏 + 下行内容栏（角色文本）。
-        std::string mood_key;
-        switch (snapshot_.mood) {
-            case voice::VoiceMood::kHappy:
-                mood_key = "happy";
-                break;
-            case voice::VoiceMood::kSad:
-                mood_key = "sad";
-                break;
-            case voice::VoiceMood::kThinking:
-                mood_key = "thinking";
-                break;
-            case voice::VoiceMood::kSurprised:
-                mood_key = "surprised";
-                break;
-            case voice::VoiceMood::kSpeaking:
-                mood_key = "speaking";
-                break;
-            case voice::VoiceMood::kAngry:
-                mood_key = "angry";
-                break;
-            default:
-                mood_key = "neutral";
-                break;
+        // 显示语义通过 PresentationPort 提交；渲染由板级 Adapter 完成。
+        if (assembly_ != nullptr) {
+            (void)assembly_->presentation().Render(snapshot_);
         }
-        (void)display_esp::SetEmotion(mood_key, snapshot_.status_text, snapshot_.content_text, scroll_offset_);
+    }
+
+    // 显示语义提交：更新业务快照并提交（启动状态/阶段变化）。
+    void ShowDisplay(voice::VoiceMood mood, std::string_view status, std::string_view content) {
+        snapshot_.mood = mood;
+        if (!status.empty()) snapshot_.status_text = std::string(status);
+        if (!content.empty()) snapshot_.content_text = std::string(content);
+        ++snapshot_.revision;
+        CommitSnapshot();
+    }
+
+    // 临时 overlay 快照：不改业务快照，过期后由业务快照覆盖（音量/告别提示）。
+    void ShowOverlay(voice::VoiceMood mood, std::string_view status, std::string_view content) {
+        if (assembly_ == nullptr) {
+            return;
+        }
+        DisplaySnapshot overlay = snapshot_;
+        overlay.mood = mood;
+        overlay.status_text = std::string(status);
+        overlay.content_text = std::string(content);
+        ++overlay.revision;
+        (void)assembly_->presentation().Render(overlay);
     }
 
     Status HandleInteractionEvent(voice::VoiceInteractionEvent event, std::string_view wake_word = {}) {
@@ -1094,30 +1052,12 @@ class Runtime final {
                 snapshot_.role = voice::VoiceContentRole::kAssistant;
                 snapshot_.status_text = "说话中";
                 snapshot_.mood = voice::VoiceMood::kSpeaking;
-                // 新内容：重置滚动窗口；超宽（>6 字符约 108px）启动滚动定时器。
-                scroll_content_ = evidence.detail;
-                scroll_offset_ = 0;
-                if (scroll_timer_ == nullptr) {
-                    esp_timer_create_args_t args = {};
-                    args.callback = &ScrollEntry;
-                    args.arg = this;
-                    args.name = "voicelife_scroll";
-                    (void)esp_timer_create(&args, &scroll_timer_);
-                }
-                if (scroll_timer_ != nullptr) {
-                    (void)esp_timer_stop(scroll_timer_);
-                    if (CountCodepoints(scroll_content_) > 6) {
-                        (void)esp_timer_start_periodic(scroll_timer_, 400 * 1000ULL);
-                    }
-                }
+                // 长文本滚动由显示 Adapter（Ssd1306PresentationAdapter）负责。
                 ++snapshot_.revision;
                 CommitSnapshot();
             }
         } else if (evidence.event == "tts_stopped" || evidence.event == "tts_aborted") {
             CancelListenTimer();
-            if (scroll_timer_ != nullptr) {
-                (void)esp_timer_stop(scroll_timer_);
-            }
             if (terminal_turn_) {
                 // 终止回合（再见/拜拜）：告别播报完成走状态机 kFarewellCompleted
                 // （kSpeaking→kStandby）恢复待机，不直接 QueueStandbyRecovery。
@@ -1187,10 +1127,7 @@ class Runtime final {
     std::atomic<int64_t> capture_started_us_{0};
     bool first_standby_ = true;
     std::string stt_display_text_;
-    // 下行内容滚动窗口起始字符（0=从头）；新内容重置，超宽时定时推进。
-    size_t scroll_offset_ = 0;
-    std::string scroll_content_;
-    esp_timer_handle_t scroll_timer_ = nullptr;
+    // 下行内容滚动窗口起始字符（0=从头）；滚动迁移至 Ssd1306PresentationAdapter。
     // 本轮是否为终止回合（用户说“再见/拜拜”等）：播报结束后不进入 follow-up。
     bool terminal_turn_ = false;
     // 最近唤醒词与其发生时刻（抑制唤醒词被服务端回传为 STT）。
@@ -1204,6 +1141,8 @@ class Runtime final {
     // 显示模型快照：会话阶段 → 可见状态的推导结果；revision 驱动增量重绘。
     voice::DisplaySnapshot snapshot_;
     uint64_t last_rendered_revision_ = 0;
+    // 构建期选定的平台装配（显示语义提交目标）。
+    PlatformAssembly* assembly_ = nullptr;
     esp_timer_handle_t listen_timer_ = nullptr;
 #else
     ScaffoldAudioInput audio_input_;
@@ -1231,7 +1170,7 @@ Runtime& Instance() {
     return runtime;
 }
 
-Status Start() { return Instance().Start(); }
+Status Start(PlatformAssembly& assembly) { return Instance().Start(assembly); }
 
 Status RequestInterrupt() { return Instance().RequestInterrupt(); }
 

@@ -278,9 +278,9 @@ target_compile_definitions(sparkbot_asset_manifest_test PRIVATE VOICELIFE_SOURCE
 
 add_voicelife_test(platform_assembly_test "unit;platform;assembly;contract"
     platform_assembly_test.cc
-    "${ROOT_DIR}/components/voicelife_runtime/src/platform_assemblies.cc")
+    "${ROOT_DIR}/main/platform_assemblies.cc")
 target_include_directories(platform_assembly_test PRIVATE
-    "${ROOT_DIR}/components/voicelife_runtime/src"
+    "${ROOT_DIR}/main"
     "${ROOT_DIR}/components/voicelife_runtime/include")
 target_link_libraries(platform_assembly_test PRIVATE display_esp display_sparkbot voice board_esp)
 

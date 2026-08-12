@@ -1,5 +1,20 @@
 menu "VoiceLife"
 
+choice VOICELIFE_BOARD
+    prompt "Board assembly"
+    default VOICELIFE_BOARD_VOICELIFE_PCB
+    help
+        构建期选定板级装配：Runtime 只依赖 PlatformAssembly 接口，
+        不判断板型、不直接调用具体显示实现。
+
+config VOICELIFE_BOARD_VOICELIFE_PCB
+    bool "VoiceLife PCB（SSD1306 点阵屏）"
+
+config VOICELIFE_BOARD_ESP_SPARKBOT
+    bool "ESP-SparkBot（ST7789/LVGL 彩屏）"
+
+endchoice
+
 config VOICELIFE_AUDIO_PROBE
     bool "Enable ESP32-S3 audio wiring probe"
     default n

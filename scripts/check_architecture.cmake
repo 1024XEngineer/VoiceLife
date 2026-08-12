@@ -109,6 +109,6 @@ assert_dependencies(voicelife_audio_esp PRIVATE esp_driver_i2c esp_driver_i2s es
 assert_dependencies(voicelife_board_esp PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_board_esp PRIVATE esp_hw_support esp_partition esp_psram esp_system spi_flash)
 assert_dependencies(voicelife_runtime PUBLIC voicelife_contracts voicelife_voice)
-assert_dependencies(voicelife_runtime PRIVATE esp-tls esp_app_format esp_driver_gpio led_strip esp_event esp_http_client esp_netif esp_partition esp_psram esp_timer esp_wifi nvs_flash nvs_sec_provider spi_flash voicelife_linx voicelife_linx_esp voicelife_mcp voicelife_audio_esp voicelife_board_esp voicelife_display_esp voicelife_display_sparkbot voicelife_schedule)
+assert_dependencies(voicelife_runtime PRIVATE esp-tls esp_app_format esp_driver_gpio led_strip esp_event esp_http_client esp_netif esp_partition esp_psram esp_timer esp_wifi nvs_flash nvs_sec_provider spi_flash voicelife_linx voicelife_linx_esp voicelife_mcp voicelife_audio_esp voicelife_schedule)
 
 message(STATUS "PASS component names, include paths, and dependency graph")
