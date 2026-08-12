@@ -11,6 +11,7 @@
 
 #ifdef ESP_PLATFORM
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <deque>
@@ -636,8 +637,7 @@ class Runtime final {
     static void VolumeOverlayEntry(void* context) {
         auto* self = static_cast<Runtime*>(context);
         self->volume_overlay_until_us_ = 0;
-        ++self->snapshot_.revision;
-        self->CommitSnapshot();
+        self->overlay_expired_.store(true);  // 只置标志；恢复由事件循环唯一执行。
     }
 
     // 聆听/最终 STT 超时：
@@ -757,25 +757,11 @@ class Runtime final {
         const bool atomic_ok = controller_ok && session_ok && gate_ok;
         ESP_LOGI(kTag, "WAKE_REARM controller=%d session=%d gate=%d atomic=%d", controller_ok ? 1 : 0,
                  session_ok ? 1 : 0, gate_ok ? 1 : 0, atomic_ok ? 1 : 0);
-        if (atomic_ok) {
-            snapshot_.phase = voice::VoiceInteractionState::kStandby;
-            snapshot_.mood = voice::VoiceMood::kNeutral;
-            const time_t now = time(nullptr);
-            if (now > 1600000000) {
-                std::tm local{};
-                localtime_r(&now, &local);
-                char clock_text[8] = {};
-                std::snprintf(clock_text, sizeof(clock_text), "%02d:%02d", local.tm_hour, local.tm_min);
-                snapshot_.status_text = clock_text;
-            } else {
-                snapshot_.status_text = PhaseStatusText(voice::VoiceInteractionState::kStandby);
-            }
-            snapshot_.content_text.clear();
-            snapshot_.role = voice::VoiceContentRole::kNone;
-            ++snapshot_.revision;
-            CommitSnapshot();
+        // 事件化：Standby 时间快照由事件循环在 kStandbyReady 处理时统一提交，
+        // 本函数（按键任务线程）不再直接改快照或渲染。
+        if (!atomic_ok) {
+            ESP_LOGI(kTag, "WAKE_STANDBY_READY=0");
         }
-        ESP_LOGI(kTag, "WAKE_STANDBY_READY=%d", atomic_ok ? 1 : 0);
     }
 
     static void WakeTaskEntry(void* context) { static_cast<Runtime*>(context)->WakeTask(); }
@@ -1095,14 +1081,9 @@ class Runtime final {
             }
             CancelListenTimer();
             if (!evidence.detail.empty()) {
+                // 事件化：文本经事件循环应用（唯一写者），门控仍在事件循环校验。
                 stt_display_text_ = evidence.detail;
-                snapshot_.content_text = evidence.detail;
-                snapshot_.role = voice::VoiceContentRole::kAssistant;
-                snapshot_.status_text = "说话中";
-                snapshot_.mood = voice::VoiceMood::kSpeaking;
-                // 长文本滚动由显示 Adapter（Ssd1306PresentationAdapter）负责。
-                ++snapshot_.revision;
-                CommitSnapshot();
+                EnqueueDisplayText(evidence.detail);
             }
         } else if (evidence.event == "tts_stopped" || evidence.event == "tts_aborted") {
             CancelListenTimer();
@@ -1170,6 +1151,10 @@ class Runtime final {
     struct InteractionEventItem {
         voice::VoiceInteractionEvent event = voice::VoiceInteractionEvent::kBootCompleted;
         std::string wake_word;
+        /** @brief 纯显示刷新文本（display_only 时由事件循环应用，不走状态机）。 */
+        std::string display_text;
+        /** @brief 是否为纯显示刷新（跳过 HandleInteractionEvent）。 */
+        bool display_only = false;
     };
     static constexpr std::size_t kEventQueueCapacity = 16;
     std::deque<InteractionEventItem> event_queue_;
@@ -1178,10 +1163,27 @@ class Runtime final {
     TaskHandle_t event_task_ = nullptr;
     bool event_loop_stop_ = false;
     bool event_loop_stopped_ = false;
+    /** @brief 音量 overlay 到期标志（timer 置位，事件循环消费）。 */
+    std::atomic<bool> overlay_expired_{false};
 
     /** @brief 投递交互事件（有界队列，满丢最旧；任何线程可调用）。 */
     void EnqueueEvent(voice::VoiceInteractionEvent event, std::string_view wake_word = {}) {
-        InteractionEventItem item{event, std::string(wake_word)};
+        InteractionEventItem item{event, std::string(wake_word), {}, false};
+        {
+            std::lock_guard<std::mutex> lock(event_mutex_);
+            if (event_queue_.size() >= kEventQueueCapacity) {
+                event_queue_.pop_front();
+            }
+            event_queue_.push_back(std::move(item));
+        }
+        event_cv_.notify_one();
+    }
+
+    /** @brief 投递纯显示刷新（TTS 文本等，事件循环内应用，不触发状态机）。 */
+    void EnqueueDisplayText(std::string detail) {
+        InteractionEventItem item{};
+        item.display_only = true;
+        item.display_text = std::move(detail);
         {
             std::lock_guard<std::mutex> lock(event_mutex_);
             if (event_queue_.size() >= kEventQueueCapacity) {
@@ -1202,12 +1204,33 @@ class Runtime final {
             InteractionEventItem item;
             {
                 std::unique_lock<std::mutex> lock(event_mutex_);
-                event_cv_.wait(lock, [this] { return event_loop_stop_ || !event_queue_.empty(); });
+                event_cv_.wait_for(lock, std::chrono::milliseconds(200),
+                                   [this] { return event_loop_stop_ || !event_queue_.empty(); });
                 if (event_loop_stop_ && event_queue_.empty()) {
                     break;
                 }
+                if (event_queue_.empty()) {
+                    // 超时轮询：处理音量 overlay 到期恢复（不依赖 timer 直接提交）。
+                    if (overlay_expired_.exchange(false)) {
+                        ++snapshot_.revision;
+                        CommitSnapshot();
+                    }
+                    continue;
+                }
                 item = std::move(event_queue_.front());
                 event_queue_.pop_front();
+            }
+            if (item.display_only) {
+                // 纯显示刷新：仅当控制器处于 kSpeaking 时应用（迟到的 TTS 丢弃）。
+                if (interaction_.state() == voice::VoiceInteractionState::kSpeaking && !item.display_text.empty()) {
+                    snapshot_.content_text = item.display_text;
+                    snapshot_.role = voice::VoiceContentRole::kAssistant;
+                    snapshot_.status_text = "说话中";
+                    snapshot_.mood = voice::VoiceMood::kSpeaking;
+                    ++snapshot_.revision;
+                    CommitSnapshot();
+                }
+                continue;
             }
             if (item.event == voice::VoiceInteractionEvent::kWakeDetected) {
                 // 唤醒前置（唯一状态写者内）：显示租约 + 提示音。
