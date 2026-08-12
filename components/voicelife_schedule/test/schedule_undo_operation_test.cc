@@ -53,7 +53,7 @@ Schedule MakeSchedule(int64_t id, std::string event, ScheduleStatus status = Sch
         .end_time = DateTime{std::chrono::seconds{1'900'003'600 + id}},
         .location = "会议室 " + std::to_string(id),
         .notes = "日程备注 " + std::to_string(id),
-        .reminder_id = 10'000 + id,
+        .rule_id = 10'000 + id,
         .status = status,
         .created_at = DateTime{std::chrono::seconds{1'899'000'000 + id}},
         .updated_at = DateTime{std::chrono::seconds{1'899'100'000 + id}},
@@ -69,8 +69,8 @@ Schedule MakeSchedule(int64_t id, std::string event, ScheduleStatus status = Sch
 bool SameSchedule(const Schedule& left, const Schedule& right) {
     return left.id == right.id && left.event == right.event && left.start_time == right.start_time &&
            left.end_time == right.end_time && left.location == right.location && left.notes == right.notes &&
-           left.reminder_id == right.reminder_id && left.status == right.status &&
-           left.created_at == right.created_at && left.updated_at == right.updated_at;
+           left.rule_id == right.rule_id && left.status == right.status && left.created_at == right.created_at &&
+           left.updated_at == right.updated_at;
 }
 
 /**

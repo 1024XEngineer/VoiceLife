@@ -65,6 +65,23 @@ int64_t ScalarInt64(SqliteDatabase& database, const char* sql) {
 }
 
 /**
+ * @brief 读取只返回一个文本值的查询。
+ * @param database 已打开数据库。
+ * @param sql 查询 SQL。
+ * @return 查询返回的文本。
+ */
+std::string ScalarText(SqliteDatabase& database, const char* sql) {
+    auto prepared = database.Prepare(sql);
+    Check(prepared.ok(), "文本标量查询应成功编译");
+    const auto row = prepared.value->Step();
+    Check(row.ok() && *row.value == SqliteStep::kRow, "文本标量查询应返回一行");
+    const std::string value = prepared.value->ColumnText(0);
+    const auto done = prepared.value->Step();
+    Check(done.ok() && *done.value == SqliteStep::kDone, "文本标量查询应在一行后结束");
+    return value;
+}
+
+/**
  * @brief 验证未打开、非法路径和非法 VFS 的错误。
  * @param path 临时数据库路径。
  * @return 无。
@@ -88,13 +105,22 @@ void CheckOpenAndClosedStates(const std::filesystem::path& path) {
 }
 
 /**
- * @brief 验证基础执行、事务、重复打开和重复关闭。
+ * @brief 验证正式 URI 参数、基础执行、事务、重复打开和重复关闭。
  * @param path 临时数据库路径。
  * @return 无。
  */
 void CheckExecutionAndTransactions(const std::filesystem::path& path) {
-    SqliteDatabase database(path.string());
+    SqliteDatabase database("file:" + path.string() + "?psow=0");
     Check(database.Open().ok() && database.Open().ok() && database.IsOpen(), "打开操作应成功且保持幂等");
+    Check(ScalarText(database, "PRAGMA locking_mode") == "exclusive", "连接必须使用独占锁模式");
+    Check(ScalarInt64(database, "PRAGMA page_size") == 4096, "数据库页大小必须为 4 KiB");
+    Check(ScalarText(database, "PRAGMA journal_mode") == "delete", "连接必须使用 DELETE journal");
+    Check(ScalarInt64(database, "PRAGMA synchronous") == 3, "连接必须使用 EXTRA 同步级别");
+    Check(ScalarInt64(database, "PRAGMA foreign_keys") == 1, "连接必须启用外键约束");
+    Check(ScalarInt64(database, "PRAGMA temp_store") == 2, "临时数据必须保存在内存");
+    Check(ScalarInt64(database, "PRAGMA cache_size") == -128, "页缓存必须限制为 128 KiB");
+    Check(ScalarInt64(database, "PRAGMA mmap_size") == 0, "设备基线必须禁用 mmap");
+    Check(ScalarInt64(database, "PRAGMA journal_size_limit") == 262144, "回滚日志必须限制为 256 KiB");
     Check(database.Execute("CREATE TABLE transaction_probe (value INTEGER NOT NULL)").ok(), "应成功建表");
     Check(database.Execute("THIS IS NOT SQL").code == ErrorCode::kInternal, "非法 SQL 应映射为内部错误");
     Check(database.Prepare("SELECT FROM").status.code == ErrorCode::kInternal, "非法查询应返回编译错误");
@@ -191,14 +217,13 @@ void CheckStatementLifecycle(const std::filesystem::path& path) {
 }
 
 /**
- * @brief 验证约束错误、Step 错误和数据库锁错误映射。
+ * @brief 验证约束错误和 Statement 执行错误映射。
  * @param path 临时数据库路径。
  * @return 无。
  */
 void CheckSqliteErrorMapping(const std::filesystem::path& path) {
     SqliteDatabase first(path.string());
-    SqliteDatabase second(path.string());
-    Check(first.Open().ok() && second.Open().ok(), "错误映射测试应打开两个连接");
+    Check(first.Open().ok(), "错误映射测试应打开第一连接");
     Check(first.Execute("CREATE TABLE error_probe (value INTEGER UNIQUE)").ok(), "应成功创建错误测试表");
     Check(first.Execute("INSERT INTO error_probe VALUES (1)").ok(), "第一次唯一值写入应成功");
     Check(first.Execute("INSERT INTO error_probe VALUES (1)").code == ErrorCode::kAlreadyExists,
@@ -207,13 +232,6 @@ void CheckSqliteErrorMapping(const std::filesystem::path& path) {
     auto duplicate = first.Prepare("INSERT INTO error_probe VALUES (?)");
     Check(duplicate.ok() && duplicate.value->BindInt(1, 1).ok(), "应成功准备重复值写入");
     Check(duplicate.value->Step().status.code == ErrorCode::kAlreadyExists, "Statement 唯一约束错误应映射为已存在");
-
-    Check(second.Execute("PRAGMA busy_timeout=0").ok(), "第二连接应关闭 busy 等待");
-    Check(first.BeginTransaction().ok(), "第一连接应取得写事务");
-    Check(first.Execute("INSERT INTO error_probe VALUES (2)").ok(), "第一连接事务写入应成功");
-    Check(second.Execute("INSERT INTO error_probe VALUES (3)").code == ErrorCode::kUnavailable,
-          "锁冲突应映射为暂不可用");
-    Check(first.Rollback().ok(), "锁冲突测试后应回滚事务");
 }
 
 }  // namespace

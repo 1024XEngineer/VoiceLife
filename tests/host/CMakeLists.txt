@@ -102,6 +102,9 @@ add_voicelife_library(linx_esp voicelife_linx_esp
 target_link_libraries(linx_esp PUBLIC contracts linx)
 add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_row_mapper.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v001_create_schedule.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/sqlite_schema.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/voicelife_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_sql.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_database.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_repository.cc")
@@ -112,6 +115,9 @@ if(TARGET SQLite3::SQLite3)
 else()
     target_link_libraries(storage_sqlite PRIVATE SQLite::SQLite3)
 endif()
+add_voicelife_library(storage_fatfs voicelife_storage_fatfs
+    "${ROOT_DIR}/components/voicelife_storage_fatfs/src/fatfs_volume.cc")
+target_link_libraries(storage_fatfs PUBLIC contracts)
 add_voicelife_library(audio_esp voicelife_audio_esp
     "${ROOT_DIR}/components/voicelife_audio_esp/src/audio_board_profile.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_audio_probe.cc"
@@ -173,6 +179,10 @@ target_link_libraries(schedule_undo_operation_test PRIVATE schedule)
 
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
 target_link_libraries(status_test PRIVATE contracts)
+
+add_voicelife_test(fatfs_volume_contract_test "unit;storage;fatfs"
+    "${ROOT_DIR}/components/voicelife_storage_fatfs/test/fatfs_volume_contract_test.cc")
+target_link_libraries(fatfs_volume_contract_test PRIVATE storage_fatfs)
 
 add_voicelife_test(timing_policy_test "unit;timing" timing_policy_test.cc)
 target_link_libraries(timing_policy_test PRIVATE timing)
@@ -279,6 +289,14 @@ target_link_libraries(sqlite_schedule_repository_test PRIVATE storage_sqlite sch
 add_voicelife_test(sqlite_database_test "unit;storage;sqlite;database"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_database_test.cc")
 target_link_libraries(sqlite_database_test PRIVATE storage_sqlite)
+
+add_voicelife_test(sqlite_schema_test "unit;storage;sqlite;schema"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schema_test.cc")
+target_link_libraries(sqlite_schema_test PRIVATE storage_sqlite)
+
+add_voicelife_test(voicelife_schema_test "integration;storage;sqlite;schema"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/voicelife_schema_test.cc")
+target_link_libraries(voicelife_schema_test PRIVATE storage_sqlite)
 
 add_voicelife_test(sqlite_schedule_repository_unit_test "unit;storage;sqlite;schedule;repository"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_repository_unit_test.cc")

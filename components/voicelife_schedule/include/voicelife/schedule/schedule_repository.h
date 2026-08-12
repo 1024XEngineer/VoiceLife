@@ -24,6 +24,18 @@ class ScheduleRepository {
      */
     virtual Result<Schedule> Insert(const Schedule& schedule) = 0;
 
+    /** @brief 更新已有日程的全部持久化字段。 @param schedule 包含有效 id 的日程。 @return 更新结果。 */
+    virtual Status Update(const Schedule& schedule) {
+        (void)schedule;
+        return Status::Error(ErrorCode::kUnavailable, "当前仓储不支持更新日程");
+    }
+
+    /** @brief 删除指定日程。 @param id 日程标识。 @return 删除结果。 */
+    virtual Status Delete(ScheduleId id) {
+        (void)id;
+        return Status::Error(ErrorCode::kUnavailable, "当前仓储不支持删除日程");
+    }
+
     /**
      * @brief 读取仓储中的全部日程。
      * @return 日程集合或数据库错误。

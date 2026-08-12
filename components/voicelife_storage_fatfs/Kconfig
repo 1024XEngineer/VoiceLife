@@ -1,0 +1,64 @@
+menu "VoiceLife FATFS 存储"
+
+config VOICELIFE_STORAGE_FATFS
+    bool "启用 FATFS/Wear Levelling 存储"
+    default n
+    help
+        启用基于 ESP-IDF FATFS 和 Wear Levelling 的 Flash 数据卷。
+        当前 Runtime 将 FATFS/WL 与 SQLite 作为一个完整持久化 Profile 启动，
+        两个适配器必须同时启用，不能只挂载其中一层后报告存储就绪。
+        正式挂载始终禁止挂载失败后自动格式化，以保留现场和用户数据。
+
+config VOICELIFE_STORAGE_FATFS_RUNTIME
+    bool
+    default VOICELIFE_STORAGE_FATFS && VOICELIFE_STORAGE_SQLITE
+    help
+        仅在 FATFS/WL 与 SQLite 同时启用时激活 Runtime 存储装配。
+
+config VOICELIFE_STORAGE_FATFS_PARTITION_LABEL
+    string "Flash 数据分区标签"
+    depends on VOICELIFE_STORAGE_FATFS
+    default "voicelife"
+    help
+        分区表中用于 VoiceLife 持久化数据的 data 分区标签。
+
+config VOICELIFE_STORAGE_FATFS_BASE_PATH
+    string "FATFS 挂载路径"
+    depends on VOICELIFE_STORAGE_FATFS
+    default "/data"
+    help
+        FATFS 通过 VFS 暴露的路径前缀，例如 /data。
+
+config VOICELIFE_STORAGE_FATFS_MAX_FILES
+    int "最大同时打开文件数"
+    depends on VOICELIFE_STORAGE_FATFS
+    default 6
+    range 1 32
+    help
+        FATFS VFS 允许同时打开的文件数量。
+
+config VOICELIFE_STORAGE_FATFS_ALLOCATION_UNIT_SIZE
+    int "FATFS 分配单元大小"
+    depends on VOICELIFE_STORAGE_FATFS
+    default 4096
+    help
+        格式化时使用的 FATFS 分配单元大小。生产适配器不会因挂载失败自动格式化，
+        因此该值只影响显式初始化或未来的维护工具。
+
+config VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_ADDRESS
+    hex "期望的 Flash 数据分区起始地址"
+    depends on VOICELIFE_STORAGE_FATFS
+    default 0x7E0000
+    help
+        非零时，挂载前严格校验分区表中的 voicelife 数据分区起始地址。
+        设置为零可用于不固定板级布局的开发或主机配置。
+
+config VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_SIZE
+    hex "期望的 Flash 数据分区大小"
+    depends on VOICELIFE_STORAGE_FATFS
+    default 0x200000
+    help
+        非零时，挂载前严格校验分区表中的数据分区容量。
+        设置为零可用于不固定板级布局的开发或主机配置。
+
+endmenu

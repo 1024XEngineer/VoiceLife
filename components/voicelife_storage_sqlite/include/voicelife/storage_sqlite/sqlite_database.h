@@ -120,6 +120,9 @@ class SqliteStatement {
      */
     [[nodiscard]] std::int64_t LastInsertRowId() const;
 
+    /** @brief 返回本语句影响的行数。 @return 受影响行数。 */
+    [[nodiscard]] int Changes() const;
+
    private:
     friend class SqliteDatabase;
 
@@ -228,6 +231,9 @@ class SqliteDatabase {
 
     /** @brief 返回原生连接句柄，仅供 Statement 内部使用。 */
     [[nodiscard]] sqlite3* NativeHandle() const { return handle_; }
+
+    /** @brief 判断当前路径是否显式声明 psow=0。 @return URI 禁用 powersafe overwrite 时返回 true。 */
+    [[nodiscard]] bool RequiresPowersafeOverwriteDisabled() const;
 
     std::string path_;
     std::string vfs_name_;

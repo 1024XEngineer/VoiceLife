@@ -6,6 +6,7 @@
 
 #include "mapping/schedule_row_mapper.h"
 #include "sql/schedule_sql.h"
+#include "voicelife/storage_sqlite/voicelife_schema.h"
 
 namespace voicelife::storage_sqlite {
 namespace {
@@ -31,7 +32,7 @@ SqliteScheduleRepository::SqliteScheduleRepository(SqliteDatabase& database) : d
 
 Status SqliteScheduleRepository::Initialize() {
     if (!database_.IsOpen()) return DatabaseUnavailable();
-    return database_.Execute(sql::kCreateScheduleSchema);
+    return VoiceLifeSchema::Initialize(database_);
 }
 
 Result<Schedule> SqliteScheduleRepository::Insert(const Schedule& schedule) {
@@ -82,6 +83,35 @@ Result<std::vector<Schedule>> SqliteScheduleRepository::FindAll() const {
         schedules.push_back(*row.value);
     }
     return Result<std::vector<Schedule>>::Success(std::move(schedules));
+}
+
+Status SqliteScheduleRepository::Update(const Schedule& schedule) {
+    if (!database_.IsOpen()) return DatabaseUnavailable();
+    if (schedule.id <= 0 || schedule.event.empty())
+        return Status::Error(ErrorCode::kInvalidArgument, "日程标识或名称无效");
+    auto prepared = database_.Prepare(sql::kUpdateSchedule);
+    if (!prepared.ok()) return prepared.status;
+    SqliteStatement statement = std::move(*prepared.value);
+    Status status = mapping::BindSchedule(statement, schedule);
+    if (!status.ok()) return status;
+    status = statement.BindInt64(10, schedule.id);
+    if (!status.ok()) return status;
+    auto stepped = statement.Step();
+    if (!stepped.ok()) return stepped.status;
+    return statement.Changes() == 1 ? Status::Ok() : Status::Error(ErrorCode::kNotFound, "日程不存在");
+}
+
+Status SqliteScheduleRepository::Delete(schedule::ScheduleId id) {
+    if (!database_.IsOpen()) return DatabaseUnavailable();
+    if (id <= 0) return Status::Error(ErrorCode::kInvalidArgument, "日程标识无效");
+    auto prepared = database_.Prepare(sql::kDeleteSchedule);
+    if (!prepared.ok()) return prepared.status;
+    SqliteStatement statement = std::move(*prepared.value);
+    Status status = statement.BindInt64(1, id);
+    if (!status.ok()) return status;
+    auto stepped = statement.Step();
+    if (!stepped.ok()) return stepped.status;
+    return statement.Changes() == 1 ? Status::Ok() : Status::Error(ErrorCode::kNotFound, "日程不存在");
 }
 
 }  // namespace voicelife::storage_sqlite

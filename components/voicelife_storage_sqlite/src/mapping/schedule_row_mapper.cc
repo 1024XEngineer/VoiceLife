@@ -101,8 +101,7 @@ Status BindSchedule(SqliteStatement& statement, const schedule::Schedule& schedu
     if (!status.ok()) return status;
     status = BindOptionalText(statement, index++, schedule.notes, "notes");
     if (!status.ok()) return status;
-    const std::optional<int64_t> reminder_id = schedule.reminder_id;
-    status = BindOptionalInt64(statement, index++, reminder_id, "reminder_id");
+    status = BindOptionalInt64(statement, index++, schedule.rule_id, "rule_id");
     if (!status.ok()) return status;
     status = WithField(statement.BindInt(index++, static_cast<int>(schedule.status)), "status");
     if (!status.ok()) return status;
@@ -127,12 +126,14 @@ Result<schedule::Schedule> ReadSchedule(const SqliteStatement& statement) {
         .end_time = ReadOptionalTime(statement, 3),
         .location = ReadOptionalText(statement, 4),
         .notes = ReadOptionalText(statement, 5),
-        .reminder_id = std::nullopt,
+        .rule_id = std::nullopt,
         .status = static_cast<schedule::ScheduleStatus>(status_value),
         .created_at = schedule::DateTime{std::chrono::seconds{statement.ColumnInt64(8)}},
         .updated_at = schedule::DateTime{std::chrono::seconds{statement.ColumnInt64(9)}},
     };
-    if (!statement.IsNull(6)) schedule.reminder_id = statement.ColumnInt64(6);
+    if (!statement.IsNull(6)) {
+        schedule.rule_id = statement.ColumnInt64(6);
+    }
     return Result<schedule::Schedule>::Success(std::move(schedule));
 }
 

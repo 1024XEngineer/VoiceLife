@@ -46,7 +46,7 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
         .end_time = command.end_time,
         .location = command.location,
         .notes = command.notes,
-        .reminder_id = std::nullopt,
+        .rule_id = std::nullopt,
         .status = ScheduleStatus::kActive,
         .created_at = {},
         .updated_at = {},
@@ -183,7 +183,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
     // 确认至少提供一个待修改字段
     const bool has_update = command.event.has_value() || command.start_time.has_value() ||
                             command.end_time.has_value() || command.location.has_value() || command.notes.has_value() ||
-                            command.reminder_id.has_value() || command.status.has_value();
+                            command.rule_id.has_value() || command.status.has_value();
     if (!has_update) return InvalidUpdateScheduleResult("至少需要提供一个要修改的字段");
 
     // 组装修改后的日程，未提供的字段保持不变，显式空值用于清空字段
@@ -199,7 +199,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
     ApplyNullableUpdate(command.end_time, updated.end_time);
     ApplyNullableUpdate(command.location, updated.location);
     ApplyNullableUpdate(command.notes, updated.notes);
-    ApplyNullableUpdate(command.reminder_id, updated.reminder_id);
+    ApplyNullableUpdate(command.rule_id, updated.rule_id);
     if (command.status.has_value()) {
         if (!IsSupportedScheduleStatus(*command.status)) return InvalidUpdateScheduleResult("不支持的日程状态");
         updated.status = *command.status;

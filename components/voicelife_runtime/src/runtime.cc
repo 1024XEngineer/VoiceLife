@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #ifdef ESP_PLATFORM
 #include <atomic>
@@ -16,6 +17,7 @@
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #endif
 
+#include "bootstrap/storage_bootstrap.h"
 #include "voicelife/voice/voice_ports.h"
 #include "voicelife/voice/voice_session.h"
 
@@ -158,10 +160,17 @@ class Runtime final {
     }
 
     Status Start() {
+        if (session_ != nullptr) {
+            return Status::Error(ErrorCode::kConflict, "VoiceLife Runtime 已经启动");
+        }
+
+        const Status storage_status = storage_.Start();
+        if (!storage_status.ok()) return storage_status;
+
         auto& registry = voice::SpeechProviderRegistry::Instance();
         auto result = registry.Create("scaffold", {});
         if (!result.ok() || !result.value.has_value()) {
-            return Status::Error(ErrorCode::kInternal, "无法创建语音 Provider: " + result.status.message);
+            return FailStart(Status::Error(ErrorCode::kInternal, "无法创建语音 Provider: " + result.status.message));
         }
         provider_ = std::move(*result.value);
 
@@ -172,7 +181,7 @@ class Runtime final {
         config.provider_id = "scaffold";
         const Status session_status = session_->Start(config);
         if (!session_status.ok()) {
-            return session_status;
+            return FailStart(session_status);
         }
 
 #if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_AUDIO_PROBE
@@ -189,7 +198,7 @@ class Runtime final {
 #endif
         const auto probe_result = probe.Run(profile, options);
         if (!probe_result.ok() || !probe_result.value.has_value()) {
-            return probe_result.status;
+            return FailStart(probe_result.status);
         }
         const auto& report = *probe_result.value;
         ESP_LOGI(kTag,
@@ -207,22 +216,45 @@ class Runtime final {
                  static_cast<unsigned>(report.replay_bytes_written),
                  static_cast<unsigned>(report.minimum_free_heap_bytes));
         if (!report.hardware_ready()) {
-            return Status::Error(ErrorCode::kUnavailable, "音频探针硬件未就绪，Codec ACK 或 I2S 状态不完整");
+            return FailStart(Status::Error(ErrorCode::kUnavailable, "音频探针硬件未就绪，Codec ACK 或 I2S 状态不完整"));
         }
         if (!report.capture_signal_detected()) {
-            return Status::Error(ErrorCode::kUnavailable, "音频探针未检测到可变化的 PCM 输入");
+            return FailStart(Status::Error(ErrorCode::kUnavailable, "音频探针未检测到可变化的 PCM 输入"));
         }
 #endif
 #if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_AUDIO_PORT_SMOKE
         const Status audio_port_status = RunAudioPortSmoke();
         if (!audio_port_status.ok()) {
-            return audio_port_status;
+            return FailStart(audio_port_status);
         }
 #endif
         return Status::Ok();
     }
 
    private:
+    /**
+     * @brief 回滚一次未完成的 Runtime 启动。
+     * @param failure 首个失败阶段返回的状态。
+     * @return 保留首个失败原因，并在必要时附加清理失败信息。
+     */
+    Status FailStart(Status failure) {
+        if (session_ != nullptr) {
+            const Status stop_status = session_->Stop();
+            if (!stop_status.ok()) {
+                failure.message += "；语音会话清理失败：" + stop_status.message;
+            }
+        }
+        session_.reset();
+        provider_.reset();
+        const Status storage_stop_status = storage_.Stop();
+        if (!storage_stop_status.ok()) {
+            failure.message += "；存储清理失败：" + storage_stop_status.message;
+        }
+        return failure;
+    }
+
+    // 先声明存储，使析构顺序为语音资源、SQLite、FATFS 数据卷。
+    StorageBootstrap storage_;
     ScaffoldAudioInput audio_input_;
     ScaffoldAudioOutput audio_output_;
     std::unique_ptr<voice::SpeechProviderAdapter> provider_;

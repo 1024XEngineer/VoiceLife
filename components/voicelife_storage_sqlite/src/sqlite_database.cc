@@ -2,12 +2,38 @@
 
 #include <limits>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "sqlite3.h"
 
 namespace voicelife::storage_sqlite {
 namespace {
+
+constexpr char kConnectionConfiguration[] =
+    "PRAGMA locking_mode=EXCLUSIVE;"
+    "PRAGMA page_size=4096;"
+    "PRAGMA journal_mode=DELETE;"
+    "PRAGMA synchronous=EXTRA;"
+    "PRAGMA foreign_keys=ON;"
+    "PRAGMA temp_store=MEMORY;"
+    "PRAGMA cache_size=-128;"
+    "PRAGMA mmap_size=0;"
+    "PRAGMA journal_size_limit=262144;";
+
+/** @brief 描述一项必须读回核验的 SQLite 连接配置。 */
+struct SqliteSettingExpectation {
+    /** @brief 用于读取配置值的 PRAGMA。 */
+    const char* query;
+    /** @brief 预期返回的文本值。 */
+    const char* expected;
+};
+
+constexpr SqliteSettingExpectation kConnectionExpectations[] = {
+    {"PRAGMA locking_mode", "exclusive"}, {"PRAGMA page_size", "4096"}, {"PRAGMA journal_mode", "delete"},
+    {"PRAGMA synchronous", "3"},          {"PRAGMA foreign_keys", "1"}, {"PRAGMA temp_store", "2"},
+    {"PRAGMA cache_size", "-128"},        {"PRAGMA mmap_size", "0"},    {"PRAGMA journal_size_limit", "262144"},
+};
 
 /**
  * @brief 将 SQLite 连接错误转换为项目状态。
@@ -26,6 +52,74 @@ Status MakeSqliteFailure(sqlite3* database, int result, const char* operation) {
     }
     const char* detail = database == nullptr ? sqlite3_errstr(result) : sqlite3_errmsg(database);
     return Status::Error(code, std::string(operation) + "：" + (detail == nullptr ? "未知 SQLite 错误" : detail));
+}
+
+/**
+ * @brief 读取标量 PRAGMA 并核对其文本表示。
+ * @param database 已打开的 SQLite 连接。
+ * @param expectation 查询语句和预期值。
+ * @return 读回值与预期一致时返回成功状态。
+ */
+Status VerifySetting(sqlite3* database, const SqliteSettingExpectation& expectation) {
+    sqlite3_stmt* statement = nullptr;
+    int result = sqlite3_prepare_v2(database, expectation.query, -1, &statement, nullptr);
+    if (result != SQLITE_OK) {
+        if (statement != nullptr) sqlite3_finalize(statement);
+        return MakeSqliteFailure(database, result, "编译 SQLite 连接配置检查失败");
+    }
+
+    result = sqlite3_step(statement);
+    const unsigned char* value = result == SQLITE_ROW ? sqlite3_column_text(statement, 0) : nullptr;
+    const bool matches =
+        value != nullptr && std::string_view(reinterpret_cast<const char*>(value)) == expectation.expected;
+    const int finalize_result = sqlite3_finalize(statement);
+    if (result != SQLITE_ROW) return MakeSqliteFailure(database, result, "读取 SQLite 连接配置失败");
+    if (finalize_result != SQLITE_OK) {
+        return MakeSqliteFailure(database, finalize_result, "释放 SQLite 连接配置检查失败");
+    }
+    if (!matches) {
+        return Status::Error(ErrorCode::kConflict, std::string("SQLite 连接配置不符合实板基线：") + expectation.query);
+    }
+    return Status::Ok();
+}
+
+/**
+ * @brief 应用并核验已通过实板资格测试的 SQLite 连接配置。
+ * @param database 已打开的 SQLite 连接。
+ * @return 全部配置生效且读回值符合预期时返回成功状态。
+ */
+Status ConfigureConnection(sqlite3* database) {
+    char* error = nullptr;
+    const int result = sqlite3_exec(database, kConnectionConfiguration, nullptr, nullptr, &error);
+    if (result != SQLITE_OK) {
+        const Status status = MakeSqliteFailure(database, result, "配置 SQLite 失败");
+        sqlite3_free(error);
+        return status;
+    }
+    sqlite3_free(error);
+
+    for (const SqliteSettingExpectation& expectation : kConnectionExpectations) {
+        const Status verified = VerifySetting(database, expectation);
+        if (!verified.ok()) return verified;
+    }
+    return Status::Ok();
+}
+
+/**
+ * @brief 核验 SQLite 主数据库禁用了 powersafe overwrite 假设。
+ * @param database 已打开的 SQLite 连接。
+ * @return psow 为零时返回成功状态，否则返回配置冲突。
+ */
+Status VerifyPowersafeOverwrite(sqlite3* database) {
+    int powersafe_overwrite = -1;
+    const int result = sqlite3_file_control(database, "main", SQLITE_FCNTL_POWERSAFE_OVERWRITE, &powersafe_overwrite);
+    if (result != SQLITE_OK) {
+        return MakeSqliteFailure(database, result, "读取 SQLite powersafe overwrite 配置失败");
+    }
+    if (powersafe_overwrite != 0) {
+        return Status::Error(ErrorCode::kConflict, "SQLite powersafe overwrite 未按实板基线关闭");
+    }
+    return Status::Ok();
 }
 
 }  // namespace
@@ -154,6 +248,8 @@ std::int64_t SqliteStatement::LastInsertRowId() const {
     return last_insert_row_id_;
 }
 
+int SqliteStatement::Changes() const { return database_ == nullptr ? 0 : sqlite3_changes(database_->handle_); }
+
 SqliteDatabase::SqliteDatabase(std::string path, std::string vfs_name)
     : path_(std::move(path)), vfs_name_(std::move(vfs_name)) {}
 
@@ -163,13 +259,17 @@ Status SqliteDatabase::Failure(int result, const char* operation) const {
     return MakeSqliteFailure(handle_, result, operation);
 }
 
+bool SqliteDatabase::RequiresPowersafeOverwriteDisabled() const {
+    return path_.find('?') != std::string::npos && sqlite3_uri_boolean(path_.c_str(), "psow", 1) == 0;
+}
+
 Status SqliteDatabase::Open() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (handle_ != nullptr) return Status::Ok();
     if (path_.empty()) return Status::Error(ErrorCode::kInvalidArgument, "SQLite 数据库路径不能为空");
 
     sqlite3* database = nullptr;
-    const int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_URI | SQLITE_OPEN_FULLMUTEX;
+    const int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX;
     const char* vfs = vfs_name_.empty() ? nullptr : vfs_name_.c_str();
     const int result = sqlite3_open_v2(path_.c_str(), &database, flags, vfs);
     if (result != SQLITE_OK) {
@@ -178,20 +278,29 @@ Status SqliteDatabase::Open() {
         return status;
     }
     handle_ = database;
-    sqlite3_busy_timeout(handle_, 5000);
-
-    char* error = nullptr;
-    const int configure_result =
-        sqlite3_exec(handle_, "PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE; PRAGMA synchronous=EXTRA;", nullptr,
-                     nullptr, &error);
-    if (configure_result != SQLITE_OK) {
-        const Status status = Failure(configure_result, "配置 SQLite 失败");
-        sqlite3_free(error);
+    const int timeout_result = sqlite3_busy_timeout(handle_, 5000);
+    if (timeout_result != SQLITE_OK) {
+        const Status status = Failure(timeout_result, "配置 SQLite busy timeout 失败");
         sqlite3_close(handle_);
         handle_ = nullptr;
         return status;
     }
-    sqlite3_free(error);
+
+    const Status configured = ConfigureConnection(handle_);
+    if (!configured.ok()) {
+        sqlite3_close(handle_);
+        handle_ = nullptr;
+        return configured;
+    }
+
+    if (RequiresPowersafeOverwriteDisabled()) {
+        const Status powersafe_overwrite = VerifyPowersafeOverwrite(handle_);
+        if (!powersafe_overwrite.ok()) {
+            sqlite3_close(handle_);
+            handle_ = nullptr;
+            return powersafe_overwrite;
+        }
+    }
     return Status::Ok();
 }
 

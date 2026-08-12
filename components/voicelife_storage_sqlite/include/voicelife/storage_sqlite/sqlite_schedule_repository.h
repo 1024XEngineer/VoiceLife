@@ -33,6 +33,12 @@ class SqliteScheduleRepository final : public schedule::ScheduleRepository {
      */
     Result<schedule::Schedule> Insert(const schedule::Schedule& schedule) override;
 
+    /** @brief 更新一条日程。 @param schedule 待更新日程。 @return 更新状态。 */
+    Status Update(const schedule::Schedule& schedule) override;
+
+    /** @brief 删除一条日程。 @param id 日程标识。 @return 删除状态。 */
+    Status Delete(schedule::ScheduleId id) override;
+
     /**
      * @brief 读取全部日程。
      * @return 按开始时间和标识排序的日程集合。

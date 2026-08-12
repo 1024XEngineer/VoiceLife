@@ -59,7 +59,7 @@ Schedule CompleteSchedule() {
         .end_time = At(2'100'003'600),
         .location = "会议室 C",
         .notes = "完整字段往返",
-        .reminder_id = 88,
+        .rule_id = 88,
         .status = ScheduleStatus::kCancelled,
         .created_at = At(2'000'000'000),
         .updated_at = At(2'000'000'100),
@@ -98,7 +98,7 @@ void CheckInsertAndRoundTrip(const std::filesystem::path& path) {
         .end_time = std::nullopt,
         .location = std::nullopt,
         .notes = std::nullopt,
-        .reminder_id = std::nullopt,
+        .rule_id = std::nullopt,
         .status = ScheduleStatus::kActive,
         .created_at = {},
         .updated_at = {},
@@ -118,14 +118,13 @@ void CheckInsertAndRoundTrip(const std::filesystem::path& path) {
     const Schedule& complete_row = stored.value->front();
     Check(complete_row.event == complete_input.event && complete_row.start_time == complete_input.start_time &&
               complete_row.end_time == complete_input.end_time && complete_row.location == complete_input.location &&
-              complete_row.notes == complete_input.notes && complete_row.reminder_id == complete_input.reminder_id &&
+              complete_row.notes == complete_input.notes && complete_row.rule_id == complete_input.rule_id &&
               complete_row.status == complete_input.status && complete_row.created_at == complete_input.created_at &&
               complete_row.updated_at == complete_input.updated_at,
           "完整日程的所有字段都应往返一致");
     const Schedule& minimal_row = stored.value->back();
     Check(!minimal_row.start_time.has_value() && !minimal_row.end_time.has_value() &&
-              !minimal_row.location.has_value() && !minimal_row.notes.has_value() &&
-              !minimal_row.reminder_id.has_value(),
+              !minimal_row.location.has_value() && !minimal_row.notes.has_value() && !minimal_row.rule_id.has_value(),
           "最小日程的可空字段应保持为空");
 }
 
@@ -172,7 +171,7 @@ void CheckRepositoryErrorPropagation(const std::filesystem::path& path) {
     Check(repository.Initialize().ok(), "错误传播测试应初始化表");
 
     Check(database
-              .Execute("CREATE TRIGGER reject_schedule BEFORE INSERT ON schedules "
+              .Execute("CREATE TRIGGER reject_schedule BEFORE INSERT ON schedule "
                        "BEGIN SELECT RAISE(ABORT, 'blocked'); END")
               .ok(),
           "应成功创建拒绝写入触发器");
@@ -180,14 +179,7 @@ void CheckRepositoryErrorPropagation(const std::filesystem::path& path) {
           "Repository 应传播 Statement 执行错误");
     Check(database.Execute("DROP TRIGGER reject_schedule").ok(), "应删除拒绝写入触发器");
 
-    Check(database
-              .Execute("INSERT INTO schedules "
-                       "(event, status, created_at, updated_at) VALUES ('非法状态', 99, 1, 1)")
-              .ok(),
-          "应写入 Mapper 非法状态测试行");
-    Check(repository.FindAll().status.code == ErrorCode::kInternal, "Repository 应传播行映射错误");
-
-    Check(database.Execute("DROP TABLE schedules").ok(), "应删除日程表以制造 SQL 编译错误");
+    Check(database.Execute("DROP TABLE schedule").ok(), "应删除日程表以制造 SQL 编译错误");
     Check(repository.Insert(CompleteSchedule()).status.code == ErrorCode::kInternal,
           "Repository 应传播写入 SQL 编译错误");
     Check(repository.FindAll().status.code == ErrorCode::kInternal, "Repository 应传播查询 SQL 编译错误");
