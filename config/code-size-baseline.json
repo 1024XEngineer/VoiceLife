@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "productionFiles": {
+    "components/voicelife_display_esp/src/ssd1306_status_display.cc": 687,
+    "components/voicelife_runtime/src/runtime.cc": 693,
+    "components/voicelife_voice/src/voice_session.cc": 509,
+    "services/im-gateway/src/application/services.ts": 1754,
+    "services/im-gateway/src/infrastructure/persistence/in-memory.ts": 583,
+    "services/im-gateway/src/infrastructure/wechat/wechat-official-adapter.ts": 584
+  }
+}
