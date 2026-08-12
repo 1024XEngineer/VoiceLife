@@ -623,13 +623,14 @@ DisplayState& State() {
     return state;
 }
 
-// 字符水平前进宽度：中文 17px，ASCII/标点 9px（16px 高度统一基线）。
+// 字符水平前进宽度：中文 17px，ASCII/标点 16px（16px 字形占满 16 列，
+// 避免 AM/API 等英文相互覆盖；宽度大由滚动补偿）。
 size_t Advance16(uint32_t cp) {
     if ((cp >= 0x4e00 && cp <= 0x9fff) || (cp >= 0x3000 && cp <= 0x303f) || (cp >= 0xff00 && cp <= 0xffef)) {
         return 17;  // CJK 及全角标点
     }
-    if (cp == ' ') return 9;
-    return 9;  // ASCII 统一 9px advance
+    if (cp == ' ') return 16;
+    return 16;  // ASCII 统一 16px advance（字形 16 列）
 }
 
 // 绘制一个 16x16 汉字（2 页）。返回水平前进宽度。

@@ -90,6 +90,9 @@ class VoiceSession {
     bool vad_silence_emitted_ = false;
     bool vad_silence_pending_ = false;
     std::chrono::steady_clock::time_point last_speech_at_{};
+    // 开麦时刻（最小采集窗口用）与 RMS 诊断计数。
+    std::chrono::steady_clock::time_point capture_started_at_{};
+    uint32_t capture_rms_log_frames_ = 0;
     uint64_t generation_ = 0;
     uint64_t next_sequence_ = 0;
 };

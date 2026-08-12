@@ -9,6 +9,12 @@
 
 namespace voicelife::voice {
 
+#ifdef ESP_PLATFORM
+constexpr char kVoiceSessionTag[] = "VoiceLifeVoiceSession";
+#endif
+// 最小采集窗口：开麦后至少采集 3 秒才允许 VAD 端点结束（用户可能还没开口）。
+constexpr int64_t kMinCaptureWindowMs = 3000;
+
 VoiceSession::VoiceSession(AudioInputPort& input, AudioOutputPort& output, SpeechProviderAdapter& provider,
                            EvidenceSink evidence)
     : input_(input), output_(output), provider_(provider), evidence_(std::move(evidence)) {}
@@ -287,6 +293,8 @@ Status VoiceSession::BeginCapture() {
             vad_silence_emitted_ = false;
             vad_silence_pending_ = false;
             last_speech_at_ = {};
+            capture_started_at_ = std::chrono::steady_clock::now();
+            capture_rms_log_frames_ = 0;
         }
         Emit("capture_started", "");
         return Status::Ok();
@@ -413,11 +421,21 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
         constexpr int64_t kSpeechEnterThreshold = 300 * 300;  // 进入语音约 -40 dBFS
         constexpr int64_t kSpeechExitThreshold = 180 * 180;   // 迟滞下限约 -44 dBFS
         const auto now = std::chrono::steady_clock::now();
+        const auto elapsed_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - capture_started_at_).count();
+        // 最小采集窗口：开麦后 3 秒内不允许端点结束（用户可能还没开口）。
+        // 诊断：每 10 帧输出一次 RMS/语音状态（脱敏，不输出原始音频）。
+#ifdef ESP_PLATFORM
+        if ((capture_rms_log_frames_++ % 10) == 0) {
+            ESP_LOGI(kVoiceSessionTag, "VAD_RMS rms=%lld speech=%d elapsed_ms=%lld", static_cast<long long>(rms),
+                     vad_speech_seen_ ? 1 : 0, static_cast<long long>(elapsed_ms));
+        }
+#endif
         if (rms >= kSpeechEnterThreshold || (vad_speech_seen_ && rms >= kSpeechExitThreshold)) {
             vad_speech_seen_ = true;
             last_speech_at_ = now;
         } else if (vad_speech_seen_ && !vad_silence_emitted_ && last_speech_at_.time_since_epoch().count() > 0 &&
-                   now - last_speech_at_ >= std::chrono::milliseconds(1200)) {
+                   now - last_speech_at_ >= std::chrono::milliseconds(1200) && elapsed_ms >= kMinCaptureWindowMs) {
             // 只在锁内置标志，锁外再 Emit，避免 Emit 重入 mutex_ 造成自死锁。
             vad_silence_emitted_ = true;
             vad_silence_pending_ = true;

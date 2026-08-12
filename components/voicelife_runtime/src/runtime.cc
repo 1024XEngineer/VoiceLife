@@ -977,6 +977,13 @@ class Runtime final {
         } else if (event == voice::VoiceInteractionEvent::kIntentReceived && !stt_display_text_.empty()) {
             snapshot_.content_text = stt_display_text_;
             snapshot_.role = voice::VoiceContentRole::kUser;
+            // STT 用户文本也启动滚动：超宽（>6 字符）时周期滚动。
+            scroll_content_ = stt_display_text_;
+            scroll_offset_ = 0;
+            if (scroll_timer_ != nullptr && CountCodepoints(scroll_content_) > 6) {
+                (void)esp_timer_stop(scroll_timer_);
+                (void)esp_timer_start_periodic(scroll_timer_, 400 * 1000ULL);
+            }
         } else if (event == voice::VoiceInteractionEvent::kTtsStopped ||
                    event == voice::VoiceInteractionEvent::kStandbyReady ||
                    event == voice::VoiceInteractionEvent::kBootCompleted) {
@@ -1061,6 +1068,9 @@ class Runtime final {
             // 回写用户说的话到屏幕（detail 是 ASR 文本，属于用户自己的输入）。
             if (!evidence.detail.empty()) {
                 stt_display_text_ = evidence.detail;
+                // 收到有效 STT：立即清除 WakeAck 租约（"收到！"不再覆盖回复文本）。
+                wake_ack_until_us_ = 0;
+                last_stt_at_ = esp_timer_get_time();
                 // 终止意图识别：再见/拜拜/bye 等 → 播报结束后不 follow-up，直接收尾。
                 terminal_turn_ = (evidence.detail.find("再见") != std::string::npos ||
                                   evidence.detail.find("拜拜") != std::string::npos ||
@@ -1088,7 +1098,8 @@ class Runtime final {
             }
             CancelListenTimer();
             if (!evidence.detail.empty()) {
-                stt_display_text_ = evidence.detail;
+                // 角色分离：助手文本独立存储，不复用 stt_display_text_（用户文本）。
+                assistant_text_ = evidence.detail;
                 snapshot_.content_text = evidence.detail;
                 snapshot_.role = voice::VoiceContentRole::kAssistant;
                 snapshot_.status_text = "说话中";
@@ -1186,6 +1197,8 @@ class Runtime final {
     std::atomic<int64_t> capture_started_us_{0};
     bool first_standby_ = true;
     std::string stt_display_text_;
+    // 助手回复文本（tts_sentence_started 写入），与用户文本角色分离。
+    std::string assistant_text_;
     // 下行内容滚动窗口起始字符（0=从头）；新内容重置，超宽时定时推进。
     size_t scroll_offset_ = 0;
     std::string scroll_content_;
@@ -1197,6 +1210,8 @@ class Runtime final {
     int64_t last_wake_at_ = 0;
     // WakeAck 显示租约截止时刻（esp_timer_us）：到期前下行栏显示“收到！”。
     int64_t wake_ack_until_us_ = 0;
+    // 最近有效 STT 到达时刻（区分唤醒词回传）。
+    int64_t last_stt_at_ = 0;
     // 音量 overlay 截止时刻（esp_timer_us）：到期后恢复最新快照。
     int64_t volume_overlay_until_us_ = 0;
     esp_timer_handle_t volume_overlay_timer_ = nullptr;
