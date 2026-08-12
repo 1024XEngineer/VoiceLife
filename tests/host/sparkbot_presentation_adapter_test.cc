@@ -69,5 +69,12 @@ int main() {
     Check(backlight_calls == 2 && backlight_requests[1], "非待机必须请求开启背光");
     Check(backlight_adapter.Render(listening).ok() && backlight_calls == 2, "相同背光状态不得重复请求");
 
+    // generation -> revision 消费丢弃：四种顺序（P1 回归保护）。
+    using voicelife::display_sparkbot::ShouldDropDisplaySnapshot;
+    Check(ShouldDropDisplaySnapshot(1, 99, 2, 0), "旧 generation 必须整体拒绝");
+    Check(ShouldDropDisplaySnapshot(2, 3, 2, 3), "同 generation 旧 revision 必须拒绝");
+    Check(!ShouldDropDisplaySnapshot(2, 4, 2, 3), "同 generation 新 revision 必须接受");
+    Check(!ShouldDropDisplaySnapshot(3, 0, 2, 99), "新 generation 首帧（revision 较小）必须接受");
+
     return 0;
 }
