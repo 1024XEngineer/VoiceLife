@@ -1,8 +1,6 @@
 #include "voicelife/runtime/runtime.h"
 
 #include <algorithm>
-#include <cstdio>
-#include <ctime>
 #include <memory>
 #include <string>
 #include <utility>
@@ -37,6 +35,7 @@
 #include "linx_secret_resolver.h"
 #include "runtime_audio_diagnostics.h"
 #include "runtime_board_input.h"
+#include "runtime_presentation.h"
 #include "runtime_scaffold.h"
 #include "schedule_mcp_tools.h"
 #include "voicelife/voice/voice_interaction_controller.h"
@@ -50,7 +49,6 @@ namespace {
 constexpr char kTag[] = "VoiceLifeRuntime";
 constexpr uint32_t kWakeFeedbackMs = 800;
 constexpr int64_t kWakeAckDisplayUs = 400 * 1000;
-constexpr int64_t kVolumeOverlayUs = 1500 * 1000;
 constexpr uint32_t kListenTimeoutMs = 15000;
 constexpr uint32_t kFinalSttTimeoutMs = 5000;
 
@@ -260,23 +258,7 @@ class Runtime final {
     void SetVolume(int volume) {
         volume_ = std::clamp(volume, 0, 100);
         if (audio_ports_) audio_ports_->SetOutputVolume(volume_);
-        // 音量通知 overlay：临时覆盖显示，1.5s 后恢复最新快照（不修改会话状态）。
-        // 连续调音量只重置同一个计时器。
-        char text[16] = {};
-        std::snprintf(text, sizeof(text), "VOL:%d", volume_);
-        (void)display_esp::SetEmotion("neutral", "音量", text);
-        volume_overlay_until_us_ = esp_timer_get_time() + kVolumeOverlayUs;
-        if (volume_overlay_timer_ == nullptr) {
-            esp_timer_create_args_t args = {};
-            args.callback = &VolumeOverlayEntry;
-            args.arg = this;
-            args.name = "voicelife_volume_overlay";
-            (void)esp_timer_create(&args, &volume_overlay_timer_);
-        }
-        if (volume_overlay_timer_ != nullptr) {
-            (void)esp_timer_stop(volume_overlay_timer_);
-            (void)esp_timer_start_once(volume_overlay_timer_, kVolumeOverlayUs);
-        }
+        presentation_.ShowVolume(volume_);
     }
 
     // 本地提示音：播放 popup.ogg 解码的 PCM（16kHz S16LE），按协商播放格式重采样。
@@ -312,8 +294,8 @@ class Runtime final {
         // 记录唤醒词与时间，用于抑制服务端把唤醒词回传为 STT。
         last_wake_word_ = wake_word;
         last_wake_at_ = esp_timer_get_time();
-        // WakeAck 显示租约：开麦（kWakeDetected 动作）不延迟；在租约期内
-        // CommitSnapshot 把下行内容栏显示为“收到！”，到期后切换普通聆听。
+        // WakeAck 显示租约：开麦（kWakeDetected 动作）不延迟；租约期内
+        // Presentation 显示“收到！”，到期后切换普通聆听。
         wake_ack_until_us_ = esp_timer_get_time() + kWakeAckDisplayUs;
         PlayWakeAck();
         const Status wake_status = HandleInteractionEvent(voice::VoiceInteractionEvent::kWakeDetected, wake_word);
@@ -343,57 +325,6 @@ class Runtime final {
         if (wake_queue_ == nullptr) return;
         const BoardRequest recovery{};
         (void)xQueueSend(wake_queue_, &recovery, 0);
-    }
-
-    // UTF-8 码点计数（滚动窗口按字符而非字节）。
-    static size_t CountCodepoints(std::string_view text) {
-        size_t count = 0;
-        for (size_t i = 0; i < text.size();) {
-            const uint8_t b = static_cast<uint8_t>(text[i]);
-            size_t width = 1;
-            if ((b & 0x80) == 0) {
-                width = 1;
-            } else if ((b & 0xe0) == 0xc0) {
-                width = 2;
-            } else if ((b & 0xf0) == 0xe0) {
-                width = 3;
-            } else if ((b & 0xf8) == 0xf0) {
-                width = 4;
-            }
-            i += width;
-            ++count;
-        }
-        return count;
-    }
-
-    // 下行长文本滚动：每 400ms 推进一个字符（按码点），滚动到末尾停止并停用定时器。
-    // 音量 overlay 到期：递增 revision 触发 CommitSnapshot 恢复最新快照。
-    static void VolumeOverlayEntry(void* context) {
-        auto* self = static_cast<Runtime*>(context);
-        self->volume_overlay_until_us_ = 0;
-        ++self->snapshot_.revision;
-        self->CommitSnapshot();
-    }
-
-    static void ScrollEntry(void* context) {
-        auto* self = static_cast<Runtime*>(context);
-        const size_t codepoints = CountCodepoints(self->scroll_content_);
-        if (codepoints <= 6) {
-            if (self->scroll_timer_ != nullptr) {
-                (void)esp_timer_stop(self->scroll_timer_);
-            }
-            return;
-        }
-        ++self->scroll_offset_;
-        // 末尾留 6 字符可见窗口后停止滚动（按码点，不用 UTF-8 字节数）。
-        if (self->scroll_offset_ + 6 >= codepoints) {
-            self->scroll_offset_ = codepoints - 6;
-            if (self->scroll_timer_ != nullptr) {
-                (void)esp_timer_stop(self->scroll_timer_);
-            }
-        }
-        ++self->snapshot_.revision;
-        self->CommitSnapshot();
     }
 
     // 聆听/最终 STT 超时：
@@ -495,7 +426,7 @@ class Runtime final {
         if (first_standby_) {
             first_standby_ = false;
         } else {
-            (void)display_esp::SetEmotion("happy", "牛牛走了！", {});
+            presentation_.ShowFarewell();
             PlayFarewell();
             vTaskDelay(pdMS_TO_TICKS(kWakeFeedbackMs));
         }
@@ -517,22 +448,7 @@ class Runtime final {
         ESP_LOGI(kTag, "WAKE_REARM controller=%d session=%d gate=%d atomic=%d", controller_ok ? 1 : 0,
                  session_ok ? 1 : 0, gate_ok ? 1 : 0, atomic_ok ? 1 : 0);
         if (atomic_ok) {
-            snapshot_.phase = voice::VoiceInteractionState::kStandby;
-            snapshot_.mood = voice::VoiceMood::kNeutral;
-            const time_t now = time(nullptr);
-            if (now > 1600000000) {
-                std::tm local{};
-                localtime_r(&now, &local);
-                char clock_text[8] = {};
-                std::snprintf(clock_text, sizeof(clock_text), "%02d:%02d", local.tm_hour, local.tm_min);
-                snapshot_.status_text = clock_text;
-            } else {
-                snapshot_.status_text = PhaseStatusText(voice::VoiceInteractionState::kStandby);
-            }
-            snapshot_.content_text.clear();
-            snapshot_.role = voice::VoiceContentRole::kNone;
-            ++snapshot_.revision;
-            CommitSnapshot();
+            presentation_.ShowStandby();
         }
         ESP_LOGI(kTag, "WAKE_STANDBY_READY=%d", atomic_ok ? 1 : 0);
     }
@@ -619,133 +535,15 @@ class Runtime final {
         }
     }
 
-    // 显示模型：由会话阶段推导可见状态，仅在 revision 变化时提交渲染器。
-    // phase→状态栏文本 与 mood 映射集中在此，不再散落在各事件分支。
-    static std::string_view PhaseStatusText(voice::VoiceInteractionState state) {
-        switch (state) {
-            case voice::VoiceInteractionState::kBooting:
-                return "开机";
-            case voice::VoiceInteractionState::kStandby:
-                return "空闲";
-            case voice::VoiceInteractionState::kOpeningCapture:
-                return "聆听中";  // 采集请求提交中（事务式启动过渡）
-            case voice::VoiceInteractionState::kListening:
-                return "聆听中";
-            case voice::VoiceInteractionState::kFinalizing:
-                return "聆听中";  // 等待最终 STT，仍显示聆听
-            case voice::VoiceInteractionState::kThinking:
-                return "处理中";
-            case voice::VoiceInteractionState::kSpeaking:
-                return "说话中";
-            case voice::VoiceInteractionState::kInterrupting:
-                return "停止";
-            case voice::VoiceInteractionState::kReconnecting:
-                return "重连中";
-            case voice::VoiceInteractionState::kError:
-                return "出错了";
-        }
-        return "出错了";
-    }
-
-    static voice::VoiceMood PhaseMood(voice::VoiceInteractionState state) {
-        switch (state) {
-            case voice::VoiceInteractionState::kListening:
-            case voice::VoiceInteractionState::kFinalizing:
-            case voice::VoiceInteractionState::kThinking:
-            case voice::VoiceInteractionState::kReconnecting:
-                return voice::VoiceMood::kThinking;
-            case voice::VoiceInteractionState::kSpeaking:
-                return voice::VoiceMood::kSpeaking;
-            case voice::VoiceInteractionState::kInterrupting:
-                return voice::VoiceMood::kSurprised;
-            case voice::VoiceInteractionState::kError:
-                return voice::VoiceMood::kSad;
-            default:
-                return voice::VoiceMood::kNeutral;
-        }
-    }
-
-    void CommitSnapshot() {
-        if (snapshot_.revision == last_rendered_revision_) {
-            return;
-        }
-        last_rendered_revision_ = snapshot_.revision;
-        // 渲染器：牛头表情 + 上行状态栏 + 下行内容栏（角色文本）。
-        std::string mood_key;
-        switch (snapshot_.mood) {
-            case voice::VoiceMood::kHappy:
-                mood_key = "happy";
-                break;
-            case voice::VoiceMood::kSad:
-                mood_key = "sad";
-                break;
-            case voice::VoiceMood::kThinking:
-                mood_key = "thinking";
-                break;
-            case voice::VoiceMood::kSurprised:
-                mood_key = "surprised";
-                break;
-            case voice::VoiceMood::kSpeaking:
-                mood_key = "speaking";
-                break;
-            case voice::VoiceMood::kAngry:
-                mood_key = "angry";
-                break;
-            default:
-                mood_key = "neutral";
-                break;
-        }
-        (void)display_esp::SetEmotion(mood_key, snapshot_.status_text, snapshot_.content_text, scroll_offset_);
-    }
-
     Status HandleInteractionEvent(voice::VoiceInteractionEvent event, std::string_view wake_word = {}) {
         const auto transition = interaction_.Handle(event);
         if (!transition.ok() || !transition.value.has_value()) {
             ESP_LOGW(kTag, "忽略乱序板端交互事件=%d: %s", static_cast<int>(event), transition.status.message.c_str());
             return transition.status;
         }
-        // 会话阶段 → 显示模型快照：状态栏文本 + 表情由阶段派生。
-        snapshot_.phase = interaction_.state();
-        snapshot_.mood = PhaseMood(snapshot_.phase);
-        // 空闲态显示当前时间（若服务端时间已初始化，约 2020 年后），否则显示状态词。
-        const time_t now = time(nullptr);
-        const bool clock_synced = now > 1600000000;  // 2020-09-13 之后的真实时间
-        if (snapshot_.phase == voice::VoiceInteractionState::kStandby && clock_synced) {
-            std::tm local{};
-            localtime_r(&now, &local);
-            char clock_text[8] = {};
-            std::snprintf(clock_text, sizeof(clock_text), "%02d:%02d", local.tm_hour, local.tm_min);
-            snapshot_.status_text = clock_text;
-        } else {
-            snapshot_.status_text = PhaseStatusText(snapshot_.phase);
-        }
-        // 事件驱动的内容角色切换：
-        // - kIntentReceived（STT）：内容栏显示用户语音，角色 user
-        // - kTtsStarted：内容栏保持/显示助手文本，角色 assistant
-        // - 会话结束/回待机：清空内容栏
-        // WakeAck 租约：唤醒后短窗（400ms）内显示“收到！”，不阻塞开麦。
-        if (event == voice::VoiceInteractionEvent::kWakeDetected &&
-            snapshot_.phase == voice::VoiceInteractionState::kListening && wake_ack_until_us_ > 0 &&
-            esp_timer_get_time() < wake_ack_until_us_) {
-            snapshot_.content_text = "收到！";
-            snapshot_.role = voice::VoiceContentRole::kSystem;
-        } else if (event == voice::VoiceInteractionEvent::kEndpointDetected) {
-            // VAD 端点：进入 kFinalizing 等待最终 STT，清掉“收到！”残留，
-            // 显示“聆听中”状态词。
-            wake_ack_until_us_ = 0;
-            snapshot_.content_text.clear();
-            snapshot_.role = voice::VoiceContentRole::kNone;
-        } else if (event == voice::VoiceInteractionEvent::kIntentReceived && !stt_display_text_.empty()) {
-            snapshot_.content_text = stt_display_text_;
-            snapshot_.role = voice::VoiceContentRole::kUser;
-        } else if (event == voice::VoiceInteractionEvent::kTtsStopped ||
-                   event == voice::VoiceInteractionEvent::kStandbyReady ||
-                   event == voice::VoiceInteractionEvent::kBootCompleted) {
-            snapshot_.content_text.clear();
-            snapshot_.role = voice::VoiceContentRole::kNone;
-        }
-        ++snapshot_.revision;
-        CommitSnapshot();
+        const bool show_wake_ack = wake_ack_until_us_ > 0 && esp_timer_get_time() < wake_ack_until_us_;
+        if (event == voice::VoiceInteractionEvent::kEndpointDetected) wake_ack_until_us_ = 0;
+        presentation_.ApplyInteraction(interaction_.state(), event, show_wake_ack, stt_display_text_);
         switch (transition.value->action) {
             case voice::VoiceInteractionAction::kNone:
                 return Status::Ok();
@@ -850,34 +648,11 @@ class Runtime final {
             CancelListenTimer();
             if (!evidence.detail.empty()) {
                 stt_display_text_ = evidence.detail;
-                snapshot_.content_text = evidence.detail;
-                snapshot_.role = voice::VoiceContentRole::kAssistant;
-                snapshot_.status_text = "说话中";
-                snapshot_.mood = voice::VoiceMood::kSpeaking;
-                // 新内容：重置滚动窗口；超宽（>6 字符约 108px）启动滚动定时器。
-                scroll_content_ = evidence.detail;
-                scroll_offset_ = 0;
-                if (scroll_timer_ == nullptr) {
-                    esp_timer_create_args_t args = {};
-                    args.callback = &ScrollEntry;
-                    args.arg = this;
-                    args.name = "voicelife_scroll";
-                    (void)esp_timer_create(&args, &scroll_timer_);
-                }
-                if (scroll_timer_ != nullptr) {
-                    (void)esp_timer_stop(scroll_timer_);
-                    if (CountCodepoints(scroll_content_) > 6) {
-                        (void)esp_timer_start_periodic(scroll_timer_, 400 * 1000ULL);
-                    }
-                }
-                ++snapshot_.revision;
-                CommitSnapshot();
+                presentation_.ShowAssistantText(evidence.detail);
             }
         } else if (evidence.event == "tts_stopped" || evidence.event == "tts_aborted") {
             CancelListenTimer();
-            if (scroll_timer_ != nullptr) {
-                (void)esp_timer_stop(scroll_timer_);
-            }
+            presentation_.StopScroll();
             if (terminal_turn_) {
                 // 终止回合（再见/拜拜）：告别播报完成走状态机 kFarewellCompleted
                 // （kSpeaking→kStandby）恢复待机，不直接 QueueStandbyRecovery。
@@ -889,10 +664,7 @@ class Runtime final {
                     // Controller 已不在 kSpeaking（如迟到 TTS 触发时已回 Standby/
                     // Error）：强制清内容栏，避免屏幕卡在“说话中”。
                     ESP_LOGI(kTag, "TTS_STOPPED_STALE state=%d 强制回内容栏", static_cast<int>(interaction_.state()));
-                    snapshot_.content_text.clear();
-                    snapshot_.role = voice::VoiceContentRole::kNone;
-                    ++snapshot_.revision;
-                    CommitSnapshot();
+                    presentation_.ClearContent();
                 }
             }
         } else if (evidence.event == "transport_disconnected") {
@@ -946,10 +718,7 @@ class Runtime final {
     std::atomic<int64_t> capture_started_us_{0};
     bool first_standby_ = true;
     std::string stt_display_text_;
-    // 下行内容滚动窗口起始字符（0=从头）；新内容重置，超宽时定时推进。
-    size_t scroll_offset_ = 0;
-    std::string scroll_content_;
-    esp_timer_handle_t scroll_timer_ = nullptr;
+    VoiceLifePcbPresentation presentation_;
     // 本轮是否为终止回合（用户说“再见/拜拜”等）：播报结束后不进入 follow-up。
     bool terminal_turn_ = false;
     // 最近唤醒词与其发生时刻（抑制唤醒词被服务端回传为 STT）。
@@ -957,12 +726,6 @@ class Runtime final {
     int64_t last_wake_at_ = 0;
     // WakeAck 显示租约截止时刻（esp_timer_us）：到期前下行栏显示“收到！”。
     int64_t wake_ack_until_us_ = 0;
-    // 音量 overlay 截止时刻（esp_timer_us）：到期后恢复最新快照。
-    int64_t volume_overlay_until_us_ = 0;
-    esp_timer_handle_t volume_overlay_timer_ = nullptr;
-    // 显示模型快照：会话阶段 → 可见状态的推导结果；revision 驱动增量重绘。
-    voice::DisplaySnapshot snapshot_;
-    uint64_t last_rendered_revision_ = 0;
     esp_timer_handle_t listen_timer_ = nullptr;
 #else
     ScaffoldAudioInput audio_input_;
