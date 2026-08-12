@@ -135,6 +135,13 @@ class CollectLinxE2eEvidenceTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("failure", error)
 
+    def test_im_readiness_status_accepts_recovery_and_uses_latest_terminal_state(self) -> None:
+        ok, error = MODULE.im_readiness_status([{"signal": "degraded"}, {"signal": "ready"}])
+        self.assertTrue(ok, error)
+        ok, error = MODULE.im_readiness_status([{"signal": "ready"}, {"signal": "degraded"}])
+        self.assertFalse(ok)
+        self.assertIn("degraded", error)
+
     def test_write_evidence_records_im_signals_without_raw_line(self) -> None:
         voice = MODULE.parse_voice_event(
             "VOICE_EVENT session=local generation=1 event=stt_text_received detail_present=1 "

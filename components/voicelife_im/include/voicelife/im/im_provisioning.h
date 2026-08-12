@@ -14,6 +14,8 @@ inline constexpr std::size_t kImProvisioningHeaderSize = 12;
 
 /// 已校验的 provisioning 字段长度。
 struct ImProvisioningHeader {
+    /// true 表示通过 VLI2 显式请求覆盖已有配置。
+    bool allow_overwrite = false;
     /// Gateway origin 的 UTF-8 字节数。
     std::size_t gateway_origin_size = 0;
     /// 设备 ID 的字节数。
@@ -28,6 +30,8 @@ struct ImProvisioningHeader {
 
 /// 从受控本地 provisioning 帧得到的 IM 配置。
 struct ImProvisioningRequest {
+    /// true 表示物理 USB 客户端显式请求覆盖已有配置。
+    bool allow_overwrite = false;
     /// Gateway HTTPS origin。
     std::string gateway_origin;
     /// Gateway 设备身份。
@@ -39,14 +43,14 @@ struct ImProvisioningRequest {
 };
 
 /**
- * @brief 校验 VLI1 provisioning 固定头及各字段长度。
+ * @brief 校验 VLI1/VLI2 provisioning 固定头及各字段长度。
  * @param bytes 至少包含 12 字节固定头的输入。
  * @return 已校验字段长度，或类型化协议错误。
  */
 Result<ImProvisioningHeader> ParseImProvisioningHeader(std::span<const uint8_t> bytes);
 
 /**
- * @brief 严格解析一帧完整 VLI1 provisioning 请求。
+ * @brief 严格解析一帧完整 VLI1/VLI2 provisioning 请求。
  * @param bytes 固定头和长度完全相符的单帧输入。
  * @return 解析后的配置；magic、长度或内容异常时 fail closed。
  */

@@ -119,6 +119,17 @@ Status StoreProvisioningRequest(im::ImProvisioningRequest& request) {
     esp_err_t error = nvs_open_from_partition(LinxSecretPartitionLabel(), kImNamespace, NVS_READWRITE, &handle);
     if (error != ESP_OK) return Status::Error(ErrorCode::kUnavailable, "打开 IM 加密 NVS 失败");
 
+    size_t existing_size = 0;
+    error = nvs_get_str(handle, "gateway_origin", nullptr, &existing_size);
+    if (!request.allow_overwrite && error == ESP_OK) {
+        nvs_close(handle);
+        return Status::Error(ErrorCode::kAlreadyExists, "IM 配置已存在；覆盖必须使用 VLI2");
+    }
+    if (error != ESP_OK && error != ESP_ERR_NVS_NOT_FOUND) {
+        nvs_close(handle);
+        return Status::Error(ErrorCode::kUnavailable, "检查已有 IM 配置失败");
+    }
+
     error = nvs_set_str(handle, "gateway_origin", request.gateway_origin.c_str());
     if (error == ESP_OK) error = nvs_set_str(handle, "device_id", request.device_id.c_str());
     if (error == ESP_OK) error = nvs_set_str(handle, "device_token", request.device_token.c_str());
@@ -246,10 +257,15 @@ Status SynchronizeSystemTime() {
 #endif
     };
 
-    const esp_err_t init = esp_netif_sntp_init(&config);
-    if (init != ESP_OK) {
-        ESP_LOGW(kTag, "SNTP_INIT_FAILED code=%d", static_cast<int>(init));
-        return Status::Error(ErrorCode::kUnavailable, "SNTP 初始化失败");
+    static std::atomic_bool initialized{false};
+    bool expected = false;
+    if (initialized.compare_exchange_strong(expected, true)) {
+        const esp_err_t init = esp_netif_sntp_init(&config);
+        if (init != ESP_OK) {
+            initialized.store(false);
+            ESP_LOGW(kTag, "SNTP_INIT_FAILED code=%d", static_cast<int>(init));
+            return Status::Error(ErrorCode::kUnavailable, "SNTP 初始化失败");
+        }
     }
     // 有界等待：SNTP 在 Wi-Fi 已关联的网络下通常 1~2s 内完成；10s 后仍未同步
     // 则降级，等下次开机再试，不让 IM 卡住设备启动。

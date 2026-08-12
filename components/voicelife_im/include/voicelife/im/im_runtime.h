@@ -52,7 +52,9 @@ enum class ImRuntimeState {
     kDisabled,
     /// 配置或设备凭据缺失、非法。
     kUnconfigured,
-    /// 配置、凭据和设备前置条件均满足，基础组件已创建。
+    /// 本地前置条件满足，正在验证 Gateway 与设备凭据。
+    kProbing,
+    /// Gateway 认证探针成功，基础组件已创建。
     kReady,
     /// 网络、时间或 Transport 初始化暂不可用。
     kDegraded,
@@ -96,6 +98,12 @@ class ImRuntime {
      */
     Status Start();
 
+    /**
+     * @brief 通过无副作用的认证 GET 请求验证 Gateway 可达性和设备凭据。
+     * @return 真实 Transport 结果；仅 2xx 或已认证后的 404 令 Runtime ready。
+     */
+    ImHttpResponse ProbeGateway();
+
     /** @brief 返回当前稳定状态。 @return 最近一次启动决策产生的状态。 */
     [[nodiscard]] ImRuntimeState state() const { return state_; }
 
@@ -111,7 +119,6 @@ class ImRuntime {
     ImRuntimeReadinessPort& readiness_;
     ImTransportFactory transport_factory_;
     ImRuntimeState state_ = ImRuntimeState::kUnconfigured;
-    bool start_attempted_ = false;
     Status start_status_ = Status::Error(ErrorCode::kUnavailable, "IM Runtime 尚未启动");
     std::unique_ptr<ImTransport> transport_;
     std::unique_ptr<ImReportingChannel> reporting_;

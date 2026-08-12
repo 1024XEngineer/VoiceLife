@@ -25,6 +25,13 @@ class ProvisionImConfigTest(unittest.TestCase):
         self.assertEqual(lengths, [23, 11, 22, 9])
         self.assertEqual(len(payload), 12 + sum(lengths))
 
+    def test_force_payload_uses_explicit_vli2_magic(self):
+        payload = PROVISION.request_payload(
+            "https://gateway.example", "device-test", "opaque-test-credential", "user-test", allow_overwrite=True
+        )
+
+        self.assertEqual(payload[:4], b"VLI2")
+
     def test_rejects_unsafe_origins_and_field_lengths(self):
         for origin in (
             "http://gateway.example",
@@ -43,6 +50,9 @@ class ProvisionImConfigTest(unittest.TestCase):
             PROVISION.request_payload("https://gateway.example", "", "credential", "")
         with self.assertRaises(ValueError):
             PROVISION.request_payload("https://gateway.example", "device-test", "x" * 513, "")
+        for device_id, token in (("device test", "credential"), ("device-test", "token with spaces"), ("设备", "token")):
+            with self.subTest(device_id=device_id, token=token), self.assertRaises(ValueError):
+                PROVISION.request_payload("https://gateway.example", device_id, token, "")
 
 
 if __name__ == "__main__":

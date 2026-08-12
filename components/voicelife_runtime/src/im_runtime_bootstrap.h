@@ -28,7 +28,8 @@ class EspImRuntimeReadiness final : public im::ImRuntimeReadinessPort {
 /**
  * @brief 启动一次受控物理串口 provisioning 窗口。
  *
- * 任务仅在配置缺失时由 Runtime 调用；成功后写入加密 NVS 并重启。
+ * 启用 IM 的 profile 始终开放该物理窗口；VLI1 仅允许首次配置，VLI2
+ * 显式允许覆盖已有配置。成功后写入加密 NVS 并重启。
  * 重复调用不会创建重复任务。
  *
  * @return 任务已存在或创建成功时为 true。

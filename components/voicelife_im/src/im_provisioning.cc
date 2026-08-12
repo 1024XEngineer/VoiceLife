@@ -11,7 +11,7 @@
 namespace voicelife::im {
 namespace {
 
-constexpr std::array<uint8_t, 4> kMagic = {'V', 'L', 'I', '1'};
+constexpr std::array<uint8_t, 3> kMagicPrefix = {'V', 'L', 'I'};
 constexpr std::size_t kMaxGatewayOriginBytes = 255;
 constexpr std::size_t kMaxDeviceIdBytes = 128;
 constexpr std::size_t kMaxDeviceTokenBytes = 512;
@@ -27,6 +27,11 @@ bool IsSafeText(std::span<const uint8_t> bytes) {
     });
 }
 
+bool IsSafeCredential(std::span<const uint8_t> bytes) {
+    return std::all_of(bytes.begin(), bytes.end(),
+                       [](uint8_t character) { return character > 0x20U && character < 0x7fU; });
+}
+
 std::string ToString(std::span<const uint8_t> bytes) {
     return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
 }
@@ -37,11 +42,13 @@ Result<ImProvisioningHeader> ParseImProvisioningHeader(std::span<const uint8_t> 
     if (bytes.size() < kImProvisioningHeaderSize) {
         return Result<ImProvisioningHeader>::Failure(ErrorCode::kInvalidArgument, "IM provisioning header 不完整");
     }
-    if (!std::equal(kMagic.begin(), kMagic.end(), bytes.begin())) {
+    if (!std::equal(kMagicPrefix.begin(), kMagicPrefix.end(), bytes.begin()) ||
+        (bytes[3] != static_cast<uint8_t>('1') && bytes[3] != static_cast<uint8_t>('2'))) {
         return Result<ImProvisioningHeader>::Failure(ErrorCode::kInvalidArgument, "IM provisioning magic 无效");
     }
 
     ImProvisioningHeader header;
+    header.allow_overwrite = bytes[3] == static_cast<uint8_t>('2');
     header.gateway_origin_size = DecodeSize(bytes, 4);
     header.device_id_size = DecodeSize(bytes, 6);
     header.device_token_size = DecodeSize(bytes, 8);
@@ -75,12 +82,13 @@ Result<ImProvisioningRequest> ParseImProvisioningRequest(std::span<const uint8_t
     const auto device_id = take(header.value->device_id_size);
     const auto token = take(header.value->device_token_size);
     const auto user_id = take(header.value->user_id_size);
-    if (!IsSafeText(origin) || !IsSafeText(device_id) || !IsSafeText(token) || !IsSafeText(user_id)) {
+    if (!IsSafeText(origin) || !IsSafeCredential(device_id) || !IsSafeCredential(token) || !IsSafeText(user_id)) {
         return Result<ImProvisioningRequest>::Failure(ErrorCode::kInvalidArgument,
                                                       "IM provisioning 字段包含非法控制字符");
     }
 
-    return Result<ImProvisioningRequest>::Success({.gateway_origin = ToString(origin),
+    return Result<ImProvisioningRequest>::Success({.allow_overwrite = header.value->allow_overwrite,
+                                                   .gateway_origin = ToString(origin),
                                                    .device_id = ToString(device_id),
                                                    .device_token = ToString(token),
                                                    .user_id = ToString(user_id)});

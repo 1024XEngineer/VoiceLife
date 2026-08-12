@@ -18,7 +18,9 @@ EVENT_PATTERN = re.compile(
     r".*?\bmin_heap=(?P<min_heap>\d+)\b"
 )
 # IM 生命周期标记：只提取脱敏状态与数字，绝不透传原始行。
-IM_MARKER_PATTERN = re.compile(r"(IM_RUNTIME_READY|IM_RUNTIME_DEGRADED|IM_PROVISION_READY|IM_PROVISIONED|SNTP_SYNCED)")
+IM_MARKER_PATTERN = re.compile(
+    r"(IM_RUNTIME_READY|IM_RUNTIME_DEGRADED|IM_PROVISION_READY|IM_PROVISIONED|SNTP_SYNCED)=1\b"
+)
 # parse_im_signal 产出的短信号名中，属于「IM 未就绪」的失败信号。
 IM_FAILURE_SIGNALS = frozenset({"degraded", "failure"})
 LABEL_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -82,14 +84,14 @@ def parse_im_signal(line: str) -> dict[str, int | str] | None:
 
 
 def im_readiness_status(signals: list[dict[str, int | str]]) -> tuple[bool, str]:
-    """Require an IM_RUNTIME_READY=1 signal and reject any IM failure signal."""
+    """Require the latest terminal IM lifecycle signal to be ready."""
     if not signals:
         return False, "no IM readiness signal observed"
-    failures = sorted({str(signal["signal"]) for signal in signals} & IM_FAILURE_SIGNALS)
-    if failures:
-        return False, f"IM failure signal observed: {', '.join(failures)}"
-    if not any(str(signal["signal"]) == "ready" for signal in signals):
+    terminal = [str(signal["signal"]) for signal in signals if str(signal["signal"]) in IM_FAILURE_SIGNALS | {"ready"}]
+    if not terminal:
         return False, "IM ready signal (IM_RUNTIME_READY=1) not observed"
+    if terminal[-1] != "ready":
+        return False, f"latest IM terminal signal is not ready: {terminal[-1]}"
     return True, ""
 
 

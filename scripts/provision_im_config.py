@@ -10,7 +10,8 @@ import re
 import time
 from urllib.parse import urlsplit
 
-MAGIC = b"VLI1"
+CREATE_MAGIC = b"VLI1"
+OVERWRITE_MAGIC = b"VLI2"
 READY_MARKER = b"IM_PROVISION_READY=1"
 FIELD_LIMITS = (255, 128, 512, 128)
 FAILURE_PATTERN = re.compile(rb"\bIM_PROVISION_FAILED code=(\d+)\b")
@@ -22,6 +23,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gateway-origin", required=True, help="HTTPS origin without path/query/fragment")
     parser.add_argument("--device-id", required=True, help="Gateway device identifier")
     parser.add_argument("--user-id", default="", help="optional non-secret Gateway user reference")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="explicitly overwrite an existing board IM configuration over the physical USB link",
+    )
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=80.0)
     return parser.parse_args()
@@ -68,17 +74,28 @@ def validate_gateway_origin(value: str) -> None:
         raise ValueError("gateway origin must be HTTPS and contain no path, userinfo, query, or fragment")
 
 
-def request_payload(gateway_origin: str, device_id: str, device_token: str, user_id: str = "") -> bytearray:
+def request_payload(
+    gateway_origin: str,
+    device_id: str,
+    device_token: str,
+    user_id: str = "",
+    *,
+    allow_overwrite: bool = False,
+) -> bytearray:
     validate_gateway_origin(gateway_origin)
     fields = tuple(value.encode("utf-8") for value in (gateway_origin, device_id, device_token, user_id))
     for index, (field, maximum) in enumerate(zip(fields, FIELD_LIMITS, strict=True)):
         minimum = 0 if index == 3 else 1
         if not minimum <= len(field) <= maximum:
             raise ValueError(f"field {index + 1} must encode to {minimum}..{maximum} bytes")
-        if b"\x00" in field or any(byte < 0x20 or byte == 0x7F for byte in field):
+        credential = index in (1, 2)
+        if b"\x00" in field or any(
+            byte < 0x20 or byte == 0x7F or (credential and (byte <= 0x20 or byte >= 0x7F)) for byte in field
+        ):
             raise ValueError(f"field {index + 1} contains a control character")
     header = b"".join(len(field).to_bytes(2, "big") for field in fields)
-    return bytearray(MAGIC + header + b"".join(fields))
+    magic = OVERWRITE_MAGIC if allow_overwrite else CREATE_MAGIC
+    return bytearray(magic + header + b"".join(fields))
 
 
 def provisioning_failure_code(line: bytes) -> int | None:
@@ -89,7 +106,13 @@ def provisioning_failure_code(line: bytes) -> int | None:
 def main() -> None:
     args = parse_args()
     token = getpass.getpass("IM device token (hidden): ")
-    payload = request_payload(args.gateway_origin, args.device_id, token, args.user_id)
+    payload = request_payload(
+        args.gateway_origin,
+        args.device_id,
+        token,
+        args.user_id,
+        allow_overwrite=args.force,
+    )
     token = ""
     try:
         import serial

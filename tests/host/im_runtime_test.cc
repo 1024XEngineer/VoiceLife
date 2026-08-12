@@ -63,6 +63,20 @@ class FakeReadiness final : public ImRuntimeReadinessPort {
 class FakeTransport final : public ImTransport {
    public:
     ImHttpResponse Post(const ImHttpRequest&) override { return {}; }
+    ImHttpResponse Get(const ImHttpRequest& request) override {
+        ++get_calls;
+        last_request = request;
+        return next_get_response;
+    }
+
+    int get_calls = 0;
+    ImHttpRequest last_request;
+    ImHttpResponse next_get_response{
+        .status = voicelife::im::ImTransportStatus::kHttpError,
+        .status_code = 404,
+        .body = "Not Found",
+        .message = "404",
+    };
 };
 
 class FakeSecretStore final : public ImSecretStorePort {
@@ -92,10 +106,13 @@ struct RuntimeFixture {
     FakeCredentials credentials;
     FakeReadiness readiness;
     int factory_calls = 0;
+    FakeTransport* transport = nullptr;
     ImRuntime runtime{config, credentials, readiness, [this](const std::string& origin) {
                           ++factory_calls;
                           last_origin = origin;
-                          return std::make_unique<FakeTransport>();
+                          auto created = std::make_unique<FakeTransport>();
+                          transport = created.get();
+                          return created;
                       }};
     std::string last_origin;
 };
@@ -260,6 +277,12 @@ void TestProvisioningFrameIsStrictAndBounded() {
           "合法 provisioning frame 必须完整解析");
     Check(parsed.value->device_token == token && parsed.value->user_id == user_id,
           "解析结果必须保留凭据和可选用户引用");
+    Check(!parsed.value->allow_overwrite, "VLI1 不得覆盖已有配置");
+
+    auto overwrite = frame;
+    overwrite[3] = '2';
+    const auto parsed_overwrite = voicelife::im::ParseImProvisioningRequest(overwrite);
+    Check(parsed_overwrite.ok() && parsed_overwrite.value->allow_overwrite, "VLI2 必须显式允许物理覆盖");
 
     auto bad_magic = frame;
     bad_magic[0] = 'X';
@@ -293,6 +316,12 @@ void TestProvisioningFrameIsStrictAndBounded() {
     length_mismatch.push_back(0x00);
     Check(voicelife::im::ParseImProvisioningRequest(length_mismatch).status.code == ErrorCode::kInvalidArgument,
           "frame 长度与 header 不符必须拒绝");
+
+    auto spaced_token = frame;
+    const std::size_t token_offset = voicelife::im::kImProvisioningHeaderSize + origin.size() + device_id.size();
+    spaced_token[token_offset] = ' ';
+    Check(voicelife::im::ParseImProvisioningRequest(spaced_token).status.code == ErrorCode::kInvalidArgument,
+          "运行时会拒绝的空格 Token 必须在 provisioning 阶段拒绝");
 }
 
 void TestReadinessFailureDegradesWithoutTransport() {
@@ -309,17 +338,91 @@ void TestReadinessFailureDegradesWithoutTransport() {
           "时间未就绪不得构造 TLS Transport");
 }
 
-void TestReadyOwnsOneReportingChannel() {
+void TestAuthenticatedProbeMakesRuntimeReady() {
     RuntimeFixture fixture;
 
-    Check(fixture.runtime.Start().ok(), "有效配置应进入 ready");
-    Check(fixture.runtime.state() == ImRuntimeState::kReady, "有效配置必须进入 ready");
+    Check(fixture.runtime.Start().ok(), "有效配置应进入探测阶段");
+    Check(fixture.runtime.state() == ImRuntimeState::kProbing, "构造 Transport 后必须等待真实 Gateway 探针");
     Check(fixture.factory_calls == 1 && fixture.last_origin == "https://gateway.example",
           "Runtime 必须用受控 origin 构造一次 Transport");
-    Check(fixture.runtime.reporting_channel() != nullptr, "ready Runtime 必须持有上报通道");
+    Check(fixture.runtime.reporting_channel() == nullptr, "认证探针成功前不得发布上报通道");
+
+    const ImHttpResponse response = fixture.runtime.ProbeGateway();
+    Check(response.status_code == 404 && fixture.runtime.state() == ImRuntimeState::kReady,
+          "已认证的探针 404 必须表示 Gateway ready");
+    Check(fixture.transport != nullptr && fixture.transport->get_calls == 1, "探针必须发出一次 GET");
+    Check(fixture.transport->last_request.method == "GET" &&
+              fixture.transport->last_request.path == "/v1/im/pairing-sessions/voicelife-runtime-readiness-probe",
+          "探针必须复用无副作用的配对查询接口");
+    Check(fixture.transport->last_request.headers.size() == 1 &&
+              fixture.transport->last_request.headers.front().name == "Authorization" &&
+              fixture.transport->last_request.headers.front().value == "Bearer device-token",
+          "探针必须携带设备 Bearer 凭据且不发送业务载荷");
+    Check(fixture.runtime.reporting_channel() != nullptr, "认证成功后 Runtime 必须发布上报通道");
 
     Check(fixture.runtime.Start().ok(), "重复启动应幂等成功");
     Check(fixture.factory_calls == 1, "重复启动不得创建重复 Transport 或任务");
+}
+
+void TestTransientReadinessCanRecoverWithoutDuplicateTransport() {
+    RuntimeFixture fixture;
+    fixture.readiness.network_ready = false;
+    Check(fixture.runtime.Start().code == ErrorCode::kUnavailable, "临时网络失败必须 degraded");
+    Check(fixture.runtime.state() == ImRuntimeState::kDegraded && fixture.factory_calls == 0,
+          "网络恢复前不得构造 Transport");
+
+    fixture.readiness.network_ready = true;
+    Check(fixture.runtime.Start().ok() && fixture.runtime.state() == ImRuntimeState::kProbing,
+          "网络恢复后必须允许重新启动探针");
+    Check(fixture.factory_calls == 1, "恢复过程只能创建一个 Transport");
+    Check(fixture.runtime.Start().ok() && fixture.factory_calls == 1, "探测期间重复启动不得重复创建资源");
+}
+
+void TestCredentialProbeFailureStaysDegraded() {
+    RuntimeFixture fixture;
+    Check(fixture.runtime.Start().ok(), "有效本地配置必须进入探测阶段");
+    fixture.transport->next_get_response = {
+        .status = voicelife::im::ImTransportStatus::kCredentialRejected,
+        .status_code = 401,
+        .body = {},
+        .message = "401",
+    };
+
+    const ImHttpResponse response = fixture.runtime.ProbeGateway();
+    Check(response.status == voicelife::im::ImTransportStatus::kCredentialRejected,
+          "401 必须保留凭据拒绝分类");
+    Check(fixture.runtime.state() == ImRuntimeState::kDegraded && fixture.runtime.reporting_channel() == nullptr,
+          "错误凭据不得进入 ready 或发布上报通道");
+}
+
+void TestArbitraryNotFoundResponseDoesNotMakeRuntimeReady() {
+    RuntimeFixture fixture;
+    Check(fixture.runtime.Start().ok(), "有效本地配置必须进入探测阶段");
+    fixture.transport->next_get_response = {
+        .status = voicelife::im::ImTransportStatus::kHttpError,
+        .status_code = 404,
+        .body = "unrelated reverse proxy response",
+        .message = "404",
+    };
+
+    (void)fixture.runtime.ProbeGateway();
+    Check(fixture.runtime.state() == ImRuntimeState::kDegraded && fixture.runtime.reporting_channel() == nullptr,
+          "任意 HTTPS 站点的 404 不得被误判为 VoiceLife Gateway ready");
+}
+
+void TestAuthenticatedNotFoundWithoutRetainedBodyMakesRuntimeReady() {
+    RuntimeFixture fixture;
+    Check(fixture.runtime.Start().ok(), "有效本地配置必须进入探测阶段");
+    fixture.transport->next_get_response = {
+        .status = voicelife::im::ImTransportStatus::kHttpError,
+        .status_code = 404,
+        .body = {},
+        .message = "404",
+    };
+
+    (void)fixture.runtime.ProbeGateway();
+    Check(fixture.runtime.state() == ImRuntimeState::kReady && fixture.runtime.reporting_channel() != nullptr,
+          "ESP 已消费短响应体时，认证后的 Gateway 404 仍必须进入 ready");
 }
 
 void TestFactoryFailureIsDegraded() {
@@ -417,7 +520,11 @@ int main() {
     TestRetryPolicyClampsAndHandles408();
     TestProvisioningFrameIsStrictAndBounded();
     TestReadinessFailureDegradesWithoutTransport();
-    TestReadyOwnsOneReportingChannel();
+    TestAuthenticatedProbeMakesRuntimeReady();
+    TestTransientReadinessCanRecoverWithoutDuplicateTransport();
+    TestCredentialProbeFailureStaysDegraded();
+    TestArbitraryNotFoundResponseDoesNotMakeRuntimeReady();
+    TestAuthenticatedNotFoundWithoutRetainedBodyMakesRuntimeReady();
     TestFactoryFailureIsDegraded();
     TestTrustedSystemTimeBoundary();
     TestStoredConfigurationReadsSecretsOnlyWhenEnabled();
