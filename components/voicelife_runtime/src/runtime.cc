@@ -427,8 +427,8 @@ class Runtime final {
         }
         bool expected = false;
         if (!im_lifecycle_started_.compare_exchange_strong(expected, true)) return;
-        if (xTaskCreate(&Runtime::ImLifecycleTaskEntry, "voicelife_im_lifecycle", 8192, this, 3,
-                        &im_lifecycle_task_) != pdPASS) {
+        if (xTaskCreate(&Runtime::ImLifecycleTaskEntry, "voicelife_im_lifecycle", 8192, this, 3, &im_lifecycle_task_) !=
+            pdPASS) {
             im_lifecycle_started_.store(false);
             ESP_LOGW(kTag, "IM_RUNTIME_TASK_FAILED=1");
         }
@@ -477,8 +477,8 @@ class Runtime final {
                      static_cast<int>(im_runtime_.state()), static_cast<int>(status.code), response.status_code);
             const auto delay_ms = retry_policy.NextDelay(response);
             if (!delay_ms.has_value()) break;
-            ESP_LOGI(kTag, "IM_RUNTIME_RETRY attempt=%u delay_ms=%u",
-                     static_cast<unsigned>(retry_policy.attempts()), static_cast<unsigned>(*delay_ms));
+            ESP_LOGI(kTag, "IM_RUNTIME_RETRY attempt=%u delay_ms=%u", static_cast<unsigned>(retry_policy.attempts()),
+                     static_cast<unsigned>(*delay_ms));
             vTaskDelay(pdMS_TO_TICKS(*delay_ms));
         }
         vTaskDelete(nullptr);

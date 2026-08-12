@@ -3,14 +3,12 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
-#include <optional>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "im_runtime_test_support.h"
 #include "support/test_support.h"
-#include "voicelife/im/im_config_store.h"
 #include "voicelife/im/im_endpoint.h"
 #include "voicelife/im/im_provisioning.h"
 #include "voicelife/im/im_retry_policy.h"
@@ -33,89 +31,12 @@ using voicelife::im::ImSecretStorePort;
 using voicelife::im::ImTransport;
 using voicelife::im::StoredImConfigProvider;
 using voicelife::test::Check;
-
-class FakeConfig final : public ImConfigProvider {
-   public:
-    Result<ImRuntimeConfig> result = Result<ImRuntimeConfig>::Success(
-        {.enabled = true, .gateway_origin = "https://gateway.example", .user_id = "user-test"});
-
-    Result<ImRuntimeConfig> Load() override { return result; }
-};
-
-class FakeCredentials final : public ImCredentialProvider {
-   public:
-    std::string token = "device-token";
-    std::string device_id = "device-test";
-
-    std::string DeviceToken() const override { return token; }
-    std::string DeviceId() const override { return device_id; }
-};
-
-class FakeReadiness final : public ImRuntimeReadinessPort {
-   public:
-    bool network_ready = true;
-    bool system_time_ready = true;
-
-    bool NetworkReady() const override { return network_ready; }
-    bool SystemTimeReady() const override { return system_time_ready; }
-};
-
-class FakeTransport final : public ImTransport {
-   public:
-    ImHttpResponse Post(const ImHttpRequest&) override { return {}; }
-    ImHttpResponse Get(const ImHttpRequest& request) override {
-        ++get_calls;
-        last_request = request;
-        return next_get_response;
-    }
-
-    int get_calls = 0;
-    ImHttpRequest last_request;
-    ImHttpResponse next_get_response{
-        .status = voicelife::im::ImTransportStatus::kHttpError,
-        .status_code = 404,
-        .body = "Not Found",
-        .message = "404",
-    };
-};
-
-class FakeSecretStore final : public ImSecretStorePort {
-   public:
-    Result<std::string> Read(std::string_view key) override {
-        ++reads;
-        if (fail_key.has_value() && key == *fail_key) {
-            return Result<std::string>::Failure(ErrorCode::kUnavailable, "read failure");
-        }
-        if (fail_with == ErrorCode::kNotFound) return Result<std::string>::Failure(ErrorCode::kNotFound, "missing");
-        if (fail_with == ErrorCode::kUnavailable) {
-            return Result<std::string>::Failure(ErrorCode::kUnavailable, "read failure");
-        }
-        const auto found = values.find(std::string(key));
-        if (found == values.end()) return Result<std::string>::Failure(ErrorCode::kNotFound, "missing");
-        return Result<std::string>::Success(found->second);
-    }
-
-    int reads = 0;
-    ErrorCode fail_with = ErrorCode::kNone;
-    std::optional<std::string> fail_key;
-    std::unordered_map<std::string, std::string> values;
-};
-
-struct RuntimeFixture {
-    FakeConfig config;
-    FakeCredentials credentials;
-    FakeReadiness readiness;
-    int factory_calls = 0;
-    FakeTransport* transport = nullptr;
-    ImRuntime runtime{config, credentials, readiness, [this](const std::string& origin) {
-                          ++factory_calls;
-                          last_origin = origin;
-                          auto created = std::make_unique<FakeTransport>();
-                          transport = created.get();
-                          return created;
-                      }};
-    std::string last_origin;
-};
+using voicelife::test::im_runtime_support::FakeConfig;
+using voicelife::test::im_runtime_support::FakeCredentials;
+using voicelife::test::im_runtime_support::FakeReadiness;
+using voicelife::test::im_runtime_support::FakeSecretStore;
+using voicelife::test::im_runtime_support::FakeTransport;
+using voicelife::test::im_runtime_support::RuntimeFixture;
 
 void TestDisabledDoesNotConstructTransport() {
     RuntimeFixture fixture;
@@ -389,8 +310,7 @@ void TestCredentialProbeFailureStaysDegraded() {
     };
 
     const ImHttpResponse response = fixture.runtime.ProbeGateway();
-    Check(response.status == voicelife::im::ImTransportStatus::kCredentialRejected,
-          "401 必须保留凭据拒绝分类");
+    Check(response.status == voicelife::im::ImTransportStatus::kCredentialRejected, "401 必须保留凭据拒绝分类");
     Check(fixture.runtime.state() == ImRuntimeState::kDegraded && fixture.runtime.reporting_channel() == nullptr,
           "错误凭据不得进入 ready 或发布上报通道");
 }

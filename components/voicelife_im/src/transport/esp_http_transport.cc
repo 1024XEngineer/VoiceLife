@@ -42,13 +42,9 @@ std::unique_ptr<ImTransport> CreateEspHttpTransport(std::string gateway_origin) 
     return std::make_unique<EspHttpTransport>(std::move(gateway_origin));
 }
 
-ImHttpResponse EspHttpTransport::Post(const ImHttpRequest& request) {
-    return Perform(request, HTTP_METHOD_POST);
-}
+ImHttpResponse EspHttpTransport::Post(const ImHttpRequest& request) { return Perform(request, HTTP_METHOD_POST); }
 
-ImHttpResponse EspHttpTransport::Get(const ImHttpRequest& request) {
-    return Perform(request, HTTP_METHOD_GET);
-}
+ImHttpResponse EspHttpTransport::Get(const ImHttpRequest& request) { return Perform(request, HTTP_METHOD_GET); }
 
 ImHttpResponse EspHttpTransport::Perform(const ImHttpRequest& request, esp_http_client_method_t method) {
     ImHttpResponse result;

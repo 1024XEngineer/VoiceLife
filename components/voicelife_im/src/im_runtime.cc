@@ -12,8 +12,7 @@
 namespace voicelife::im {
 namespace {
 
-constexpr std::string_view kReadinessProbePath =
-    "/v1/im/pairing-sessions/voicelife-runtime-readiness-probe";
+constexpr std::string_view kReadinessProbePath = "/v1/im/pairing-sessions/voicelife-runtime-readiness-probe";
 
 bool IsSafeCredential(const std::string& value, std::size_t maximum_size) {
     if (value.empty() || value.size() > maximum_size) return false;

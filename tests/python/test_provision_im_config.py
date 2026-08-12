@@ -50,7 +50,11 @@ class ProvisionImConfigTest(unittest.TestCase):
             PROVISION.request_payload("https://gateway.example", "", "credential", "")
         with self.assertRaises(ValueError):
             PROVISION.request_payload("https://gateway.example", "device-test", "x" * 513, "")
-        for device_id, token in (("device test", "credential"), ("device-test", "token with spaces"), ("设备", "token")):
+        for device_id, token in (
+            ("device test", "credential"),
+            ("device-test", "token with spaces"),
+            ("设备", "token"),
+        ):
             with self.subTest(device_id=device_id, token=token), self.assertRaises(ValueError):
                 PROVISION.request_payload("https://gateway.example", device_id, token, "")
 
