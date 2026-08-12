@@ -4,6 +4,7 @@
 
 #include "voicelife/audio_esp/audio_board_profile.h"
 #include "voicelife/voice/voice_ports.h"
+#include "voicelife/voice/wake_gate_audio_input.h"
 
 namespace voicelife::runtime {
 
@@ -59,6 +60,17 @@ class PlatformAssembly {
      * @return 音频输出端口引用。
      */
     virtual voicelife::voice::AudioOutputPort& audio_output() = 0;
+
+    /**
+     * @brief 返回板级唤醒门控（含具体唤醒检测器，Assembly 持有）。
+     * @return 唤醒门控引用。
+     */
+    virtual voicelife::voice::WakeGateAudioInput& wake_gate() = 0;
+
+    /**
+     * @brief 初始化板级 LED（构建期板型专属；无 LED 板为空实现）。
+     */
+    virtual void InitializeBoardLeds() {}
 
     /**
      * @brief 设置输出音量（0-100）。默认空实现。

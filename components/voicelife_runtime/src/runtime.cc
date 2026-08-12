@@ -23,7 +23,6 @@
 #include "freertos/task.h"
 #include "generated/farewell_pcm.h"
 #include "generated/wake_ack_pcm.h"
-#include "led_strip.h"
 #include "nvs.h"
 #include "voicelife/audio_esp/audio_board_profile.h"
 #include "voicelife/audio_esp/esp32s3_audio_probe.h"
@@ -199,27 +198,6 @@ Status RunAudioPortSmoke() {
 }
 #endif
 
-#if CONFIG_VOICELIFE_SPARKBOT_HARDWARE_DEMO
-constexpr uint32_t kSparkBotDemoToneHz = 1000;
-constexpr uint32_t kSparkBotDemoToneMs = 1000;
-constexpr uint32_t kSparkBotDemoEmotionHoldMs = 1500;
-
-voice::AudioFrame MakeSparkBotDemoToneFrame(const voice::AudioFormat& format, uint64_t sequence) {
-    constexpr double kPi = 3.14159265358979323846;
-    voice::AudioFrame frame;
-    frame.sequence = sequence;
-    frame.format = format;
-    const std::size_t samples = static_cast<std::size_t>(format.sample_rate_hz) * format.frame_duration_ms / 1000U;
-    frame.payload.resize(samples * sizeof(int16_t));
-    for (std::size_t i = 0; i < samples; ++i) {
-        const double angle = 2.0 * kPi * static_cast<double>(kSparkBotDemoToneHz) * static_cast<double>(i) /
-                             static_cast<double>(format.sample_rate_hz);
-        const int16_t sample = static_cast<int16_t>(std::sin(angle) * 6000.0);
-        std::memcpy(frame.payload.data() + i * sizeof(sample), &sample, sizeof(sample));
-    }
-    return frame;
-}
-#endif
 #endif
 
 class ScaffoldAudioInput final : public voice::AudioInputPort {
@@ -289,44 +267,13 @@ class Runtime final {
         if (!init_status_.ok()) return init_status_;
 #ifdef ESP_PLATFORM
         // 立创实战派 ESP32-S3 板载 WS2812 灯珠接 GPIO48（小智 BUILTIN_LED_GPIO）。
-        // 上电未驱动时灯珠可能随机亮；用 RMT led_strip 初始化后立即 clear（GRB 全零）
-        // 真正关闭灯珠。GPIO18 是 MCP 外接灯，不在本板默认范围。
-        {
-            led_strip_config_t strip_config = {};
-            strip_config.strip_gpio_num = GPIO_NUM_48;
-            strip_config.max_leds = 1;
-            strip_config.color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB;
-            strip_config.led_model = LED_MODEL_WS2812;
-            led_strip_rmt_config_t rmt_config = {};
-            rmt_config.resolution_hz = 10 * 1000 * 1000;
-            led_strip_handle_t strip = nullptr;
-            if (led_strip_new_rmt_device(&strip_config, &rmt_config, &strip) == ESP_OK) {
-                (void)led_strip_clear(strip);
-                (void)led_strip_del(strip);
-                ESP_LOGI(kTag, "BUILTIN_LED_GPIO48_CLEAR=1");
-            } else {
-                ESP_LOGW(kTag, "BUILTIN_LED_GPIO48_INIT_FAILED");
-            }
-            // clear 后把 GPIO48 配成输出低并保持：RMT 句柄删除后数据线若悬空，
-            // WS2812 会因电平漂移重新点亮；拉低可锁定灯灭。
-            gpio_config_t led_lock = {};
-            led_lock.pin_bit_mask = 1ULL << GPIO_NUM_48;
-            led_lock.mode = GPIO_MODE_OUTPUT;
-            led_lock.pull_up_en = GPIO_PULLUP_DISABLE;
-            led_lock.pull_down_en = GPIO_PULLDOWN_ENABLE;
-            led_lock.intr_type = GPIO_INTR_DISABLE;
-            if (gpio_config(&led_lock) == ESP_OK) {
-                (void)gpio_set_level(GPIO_NUM_48, 0);
-            }
-        }
+        // 板级 LED 初始化（板型专属，Assembly 持有）。
+        assembly_->InitializeBoardLeds();
         if (const Status display_status = assembly_->Start(); !display_status.ok()) {
             ESP_LOGE(kTag, "STARTUP_ERROR stage=display_start code=%d msg=%s", static_cast<int>(display_status.code),
                      display_status.message.c_str());
             return display_status;
         }
-#if CONFIG_VOICELIFE_SPARKBOT_HARDWARE_DEMO
-        return RunSparkBotHardwareDemo();
-#endif
         ShowDisplay(voice::VoiceMood::kThinking, "联网", "");
         if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=secret_store code=%d", static_cast<int>(secret_store.code));
@@ -356,11 +303,9 @@ class Runtime final {
 #ifdef ESP_PLATFORM
         // 音频端口由 Assembly 注入（业务 PCM 语义，不暴露 I2S/Codec）。
         assembly_->SetOutputVolume(static_cast<uint8_t>(volume_));
-        wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
-        wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(assembly_->audio_input(), *wake_detector_);
-        wake_gate_->SetWakeSink([this](std::string_view wake_word) { QueueWakeWord(wake_word); });
+        assembly_->wake_gate().SetWakeSink([this](std::string_view wake_word) { QueueWakeWord(wake_word); });
         session_ = std::make_unique<voice::VoiceSession>(
-            *wake_gate_, assembly_->audio_output(), *provider_,
+            assembly_->wake_gate(), assembly_->audio_output(), *provider_,
             [this](const voice::VoiceEvidence& evidence) { LogVoiceEvidence(evidence); });
         voice::VoiceSessionConfig config;
         config.session_id = "voicelife-linx-session";
@@ -767,14 +712,14 @@ class Runtime final {
     }
 
     void RestoreStandby() {
-        if (!wake_gate_) return;
-        const Status stop_status = wake_gate_->StopCapture();
+        if (assembly_ == nullptr) return;
+        const Status stop_status = assembly_->wake_gate().StopCapture();
         if (!stop_status.ok()) {
             ESP_LOGW(kTag, "本地待机恢复停止上行失败: %s", stop_status.message.c_str());
             (void)EnqueueEvent(voice::VoiceInteractionEvent::kFailure);
             return;
         }
-        const Status standby_status = wake_gate_->StartStandby();
+        const Status standby_status = assembly_->wake_gate().StartStandby();
         if (!standby_status.ok()) {
             ESP_LOGW(kTag, "本地待机恢复失败: %s", standby_status.message.c_str());
             (void)EnqueueEvent(voice::VoiceInteractionEvent::kFailure);
@@ -808,7 +753,7 @@ class Runtime final {
         // 仅全部满足才显示 Standby 时间快照；不满足则为假待机，保留告警文案并记录。
         const bool controller_ok = interaction_.state() == voice::VoiceInteractionState::kStandby;
         const bool session_ok = session_ && session_->state() == voice::VoiceSessionState::kReady;
-        const bool gate_ok = wake_gate_ && wake_gate_->standby();
+        const bool gate_ok = assembly_ != nullptr && assembly_->wake_gate().standby();
         const bool atomic_ok = controller_ok && session_ok && gate_ok;
         ESP_LOGI(kTag, "WAKE_REARM controller=%d session=%d gate=%d atomic=%d", controller_ok ? 1 : 0,
                  session_ok ? 1 : 0, gate_ok ? 1 : 0, atomic_ok ? 1 : 0);
@@ -980,61 +925,6 @@ class Runtime final {
         ++snapshot_.revision;
         CommitSnapshot();
     }
-
-#if CONFIG_VOICELIFE_SPARKBOT_HARDWARE_DEMO
-    Status RunSparkBotHardwareDemo() {
-        // This mode deliberately stops before secrets, Provider, and VoiceSession.
-        // It exercises only the already-injected presentation and audio ports.
-        ESP_LOGI(kTag, "SPARKBOT_DEMO_MODE=1");
-        ShowDisplay(voice::VoiceMood::kNeutral, "SparkBot demo", "Idle animation");
-        ESP_LOGI(kTag, "SPARKBOT_DEMO_DISPLAY_SUBMITTED=1");
-        vTaskDelay(pdMS_TO_TICKS(kSparkBotDemoEmotionHoldMs));
-
-        audio_esp::Esp32s3PcmAudioPorts ports(
-            assembly_->audio_profile(), audio_esp::AudioPortOptions{},
-            [this](bool enabled) { (void)assembly_->SetAudioOutputEnabled(enabled); });
-        const auto profile = assembly_->audio_profile();
-        Status status = ports.input().Open(profile.capture_i2s.format);
-        if (!status.ok()) {
-            ESP_LOGW(kTag, "SPARKBOT_DEMO_AUDIO_FAILED stage=input_open code=%d", static_cast<int>(status.code));
-            ShowDisplay(voice::VoiceMood::kSad, "Audio error", "input open failed");
-            return status;
-        }
-        status = ports.output().Open(profile.playback_i2s.format);
-        if (!status.ok()) {
-            ports.input().Close();
-            ESP_LOGW(kTag, "SPARKBOT_DEMO_AUDIO_FAILED stage=output_open code=%d", static_cast<int>(status.code));
-            ShowDisplay(voice::VoiceMood::kSad, "Audio error", "output open failed");
-            return status;
-        }
-        ESP_LOGI(kTag, "SPARKBOT_DEMO_AUDIO_READY=1");
-
-        ShowDisplay(voice::VoiceMood::kSpeaking, "Playing 1 kHz", "Listen for the tone");
-        const uint32_t frames = kSparkBotDemoToneMs / profile.playback_i2s.format.frame_duration_ms;
-        for (uint32_t sequence = 0; sequence < frames; ++sequence) {
-            status = ports.output().Push(MakeSparkBotDemoToneFrame(profile.playback_i2s.format, sequence));
-            if (!status.ok()) {
-                break;
-            }
-        }
-        if (status.ok()) {
-            ESP_LOGI(kTag, "SPARKBOT_DEMO_TONE_QUEUED=1 frames=%u", static_cast<unsigned>(frames));
-            vTaskDelay(pdMS_TO_TICKS(kSparkBotDemoToneMs + 250));
-        } else {
-            ESP_LOGW(kTag, "SPARKBOT_DEMO_AUDIO_FAILED stage=tone_queue code=%d", static_cast<int>(status.code));
-        }
-        ports.output().Close();
-        ports.input().Close();
-        if (!status.ok()) {
-            ShowDisplay(voice::VoiceMood::kSad, "Audio error", "tone queue failed");
-            return status;
-        }
-        ShowDisplay(voice::VoiceMood::kHappy, "Demo complete", "Display and audio passed");
-        ESP_LOGI(kTag, "SPARKBOT_DEMO_COMPLETE=1");
-        vTaskDelay(pdMS_TO_TICKS(kSparkBotDemoEmotionHoldMs));
-        return Status::Ok();
-    }
-#endif
 
     // 临时 overlay 快照：不改业务快照，过期后由业务快照覆盖（音量/告别提示）。
     void ShowOverlay(voice::VoiceMood mood, std::string_view status, std::string_view content) {
@@ -1273,8 +1163,6 @@ class Runtime final {
     linx::LinxConnectionConfig linx_config_;
     std::unique_ptr<linx_esp::EspWebSocketTransport> linx_transport_ =
         std::make_unique<linx_esp::EspWebSocketTransport>(linx_secrets_);
-    std::unique_ptr<audio_esp::EspMultiNetWakeDetector> wake_detector_;
-    std::unique_ptr<voice::WakeGateAudioInput> wake_gate_;
     QueueHandle_t wake_queue_ = nullptr;
     TaskHandle_t wake_task_ = nullptr;
     TaskHandle_t button_task_ = nullptr;
@@ -1335,9 +1223,7 @@ class Runtime final {
                 // 唤醒被拒（如控制器不在 kStandby）：重启检测器，否则后续永远叫不醒。
                 ESP_LOGW(kTag, "WAKE_REJECTED state=%d err=%s", static_cast<int>(interaction_.state()),
                          wake_status.message.c_str());
-                if (wake_gate_ != nullptr) {
-                    (void)wake_gate_->StartStandby();
-                }
+                (void)assembly_->wake_gate().StartStandby();
             }
         }
         event_loop_stopped_ = true;

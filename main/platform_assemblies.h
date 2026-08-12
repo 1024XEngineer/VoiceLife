@@ -3,10 +3,12 @@
 #include <mutex>
 
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
+#include "voicelife/audio_esp/esp_multinet_wake_detector.h"
 #include "voicelife/board_esp/gpio46_power_arbiter.h"
 #include "voicelife/display_esp/ssd1306_presentation_adapter.h"
 #include "voicelife/display_sparkbot/sparkbot_presentation_adapter.h"
 #include "voicelife/runtime/platform_assembly.h"
+#include "voicelife/voice/wake_gate_audio_input.h"
 
 namespace voicelife::runtime {
 
@@ -41,8 +43,14 @@ class VoiceLifePcbAssembly : public PlatformAssembly {
     void SetOutputVolume(uint8_t volume) override;
     /** @brief 打印 PCM 音频统计。 */
     void LogAudioStats() override;
+    /** @brief 返回 PCB 唤醒门控。 @return WakeGateAudioInput。 */
+    voicelife::voice::WakeGateAudioInput& wake_gate() override;
+    /** @brief 初始化 PCB LED（GPIO48 锁定灭）。 */
+    void InitializeBoardLeds() override;
 
    private:
+    std::unique_ptr<voicelife::audio_esp::EspMultiNetWakeDetector> wake_detector_;
+    std::unique_ptr<voicelife::voice::WakeGateAudioInput> wake_gate_;
     voicelife::audio_esp::Esp32s3PcmAudioPorts audio_ports_;
     voicelife::display_esp::Ssd1306PresentationAdapter ssd1306_adapter_;
 };
@@ -85,6 +93,10 @@ class SparkBotAssembly : public PlatformAssembly {
     void SetOutputVolume(uint8_t volume) override;
     /** @brief 打印 ES8311 音频统计。 */
     void LogAudioStats() override;
+    /** @brief 返回 SparkBot 唤醒门控。 @return WakeGateAudioInput。 */
+    voicelife::voice::WakeGateAudioInput& wake_gate() override;
+    /** @brief SparkBot 无 LED（GPIO48 为底盘 UART RX，不写入）。 */
+    void InitializeBoardLeds() override {}
 
    private:
     /** @brief 经板级仲裁更新 GPIO46 背光（ESP 构建写 GPIO）。 */
@@ -98,6 +110,8 @@ class SparkBotAssembly : public PlatformAssembly {
 
     /** @brief GPIO46 仲裁与写入互斥（显示回调与音频任务并发保护）。 */
     mutable std::mutex power_mutex_;
+    std::unique_ptr<voicelife::audio_esp::EspMultiNetWakeDetector> wake_detector_;
+    std::unique_ptr<voicelife::voice::WakeGateAudioInput> wake_gate_;
     voicelife::audio_esp::Esp32s3PcmAudioPorts audio_ports_;
     voicelife::board_esp::Gpio46PowerArbiter arbiter_;
     voicelife::display_sparkbot::SparkBotPresentationAdapter adapter_;

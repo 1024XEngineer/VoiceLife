@@ -40,6 +40,10 @@ Status ValidateEndpoint(const I2sEndpointProfile& endpoint) {
     if ((endpoint.wire_bits_per_sample == 16 && endpoint.pcm_shift_bits != 0) || endpoint.pcm_shift_bits > 16) {
         return Invalid("I2S PCM 对齐位数与 wire sample 不匹配");
     }
+    const uint8_t wire_slots = endpoint.wire_slot_count == 0 ? endpoint.format.channels : endpoint.wire_slot_count;
+    if (wire_slots == 0 || wire_slots > 2 || wire_slots < endpoint.format.channels) {
+        return Invalid("I2S 物理 slot 数必须覆盖逻辑 PCM 通道数且最多为双声道");
+    }
     return Status::Ok();
 }
 
@@ -75,7 +79,8 @@ Status AudioBoardProfile::Validate() const {
         if (capture_i2s.port != playback_i2s.port || capture_i2s.mclk != playback_i2s.mclk ||
             capture_i2s.bclk != playback_i2s.bclk || capture_i2s.ws != playback_i2s.ws ||
             capture_i2s.format.sample_rate_hz != playback_i2s.format.sample_rate_hz ||
-            capture_i2s.wire_bits_per_sample != playback_i2s.wire_bits_per_sample) {
+            capture_i2s.wire_bits_per_sample != playback_i2s.wire_bits_per_sample ||
+            capture_i2s.wire_slot_count != playback_i2s.wire_slot_count) {
             return Invalid("外部 Codec 双工端点必须共享 I2S port、时钟与 wire sample");
         }
         pins = {capture_i2s.mclk, capture_i2s.bclk, capture_i2s.ws, capture_i2s.data, playback_i2s.data};
@@ -212,6 +217,7 @@ AudioBoardProfile SparkBotEsp32s3AudioProfile() {
                                   .channels = 1,
                                   .bits_per_sample = 16,
                                   .frame_duration_ms = 20};
+    profile.capture_i2s.wire_slot_count = 2;
     profile.playback_i2s.port = 0;
     profile.playback_i2s.mclk = 45;
     profile.playback_i2s.bclk = 39;
@@ -222,6 +228,7 @@ AudioBoardProfile SparkBotEsp32s3AudioProfile() {
                                    .channels = 1,
                                    .bits_per_sample = 16,
                                    .frame_duration_ms = 20};
+    profile.playback_i2s.wire_slot_count = 2;
     CodecControlProfile codec_control;
     codec_control.i2c_port = 0;
     codec_control.i2c.sda = 4;

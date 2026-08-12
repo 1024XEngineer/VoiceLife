@@ -6,6 +6,7 @@
 #ifdef ESP_PLATFORM
 #include <driver/gpio.h>
 #include <esp_log.h>
+#include <led_strip.h>
 
 namespace {
 constexpr const char* kPowerTag = "sparkbot_power";
@@ -51,6 +52,38 @@ audio_esp::AudioBoardProfile VoiceLifePcbAssembly::audio_profile() const {
 voicelife::voice::AudioInputPort& VoiceLifePcbAssembly::audio_input() { return audio_ports_.input(); }
 voicelife::voice::AudioOutputPort& VoiceLifePcbAssembly::audio_output() { return audio_ports_.output(); }
 void VoiceLifePcbAssembly::SetOutputVolume(uint8_t volume) { audio_ports_.SetOutputVolume(volume); }
+voicelife::voice::WakeGateAudioInput& VoiceLifePcbAssembly::wake_gate() { return *wake_gate_; }
+
+void VoiceLifePcbAssembly::InitializeBoardLeds() {
+#ifdef ESP_PLATFORM
+    // PCB 板型专属：WS2812 上电 clear 并锁定 GPIO48 低电平。
+    led_strip_config_t strip_config = {};
+    strip_config.strip_gpio_num = GPIO_NUM_48;
+    strip_config.max_leds = 1;
+    strip_config.color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB;
+    strip_config.led_model = LED_MODEL_WS2812;
+    led_strip_rmt_config_t rmt_config = {};
+    rmt_config.resolution_hz = 10 * 1000 * 1000;
+    led_strip_handle_t strip = nullptr;
+    if (led_strip_new_rmt_device(&strip_config, &rmt_config, &strip) == ESP_OK) {
+        (void)led_strip_clear(strip);
+        (void)led_strip_del(strip);
+        ESP_LOGI(kPowerTag, "BUILTIN_LED_GPIO48_CLEAR=1");
+    } else {
+        ESP_LOGW(kPowerTag, "BUILTIN_LED_GPIO48_INIT_FAILED");
+    }
+    gpio_config_t led_lock = {};
+    led_lock.pin_bit_mask = 1ULL << GPIO_NUM_48;
+    led_lock.mode = GPIO_MODE_OUTPUT;
+    led_lock.pull_up_en = GPIO_PULLUP_DISABLE;
+    led_lock.pull_down_en = GPIO_PULLDOWN_ENABLE;
+    led_lock.intr_type = GPIO_INTR_DISABLE;
+    if (gpio_config(&led_lock) == ESP_OK) {
+        (void)gpio_set_level(GPIO_NUM_48, 0);
+    }
+#endif
+}
+
 void VoiceLifePcbAssembly::LogAudioStats() {
 #ifdef ESP_PLATFORM
     const auto stats = audio_ports_.stats();
@@ -64,7 +97,10 @@ SparkBotAssembly::SparkBotAssembly()
     : audio_ports_(audio_esp::SparkBotEsp32s3AudioProfile(), {},
                    [this](bool enabled) { (void)SetAudioOutputEnabled(enabled); }),
       arbiter_(voicelife::board_esp::SparkBotProfile().shared_power),
-      adapter_(MakeSparkBotLcdConfig(), [this](bool enabled) { ApplyBacklight(enabled); }) {}
+      adapter_(MakeSparkBotLcdConfig(), [this](bool enabled) { ApplyBacklight(enabled); }) {
+    wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
+    wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_.input(), *wake_detector_);
+}
 
 voicelife::voice::PresentationPort& SparkBotAssembly::presentation() { return adapter_; }
 
@@ -75,6 +111,8 @@ audio_esp::AudioBoardProfile SparkBotAssembly::audio_profile() const {
 voicelife::voice::AudioInputPort& SparkBotAssembly::audio_input() { return audio_ports_.input(); }
 voicelife::voice::AudioOutputPort& SparkBotAssembly::audio_output() { return audio_ports_.output(); }
 void SparkBotAssembly::SetOutputVolume(uint8_t volume) { audio_ports_.SetOutputVolume(volume); }
+voicelife::voice::WakeGateAudioInput& SparkBotAssembly::wake_gate() { return *wake_gate_; }
+
 void SparkBotAssembly::LogAudioStats() {
 #ifdef ESP_PLATFORM
     const auto stats = audio_ports_.stats();

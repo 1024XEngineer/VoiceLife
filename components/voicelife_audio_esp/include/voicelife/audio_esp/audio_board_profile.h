@@ -45,6 +45,12 @@ struct I2sEndpointProfile {
      * 采集右移、播放左移。
      */
     uint8_t pcm_shift_bits = 0;
+    /**
+     * @brief I2S 物理时隙数；0 表示与逻辑 PCM 通道数一致。
+     *
+     * VoiceSession 可保持单声道，而 ES8311 仍按板级时序收发 stereo/BOTH slots。
+     */
+    uint8_t wire_slot_count = 0;
 };
 
 /** @brief I2C 引脚 Profile。 */
