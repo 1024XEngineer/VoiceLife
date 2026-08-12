@@ -1,3 +1,4 @@
+#include <chrono>
 #include <memory>
 #include <string>
 #include <utility>
@@ -264,7 +265,7 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(const voice::AudioFrame& frame) {
     (void)frame;
     return detail::Unavailable("ESP32-S3 PCM Audio Port 只能在 ESP-IDF 目标运行");
 #else
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     if (!output_open_ || !playback_format_.has_value()) {
         return detail::Unavailable("输出端口尚未打开");
     }
@@ -295,9 +296,16 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(const voice::AudioFrame& frame) {
     } else if (!detail::SameFormat(frame.format, *playback_format_, false)) {
         return detail::Invalid("播放帧格式不支持");
     }
+    // 背压：队列满时有界等待（最多 100ms），OutputLoop 消费后继续入队，
+    // 平滑服务端瞬时 burst，避免直接拒绝导致 TTS 丢帧/断续。
     if (output_queue_.size() >= options_.output_queue_depth) {
-        ++rejected_output_frames_;
-        return Status::Error(ErrorCode::kConflict, "播放队列已满，拒绝新帧");
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+        while (output_queue_.size() >= options_.output_queue_depth) {
+            if (output_cv_.wait_until(lock, deadline) == std::cv_status::timeout) {
+                ++rejected_output_frames_;
+                return Status::Error(ErrorCode::kConflict, "播放队列背压超时，拒绝新帧");
+            }
+        }
     }
     output_queue_.push_back(std::move(out));
     output_high_watermark_.store(std::max(output_high_watermark_.load(), output_queue_.size()));

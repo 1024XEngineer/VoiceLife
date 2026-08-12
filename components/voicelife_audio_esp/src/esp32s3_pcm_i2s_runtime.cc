@@ -271,12 +271,15 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
         if (endpoint.wire_bits_per_sample == 32) {
             auto* out = reinterpret_cast<int32_t*>(wire.data());
             const int volume = output_volume_.load();
+            // 与官方小智/MVP 一致：int16 PCM × (vol/100)^2 × 65536 直写 32bit
+            // slot 高 16 位（MVP no_audio_codec.cc Write 的 volume_factor）。
+            // 不 clamp 到 int16（保留峰值动态），满幅时输出最大化。
+            const int32_t factor = static_cast<int32_t>(static_cast<int64_t>(volume) * volume * 65536 / 10000);
             for (std::size_t i = 0; i < count; ++i) {
-                // 播放增益：MVP 用 (vol/100)^2*65536 满幅；语音信号约 -6~-12dBFS，
-                // volume=100 时补 4 倍（+12dB）数字增益，clamp 防削波。
-                const int32_t gain = 4;
-                const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume * gain / 100;
-                out[i] = detail::ToWire(static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767)), endpoint);
+                const int64_t temp = static_cast<int64_t>(pcm[offset + i]) * factor;
+                out[i] =
+                    static_cast<int32_t>(std::clamp(temp, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
+                                                    static_cast<int64_t>(std::numeric_limits<int32_t>::max())));
             }
         } else {
             const int volume = output_volume_.load();
