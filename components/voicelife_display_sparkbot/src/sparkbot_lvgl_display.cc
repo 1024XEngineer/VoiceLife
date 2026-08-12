@@ -58,8 +58,8 @@ voicelife::Status SparkBotLvglDisplay::Initialize() {
     // 官方 InitializeDisplay：panel IO（SPI mode 2，SparkBot mode 0 无图像）。
     esp_lcd_panel_io_handle_t panel_io = nullptr;
     esp_lcd_panel_io_spi_config_t io_config = {};
-    io_config.cs_gpio_num = config_.cs_gpio;
-    io_config.dc_gpio_num = config_.dc_gpio;
+    io_config.cs_gpio_num = static_cast<gpio_num_t>(config_.cs_gpio);
+    io_config.dc_gpio_num = static_cast<gpio_num_t>(config_.dc_gpio);
     io_config.spi_mode = config_.spi_mode;
     io_config.pclk_hz = config_.pixel_clock_hz;
     io_config.trans_queue_depth = 10;
@@ -124,6 +124,7 @@ voicelife::Status SparkBotLvglDisplay::Initialize() {
                 .mirror_x = config_.mirror_x,
                 .mirror_y = config_.mirror_y,
             },
+        .rounder_cb = nullptr,
         .color_format = LV_COLOR_FORMAT_RGB565,
         .flags =
             {

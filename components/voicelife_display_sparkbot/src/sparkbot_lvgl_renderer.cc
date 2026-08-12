@@ -181,7 +181,7 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
                 gif_controller_ = nullptr;
             }
             lv_img_dsc_t img_dsc{};
-            img_dsc.data = static_cast<const uint8_t*>(asset.value.data);
+            img_dsc.data = static_cast<const uint8_t*>(asset.value->data);
             auto* gif = new LvglGif(&img_dsc);
             if (gif->IsLoaded()) {
                 gif->SetFrameCallback(
