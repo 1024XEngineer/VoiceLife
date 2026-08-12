@@ -33,6 +33,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "voicelife/linx/linx_ota.h"
+#include "voicelife/runtime/wifi_hotspot_provision.h"
 
 namespace voicelife::runtime {
 namespace {
@@ -171,8 +172,18 @@ Status EnsureWifiStaConnected() {
     auto credentials = LoadWifiCredentials();
     if (!credentials.ok() || !credentials.value.has_value()) {
         if (credentials.status.code != ErrorCode::kNotFound) return credentials.status;
+        // 优先物理串口配网（VLW1，45s 窗口）；未收到串口请求则自动进入热点配网
+        // （AP + Web 页，替代直接进入错误状态）。
         const Status provisioned = ProvisionWifiCredentialsFromConsole();
-        if (!provisioned.ok()) return provisioned;
+        if (!provisioned.ok() && provisioned.code != ErrorCode::kNotFound) return provisioned;
+        if (provisioned.code == ErrorCode::kNotFound) {
+            ESP_LOGW(kTag, "LINX_SERIAL_PROVISION_TIMEOUT entering hotspot");
+            HotspotProvisionResult hotspot;
+            const Status hotspot_status = RunHotspotProvision(hotspot, 300000);
+            if (!hotspot_status.ok()) {
+                return Status::Error(ErrorCode::kUnavailable, "热点配网失败: " + hotspot_status.message);
+            }
+        }
         credentials = LoadWifiCredentials();
         if (!credentials.ok() || !credentials.value.has_value()) return credentials.status;
     }
@@ -192,7 +203,29 @@ Status EnsureWifiStaConnected() {
                 return Status::Ok();
             }
         }
-        return Status::Error(ErrorCode::kUnavailable, "Wi-Fi STA 尚未连接");
+        // 断网且重连失败：进入热点配网（替代直接错误），配新 Wi-Fi 后重连。
+        ESP_LOGW(kTag, "LINX_WIFI_RECONNECT_FAILED entering hotspot");
+        HotspotProvisionResult hotspot;
+        const Status hotspot_status = RunHotspotProvision(hotspot, 300000);
+        if (!hotspot_status.ok()) {
+            return Status::Error(ErrorCode::kUnavailable, "热点配网失败或超时: " + hotspot_status.message);
+        }
+        // 配网成功：重新加载凭据并重连。
+        credentials = LoadWifiCredentials();
+        if (!credentials.ok() || !credentials.value.has_value()) return credentials.status;
+        for (int attempt = 0; attempt < kOtaAttempts; ++attempt) {
+            xEventGroupClearBits(events, kWifiConnectedBit | kWifiFailedBit);
+            if (const esp_err_t error = esp_wifi_connect(); error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
+                return EspError("重新连接 Wi-Fi STA", error);
+            }
+            const EventBits_t result = xEventGroupWaitBits(events, kWifiConnectedBit | kWifiFailedBit, pdFALSE, pdFALSE,
+                                                           pdMS_TO_TICKS(kWifiConnectTimeoutMs));
+            wifi_ap_record_t access_point{};
+            if ((result & kWifiConnectedBit) != 0 && esp_wifi_sta_get_ap_info(&access_point) == ESP_OK) {
+                return Status::Ok();
+            }
+        }
+        return Status::Error(ErrorCode::kUnavailable, "Wi-Fi STA 配网后仍无法连接");
     }
     if (const esp_err_t error = esp_netif_init(); error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
         return EspError("初始化 esp_netif", error);
