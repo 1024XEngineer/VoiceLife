@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "support/im_pairing_test_support.h"
 #include "support/test_support.h"
 #include "voicelife/contracts/im/pairing_session.h"
 #include "voicelife/contracts/json.h"
@@ -75,7 +76,13 @@ class FakeCredentials final : public ImCredentialProvider {
 class FakeClock final : public ImPairingClock {
    public:
     uint64_t now_ms = 1000;
+    uint64_t unix_ms = 1785715200000ULL;
     uint64_t MonotonicMillis() const override { return now_ms; }
+    uint64_t UnixMillis() const override { return unix_ms; }
+    void Advance(uint64_t milliseconds) {
+        now_ms += milliseconds;
+        unix_ms += milliseconds;
+    }
 };
 
 ImHttpResponse Response(ImTransportStatus status, int code, std::string body = {}) {
@@ -167,7 +174,8 @@ void TestClientEscapesJsonAndRejectsInvalidInputsLocally() {
     std::string special_user_id = "quote\" slash\\ backspace\b formfeed\f newline\n return\r tab\t control";
     special_user_id.push_back('\x01');
     const auto created = client.Create({.user_id = special_user_id, .expires_in_minutes = 5});
-    Check(created.status == PairingClientStatus::kSuccess, "含 JSON 特殊字符的 user id 必须可安全序列化");
+    Check(created.status == PairingClientStatus::kInvalidResponse,
+          "响应 user id 与请求不同时必须 fail closed，但请求仍须安全序列化");
     voicelife::JsonValue request_json;
     voicelife::contracts::im::CreatePairingSessionRequest request_contract;
     Check(voicelife::ParseJson(transport.requests[0].body, request_json).ok() &&
@@ -182,6 +190,8 @@ void TestClientEscapesJsonAndRejectsInvalidInputsLocally() {
           "超过上限的配对窗口必须本地拒绝");
     Check(client.Create({.user_id = "", .expires_in_minutes = 5}).status == PairingClientStatus::kRejected,
           "显式空 user id 必须本地拒绝");
+    Check(client.Create({.user_id = std::nullopt, .expires_in_minutes = 5}).status == PairingClientStatus::kRejected,
+          "缺少 user id 必须本地拒绝，不能创建永远无法确认的微信会话");
     Check(client.Query("").status == PairingClientStatus::kRejected, "空 session id 必须本地拒绝");
     Check(transport.requests.size() == before, "非法输入不得发出网络请求");
 
@@ -203,10 +213,31 @@ void TestClientRejectsCreateAndQueryFailures() {
     };
     ImPairingClient client(transport, credentials);
 
-    Check(client.Create({}).status == PairingClientStatus::kRetryable, "创建时服务端 5xx 必须映射为可重试");
-    Check(client.Create({}).status == PairingClientStatus::kInvalidResponse, "非法创建响应必须 fail closed");
+    Check(client.Create({.user_id = "user-fixture"}).status == PairingClientStatus::kRetryable,
+          "创建时服务端 5xx 必须映射为可重试");
+    Check(client.Create({.user_id = "user-fixture"}).status == PairingClientStatus::kInvalidResponse,
+          "非法创建响应必须 fail closed");
     Check(client.Query("pairing-1").status == PairingClientStatus::kInvalidResponse,
           "confirmed 与 confirmedAt 不一致的查询响应必须 fail closed");
+}
+
+void TestClientRejectsUnexpectedStatusesAndClassifiesTransientErrors() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    ImPairingClient client(transport, credentials);
+    transport.responses = {
+        Response(ImTransportStatus::kHttpError, 408),
+        Response(ImTransportStatus::kHttpError, 429),
+        Response(ImTransportStatus::kSuccess, 200, ReadFixture("pairing-created.json")),
+        Response(ImTransportStatus::kSuccess, 201, ReadFixture("pairing-status.json")),
+    };
+
+    Check(client.Create({.user_id = "user-fixture"}).status == PairingClientStatus::kRetryable,
+          "创建超时必须归类为可重试");
+    Check(client.Query("pairing-1").status == PairingClientStatus::kRetryable, "查询限流必须归类为可重试");
+    Check(client.Create({.user_id = "user-fixture"}).status == PairingClientStatus::kInvalidResponse,
+          "创建接口只接受 201");
+    Check(client.Query("pairing-1").status == PairingClientStatus::kInvalidResponse, "查询接口只接受 200");
 }
 
 void TestControllerPollsFinitelyAndRejectsDuplicateStart() {
@@ -228,19 +259,19 @@ void TestControllerPollsFinitelyAndRejectsDuplicateStart() {
     Check(controller.Begin({}).status == PairingFlowStatus::kAlreadyActive && transport.requests.size() == 1,
           "重复开始必须拒绝且不得创建第二个会话");
 
-    clock.now_ms += 2999;
+    clock.Advance(2999);
     Check(controller.Poll().status == PairingFlowStatus::kWaiting && transport.requests.size() == 1,
           "轮询间隔未到不得请求");
-    clock.now_ms += 1;
+    clock.Advance(1);
     Check(controller.Poll().status == PairingFlowStatus::kPending && transport.requests.size() == 2,
           "pending 必须按三秒间隔查询");
-    clock.now_ms += 3000;
+    clock.Advance(3000);
     Check(controller.Poll().status == PairingFlowStatus::kRetrying && controller.active(),
           "临时网络失败必须有限退避且保留 active session");
-    clock.now_ms += 1999;
+    clock.Advance(1999);
     Check(controller.Poll().status == PairingFlowStatus::kWaiting && transport.requests.size() == 3,
           "退避窗口内不得紧密重试");
-    clock.now_ms += 1;
+    clock.Advance(1);
     Check(controller.Poll().status == PairingFlowStatus::kConfirmed && !controller.active(),
           "confirmed 必须立即停止并释放 active session");
 }
@@ -257,23 +288,30 @@ void TestControllerStopsOnTerminalAndDeadline() {
                                Response(ImTransportStatus::kSuccess, 200, ReadFixture(fixture))};
         ImPairingClient client(transport, credentials);
         PairingSessionController controller(client, clock);
-        Check(controller.Begin({}).status == PairingFlowStatus::kPending, "测试会话必须创建成功");
-        clock.now_ms += 3000;
+        Check(controller.Begin({.user_id = "user-fixture"}).status == PairingFlowStatus::kPending,
+              "测试会话必须创建成功");
+        clock.Advance(3000);
         Check(controller.Poll().status == expected && !controller.active(), "终态必须立即释放 active session");
     }
 
     FakeTransport transport;
     FakeCredentials credentials;
     FakeClock clock;
-    transport.responses = {Response(ImTransportStatus::kSuccess, 201, ReadFixture("pairing-created.json"))};
+    transport.responses = {
+        Response(
+            ImTransportStatus::kSuccess, 201,
+            R"({"session":{"id":"pairing-1","userId":"user-fixture","deviceId":"device-fixture","allowedPlatforms":["wechat_official"],"status":"pending","expiresAt":"2026-08-03T00:01:00.000Z","createdAt":"2026-08-03T00:00:00.000Z"},"displayCode":"123456"})"),
+        Response(
+            ImTransportStatus::kSuccess, 200,
+            R"({"id":"pairing-1","userId":"user-fixture","deviceId":"device-fixture","allowedPlatforms":["wechat_official"],"status":"pending","expiresAt":"2026-08-03T00:01:00.000Z","createdAt":"2026-08-03T00:00:00.000Z"})")};
     ImPairingClient client(transport, credentials);
     PairingSessionController controller(client, clock);
-    Check(controller.Begin({.user_id = std::nullopt, .expires_in_minutes = 1}).status == PairingFlowStatus::kPending,
+    Check(controller.Begin({.user_id = "user-fixture", .expires_in_minutes = 1}).status == PairingFlowStatus::kPending,
           "一分钟会话必须创建成功");
-    clock.now_ms += 60000;
+    clock.Advance(60000);
     Check(controller.Poll().status == PairingFlowStatus::kTimedOut && !controller.active() &&
-              transport.requests.size() == 1,
-          "本地截止时间到达必须无请求停止");
+              transport.requests.size() == 2,
+          "本地截止时间到达必须只做一次终态查询再停止");
 }
 
 void TestControllerStopsOnNotFoundCredentialsAndRetryExhaustion() {
@@ -288,8 +326,9 @@ void TestControllerStopsOnNotFoundCredentialsAndRetryExhaustion() {
                                response};
         ImPairingClient client(transport, credentials);
         PairingSessionController controller(client, clock);
-        Check(controller.Begin({}).status == PairingFlowStatus::kPending, "测试会话必须创建成功");
-        clock.now_ms += 3000;
+        Check(controller.Begin({.user_id = "user-fixture"}).status == PairingFlowStatus::kPending,
+              "测试会话必须创建成功");
+        clock.Advance(3000);
         Check(controller.Poll().status == expected && !controller.active(),
               "404 或凭据拒绝必须立即停止并释放 active session");
     }
@@ -298,20 +337,20 @@ void TestControllerStopsOnNotFoundCredentialsAndRetryExhaustion() {
     FakeCredentials credentials;
     FakeClock clock;
     transport.responses = {Response(ImTransportStatus::kSuccess, 201, ReadFixture("pairing-created.json"))};
-    for (int attempt = 0; attempt < 5; ++attempt) {
+    for (int attempt = 0; attempt < 6; ++attempt) {
         transport.responses.push_back(Response(ImTransportStatus::kNetworkFailure, 0));
     }
     ImPairingClient client(transport, credentials);
     PairingSessionController controller(client, clock);
-    Check(controller.Begin({}).status == PairingFlowStatus::kPending, "测试会话必须创建成功");
-    for (const uint64_t delay : std::vector<uint64_t>{3000, 2000, 4000, 5000}) {
-        clock.now_ms += delay;
+    Check(controller.Begin({.user_id = "user-fixture"}).status == PairingFlowStatus::kPending, "测试会话必须创建成功");
+    for (const uint64_t delay : std::vector<uint64_t>{3000, 2000, 4000, 5000, 5000}) {
+        clock.Advance(delay);
         Check(controller.Poll().status == PairingFlowStatus::kRetrying && controller.active(),
-              "上限内网络失败必须使用有限退避");
+              "网络失败必须在会话截止前持续有限退避");
     }
-    clock.now_ms += 5000;
-    Check(controller.Poll().status == PairingFlowStatus::kFailed && !controller.active(),
-          "重试预算耗尽后必须停止并释放 active session");
+    clock.Advance(300000 - (3000 + 2000 + 4000 + 5000 + 5000));
+    Check(controller.Poll().status == PairingFlowStatus::kTimedOut && !controller.active(),
+          "截止时间必须只做最后一次查询并以超时终止");
 }
 
 void TestControllerStopsWhenCreationOrQueryIsRejected() {
@@ -332,8 +371,9 @@ void TestControllerStopsWhenCreationOrQueryIsRejected() {
         transport.responses = {Response(ImTransportStatus::kHttpError, 400)};
         ImPairingClient client(transport, credentials);
         PairingSessionController controller(client, clock);
-        Check(controller.Begin({}).status == PairingFlowStatus::kFailed && !controller.active(),
-              "创建请求被拒绝时控制器必须停止");
+        Check(
+            controller.Begin({.user_id = "user-fixture"}).status == PairingFlowStatus::kFailed && !controller.active(),
+            "创建请求被拒绝时控制器必须停止");
     }
     {
         FakeTransport transport;
@@ -345,11 +385,94 @@ void TestControllerStopsWhenCreationOrQueryIsRejected() {
         };
         ImPairingClient client(transport, credentials);
         PairingSessionController controller(client, clock);
-        Check(controller.Begin({}).status == PairingFlowStatus::kPending, "异常查询测试必须先创建会话");
-        clock.now_ms += 3000;
+        Check(controller.Begin({.user_id = "user-fixture"}).status == PairingFlowStatus::kPending,
+              "异常查询测试必须先创建会话");
+        clock.Advance(3000);
         Check(controller.Poll().status == PairingFlowStatus::kFailed && !controller.active(),
               "非法查询响应必须停止控制器并释放 active session");
     }
+}
+
+void TestControllerUsesServerWindowAndRejectsMalformedTime() {
+    const std::vector<std::pair<std::string, std::string>> malformed = {
+        {"bad", "2026-08-03T00:05:00.000Z"},
+        {"2026-0x-03T00:00:00.000Z", "2026-08-03T00:05:00.000Z"},
+        {"2026-08-03T00:00:00.000", "2026-08-03T00:05:00.000Z"},
+        {"2026-08-03T00:00:00.000Ztail", "2026-08-03T00:05:00.000Z"},
+        {"1960-08-03T00:00:00.000Z", "1960-08-03T00:05:00.000Z"},
+    };
+    for (const auto& [created_at, expires_at] : malformed) {
+        FakePairingPort port;
+        port.created = {
+            .status = PairingClientStatus::kSuccess, .value = CreatedSession(created_at, expires_at), .message = {}};
+        FakeClock clock;
+        PairingSessionController controller(port, clock);
+        Check(controller.Begin({.user_id = "user-fixture", .expires_in_minutes = 10}).status ==
+                      PairingFlowStatus::kFailed &&
+                  !controller.active(),
+              "控制器必须拒绝无法归一化的服务端时间");
+    }
+
+    FakePairingPort offset_port;
+    offset_port.created = {.status = PairingClientStatus::kSuccess,
+                           .value = CreatedSession("2026-08-03T01:00:00-01:00", "2026-08-03T03:05:00+01:00"),
+                           .message = {}};
+    FakeClock offset_clock;
+    PairingSessionController offset_controller(offset_port, offset_clock);
+    Check(offset_controller.Begin({.user_id = "user-fixture", .expires_in_minutes = 10}).status ==
+              PairingFlowStatus::kPending,
+          "控制器必须正确归一化正负时区偏移");
+
+    FakePairingPort expired_port;
+    expired_port.created = {.status = PairingClientStatus::kSuccess,
+                            .value = CreatedSession("2026-08-02T23:50:00Z", "2026-08-02T23:59:59.9Z"),
+                            .message = {}};
+    FakeClock expired_clock;
+    PairingSessionController expired_controller(expired_port, expired_clock);
+    Check(expired_controller.Begin({.user_id = "user-fixture", .expires_in_minutes = 10}).status ==
+                  PairingFlowStatus::kTimedOut &&
+              !expired_controller.active(),
+          "已经到期的服务端窗口必须立即终止");
+}
+
+void TestControllerRejectsIdentityDriftAndFinalRetry() {
+    for (int field = 0; field < 4; ++field) {
+        FakeTransport transport;
+        FakeCredentials credentials;
+        FakeClock clock;
+        std::string response = ReadFixture("pairing-status.json");
+        if (field == 0) response.replace(response.find("00:05:00"), 8, "00:04:00");
+        if (field == 1) response.replace(response.find("00:00:00"), 8, "00:00:01");
+        if (field == 2) response.replace(response.find("user-fixture"), 12, "user-changed");
+        if (field == 3) response.replace(response.find("wechat_official"), 15, "wecom_aibot");
+        transport.responses = {Response(ImTransportStatus::kSuccess, 201, ReadFixture("pairing-created.json")),
+                               Response(ImTransportStatus::kSuccess, 200, response)};
+        ImPairingClient client(transport, credentials);
+        PairingSessionController controller(client, clock);
+        Check(controller.Begin({.user_id = "user-fixture"}).status == PairingFlowStatus::kPending,
+              "漂移测试必须先建立会话");
+        clock.Advance(3000);
+        Check(controller.Poll().status == PairingFlowStatus::kFailed && !controller.active(),
+              "轮询中的任一不可变身份或窗口字段漂移都必须失败关闭");
+    }
+
+    FakeTransport transport;
+    FakeCredentials credentials;
+    FakeClock clock;
+    transport.responses = {
+        Response(
+            ImTransportStatus::kSuccess, 201,
+            R"({"session":{"id":"pairing-1","userId":"user-fixture","deviceId":"device-fixture","allowedPlatforms":["wechat_official"],"status":"pending","expiresAt":"2026-08-03T00:01:00.000Z","createdAt":"2026-08-03T00:00:00.000Z"},"displayCode":"123456"})"),
+        Response(ImTransportStatus::kNetworkFailure, 0),
+    };
+    ImPairingClient client(transport, credentials);
+    PairingSessionController controller(client, clock);
+    Check(controller.Begin({.user_id = "user-fixture", .expires_in_minutes = 1}).status == PairingFlowStatus::kPending,
+          "最终重试测试必须先建立会话");
+    clock.Advance(60000);
+    Check(controller.Poll().status == PairingFlowStatus::kTimedOut && !controller.active(),
+          "截止点的可重试错误必须直接收敛为超时");
+    Check(controller.Poll().status == PairingFlowStatus::kIdle, "结束后的重复 Poll 必须保持 idle");
 }
 
 }  // namespace
@@ -359,9 +482,12 @@ int main() {
     TestClientFailsClosedAndClassifiesErrors();
     TestClientEscapesJsonAndRejectsInvalidInputsLocally();
     TestClientRejectsCreateAndQueryFailures();
+    TestClientRejectsUnexpectedStatusesAndClassifiesTransientErrors();
     TestControllerPollsFinitelyAndRejectsDuplicateStart();
     TestControllerStopsOnTerminalAndDeadline();
     TestControllerStopsOnNotFoundCredentialsAndRetryExhaustion();
     TestControllerStopsWhenCreationOrQueryIsRejected();
+    TestControllerUsesServerWindowAndRejectsMalformedTime();
+    TestControllerRejectsIdentityDriftAndFinalRetry();
     return 0;
 }

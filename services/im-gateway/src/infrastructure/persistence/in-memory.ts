@@ -82,6 +82,16 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         return Promise.resolve(true);
     }
 
+    /** {@inheritDoc PairingSessionRepository.cancelPendingByDevice} */
+    public cancelPendingByDevice(deviceId: DeviceId): Promise<void> {
+        for (const [id, session] of this.pairingRows) {
+            if (session.deviceId === deviceId && session.status === 'pending') {
+                this.pairingRows.set(id, { ...session, status: 'cancelled' });
+            }
+        }
+        return Promise.resolve();
+    }
+
     /** {@inheritDoc BindingRepository.createActiveIfAbsent} */
     public createActiveIfAbsent(binding: ImBinding): Promise<ImBinding> {
         const existing = [...this.bindingRows.values()].find(

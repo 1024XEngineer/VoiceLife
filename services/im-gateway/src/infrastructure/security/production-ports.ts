@@ -23,6 +23,7 @@ import type {
     OutboxEventId,
     PairingSessionId,
     RequestId,
+    UserId,
 } from '../../contracts/ids.js';
 import type {
     DeviceAuthenticationPort,
@@ -45,10 +46,12 @@ export class BearerDeviceAuthenticationPort implements DeviceAuthenticationPort 
 
     /**
      * @param deviceId 部署实例接受的设备标识。
+     * @param userId 与设备凭据绑定的 VoiceLife 用户标识。
      * @param token 由 Secret 注入的 Bearer 令牌。
      */
     public constructor(
         private readonly deviceId: DeviceId,
+        private readonly userId: UserId,
         token: string,
     ) {
         assertMinimumSecret(token, 'DEVICE_TOKEN', 24);
@@ -60,7 +63,7 @@ export class BearerDeviceAuthenticationPort implements DeviceAuthenticationPort 
         if (!authorization.startsWith(TOKEN_PREFIX)) return Promise.reject(unauthorized());
         const actual = digest(authorization.slice(TOKEN_PREFIX.length));
         if (!timingSafeEqual(actual, this.expectedTokenDigest)) return Promise.reject(unauthorized());
-        return Promise.resolve({ deviceId: this.deviceId });
+        return Promise.resolve({ deviceId: this.deviceId, userId: this.userId });
     }
 }
 

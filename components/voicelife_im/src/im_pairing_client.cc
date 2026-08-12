@@ -89,8 +89,8 @@ PairingCreateResult ImPairingClient::Create(const PairingCreateOptions& options)
     if (token.empty() || device_id.empty()) {
         return {.status = PairingClientStatus::kCredentialRejected, .value = std::nullopt, .message = "设备凭据未配置"};
     }
-    if (options.expires_in_minutes < 1 || options.expires_in_minutes > 10 ||
-        (options.user_id.has_value() && options.user_id->empty())) {
+    if (options.expires_in_minutes < 1 || options.expires_in_minutes > 10 || !options.user_id.has_value() ||
+        options.user_id->empty()) {
         return {.status = PairingClientStatus::kRejected, .value = std::nullopt, .message = "配对选项非法"};
     }
     ImHttpRequest request{.path = kPairingPath,
@@ -102,11 +102,16 @@ PairingCreateResult ImPairingClient::Create(const PairingCreateOptions& options)
     if (status != PairingClientStatus::kSuccess) {
         return {.status = status, .value = std::nullopt, .message = response.message};
     }
+    if (response.status_code != 201) {
+        return {
+            .status = PairingClientStatus::kInvalidResponse, .value = std::nullopt, .message = "配对创建状态码非法"};
+    }
 
     JsonValue root;
     contracts::im::CreatedPairingSession value;
     if (!ParseJson(response.body, root).ok() || !contracts::im::ParseCreatedPairingSession(root, value).ok() ||
-        value.session.deviceId != device_id) {
+        value.session.deviceId != device_id || value.session.userId != options.user_id ||
+        value.session.allowedPlatforms != std::optional<std::vector<std::string>>{{"wechat_official"}}) {
         return {.status = PairingClientStatus::kInvalidResponse, .value = std::nullopt, .message = "配对创建响应非法"};
     }
     return {.status = PairingClientStatus::kSuccess, .value = std::move(value), .message = {}};
@@ -129,6 +134,10 @@ PairingQueryResult ImPairingClient::Query(const std::string& pairing_session_id)
     const PairingClientStatus status = Classify(response, true);
     if (status != PairingClientStatus::kSuccess) {
         return {.status = status, .value = std::nullopt, .message = response.message};
+    }
+    if (response.status_code != 200) {
+        return {
+            .status = PairingClientStatus::kInvalidResponse, .value = std::nullopt, .message = "配对查询状态码非法"};
     }
 
     JsonValue root;

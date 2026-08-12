@@ -1,7 +1,7 @@
 import { queryOne, type SqlExecutor } from './sql.js';
 
 /** 当前 schema 版本号；低于该版本的库会在 migrate() 时逐版本升级。 */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /** 迁移版本表：version 行与对应 DDL 在同一事务内写入，保证原子可见。 */
 const SCHEMA_MIGRATIONS_TABLE = 'im_schema_migrations';
@@ -232,12 +232,48 @@ const V4_STATEMENTS: readonly string[] = [
         WHERE status = 'pending'`,
 ];
 
+/** v5 配对会话约束：单设备仅保留一个待确认会话，并阻止新的非法状态与时间组合。 */
+const V5_STATEMENTS: readonly string[] = [
+    `WITH ranked AS (
+        SELECT id,
+               row_number() OVER (
+                   PARTITION BY device_id
+                   ORDER BY created_at DESC, id DESC
+               ) AS rank
+        FROM im_pairing_sessions
+        WHERE status = 'pending'
+    )
+    UPDATE im_pairing_sessions AS session
+    SET status = 'cancelled'
+    FROM ranked
+    WHERE session.id = ranked.id AND ranked.rank > 1`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS im_pairing_sessions_pending_device_id_uq
+        ON im_pairing_sessions (device_id)
+        WHERE status = 'pending'`,
+    'ALTER TABLE im_pairing_sessions DROP CONSTRAINT IF EXISTS im_pairing_sessions_status_check',
+    `ALTER TABLE im_pairing_sessions
+        ADD CONSTRAINT im_pairing_sessions_status_check
+        CHECK (status IN ('pending', 'confirmed', 'expired', 'cancelled')) NOT VALID`,
+    'ALTER TABLE im_pairing_sessions DROP CONSTRAINT IF EXISTS im_pairing_sessions_time_order_check',
+    `ALTER TABLE im_pairing_sessions
+        ADD CONSTRAINT im_pairing_sessions_time_order_check
+        CHECK (expires_at > created_at) NOT VALID`,
+    'ALTER TABLE im_pairing_sessions DROP CONSTRAINT IF EXISTS im_pairing_sessions_confirmation_check',
+    `ALTER TABLE im_pairing_sessions
+        ADD CONSTRAINT im_pairing_sessions_confirmation_check
+        CHECK (
+            (status = 'confirmed' AND confirmed_at IS NOT NULL AND confirmed_at >= created_at AND confirmed_at < expires_at)
+            OR (status <> 'confirmed' AND confirmed_at IS NULL)
+        ) NOT VALID`,
+];
+
 /** 按版本号索引的迁移脚本；下标 i 对应版本 i+1。 */
 const VERSIONED_STATEMENTS: readonly (readonly string[])[] = [
     V1_STATEMENTS,
     V2_STATEMENTS,
     V3_STATEMENTS,
     V4_STATEMENTS,
+    V5_STATEMENTS,
 ];
 
 /**

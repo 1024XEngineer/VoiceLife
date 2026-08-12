@@ -145,6 +145,30 @@ int main() {
                                ParseCreatePairingSessionRequest)
                .ok(),
           "未知配对平台必须被 C++ 拒绝");
+    for (const char* invalid_request : {R"([])", R"({"deviceId":"device-fixture","allowedPlatforms":{}})",
+                                        R"({"deviceId":"device-fixture","expiresInMinutes":1.5})"}) {
+        JsonValue root;
+        Check(ParseJson(invalid_request, root).ok() && !ParseCreatePairingSessionRequest(root, pairing_request).ok(),
+              "配对请求的对象、平台数组和整数有效期约束必须执行");
+    }
+    JsonValue all_platforms;
+    Check(
+        ParseJson(
+            R"({"deviceId":"device-fixture","allowedPlatforms":["wechat_official","wecom_aibot","feishu","dingtalk"]})",
+            all_platforms)
+                .ok() &&
+            ParseCreatePairingSessionRequest(all_platforms, pairing_request).ok(),
+        "全部声明平台必须被契约解析器识别");
+    JsonValue invalid_empty_platforms;
+    Check(ParseJson(R"({"deviceId":"device-fixture","allowedPlatforms":[]})", invalid_empty_platforms).ok() &&
+              !ParseCreatePairingSessionRequest(invalid_empty_platforms, pairing_request).ok(),
+          "空平台集合必须被 C++ 拒绝");
+    JsonValue invalid_duplicate_platforms;
+    Check(ParseJson(R"({"deviceId":"device-fixture","allowedPlatforms":["wechat_official","wechat_official"]})",
+                    invalid_duplicate_platforms)
+                  .ok() &&
+              !ParseCreatePairingSessionRequest(invalid_duplicate_platforms, pairing_request).ok(),
+          "重复平台必须被 C++ 拒绝");
 
     CreatedPairingSession created_pairing;
     Check(ParsePairingFixture("pairing-created.json", created_pairing, ParseCreatedPairingSession).ok(),
@@ -155,6 +179,14 @@ int main() {
           "非六位数字 displayCode 必须被 C++ 拒绝");
     Check(!ParsePairingFixture("pairing-created-invalid-secret.json", created_pairing, ParseCreatedPairingSession).ok(),
           "含 displayCodeHash 的创建响应必须 fail closed");
+    for (
+        const char* invalid_created :
+        {R"([])", R"({"displayCode":"123456"})",
+         R"({"session":{"id":"pairing-1","deviceId":"device-fixture","status":"expired","expiresAt":"2026-08-03T00:05:00Z","createdAt":"2026-08-03T00:00:00Z"},"displayCode":"123456"})"}) {
+        JsonValue root;
+        Check(ParseJson(invalid_created, root).ok() && !ParseCreatedPairingSession(root, created_pairing).ok(),
+              "创建响应必须是含 pending session 的对象");
+    }
 
     PairingSessionStatus pairing_status;
     Check(ParsePairingFixture("pairing-status.json", pairing_status, ParsePairingSessionStatus).ok(),
@@ -174,6 +206,39 @@ int main() {
           "非法配对时间必须被 C++ 拒绝");
     Check(!ParsePairingFixture("pairing-status-invalid-secret.json", pairing_status, ParsePairingSessionStatus).ok(),
           "含 displayCodeHash 的状态响应必须 fail closed");
+    for (
+        const char* invalid_status :
+        {R"([])",
+         R"({"id":"pairing-1","deviceId":"device-fixture","status":"confirmed","createdAt":"2026-08-03T00:00:00Z","expiresAt":"2026-08-03T00:05:00Z","confirmedAt":"2026-08-02T23:59:59Z"})",
+         R"({"id":"pairing-1","deviceId":"device-fixture","status":"confirmed","createdAt":"2026-08-03T00:00:00Z","expiresAt":"2026-08-03T00:05:00Z","confirmedAt":"2026-08-03T00:05:00Z"})"}) {
+        JsonValue root;
+        Check(ParseJson(invalid_status, root).ok() && !ParsePairingSessionStatus(root, pairing_status).ok(),
+              "状态对象及 confirmedAt 有效窗口约束必须执行");
+    }
+    JsonValue invalid_pairing_time_order;
+    Check(
+        ParseJson(
+            R"({"id":"pairing-1","deviceId":"device-fixture","status":"pending","createdAt":"2026-08-03T00:05:00.000Z","expiresAt":"2026-08-03T00:00:00.000Z"})",
+            invalid_pairing_time_order)
+                .ok() &&
+            !ParsePairingSessionStatus(invalid_pairing_time_order, pairing_status).ok(),
+        "expiresAt 不晚于 createdAt 的响应必须 fail closed");
+    JsonValue invalid_nested_secret;
+    Check(
+        ParseJson(
+            R"({"id":"pairing-1","deviceId":"device-fixture","status":"pending","createdAt":"2026-08-03T00:00:00.000Z","expiresAt":"2026-08-03T00:05:00.000Z","extension":{"externalUserId":"secret"}})",
+            invalid_nested_secret)
+                .ok() &&
+            !ParsePairingSessionStatus(invalid_nested_secret, pairing_status).ok(),
+        "嵌套外部身份字段也必须 fail closed");
+    JsonValue invalid_top_level_secret;
+    Check(
+        ParseJson(
+            R"({"session":{"id":"pairing-1","deviceId":"device-fixture","status":"pending","createdAt":"2026-08-03T00:00:00.000Z","expiresAt":"2026-08-03T00:05:00.000Z"},"displayCode":"123456","displayCodeHash":"secret"})",
+            invalid_top_level_secret)
+                .ok() &&
+            !ParseCreatedPairingSession(invalid_top_level_secret, created_pairing).ok(),
+        "创建响应顶层额外字段必须 fail closed");
 
     // 强提醒：双端共享版本，字段与 TS 语义一致
     NotificationIntent strong;

@@ -97,8 +97,14 @@ export class DeviceIntentController {
         readonly body: unknown;
     }): Promise<CreatedPairingSessionResponse> {
         const body = parseCreatePairingSessionRequest(input.body);
-        await this.authenticateDevice(input.authorization, body.deviceId);
-        const created = await this.pairing.create(body);
+        const principal = await this.authentication.authenticate(input.authorization);
+        if (principal.deviceId !== body.deviceId) {
+            throw new ImGatewayError('invalid_transition', 'Device token is not bound to the requested deviceId');
+        }
+        if (body.userId !== undefined && body.userId !== principal.userId) {
+            throw new ImGatewayError('invalid_transition', 'Device token is not bound to the requested userId');
+        }
+        const created = await this.pairing.create({ ...body, userId: principal.userId });
         return { session: publicPairingSession(created.session), displayCode: created.displayCode };
     }
 

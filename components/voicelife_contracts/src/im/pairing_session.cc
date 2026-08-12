@@ -38,6 +38,12 @@ Status ParseOptionalPlatforms(const JsonValue& root, std::optional<std::vector<s
         }
         platforms.push_back(platform.string);
     }
+    if (platforms.empty()) return Reject("allowedPlatforms 必须非空且不得重复");
+    std::vector<std::string> unique = platforms;
+    std::sort(unique.begin(), unique.end());
+    if (std::adjacent_find(unique.begin(), unique.end()) != unique.end()) {
+        return Reject("allowedPlatforms 必须非空且不得重复");
+    }
     out = std::move(platforms);
     return Status::Ok();
 }
@@ -56,7 +62,10 @@ Status ParseOptionalPairingMinutes(const JsonValue& root, std::optional<int>& ou
 
 Status ParsePairingSessionStatusValue(const JsonValue& root, PairingSessionStatus& out) {
     if (!root.IsObject()) return Reject("PairingSessionStatus 必须是对象");
-    if (root.Get("displayCodeHash") != nullptr) return Reject("设备响应不得包含 displayCodeHash");
+    if (!detail::HasOnlyFields(root, {"id", "userId", "deviceId", "allowedPlatforms", "status", "expiresAt",
+                                      "createdAt", "confirmedAt"})) {
+        return Reject("设备响应包含未声明字段");
+    }
     if (const Status status = RequireString(root, "id", out.id); !status.ok()) return status;
     if (const Status status = OptionalString(root, "userId", out.userId); !status.ok()) return status;
     if (const Status status = RequireString(root, "deviceId", out.deviceId); !status.ok()) return status;
@@ -70,6 +79,17 @@ Status ParsePairingSessionStatusValue(const JsonValue& root, PairingSessionStatu
     if (const Status status = OptionalIsoDateTime(root, "confirmedAt", out.confirmedAt); !status.ok()) return status;
     if ((out.status == "confirmed") != out.confirmedAt.has_value()) {
         return Reject("confirmed 状态与 confirmedAt 必须一致");
+    }
+    const auto created_at = detail::IsoDateTimeMillis(out.createdAt);
+    const auto expires_at = detail::IsoDateTimeMillis(out.expiresAt);
+    if (!created_at.has_value() || !expires_at.has_value() || *expires_at <= *created_at) {
+        return Reject("expiresAt 必须晚于 createdAt");
+    }
+    if (out.confirmedAt.has_value()) {
+        const auto confirmed_at = detail::IsoDateTimeMillis(*out.confirmedAt);
+        if (!confirmed_at.has_value() || *confirmed_at < *created_at || *confirmed_at >= *expires_at) {
+            return Reject("confirmedAt 必须位于会话有效窗口内");
+        }
     }
     return Status::Ok();
 }
@@ -102,6 +122,7 @@ Status ParsePairingSessionStatus(const JsonValue& root, PairingSessionStatus& ou
 
 Status ParseCreatedPairingSession(const JsonValue& root, CreatedPairingSession& out) {
     if (!root.IsObject()) return Reject("CreatedPairingSession 必须是对象");
+    if (!detail::HasOnlyFields(root, {"session", "displayCode"})) return Reject("创建响应包含未声明字段");
     const JsonValue* session = root.Get("session");
     if (session == nullptr) return Reject("创建响应缺少 session");
     CreatedPairingSession parsed;

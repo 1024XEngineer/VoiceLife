@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -42,11 +43,14 @@ constexpr int kProvisionTimeoutMs = 60000;
 constexpr std::size_t kMaximumStoredStringBytes = 1024;
 std::atomic_bool g_provisioning_started{false};
 std::atomic<im::ImPairingPort*> g_pairing_client{nullptr};
+std::atomic_uint32_t g_pairing_window_generation{0};
+std::atomic_bool g_pairing_active{false};
 std::optional<std::string> g_pairing_user_id;
 
 class EspPairingClock final : public im::ImPairingClock {
    public:
     uint64_t MonotonicMillis() const override { return static_cast<uint64_t>(esp_timer_get_time() / 1000); }
+    uint64_t UnixMillis() const override { return static_cast<uint64_t>(time(nullptr)) * 1000U; }
 };
 
 bool IsPairingTrigger(std::span<const uint8_t> bytes) {
@@ -79,16 +83,13 @@ const char* PairingStatusName(im::PairingFlowStatus status) {
     }
 }
 
-Status RunPairingAcceptance(std::span<const uint8_t> frame) {
-    auto trigger = im::ParseImPairingTrigger(frame);
-    if (!trigger.ok() || !trigger.value.has_value()) return trigger.status;
+Status RunPairingAcceptance(uint8_t expires_in_minutes) {
     im::ImPairingPort* client = g_pairing_client.load(std::memory_order_acquire);
     if (client == nullptr) return Status::Error(ErrorCode::kUnavailable, "IM Runtime 尚未 ready");
 
     EspPairingClock clock;
     im::PairingSessionController controller(*client, clock);
-    const auto begun =
-        controller.Begin({.user_id = g_pairing_user_id, .expires_in_minutes = trigger.value->expires_in_minutes});
+    const auto begun = controller.Begin({.user_id = g_pairing_user_id, .expires_in_minutes = expires_in_minutes});
     if (begun.status != im::PairingFlowStatus::kPending) {
         ESP_LOGW(kTag, "IM_PAIRING_STATUS=%s", PairingStatusName(begun.status));
         return Status::Error(ErrorCode::kUnavailable, "创建配对会话失败");
@@ -105,6 +106,40 @@ Status RunPairingAcceptance(std::span<const uint8_t> frame) {
             result.status == im::PairingFlowStatus::kFailed) {
             return Status::Error(ErrorCode::kUnavailable, "配对状态查询失败");
         }
+    }
+    return Status::Ok();
+}
+
+struct PairingTaskArguments {
+    uint8_t expires_in_minutes;
+};
+
+void PairingTask(void* context) {
+    auto* arguments = static_cast<PairingTaskArguments*>(context);
+    const uint8_t expires_in_minutes = arguments->expires_in_minutes;
+    delete arguments;
+    const Status status = RunPairingAcceptance(expires_in_minutes);
+    if (!status.ok()) ESP_LOGW(kTag, "IM_PAIRING_FAILED code=%d", static_cast<int>(status.code));
+    g_pairing_active.store(false, std::memory_order_release);
+    vTaskDelete(nullptr);
+}
+
+Status StartPairingAcceptance(std::span<const uint8_t> frame) {
+    auto trigger = im::ParseImPairingTrigger(frame);
+    if (!trigger.ok() || !trigger.value.has_value()) return trigger.status;
+    if (g_pairing_client.load(std::memory_order_acquire) == nullptr || !g_pairing_user_id.has_value()) {
+        return Status::Error(ErrorCode::kUnavailable, "IM Runtime 尚未 ready");
+    }
+    bool expected = false;
+    if (!g_pairing_active.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        return Status::Error(ErrorCode::kAlreadyExists, "已有配对会话正在轮询");
+    }
+    auto* arguments = new (std::nothrow) PairingTaskArguments{static_cast<uint8_t>(trigger.value->expires_in_minutes)};
+    if (arguments == nullptr ||
+        xTaskCreate(&PairingTask, "voicelife_im_pairing", 6144, arguments, 3, nullptr) != pdPASS) {
+        delete arguments;
+        g_pairing_active.store(false, std::memory_order_release);
+        return Status::Error(ErrorCode::kInternal, "创建配对轮询任务失败");
     }
     return Status::Ok();
 }
@@ -222,14 +257,14 @@ ConsoleCommandResult ReadImConsoleCommand() {
     const Status console_status = PrepareProvisioningConsole();
     if (!console_status.ok()) return {.status = console_status};
     ESP_LOGW(kTag, "IM_PROVISION_READY=1 timeout_ms=%d", kProvisionTimeoutMs);
-    ESP_LOGW(kTag, "IM_PAIRING_READY=1 timeout_ms=%d", kProvisionTimeoutMs);
+    if (g_pairing_client.load(std::memory_order_acquire) != nullptr) {
+        ESP_LOGW(kTag, "IM_PAIRING_READY=1 timeout_ms=%d", kProvisionTimeoutMs);
+    }
     std::array<uint8_t, im::kImProvisioningHeaderSize> header_bytes{};
     if (!ReadConsoleBytes(header_bytes.data(), header_bytes.size(), kProvisionTimeoutMs)) {
         return {.status = Status::Error(ErrorCode::kNotFound, "未收到物理串口 IM 请求")};
     }
-    if (IsPairingTrigger(header_bytes)) {
-        return {.status = RunPairingAcceptance(header_bytes), .pairing = true};
-    }
+    if (IsPairingTrigger(header_bytes)) return {.status = StartPairingAcceptance(header_bytes), .pairing = true};
     auto header = im::ParseImProvisioningHeader(header_bytes);
     if (!header.ok() || !header.value.has_value()) return {.status = header.status};
 
@@ -250,6 +285,7 @@ ConsoleCommandResult ReadImConsoleCommand() {
 }
 
 void ProvisioningTask(void*) {
+    uint32_t observed_pairing_window = g_pairing_window_generation.load(std::memory_order_acquire);
     while (true) {
         const ConsoleCommandResult result = ReadImConsoleCommand();
         if (result.restart) {
@@ -260,14 +296,28 @@ void ProvisioningTask(void*) {
             if (!result.status.ok()) {
                 ESP_LOGW(kTag, "IM_PAIRING_FAILED code=%d", static_cast<int>(result.status.code));
             }
+            observed_pairing_window = g_pairing_window_generation.load(std::memory_order_acquire);
+            // 配对轮询不占用串口读取者；继续开放 provisioning，坏凭据可用 VLI2 现场恢复。
             continue;
         }
         if (!result.status.ok()) {
             ESP_LOGW(kTag, "IM_PROVISION_FAILED code=%d", static_cast<int>(result.status.code));
         }
+        const uint32_t requested_pairing_window = g_pairing_window_generation.load(std::memory_order_acquire);
+        if (requested_pairing_window != observed_pairing_window &&
+            g_pairing_client.load(std::memory_order_acquire) != nullptr) {
+            observed_pairing_window = requested_pairing_window;
+            continue;
+        }
+        if (g_pairing_active.load(std::memory_order_acquire)) continue;
         break;
     }
-    g_provisioning_started.store(false);
+    g_provisioning_started.store(false, std::memory_order_release);
+    // RegisterImPairingAcceptance 可能恰好在旧窗口退出时请求新窗口；重新检查代数，避免丢唤醒。
+    if (g_pairing_window_generation.load(std::memory_order_acquire) != observed_pairing_window &&
+        g_pairing_client.load(std::memory_order_acquire) != nullptr) {
+        (void)StartImProvisioningTask();
+    }
     vTaskDelete(nullptr);
 }
 
@@ -383,8 +433,19 @@ bool StartImProvisioningTask() {
 
 void RegisterImPairingAcceptance(im::ImPairingPort* client, std::optional<std::string> user_id) {
     if (client == nullptr) return;
+    if (!user_id.has_value() || user_id->empty()) {
+        ESP_LOGW(kTag, "IM_PAIRING_UNAVAILABLE=user_id_missing");
+        return;
+    }
     g_pairing_user_id = std::move(user_id);
     g_pairing_client.store(client, std::memory_order_release);
+    g_pairing_window_generation.fetch_add(1, std::memory_order_acq_rel);
+    if (!StartImProvisioningTask()) {
+        ESP_LOGW(kTag, "IM_PAIRING_TASK_FAILED=1");
+        return;
+    }
+    // 任务已存在时不会再次进入 ReadImConsoleCommand，因此在注册点显式发布 ready 标记。
+    ESP_LOGW(kTag, "IM_PAIRING_READY=1 timeout_ms=%d", kProvisionTimeoutMs);
 }
 
 }  // namespace voicelife::runtime

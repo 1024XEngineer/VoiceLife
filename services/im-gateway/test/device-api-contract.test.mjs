@@ -52,6 +52,8 @@ test('pairing creation parses untrusted device input before authentication', asy
         {},
         { deviceId: '' },
         { deviceId: 'device-fixture', allowedPlatforms: ['unknown'] },
+        { deviceId: 'device-fixture', allowedPlatforms: [] },
+        { deviceId: 'device-fixture', allowedPlatforms: ['wechat_official', 'wechat_official'] },
         { deviceId: 'device-fixture', expiresInMinutes: 0 },
         { deviceId: 'device-fixture', expiresInMinutes: 11 },
     ];
@@ -77,12 +79,40 @@ test('pairing device responses never expose the internal display code hash', asy
         },
     });
     assert.equal('displayCodeHash' in created.session, false);
+    assert.deepEqual(Object.keys(created.session).sort(), [
+        'allowedPlatforms',
+        'createdAt',
+        'deviceId',
+        'expiresAt',
+        'id',
+        'status',
+        'userId',
+    ]);
 
     const status = await gateway.deviceApi.getPairingSession({
         authorization: 'Bearer fixture-device-token',
         pairingSessionId: created.session.id,
     });
     assert.equal(status === undefined ? undefined : 'displayCodeHash' in status, false);
+});
+
+test('pairing creation derives userId from the authenticated device principal', async () => {
+    const { gateway } = buildGateway();
+    const created = await gateway.deviceApi.postPairingSession({
+        authorization: 'Bearer fixture-device-token',
+        body: { deviceId: 'device-fixture', allowedPlatforms: ['wechat_official'] },
+    });
+    assert.equal(created.session.userId, 'user-fixture');
+
+    await expectGatewayError(
+        () =>
+            gateway.deviceApi.postPairingSession({
+                authorization: 'Bearer fixture-device-token',
+                body: { deviceId: 'device-fixture', userId: 'user-other' },
+            }),
+        'invalid_transition',
+        'Pairing accepted a userId that was not bound to the device credential',
+    );
 });
 
 test('notification rejects a body for another device principal', async () => {
