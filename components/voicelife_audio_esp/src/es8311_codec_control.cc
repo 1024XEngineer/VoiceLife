@@ -48,7 +48,10 @@ voicelife::Status InitializeEs8311(const Es8311ControlConfig& config) {
     bus_config.glitch_ignore_cnt = 7;
     bus_config.flags.enable_internal_pullup = 1;
     i2c_master_bus_handle_t bus = nullptr;
-    ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus_config, &bus), kTag, "创建 ES8311 I2C 总线失败");
+    const esp_err_t bus_err = i2c_new_master_bus(&bus_config, &bus);
+    if (bus_err != ESP_OK) {
+        return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "创建 ES8311 I2C 总线失败");
+    }
 
     // I2C 控制接口（官方 audio_codec）。
     audio_codec_i2c_cfg_t i2c_cfg = {};
