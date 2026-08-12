@@ -233,14 +233,15 @@ class SparkBotAssetManifestTest(unittest.TestCase):
                 if path.suffix.lower() != ".gif":
                     continue
                 data = path.read_bytes()
-                infos.append((path.name, len(merged), len(data)))
+                width, height = struct.unpack("<HH", data[6:10])
+                infos.append((path.name, len(merged), len(data), width, height))
                 merged.extend(b"\x5a" * 2)
                 merged.extend(data)
             table = bytearray()
-            for name, offset, size in infos:
+            for name, offset, size, width, height in infos:
                 fixed = name.encode("utf-8")[:32].ljust(32, b"\x00")
                 table.extend(fixed)
-                table.extend(struct.pack("<IIHH", size, offset, 0, 0))
+                table.extend(struct.pack("<IIHH", size, offset, width, height))
             combined = bytes(table) + bytes(merged)
             header = struct.pack("<III", len(infos), sum(combined) & 0xFFFF, len(combined))
             return header + combined

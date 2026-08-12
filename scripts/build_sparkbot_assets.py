@@ -44,21 +44,26 @@ def pack_assets(gif_dir: Path, out_path: Path) -> tuple[int, bytes]:
         raise AssetPackError(f"{gif_dir} 中没有 .gif 文件")
 
     merged = bytearray()
-    table: list[tuple[str, int, int]] = []
+    table: list[tuple[str, int, int, int, int]] = []
     for path in files:
         name = path.name
         data = path.read_bytes()
-        table.append((name, len(merged), len(data)))
+        if len(data) < 10 or data[:6] not in (b"GIF87a", b"GIF89a"):
+            raise AssetPackError(f"{name} 不是合法 GIF")
+        width, height = struct.unpack("<HH", data[6:10])
+        if width != 96 or height != 96:
+            raise AssetPackError(f"{name} 尺寸必须为 96x96，实际 {width}x{height}")
+        table.append((name, len(merged), len(data), width, height))
         merged.extend(MAGIC)
         merged.extend(data)
 
     mmap_table = bytearray()
-    for name, offset, size in table:
+    for name, offset, size, width, height in table:
         fixed = name.encode("utf-8")[:MAX_NAME].ljust(MAX_NAME, b"\x00")
         if len(fixed) != MAX_NAME:
             raise AssetPackError(f"文件名超长: {name}")
         mmap_table.extend(fixed)
-        mmap_table.extend(struct.pack("<IIHH", size, offset, 0, 0))
+        mmap_table.extend(struct.pack("<IIHH", size, offset, width, height))
 
     combined = bytes(mmap_table) + bytes(merged)
     header = struct.pack(
