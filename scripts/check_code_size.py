@@ -10,7 +10,7 @@ from pathlib import Path
 
 SOURCE_ROOTS = ("components/", "main/", "services/", "scripts/", "tests/")
 SOURCE_SUFFIXES = {".cc", ".h", ".py", ".sh", ".mjs", ".ts"}
-IGNORED_PARTS = {"build", "build-host", "dist", "managed_components", "node_modules"}
+IGNORED_PARTS = {"build", "build-host", "dist", "generated", "managed_components", "node_modules"}
 
 
 def changed_sources(base: str) -> list[tuple[str, Path]]:

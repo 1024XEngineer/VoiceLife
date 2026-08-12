@@ -61,6 +61,7 @@ class FakeOutput final : public voicelife::voice::AudioOutputPort {
         ++flushes;
         return flush_result;
     }
+    bool IsIdle() const override { return true; }
     void Close() override { ++closes; }
 
     Status open_result = Status::Ok();
@@ -185,11 +186,32 @@ int main() {
     Check(session.Start(Config()).ok(), "合法配置应启动语音会话");
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady, "启动后应进入 ready");
     const uint64_t generation = session.generation();
-    Check(provider.EmitAudio(Frame(generation, 0)).ok() && output.pushes == 1, "Provider 下行音频应通过会话输出端口");
+    // 空闲（kReady）收到服务端残留 TTS start 必须忽略，不进入播报。
+    provider.Emit(voicelife::voice::VoiceEvent{
+        .kind = voicelife::voice::VoiceEventKind::kTtsStarted, .generation = generation, .text = {}, .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kReady, "空闲时收到残留 TTS start 不得进入播报状态");
+    Check(provider.EmitAudio(Frame(generation, 0)).code == ErrorCode::kUnavailable && output.pushes == 0,
+          "空闲时残留 TTS 二进制帧不得播放");
+    // 正常流程：进入聆听并收到有效 STT 后，TTS start 才被接受。
+    Check(session.BeginCapture().ok(), "ready 会话应开始采集");
+    provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kAsrText,
+                                               .generation = generation,
+                                               .text = "你好",
+                                               .aborted = false});
+    provider.Emit(voicelife::voice::VoiceEvent{
+        .kind = voicelife::voice::VoiceEventKind::kTtsStarted, .generation = generation, .text = {}, .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kSpeaking,
+          "收到有效 STT 后 TTS start 应进入播报状态");
+    Check(provider.EmitAudio(Frame(generation, 0)).ok() && output.pushes == 1,
+          "TTS start 后的下行音频应通过会话输出端口");
+    session.EndCapture();
+    provider.Emit(voicelife::voice::VoiceEvent{
+        .kind = voicelife::voice::VoiceEventKind::kTtsStopped, .generation = generation, .text = {}, .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kReady, "TTS stop 后回到 ready");
     auto mismatched_playback = Frame(generation, 0);
     mismatched_playback.format.channels = 2;
-    Check(provider.EmitAudio(std::move(mismatched_playback)).code == ErrorCode::kInvalidArgument && output.pushes == 1,
-          "下行音频格式变化必须拒绝");
+    Check(provider.EmitAudio(std::move(mismatched_playback)).code == ErrorCode::kUnavailable && output.pushes == 1,
+          "非播报状态的下行音频必须拒绝");
     Check(session.BeginCapture().ok(), "ready 会话应开始采集");
     Check(session.SubmitAudio(Frame(generation, 0)).ok(), "当前 generation 的首帧应发送");
     Check(input.EmitCapture(Frame(0, 0)).ok() && provider.audio_frames == 2, "输入端口采集回调应转发为上行音频");
@@ -206,9 +228,13 @@ int main() {
     Check(session.SubmitAudio(Frame(generation, 3)).code == ErrorCode::kConflict, "跳号音频帧必须拒绝");
     Check(session.SubmitAudio(Frame(generation - 1, 1)).code == ErrorCode::kInvalidArgument,
           "旧 generation 音频帧必须拒绝");
+    provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kAsrText,
+                                               .generation = generation,
+                                               .text = "今天天气",
+                                               .aborted = false});
     provider.Emit(voicelife::voice::VoiceEvent{
         .kind = voicelife::voice::VoiceEventKind::kTtsStarted, .generation = generation, .text = {}, .aborted = false});
-    Check(input.stops == 1 && session.state() == voicelife::voice::VoiceSessionState::kSpeaking,
+    Check(input.stops == 2 && session.state() == voicelife::voice::VoiceSessionState::kSpeaking,
           "采集中收到 TTS start 必须先停止本地采集，再进入播放状态");
     Check(provider.EmitAudio(Frame(generation, 1)).ok() && output.pushes == 2,
           "停止采集后的 TTS 二进制帧必须进入输出端口");
@@ -226,7 +252,7 @@ int main() {
     Check(session.generation() != generation && provider.generation_ == session.generation() &&
               provider.generation_at_abort == session.generation() && output.flushes == 1,
           "打断应刷新播放并让 Provider 切换到新 generation");
-    Check(provider.EmitAudio(Frame(generation, 1)).code == ErrorCode::kInvalidArgument && output.pushes == 2,
+    Check(provider.EmitAudio(Frame(generation, 1)).code == ErrorCode::kUnavailable && output.pushes == 2,
           "打断后迟到的旧 generation 音频不得重新进入播放队列");
     provider.Emit(voicelife::voice::VoiceEvent{});
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
@@ -277,9 +303,12 @@ int main() {
     Check(stop_capture_failure.Start(Config()).ok() && stop_capture_failure.BeginCapture().ok(),
           "停止采集失败用例应先进入 capturing");
     stop_capture_failure_provider.stop_result = Status::Error(ErrorCode::kUnavailable, "远端停止失败");
-    Check(stop_capture_failure.EndCapture().code == ErrorCode::kUnavailable &&
-              stop_capture_failure.state() == voicelife::voice::VoiceSessionState::kFailed,
-          "本地已停止而远端停止失败时不得继续保持 capturing");
+    const uint64_t gen_before_stop_fail = stop_capture_failure.generation();
+    Check(stop_capture_failure.EndCapture().ok() &&
+              stop_capture_failure.state() == voicelife::voice::VoiceSessionState::kReady &&
+              stop_capture_failure.generation() == gen_before_stop_fail + 1 &&
+              stop_capture_failure_provider.generation_ == stop_capture_failure.generation(),
+          "本地已停止而远端停止失败时回 ready 并使旧代次失效，不得卡死在 capturing");
 
     FakeInput disconnect_failure_input;
     FakeOutput disconnect_failure_output;
@@ -319,8 +348,26 @@ int main() {
           "输出端口必须在 Provider hello 后使用协商的下行格式");
     auto negotiated_playback = Frame(negotiated_session.generation(), 0);
     negotiated_playback.format = negotiated_provider.formats.playback;
+    // 模拟真实回合：进入聆听并收到 STT 后，TTS start 再接收协商格式下行音频。
+    Check(negotiated_session.BeginCapture().ok(), "协商会话应可进入采集");
+    negotiated_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kAsrText,
+                                                          .generation = negotiated_session.generation(),
+                                                          .text = "你好",
+                                                          .aborted = false});
+    negotiated_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
+                                                          .generation = negotiated_session.generation(),
+                                                          .text = {},
+                                                          .aborted = false});
+    Check(negotiated_session.state() == voicelife::voice::VoiceSessionState::kSpeaking,
+          "协商会话进入聆听后收到 TTS start 应进入播报");
     Check(negotiated_provider.EmitAudio(std::move(negotiated_playback)).ok() && negotiated_output.pushes == 1,
           "协商后的 24 kHz 下行音频应进入输出端口");
+    negotiated_session.EndCapture();
+    negotiated_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStopped,
+                                                          .generation = negotiated_session.generation(),
+                                                          .text = {},
+                                                          .aborted = false});
+    Check(negotiated_session.state() == voicelife::voice::VoiceSessionState::kReady, "协商会话结束播报后应回到 ready");
     const uint64_t speaking_generation = negotiated_session.generation();
     Check(negotiated_session.Speak("测试打断").ok(), "协商会话应可播报");
     negotiated_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,

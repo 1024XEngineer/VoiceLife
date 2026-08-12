@@ -254,7 +254,10 @@ Status LinxSpeechProviderAdapter::Send(Result<std::string> encoded) {
     if (!encoded.ok() || !encoded.value.has_value()) {
         return encoded.status;
     }
-    return transport_.SendText(*encoded.value);
+    // 脱敏诊断：仅记录控制消息的 type/state 字段，不输出 token、设备 ID 或完整消息。
+    const std::string& message = *encoded.value;
+    // 控制消息的脱敏 type/state 日志由 transport 层记录（见 EspWebSocketTransport::SendText）。
+    return transport_.SendText(message);
 }
 
 void LinxSpeechProviderAdapter::Emit(voice::VoiceEvent event) {
@@ -401,6 +404,12 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
             }
             return;
         }
+        case LinxMessageKind::kGoodbye:
+            // 服务端结束会话的告别消息：不是故障，保持当前状态等待断开事件。
+            return;
+        case LinxMessageKind::kLlm:
+            // 服务端表情/情感 UI 消息：本板仅文本 OLED，无表情渲染，直接忽略。
+            return;
         case LinxMessageKind::kError:
             Emit(Event(voice::VoiceEventKind::kError, inbound.text));
             return;
@@ -435,7 +444,10 @@ void LinxSpeechProviderAdapter::OnBinary(const std::vector<uint8_t>& payload) {
             // The board's output queue is deliberately bounded. A burst can
             // reject one frame while playback remains healthy; metrics record
             // that loss, so do not turn it into a provider lifecycle failure.
-            if (status.code == ErrorCode::kConflict) return;
+            // kConflict / kUnavailable are expected state guards (stale
+            // generation, residual TTS outside a speaking turn); drop them
+            // silently instead of surfacing a false provider error.
+            if (status.code == ErrorCode::kConflict || status.code == ErrorCode::kUnavailable) return;
             Emit(Event(voice::VoiceEventKind::kError, status.message));
         }
     } else {

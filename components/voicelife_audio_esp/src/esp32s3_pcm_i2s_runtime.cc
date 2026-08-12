@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "esp_err.h"
+#include "esp_log.h"
 
 namespace voicelife::audio_esp {
 
@@ -43,6 +44,12 @@ i2s_std_config_t MakeStdConfig(const I2sEndpointProfile& endpoint, bool tx) {
             },
     };
     config.slot_cfg.slot_mask = endpoint.format.channels == 1 ? I2S_STD_SLOT_LEFT : I2S_STD_SLOT_BOTH;
+    // 与官方小智/MVP 的 NoAudioCodec 一致：数据左对齐（MSB 对齐 slot 高位）。
+    // 我们写 32bit wire（16bit PCM << pcm_shift_bits），若 left_align=false（右对齐）
+    // 高 16 位数据会被当作低位处理，导致功放无声。
+#if SOC_I2S_HW_VERSION_2
+    config.slot_cfg.left_align = true;
+#endif
     return config;
 }
 
@@ -245,6 +252,16 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
     }
     const std::size_t sample_count = frame.payload.size() / (sizeof(int16_t) * endpoint.format.channels);
     const auto* pcm = reinterpret_cast<const int16_t*>(frame.payload.data());
+    static bool s_first_write_logged = false;
+    if (!s_first_write_logged) {
+        s_first_write_logged = true;
+        const int vol = output_volume_.load();
+        ESP_LOGI(voicelife::audio_esp::detail::kAudioRuntimeTag,
+                 "I2S_WRITE first_frame bytes=%u samples=%u volume=%d sr=%u wire=%u shift=%u first_pcm=%d",
+                 static_cast<unsigned>(frame.payload.size()), static_cast<unsigned>(sample_count), vol,
+                 endpoint.format.sample_rate_hz, endpoint.wire_bits_per_sample, endpoint.pcm_shift_bits,
+                 sample_count > 0 ? pcm[0] : 0);
+    }
     const std::size_t period_samples = static_cast<std::size_t>(endpoint.format.sample_rate_hz) *
                                        endpoint.format.frame_duration_ms / 1000U * endpoint.format.channels;
     for (std::size_t offset = 0; offset < sample_count; offset += period_samples) {
@@ -255,7 +272,10 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
             auto* out = reinterpret_cast<int32_t*>(wire.data());
             const int volume = output_volume_.load();
             for (std::size_t i = 0; i < count; ++i) {
-                const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume / 100;
+                // 播放增益：MVP 用 (vol/100)^2*65536 满幅；语音信号约 -6~-12dBFS，
+                // volume=100 时补 4 倍（+12dB）数字增益，clamp 防削波。
+                const int32_t gain = 4;
+                const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume * gain / 100;
                 out[i] = detail::ToWire(static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767)), endpoint);
             }
         } else {
@@ -293,8 +313,16 @@ void Esp32s3PcmAudioPorts::Impl::OutputLoop() {
             frame = std::move(output_queue_.front());
             output_queue_.pop_front();
         }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            output_writing_ = true;
+        }
         if (WriteFrame(frame).ok()) {
             ++played_frames_;
+        }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            output_writing_ = false;
         }
     }
     MarkTaskDone(&output_task_);

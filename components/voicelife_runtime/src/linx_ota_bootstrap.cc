@@ -1,6 +1,7 @@
 #include "linx_ota_bootstrap.h"
 
 #include <fcntl.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -466,6 +467,27 @@ Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig() {
                 auto response = FetchOtaResponse(*request.value);
                 if (response.ok() && response.value.has_value()) {
                     LogOtaResponseShape(*response.value);
+                    // 用服务端时间初始化系统时钟（UTC epoch，供空闲态显示 HH:MM）。
+                    if (response.value->server_time.has_value() && response.value->server_time->timestamp_ms > 0) {
+                        timespec spec{};
+                        spec.tv_sec = static_cast<time_t>(response.value->server_time->timestamp_ms / 1000ULL);
+                        spec.tv_nsec =
+                            static_cast<long>((response.value->server_time->timestamp_ms % 1000ULL) * 1000000ULL);
+                        if (clock_settime(CLOCK_REALTIME, &spec) == 0) {
+                            // 设置进程时区：CLOCK_REALTIME 保持 UTC（日程比较不受影响），
+                            // 由 TZ 让 localtime_r 渲染服务器提供的本地偏移。POSIX 符号与
+                            // 分钟偏移相反（UTC+8 → "UTC-8:00"）。缺省按中国时区 +480。
+                            const int32_t offset_minutes =
+                                response.value->server_time->timezone_offset_minutes.value_or(480);
+                            const int32_t absolute = offset_minutes < 0 ? -offset_minutes : offset_minutes;
+                            char timezone[24]{};
+                            std::snprintf(timezone, sizeof(timezone), "UTC%c%ld:%02ld", offset_minutes >= 0 ? '-' : '+',
+                                          static_cast<long>(absolute / 60), static_cast<long>(absolute % 60));
+                            setenv("TZ", timezone, 1);
+                            tzset();
+                            ESP_LOGI(kTag, "LINX_SERVER_TIME_SET=1 tz=%s", timezone);
+                        }
+                    }
                     if (response.value->activation.has_value()) {
                         ESP_LOGW(kTag, "LINX_ACTIVATION_REQUIRED=1");
                         return Result<linx::LinxConnectionConfig>::Failure(ErrorCode::kUnavailable,

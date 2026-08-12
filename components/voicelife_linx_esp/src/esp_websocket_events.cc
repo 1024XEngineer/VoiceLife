@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "esp_log.h"
+#include "esp_tls_errors.h"
 #include "esp_websocket_client.h"
 #include "esp_websocket_impl.h"
 #include "freertos/FreeRTOS.h"
@@ -46,14 +47,27 @@ void EspWebSocketTransport::Impl::Enqueue(int32_t event_id, const esp_websocket_
             std::memcpy(envelope.data.data(), event_data->data_ptr, event_data->data_len);
         }
     } else if (event_id == WEBSOCKET_EVENT_ERROR) {
-        envelope.kind = detail::EventKind::kError;
-        if (event_data != nullptr) {
-            envelope.tls_last_error = event_data->error_handle.esp_tls_last_esp_err;
-            envelope.tls_stack_error = event_data->error_handle.esp_tls_stack_err;
-            envelope.tls_cert_flags = event_data->error_handle.esp_tls_cert_verify_flags;
-            envelope.handshake_status = event_data->error_handle.esp_ws_handshake_status_code;
-            envelope.socket_errno = event_data->error_handle.esp_transport_sock_errno;
-            envelope.opcode = static_cast<uint8_t>(event_data->error_handle.error_type);
+        // 服务端有序关闭是正常告别，不当故障：
+        // - 收到 WebSocket CLOSE 帧（SERVER_CLOSE）
+        // - TCP 有序 FIN（esp-tls 报 TCP_CLOSED_FIN）
+        // 均映射为 kDisconnected（触发自动重连），其余才是真正故障（证书/握手/超时）。
+        const auto error_type = event_data != nullptr ? event_data->error_handle.error_type : WEBSOCKET_ERROR_TYPE_NONE;
+        const bool ordered_close =
+            error_type == WEBSOCKET_ERROR_TYPE_SERVER_CLOSE ||
+            (event_data != nullptr && event_data->error_handle.esp_tls_last_esp_err == ESP_ERR_ESP_TLS_TCP_CLOSED_FIN);
+        if (ordered_close) {
+            envelope.kind = detail::EventKind::kDisconnected;
+            envelope.opcode = static_cast<uint8_t>(error_type);
+        } else {
+            envelope.kind = detail::EventKind::kError;
+            if (event_data != nullptr) {
+                envelope.tls_last_error = event_data->error_handle.esp_tls_last_esp_err;
+                envelope.tls_stack_error = event_data->error_handle.esp_tls_stack_err;
+                envelope.tls_cert_flags = event_data->error_handle.esp_tls_cert_verify_flags;
+                envelope.handshake_status = event_data->error_handle.esp_ws_handshake_status_code;
+                envelope.socket_errno = event_data->error_handle.esp_transport_sock_errno;
+                envelope.opcode = static_cast<uint8_t>(error_type);
+            }
         }
     } else {
         return;
@@ -99,6 +113,63 @@ void EspWebSocketTransport::Impl::HandleQueueOverflow() {
     const linx::LinxTransportSink sink = SinkSnapshot();
     if (sink.on_error) {
         sink.on_error(status);
+    }
+}
+
+void EspWebSocketTransport::Impl::TxEntry(void* argument) {
+    static_cast<Impl*>(argument)->TxLoop();
+    vTaskDelete(nullptr);
+}
+
+void EspWebSocketTransport::Impl::TxLoop() {
+    // 唯一 TX 任务：按队列顺序发送文本/音频，TLS 只在本任务运行。
+    // 短超时（network_timeout_ms 已配置，通常 ≤1s）避免写阻塞拖垮采集。
+    while (running_.load()) {
+        detail::LinxTxItem* item = nullptr;
+        // 高优先级控制队列优先（listen.stop/abort 不被音频队列阻塞）。
+        if (tx_control_queue_ != nullptr && xQueueReceive(tx_control_queue_, &item, 0) == pdTRUE) {
+            // 从控制队列取到 item，直接发送。
+        } else if (tx_queue_ != nullptr && xQueueReceive(tx_queue_, &item, pdMS_TO_TICKS(100)) != pdTRUE) {
+            continue;
+        }
+        if (item == nullptr) {
+            continue;
+        }
+        if (item->kind == detail::LinxTxItem::Kind::kBarrier) {
+            // barrier：文本/音频序列的分界（如 listen.stop 排在本轮音频之后）。
+            delete item;
+            continue;
+        }
+        const int sent = item->kind == detail::LinxTxItem::Kind::kText
+                             ? esp_websocket_client_send_text(
+                                   client_, reinterpret_cast<const char*>(item->payload.data()),
+                                   static_cast<int>(item->payload.size()), pdMS_TO_TICKS(options_.network_timeout_ms))
+                             : esp_websocket_client_send_bin(
+                                   client_, reinterpret_cast<const char*>(item->payload.data()),
+                                   static_cast<int>(item->payload.size()), pdMS_TO_TICKS(options_.network_timeout_ms));
+        const size_t want = item->payload.size();
+        delete item;
+        item = nullptr;
+        if (sent < 0 || static_cast<size_t>(sent) != want) {
+            // 发送失败（写阻塞/短写/连接已断）：不能直接 esp_websocket_client_stop
+            // ——stop 会停止客户端，ESP 内建自动重连（disable_auto_reconnect=false）
+            // 随之失效，Session 永久卡在非 Ready（无法二次唤醒/说话）。
+            // 正确做法：停止后立即重启 client，让内建自动重连继续负责重连
+            // （单一重连执行者），随后断开事件会走 transport_disconnected 恢复。
+            ESP_LOGW(detail::kTag, "LINX_TX_SEND_FAIL sent=%d want=%u, restart client for reconnect", sent,
+                     static_cast<unsigned>(want));
+            if (client_ != nullptr && !closing_.load()) {
+                (void)esp_websocket_client_stop(client_);
+                // 重启以恢复内建自动重连；start 会重新进入连接流程并自动重连。
+                (void)esp_websocket_client_start(client_);
+            }
+            // 清理队列中剩余项，避免堆积。
+            detail::LinxTxItem* remaining = nullptr;
+            while (tx_queue_ != nullptr && xQueueReceive(tx_queue_, &remaining, 0) == pdTRUE) {
+                delete remaining;
+            }
+            continue;
+        }
     }
 }
 

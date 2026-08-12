@@ -3,6 +3,9 @@
 #include <utility>
 
 #include "esp32s3_pcm_audio_port_internal.h"
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
 
 namespace voicelife::audio_esp {
 
@@ -55,6 +58,8 @@ Status Esp32s3PcmAudioPorts::Impl::OutputPort::Open(const voice::AudioFormat& fo
 Status Esp32s3PcmAudioPorts::Impl::OutputPort::Push(const voice::AudioFrame& frame) { return owner_.PushOutput(frame); }
 
 Status Esp32s3PcmAudioPorts::Impl::OutputPort::Flush() { return owner_.FlushOutput(); }
+
+bool Esp32s3PcmAudioPorts::Impl::OutputPort::IsIdle() const { return owner_.OutputIdle(); }
 
 void Esp32s3PcmAudioPorts::Impl::OutputPort::Close() { (void)owner_.CloseOutput(); }
 
@@ -135,8 +140,14 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
     if (options_.input_queue_depth == 0 || options_.output_queue_depth == 0) {
         return detail::Invalid("Audio Port 队列容量不能为零");
     }
-    playback_format_ = format;
+    // 播放端固定用板级 profile 格式（24kHz），协商/上游帧在 Push 时统一重采样。
+    // 这样 I2S 时钟恒定（与 MVP 一致），避免 16k 协商导致硬件无声。
+    playback_format_ = profile_.playback_i2s.format;
     output_open_ = true;
+#ifdef ESP_PLATFORM
+    ESP_LOGI(voicelife::audio_esp::detail::kAudioRuntimeTag, "OUTPUT_OPEN sr=%u ch=%u bits=%u",
+             playback_format_->sample_rate_hz, playback_format_->channels, playback_format_->bits_per_sample);
+#endif
     const Status init_status = TryInitializeChannelsLocked();
     if (!init_status.ok()) {
         output_open_ = false;
@@ -183,7 +194,7 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
         input_cv_.notify_all();
         return detail::Unavailable("创建 I2S 采集任务失败");
     }
-    if (xTaskCreate(&DeliveryTaskEntry, "voice_audio_sink", 3072, this, 4, &delivery_task_) != pdPASS) {
+    if (xTaskCreate(&DeliveryTaskEntry, "voice_audio_sink", 16384, this, 4, &delivery_task_) != pdPASS) {
         input_running_ = false;
         i2s_channel_disable(rx_channel_);
         input_cv_.notify_all();
@@ -257,15 +268,38 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(const voice::AudioFrame& frame) {
     if (!output_open_ || !playback_format_.has_value()) {
         return detail::Unavailable("输出端口尚未打开");
     }
-    if (!detail::SameFormat(frame.format, *playback_format_, true) || frame.payload.empty() ||
-        frame.payload.size() % (sizeof(int16_t) * playback_format_->channels) != 0) {
-        return detail::Invalid("播放帧格式或 PCM 负载无效");
+    if (frame.payload.empty() || frame.payload.size() % (sizeof(int16_t) * playback_format_->channels) != 0) {
+        return detail::Invalid("播放帧 PCM 负载无效");
+    }
+    // 采样率不匹配（如服务端协商 16k、播放端 24k）：线性重采样到播放格式。
+    voice::AudioFrame out = frame;
+    if (frame.format.sample_rate_hz != 0 && frame.format.sample_rate_hz != playback_format_->sample_rate_hz &&
+        frame.format.channels == playback_format_->channels && frame.format.bits_per_sample == 16) {
+        const uint32_t src_rate = frame.format.sample_rate_hz;
+        const uint32_t dst_rate = playback_format_->sample_rate_hz;
+        const std::size_t src_samples = frame.payload.size() / sizeof(int16_t);
+        const std::size_t dst_samples = src_samples * dst_rate / src_rate;
+        std::vector<uint8_t> resampled(dst_samples * sizeof(int16_t));
+        const int16_t* src = reinterpret_cast<const int16_t*>(frame.payload.data());
+        auto* dst = reinterpret_cast<int16_t*>(resampled.data());
+        for (std::size_t i = 0; i < dst_samples; ++i) {
+            const double pos = static_cast<double>(i) * src_rate / dst_rate;
+            const std::size_t i0 = static_cast<std::size_t>(pos);
+            const std::size_t i1 = i0 + 1 < src_samples ? i0 + 1 : i0;
+            const double frac = pos - static_cast<double>(i0);
+            dst[i] = static_cast<int16_t>(src[i0] * (1.0 - frac) + src[i1] * frac);
+        }
+        out.payload = std::move(resampled);
+        out.format = *playback_format_;
+        ++resampled_frames_;
+    } else if (!detail::SameFormat(frame.format, *playback_format_, false)) {
+        return detail::Invalid("播放帧格式不支持");
     }
     if (output_queue_.size() >= options_.output_queue_depth) {
         ++rejected_output_frames_;
         return Status::Error(ErrorCode::kConflict, "播放队列已满，拒绝新帧");
     }
-    output_queue_.push_back(frame);
+    output_queue_.push_back(std::move(out));
     output_high_watermark_.store(std::max(output_high_watermark_.load(), output_queue_.size()));
     output_cv_.notify_one();
     return Status::Ok();
@@ -279,6 +313,16 @@ Status Esp32s3PcmAudioPorts::Impl::FlushOutput() {
     return Status::Ok();
 #else
     return detail::Unavailable("ESP32-S3 PCM Audio Port 只能在 ESP-IDF 目标运行");
+#endif
+}
+
+bool Esp32s3PcmAudioPorts::Impl::OutputIdle() const {
+#ifdef ESP_PLATFORM
+    std::lock_guard<std::mutex> lock(mutex_);
+    // 播放排空 = 软件队列空 且 无正在写 I2S 的帧（同步阻塞写窗口）。
+    return output_queue_.empty() && !output_writing_;
+#else
+    return true;
 #endif
 }
 

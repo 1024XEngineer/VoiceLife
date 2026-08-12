@@ -101,7 +101,7 @@ int main() {
     Check(wake_events == 1 && forwarded == 0, "检测事件不能把待机 PCM 误送云端");
 
     Check(gate.StartCapture(voicelife::voice::VoiceMode::kRealtime).ok(), "唤醒后应能切换到云端采集");
-    Check(physical.starts == 1 && detector.stops == 1, "切换上行不能重新打开 I2S，且必须停止检测器");
+    Check(physical.starts == 1 && detector.stops == 0, "唤醒命中后检测器已自停，切换上行不应重复停止检测器");
     Check(physical.Emit(Frame()).ok() && detector.frames == 1 && forwarded == 1,
           "上行状态 PCM 必须只转发 VoiceSession");
     Check(gate.StopCapture().ok() && gate.standby(), "停止上行后必须恢复本地待机");
@@ -111,6 +111,6 @@ int main() {
     Check(detector.starts == 2 && physical.starts == 1, "已在待机时恢复不得创建重复检测或采集任务");
 
     gate.Close();
-    Check(physical.stops == 1 && physical.closes == 1 && detector.stops == 2, "关闭必须停止检测、采集并释放物理端口");
+    Check(physical.stops == 1 && physical.closes == 1 && detector.stops == 1, "关闭必须停止检测、采集并释放物理端口");
     return 0;
 }

@@ -69,6 +69,10 @@ class AudioOutputPort {
      *  @return 刷新成功返回 Ok。 */
     virtual Status Flush() = 0;
 
+    /** @brief 查询播放队列是否已排空（无待播帧）。
+     *  @return true 表示播放已排空，可用于 TTS 结束后的收尾判断。 */
+    [[nodiscard]] virtual bool IsIdle() const = 0;
+
     /** @brief 释放硬件资源。 */
     virtual void Close() = 0;
 };

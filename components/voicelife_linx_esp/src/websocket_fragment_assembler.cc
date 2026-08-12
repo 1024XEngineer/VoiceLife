@@ -37,8 +37,7 @@ Result<WebSocketAssemblyResult> WebSocketFragmentAssembler::Push(const WebSocket
         if (fragment.opcode != WebSocketOpcode::kText && fragment.opcode != WebSocketOpcode::kBinary) {
             return Reject(ErrorCode::kInvalidArgument, "WebSocket opcode 不支持");
         }
-        if (fragment.payload_offset != 0 || (fragment.fin && fragment.data_len != fragment.payload_len) ||
-            (!fragment.fin && (fragment.payload_len == 0 || fragment.data_len == 0))) {
+        if (fragment.payload_offset != 0 || fragment.payload_len == 0) {
             return Reject(ErrorCode::kInvalidArgument, "WebSocket 首帧边界无效");
         }
         assembling_ = true;
@@ -50,8 +49,15 @@ Result<WebSocketAssemblyResult> WebSocketFragmentAssembler::Push(const WebSocket
         if (fragment.generation != generation_) {
             return Reject(ErrorCode::kConflict, "WebSocket 分片 generation 已过期");
         }
-        if (fragment.opcode != WebSocketOpcode::kContinuation || fragment.payload_len != expected_payload_len_ ||
-            fragment.payload_offset != payload_.size()) {
+        // ESP-IDF 对超过 WS_BUFFER_SIZE 的单帧会分块投递多个 DATA 事件：
+        // 每块 opcode/fin 保持帧头原值，payload_offset 单调递增、payload_len 不变。
+        const bool same_frame_chunk = fragment.opcode == opcode_ && fragment.payload_len == expected_payload_len_;
+        const bool protocol_continuation =
+            fragment.opcode == WebSocketOpcode::kContinuation && fragment.payload_len == expected_payload_len_;
+        if (!same_frame_chunk && !protocol_continuation) {
+            return Reject(ErrorCode::kConflict, "WebSocket continuation 序列无效");
+        }
+        if (fragment.payload_offset != payload_.size()) {
             return Reject(ErrorCode::kConflict, "WebSocket continuation 序列无效");
         }
     }
@@ -59,14 +65,11 @@ Result<WebSocketAssemblyResult> WebSocketFragmentAssembler::Push(const WebSocket
     if (fragment.data_len > 0) {
         payload_.insert(payload_.end(), fragment.data, fragment.data + fragment.data_len);
     }
-    if (fragment.fin) {
-        if (payload_.size() != expected_payload_len_) {
-            return Reject(ErrorCode::kInvalidArgument, "WebSocket 完整帧长度不匹配");
-        }
+    if (payload_.size() == expected_payload_len_) {
         return Complete();
     }
-    if (payload_.size() >= expected_payload_len_) {
-        return Reject(ErrorCode::kInvalidArgument, "未结束的 WebSocket 分片已达到声明长度");
+    if (payload_.size() > expected_payload_len_) {
+        return Reject(ErrorCode::kInvalidArgument, "WebSocket 完整帧长度不匹配");
     }
     return Result<WebSocketAssemblyResult>::Success({});
 }

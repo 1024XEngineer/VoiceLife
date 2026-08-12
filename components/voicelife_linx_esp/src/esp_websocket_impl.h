@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
@@ -27,6 +28,14 @@ constexpr EventBits_t kConnectedBit = BIT0;
 constexpr EventBits_t kFailedBit = BIT1;
 
 enum class EventKind : uint8_t { kConnected, kData, kDisconnected, kError, kShutdown };
+
+/** 统一 TX 队列项：文本/音频/barrier，由唯一 LinxTxTask 顺序发送。 */
+struct LinxTxItem {
+    enum class Kind : uint8_t { kText, kAudio, kBarrier };
+    Kind kind = Kind::kText;
+    std::vector<uint8_t> payload;
+    uint64_t generation = 0;
+};
 
 struct EventEnvelope {
     EventKind kind = EventKind::kError;
@@ -69,6 +78,8 @@ class EspWebSocketTransport::Impl final {
     void Enqueue(int32_t event_id, const esp_websocket_event_data_t* event_data);
     static void WorkerEntry(void* argument);
     void WorkerLoop();
+    static void TxEntry(void* argument);
+    void TxLoop();
     void HandleQueueOverflow();
     void HandleEnvelope(const detail::EventEnvelope& envelope);
     void HandleData(const detail::EventEnvelope& envelope);
@@ -79,6 +90,13 @@ class EspWebSocketTransport::Impl final {
     esp_websocket_client_handle_t client_ = nullptr;
     QueueHandle_t event_queue_ = nullptr;
     bool event_queue_uses_caps_ = false;
+    // 唯一 TX 队列：文本/音频/barrier 统一由 TxTask 顺序发送，
+    // TLS 只在 TxTask 运行（栈 16KB），避免调用任务同步写阻塞。
+    QueueHandle_t tx_queue_ = nullptr;
+    // 高优先级控制队列：listen.stop/abort 等控制帧，音频占满时仍可入队。
+    QueueHandle_t tx_control_queue_ = nullptr;
+    bool tx_queue_uses_caps_ = false;
+    TaskHandle_t tx_task_ = nullptr;
     EventGroupHandle_t state_events_ = nullptr;
     SemaphoreHandle_t worker_stopped_ = nullptr;
     TaskHandle_t worker_ = nullptr;

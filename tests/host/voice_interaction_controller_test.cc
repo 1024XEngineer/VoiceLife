@@ -24,8 +24,7 @@ void CheckTransition(VoiceInteractionController& controller, VoiceInteractionEve
 
 int main() {
     VoiceInteractionController controller;
-    Check(controller.state() == VoiceInteractionState::kBooting && controller.display_text() == "BOOT",
-          "控制器应以 BOOT 状态启动");
+    Check(controller.state() == VoiceInteractionState::kBooting, "控制器应以 BOOT 状态启动");
     CheckTransition(controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "启动后应进入待机并启动本地唤醒");
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
@@ -45,8 +44,12 @@ int main() {
                     VoiceInteractionAction::kStartVoiceTurn, "新一轮唤醒应可开始");
     CheckTransition(controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
                     VoiceInteractionAction::kNone, "无需先收到文本也允许服务器直接开始 TTS");
-    CheckTransition(controller, VoiceInteractionEvent::kTtsStopped, VoiceInteractionState::kStandby,
-                    VoiceInteractionAction::kRestoreStandby, "TTS 正常结束后应恢复待机");
+    CheckTransition(controller, VoiceInteractionEvent::kTtsStopped, VoiceInteractionState::kListening,
+                    VoiceInteractionAction::kStartCapture, "TTS 结束后应进入 follow-up 聆听供用户续说");
+    CheckTransition(controller, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kFinalizing,
+                    VoiceInteractionAction::kStopVoiceTurn, "follow-up 聆听可通过松开触摸进入等待最终 STT");
+    CheckTransition(controller, VoiceInteractionEvent::kFinalizationTimedOut, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "最终 STT 超时应恢复待机");
 
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
                     VoiceInteractionAction::kStartVoiceTurn, "按住说打断路径前应可进入一轮语音");
@@ -55,19 +58,22 @@ int main() {
     CheckTransition(controller, VoiceInteractionEvent::kPressDown, VoiceInteractionState::kListening,
                     VoiceInteractionAction::kInterruptAndStartCapture,
                     "播报中按住说只能重启采集，不能伪造本地唤醒事件");
-    CheckTransition(controller, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kStandby,
-                    VoiceInteractionAction::kStopVoiceTurn, "打断后松开触摸应停止手动采集");
+    CheckTransition(controller, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kFinalizing,
+                    VoiceInteractionAction::kStopVoiceTurn, "打断后松开触摸应进入等待最终 STT");
 
     CheckTransition(controller, VoiceInteractionEvent::kTransportDisconnected, VoiceInteractionState::kReconnecting,
                     VoiceInteractionAction::kRestoreStandby, "断线时必须停止云端上行并保留本地待机");
     CheckTransition(controller, VoiceInteractionEvent::kTransportConnected, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "重连完成后应重新可被唤醒");
-    Check(controller.display_text() == "IDLE", "待机状态应使用固定 OLED 文本");
 
-    CheckTransition(controller, VoiceInteractionEvent::kPressDown, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kStartCapture, "触摸按下应开始手动采集");
-    CheckTransition(controller, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kStandby,
-                    VoiceInteractionAction::kStopVoiceTurn, "触摸松开应停止手动采集");
+    CheckTransition(controller, VoiceInteractionEvent::kPressDown, VoiceInteractionState::kOpeningCapture,
+                    VoiceInteractionAction::kStartCapture, "触摸按下应提交采集请求（事务式启动）");
+    CheckTransition(controller, VoiceInteractionEvent::kCaptureStarted, VoiceInteractionState::kListening,
+                    VoiceInteractionAction::kNone, "capture_started 确认后才进入聆听中");
+    CheckTransition(controller, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kFinalizing,
+                    VoiceInteractionAction::kStopVoiceTurn, "触摸松开应进入等待最终 STT");
+    CheckTransition(controller, VoiceInteractionEvent::kFinalizationTimedOut, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "触摸松开后最终 STT 超时应恢复待机");
 
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
                     VoiceInteractionAction::kStartVoiceTurn, "待机唤醒仍应开始云端语音");
@@ -88,9 +94,8 @@ int main() {
           "乱序 TTS stop 不能破坏待机状态");
     const auto failure = controller.Handle(VoiceInteractionEvent::kFailure);
     Check(failure.ok() && failure.value->state == VoiceInteractionState::kError &&
-              failure.value->action == VoiceInteractionAction::kInterruptSession &&
-              controller.display_text() == "ERROR",
-          "失败必须可见，并要求中止远端轮次后恢复本地待机");
+              failure.value->action == VoiceInteractionAction::kInterruptSession,
+          "失败必须中止远端轮次后恢复本地待机");
     CheckTransition(controller, VoiceInteractionEvent::kStandbyReady, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kNone, "本地待机恢复后应清除错误状态");
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,

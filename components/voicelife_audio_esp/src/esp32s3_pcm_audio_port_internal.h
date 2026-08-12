@@ -31,6 +31,8 @@
 namespace voicelife::audio_esp {
 namespace detail {
 
+constexpr char kAudioRuntimeTag[] = "VoiceLifeAudioRuntime";
+
 Status Invalid(std::string message);
 Status Unavailable(std::string message);
 
@@ -69,6 +71,7 @@ class Esp32s3PcmAudioPorts::Impl final {
         Status Open(const voice::AudioFormat& format) override;
         Status Push(const voice::AudioFrame& frame) override;
         Status Flush() override;
+        bool IsIdle() const override;
         void Close() override;
 
        private:
@@ -98,6 +101,7 @@ class Esp32s3PcmAudioPorts::Impl final {
     Status CloseInput();
     Status PushOutput(const voice::AudioFrame& frame);
     Status FlushOutput();
+    bool OutputIdle() const;
     Status CloseOutput();
 
 #ifdef ESP_PLATFORM
@@ -135,12 +139,15 @@ class Esp32s3PcmAudioPorts::Impl final {
     bool channels_ready_ = false;
     bool input_running_ = false;
     bool output_running_ = false;
+    // 正在执行 i2s_channel_write 的帧（同步阻塞写期间队列可能空但 I2S 仍在播）。
+    bool output_writing_ = false;
 #endif
 
     std::atomic<std::size_t> captured_frames_{0};
     std::atomic<std::size_t> dropped_input_frames_{0};
     std::atomic<std::size_t> played_frames_{0};
     std::atomic<std::size_t> rejected_output_frames_{0};
+    std::atomic<std::size_t> resampled_frames_{0};
     std::atomic<std::size_t> short_reads_{0};
     std::atomic<std::size_t> short_writes_{0};
     std::atomic<std::size_t> input_high_watermark_{0};

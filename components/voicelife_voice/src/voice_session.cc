@@ -3,6 +3,10 @@
 #include <string>
 #include <utility>
 
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
+
 namespace voicelife::voice {
 
 VoiceSession::VoiceSession(AudioInputPort& input, AudioOutputPort& output, SpeechProviderAdapter& provider,
@@ -38,6 +42,11 @@ VoiceSessionConfig VoiceSession::config() const {
     return config_;
 }
 
+AudioFormat VoiceSession::playback_format() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return audio_formats_.playback;
+}
+
 bool VoiceSession::AcceptFrameLocked(const AudioFrame& frame) const {
     const AudioFormat& expected = audio_formats_.capture;
     const AudioFormat& actual = frame.format;
@@ -67,6 +76,7 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
         audio_formats_ = {.capture = config.audio, .playback = config.audio};
         audio_ready_ = false;
         state_ = VoiceSessionState::kStarting;
+        response_armed_ = false;
         generation_++;
         config_.generation = generation_;
         next_sequence_ = 0;
@@ -164,14 +174,30 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
             generation = generation_;
             generation_changed = true;
             disconnected = true;
+            response_armed_ = false;
+        } else if (event.kind == VoiceEventKind::kAsrText) {
+            // 本轮收到用户语音转写（非唤醒词），武装本轮回复接受条件。
+            // kToolCall 不武装：启动/重连时的 MCP 发现消息（tools/list）并非
+            // 用户本轮输入，不能提前放行服务端 TTS。
+            response_armed_ = true;
         } else if (event.kind == VoiceEventKind::kConnected && audio_ready_ && state_ == VoiceSessionState::kStarting) {
             state_ = VoiceSessionState::kReady;
         } else if (event.kind == VoiceEventKind::kTtsStarted) {
-            // This board has no AEC path. Stop capture before accepting the
-            // server's TTS binary frames, rather than running I2S RX/TX as a
-            // misleading full-duplex conversation.
-            stop_input_for_tts = state_ == VoiceSessionState::kCapturing;
-            state_ = VoiceSessionState::kSpeaking;
+            // 仅接受本轮请求产生的 TTS：必须先收到有效 STT/工具调用（response_armed_）。
+            // 允许 kReady（listen.stop 后最终 STT 到达、Session 已回 kReady 的回应路径）、
+            // kCapturing、kThinking、kSpeaking。空闲且无本轮输入（未 armed）的残留 TTS
+            // 一律忽略，避免设备在没有用户输入时擅自播报。
+            const bool armed = response_armed_ || state_ == VoiceSessionState::kSpeaking;
+            if (!armed || state_ == VoiceSessionState::kStopped || state_ == VoiceSessionState::kStarting ||
+                state_ == VoiceSessionState::kFailed) {
+                stale = true;
+            } else {
+                // This board has no AEC path. Stop capture before accepting the
+                // server's TTS binary frames, rather than running I2S RX/TX as a
+                // misleading full-duplex conversation.
+                stop_input_for_tts = state_ == VoiceSessionState::kCapturing;
+                state_ = VoiceSessionState::kSpeaking;
+            }
         } else if (event.kind == VoiceEventKind::kTtsStopped) {
             if (event.aborted && audio_ready_) {
                 ++generation_;
@@ -180,6 +206,7 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
                 state_ = VoiceSessionState::kReady;
                 generation = generation_;
                 playback_aborted = true;
+                response_armed_ = false;
             } else if (state_ == VoiceSessionState::kSpeaking) {
                 state_ = VoiceSessionState::kReady;
             }
@@ -219,7 +246,11 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
         }
         Emit("tts_started", "");
     } else if (event.kind == VoiceEventKind::kTtsSentenceStarted) {
-        Emit("tts_sentence_started", event.text);
+        // 仅当处于播报状态（本轮 TTS 已被 kTtsStarted 接受）时才回显句子；
+        // 空闲态残留 TTS（如服务端闲聊）不显示文本。
+        if (state_ == VoiceSessionState::kSpeaking) {
+            Emit("tts_sentence_started", event.text);
+        }
     } else if (event.kind == VoiceEventKind::kTtsStopped) {
         Emit("tts_stopped", "");
     } else if (event.kind == VoiceEventKind::kError) {
@@ -250,6 +281,12 @@ Status VoiceSession::BeginCapture() {
             std::lock_guard<std::mutex> lock(mutex_);
             state_ = VoiceSessionState::kCapturing;
             next_sequence_ = 0;
+            // 新回合开始：清零上一轮武装标记与 VAD 状态，只允许本轮有效输入武装回复。
+            response_armed_ = false;
+            vad_speech_seen_ = false;
+            vad_silence_emitted_ = false;
+            vad_silence_pending_ = false;
+            last_speech_at_ = {};
         }
         Emit("capture_started", "");
         return Status::Ok();
@@ -286,9 +323,33 @@ Status VoiceSession::EndCapture() {
         Emit("capture_stopped", "");
         return Status::Ok();
     }
-    // Input is already stopped but provider stop failed: the session cannot
-    // safely return to kReady or kCapturing. Transition to kFailed so the
-    // caller does not attempt further capture on a half-closed session.
+    // Input is already stopped but provider stop failed (e.g. the WebSocket was
+    // torn down mid-turn). The transport auto-reconnects and hello re-arms the
+    // session, so keep the session usable for the next wake word instead of
+    // stranding it in kFailed. Invalidate the old turn generation so any
+    // residual TTS frames or stale listen state from the failed round are
+    // rejected, and the next BeginCapture starts a fresh turn.
+    // 注意：本地输入已停止，会话可复用，必须返回成功——调用方若看到失败会
+    // 映射 kFailure 把控制器拖进 Error，导致后续无法恢复聆听。
+    if (input_status.ok()) {
+        uint64_t next_generation = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            ++generation_;
+            config_.generation = generation_;
+            next_sequence_ = 0;
+            next_generation = generation_;
+            state_ = VoiceSessionState::kReady;
+        }
+        provider_.SetGeneration(next_generation);
+        Emit("capture_stopped", "");
+#ifdef ESP_PLATFORM
+        ESP_LOGW("VoiceLifeVoiceSession",
+                 "EndCapture: input stopped, provider stop 失败（可恢复，generation=%llu）: %s",
+                 static_cast<unsigned long long>(next_generation), provider_status.message.c_str());
+#endif
+        return Status::Ok();
+    }
     {
         std::lock_guard<std::mutex> lock(mutex_);
         state_ = VoiceSessionState::kFailed;
@@ -338,6 +399,33 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
         sequence = next_sequence_;
         frame.generation = generation;
         frame.sequence = sequence;
+        // 本地 VAD 端点（无 AFE，用 RMS 能量近似，PCM 已右移 14 位幅度较小）：
+        // 带迟滞：进入语音用较高阈值，一旦检测到语音后以更低阈值维持，静音超
+        // 1200ms 发一次 vad_silence 供上层进入最终 STT 等待。
+        const auto* pcm = reinterpret_cast<const int16_t*>(frame.payload.data());
+        const std::size_t sample_count = frame.payload.size() / sizeof(int16_t);
+        int64_t energy = 0;
+        for (std::size_t i = 0; i < sample_count; ++i) {
+            const int64_t sample = pcm[i];
+            energy += sample * sample;
+        }
+        const int64_t rms = sample_count > 0 ? energy / static_cast<int64_t>(sample_count) : 0;
+        constexpr int64_t kSpeechEnterThreshold = 300 * 300;  // 进入语音约 -40 dBFS
+        constexpr int64_t kSpeechExitThreshold = 180 * 180;   // 迟滞下限约 -44 dBFS
+        const auto now = std::chrono::steady_clock::now();
+        if (rms >= kSpeechEnterThreshold || (vad_speech_seen_ && rms >= kSpeechExitThreshold)) {
+            vad_speech_seen_ = true;
+            last_speech_at_ = now;
+        } else if (vad_speech_seen_ && !vad_silence_emitted_ && last_speech_at_.time_since_epoch().count() > 0 &&
+                   now - last_speech_at_ >= std::chrono::milliseconds(1200)) {
+            // 只在锁内置标志，锁外再 Emit，避免 Emit 重入 mutex_ 造成自死锁。
+            vad_silence_emitted_ = true;
+            vad_silence_pending_ = true;
+        }
+    }
+    if (vad_silence_pending_) {
+        vad_silence_pending_ = false;
+        Emit("vad_silence", "");
     }
     Status status = provider_.SendAudio(frame);
     if (status.ok()) {
@@ -351,7 +439,7 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
 
 Status VoiceSession::HandleAudio(AudioFrame frame) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (state_ != VoiceSessionState::kReady && state_ != VoiceSessionState::kSpeaking) {
+    if (state_ != VoiceSessionState::kSpeaking) {
         return Status::Error(ErrorCode::kUnavailable, "语音会话当前不能播放音频");
     }
     const AudioFormat& expected = audio_formats_.playback;

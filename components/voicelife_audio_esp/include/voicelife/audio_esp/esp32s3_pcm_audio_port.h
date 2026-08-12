@@ -16,7 +16,7 @@ struct AudioPortOptions {
     /** @brief 输入队列深度。 */
     std::size_t input_queue_depth = 4;
     /** @brief 输出队列深度。 */
-    std::size_t output_queue_depth = 12;
+    std::size_t output_queue_depth = 50;
 };
 
 /** @brief 音频端口统计。 */
