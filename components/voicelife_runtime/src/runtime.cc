@@ -1,7 +1,6 @@
 #include "voicelife/runtime/runtime.h"
 
 #include <algorithm>
-#include <array>
 #include <cstdio>
 #include <ctime>
 #include <memory>
@@ -14,7 +13,6 @@
 #include <cstring>
 #include <string_view>
 
-#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -38,6 +36,7 @@
 #include "linx_ota_bootstrap.h"
 #include "linx_secret_resolver.h"
 #include "runtime_audio_diagnostics.h"
+#include "runtime_board_input.h"
 #include "schedule_mcp_tools.h"
 #include "voicelife/voice/voice_interaction_controller.h"
 #include "voicelife/voice/voice_ports.h"
@@ -267,7 +266,16 @@ class Runtime final {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=interaction_boot code=%d", static_cast<int>(interaction_status.code));
             return interaction_status;
         }
-        StartBoardControls();
+        board_input_ = std::make_unique<VoiceLifePcbBoardInput>(
+            [this](voice::VoiceInteractionEvent event) { (void)HandleInteractionEvent(event); },
+            [this](int volume_delta_or_absolute) {
+                if (volume_delta_or_absolute == 100 || volume_delta_or_absolute == 0) {
+                    SetVolume(volume_delta_or_absolute);
+                } else {
+                    SetVolume(std::clamp(volume_ + volume_delta_or_absolute, 0, 100));
+                }
+            });
+        board_input_->Start();
 #endif
         return Status::Ok();
     }
@@ -287,81 +295,6 @@ class Runtime final {
         BoardRequestKind kind = BoardRequestKind::kRestoreStandby;
         char wake_word[32];
     };
-
-    struct ButtonSample {
-        gpio_num_t gpio = GPIO_NUM_NC;
-        bool previous_pressed = false;
-        bool long_fired = false;
-        int64_t pressed_at_us = 0;
-    };
-
-    static constexpr gpio_num_t kBootButtonGpio = GPIO_NUM_0;
-    static constexpr gpio_num_t kTouchButtonGpio = GPIO_NUM_47;
-    static constexpr gpio_num_t kVolumeUpButtonGpio = GPIO_NUM_40;
-    static constexpr gpio_num_t kVolumeDownButtonGpio = GPIO_NUM_39;
-    static constexpr int64_t kLongPressUs = 2000000;
-
-    static void BoardTaskEntry(void* context) { static_cast<Runtime*>(context)->BoardTask(); }
-
-    void StartBoardControls() {
-        const gpio_config_t config = {
-            .pin_bit_mask = (1ULL << kBootButtonGpio) | (1ULL << kTouchButtonGpio) | (1ULL << kVolumeUpButtonGpio) |
-                            (1ULL << kVolumeDownButtonGpio),
-            .mode = GPIO_MODE_INPUT,
-            .pull_up_en = GPIO_PULLUP_ENABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE,
-        };
-        ESP_ERROR_CHECK(gpio_config(&config));
-        buttons_[0].gpio = kBootButtonGpio;
-        buttons_[1].gpio = kTouchButtonGpio;
-        buttons_[2].gpio = kVolumeUpButtonGpio;
-        buttons_[3].gpio = kVolumeDownButtonGpio;
-        if (xTaskCreate(&BoardTaskEntry, "voicelife_buttons", 3072, this, 5, &button_task_) != pdPASS) {
-            ESP_LOGW(kTag, "创建板级按键任务失败");
-        }
-    }
-
-    void BoardTask() {
-        while (true) {
-            const int64_t now = esp_timer_get_time();
-            for (std::size_t index = 0; index < buttons_.size(); ++index) {
-                auto& button = buttons_[index];
-                const bool pressed = gpio_get_level(button.gpio) == 0;
-                if (pressed && !button.previous_pressed) {
-                    button.pressed_at_us = now;
-                    button.long_fired = false;
-                    ESP_LOGI(kTag, "BUTTON_EVENT gpio=%d action=down", static_cast<int>(button.gpio));
-                    if (index == 1) {
-                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kPressDown);
-                    }
-                } else if (pressed && !button.long_fired && now - button.pressed_at_us >= kLongPressUs) {
-                    button.long_fired = true;
-                    ESP_LOGI(kTag, "BUTTON_EVENT gpio=%d action=long", static_cast<int>(button.gpio));
-                    if (index == 2) {
-                        SetVolume(100);
-                    } else if (index == 3) {
-                        SetVolume(0);
-                    }
-                } else if (!pressed && button.previous_pressed) {
-                    ESP_LOGI(kTag, "BUTTON_EVENT gpio=%d action=up duration_ms=%lld", static_cast<int>(button.gpio),
-                             static_cast<long long>((now - button.pressed_at_us) / 1000));
-                    if (index == 0 && !button.long_fired) {
-                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kToggleChat);
-                    } else if (index == 1) {
-                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kPressUp);
-                    } else if (index == 2 && !button.long_fired) {
-                        SetVolume(std::min(volume_ + 10, 100));
-                    } else if (index == 3 && !button.long_fired) {
-                        SetVolume(std::max(volume_ - 10, 0));
-                    }
-                    button.pressed_at_us = 0;
-                }
-                button.previous_pressed = pressed;
-            }
-            vTaskDelay(pdMS_TO_TICKS(20));
-        }
-    }
 
     void SetVolume(int volume) {
         volume_ = std::clamp(volume, 0, 100);
@@ -1047,8 +980,7 @@ class Runtime final {
     std::unique_ptr<voice::WakeGateAudioInput> wake_gate_;
     QueueHandle_t wake_queue_ = nullptr;
     TaskHandle_t wake_task_ = nullptr;
-    TaskHandle_t button_task_ = nullptr;
-    std::array<ButtonSample, 4> buttons_{};
+    std::unique_ptr<VoiceLifePcbBoardInput> board_input_;
     int volume_ = 70;
     std::atomic<int64_t> capture_started_us_{0};
     bool first_standby_ = true;
