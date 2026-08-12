@@ -5,24 +5,10 @@
 #include <string_view>
 
 #include "voicelife/contracts/status.h"
+#include "voicelife/voice/display_snapshot.h"
+#include "voicelife/voice/voice_interaction_state.h"
 
 namespace voicelife::voice {
-
-/** @brief 小智式单轮语音交互在板端可见的状态。 */
-enum class VoiceInteractionState {
-    kBooting,
-    kStandby,
-    /** 采集请求已提交，等待 capture_started 确认（事务式启动，避免假"聆听中"）。 */
-    kOpeningCapture,
-    kListening,
-    /** 语音端点已检测到（VAD 静音）：已发 listen.stop，等待最终 STT。 */
-    kFinalizing,
-    kThinking,
-    kSpeaking,
-    kInterrupting,
-    kReconnecting,
-    kError,
-};
 
 /** @brief 板端输入或语音会话生命周期产生的交互事件。 */
 enum class VoiceInteractionEvent {
@@ -68,40 +54,6 @@ enum class VoiceInteractionAction {
 struct VoiceInteractionTransition {
     VoiceInteractionState state = VoiceInteractionState::kBooting;
     VoiceInteractionAction action = VoiceInteractionAction::kNone;
-};
-
-/** @brief 牛头表情键（显示模型层使用，与 OLED 渲染解耦）。 */
-enum class VoiceMood {
-    kNeutral,
-    kHappy,
-    kSad,
-    kThinking,
-    kSurprised,
-    kSpeaking,
-    kAngry,
-};
-
-/** @brief 内容栏当前展示的文本角色。 */
-enum class VoiceContentRole {
-    kNone,
-    kSystem,
-    kUser,
-    kAssistant,
-};
-
-/**
- * @brief 显示模型快照：一次会话阶段变化后派生出的完整可见状态。
- * 由 Runtime 维护，仅在 revision 变化时提交给渲染器，避免全屏重绘。
- */
-struct DisplaySnapshot {
-    VoiceInteractionState phase = VoiceInteractionState::kBooting;
-    VoiceMood mood = VoiceMood::kNeutral;
-    /** 上行状态栏文本（如“聆听中...”“处理中...”）。 */
-    std::string status_text;
-    /** 下行内容栏文本（用户语音 / 助手回复 / 系统提示）。 */
-    std::string content_text;
-    VoiceContentRole role = VoiceContentRole::kNone;
-    uint64_t revision = 0;
 };
 
 /**

@@ -39,6 +39,7 @@
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
 #include "schedule_mcp_tools.h"
+#include "voicelife/voice/display_snapshot.h"
 #include "voicelife/voice/voice_interaction_controller.h"
 #include "voicelife/voice/voice_ports.h"
 #include "voicelife/voice/voice_session.h"

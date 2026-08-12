@@ -117,6 +117,10 @@ add_voicelife_library(board_esp voicelife_board_esp
     "${ROOT_DIR}/components/voicelife_board_esp/src/gpio46_power_arbiter.cc"
     "${ROOT_DIR}/components/voicelife_board_esp/src/esp32s3_board_probe.cc")
 target_link_libraries(board_esp PUBLIC contracts)
+add_voicelife_library(display_esp voicelife_display_esp
+    "${ROOT_DIR}/components/voicelife_display_esp/src/sparkbot_presentation_adapter.cc"
+    "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_presentation_adapter.cc")
+target_link_libraries(display_esp PUBLIC contracts voice)
 
 enable_testing()
 
@@ -252,6 +256,23 @@ target_link_libraries(audio_board_profile_contract_test PRIVATE audio_esp)
 add_voicelife_test(sparkbot_profile_contract_test "unit;board;esp;contract"
     sparkbot_profile_contract_test.cc)
 target_link_libraries(sparkbot_profile_contract_test PRIVATE board_esp)
+
+add_voicelife_test(sparkbot_presentation_adapter_test "unit;display;esp;board;contract"
+    sparkbot_presentation_adapter_test.cc)
+target_link_libraries(sparkbot_presentation_adapter_test PRIVATE display_esp)
+
+add_voicelife_test(sparkbot_asset_manifest_test "unit;display;assets;contract"
+    sparkbot_asset_manifest_test.cc)
+target_link_libraries(sparkbot_asset_manifest_test PRIVATE display_esp yyjson)
+target_compile_definitions(sparkbot_asset_manifest_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
+
+add_voicelife_test(platform_assembly_test "unit;platform;assembly;contract"
+    platform_assembly_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime/src/platform_assemblies.cc")
+target_include_directories(platform_assembly_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_runtime/src"
+    "${ROOT_DIR}/components/voicelife_runtime/include")
+target_link_libraries(platform_assembly_test PRIVATE display_esp voice)
 
 add_voicelife_test(pcm_frame_assembler_contract_test "unit;voice;audio;esp;contract"
     pcm_frame_assembler_contract_test.cc)
