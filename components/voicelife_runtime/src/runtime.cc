@@ -326,7 +326,8 @@ class Runtime final {
         provider_ = std::move(*result.value);
 
 #ifdef ESP_PLATFORM
-        audio_ports_ = std::make_unique<audio_esp::Esp32s3PcmAudioPorts>(assembly_->audio_profile());
+        audio_ports_ = std::make_unique<audio_esp::Esp32s3PcmAudioPorts>(
+            assembly_->audio_profile(), {}, [this](bool enabled) { (void)assembly_->SetAudioOutputEnabled(enabled); });
         audio_ports_->SetOutputVolume(static_cast<uint8_t>(volume_));
         wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
         wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_->input(), *wake_detector_);

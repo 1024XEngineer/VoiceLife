@@ -2,6 +2,7 @@
 #include <string>
 #include <utility>
 
+#include "es8311_codec_control.h"
 #include "esp32s3_pcm_audio_port_internal.h"
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
@@ -103,8 +104,9 @@ Status Esp32s3PcmAudioPorts::Impl::OpenInput(const voice::AudioFormat& format) {
                    ? Status::Ok()
                    : Status::Error(ErrorCode::kConflict, "输入端口已经以其他格式打开");
     }
-    if (profile_.topology != AudioBoardTopology::kDirectI2sSimplex) {
-        return detail::Unavailable("Codec Audio Port 尚未实现寄存器控制面");
+    if (profile_.topology != AudioBoardTopology::kDirectI2sSimplex &&
+        profile_.topology != AudioBoardTopology::kExternalCodecDuplex) {
+        return detail::Unavailable("未知音频拓扑");
     }
     if (options_.input_queue_depth == 0 || options_.output_queue_depth == 0) {
         return detail::Invalid("Audio Port 队列容量不能为零");
@@ -134,8 +136,9 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
                    ? Status::Ok()
                    : Status::Error(ErrorCode::kConflict, "输出端口已经以其他格式打开");
     }
-    if (profile_.topology != AudioBoardTopology::kDirectI2sSimplex) {
-        return detail::Unavailable("Codec Audio Port 尚未实现寄存器控制面");
+    if (profile_.topology != AudioBoardTopology::kDirectI2sSimplex &&
+        profile_.topology != AudioBoardTopology::kExternalCodecDuplex) {
+        return detail::Unavailable("未知音频拓扑");
     }
     if (options_.input_queue_depth == 0 || options_.output_queue_depth == 0) {
         return detail::Invalid("Audio Port 队列容量不能为零");
@@ -160,6 +163,22 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
         output_open_ = false;
         playback_format_.reset();
         return detail::Unavailable("启动 I2S 播放通道失败");
+    }
+    if (profile_.topology == AudioBoardTopology::kExternalCodecDuplex && !codec_initialized_) {
+        const auto& control = *profile_.codec_control;
+        const Status codec_status =
+            InitializeEs8311(control.i2c_port, control.i2c.sda, control.i2c.scl, control.addresses.es8311_8bit);
+        if (!codec_status.ok()) {
+            i2s_channel_disable(tx_channel_);
+            output_running_ = false;
+            output_open_ = false;
+            playback_format_.reset();
+            return codec_status;
+        }
+        codec_initialized_ = true;
+    }
+    if (amplifier_callback_) {
+        amplifier_callback_(true);  // 播放打开：经板级仲裁请求功放。
     }
     if (xTaskCreate(&OutputTaskEntry, "voice_audio_out", 4096, this, 4, &output_task_) != pdPASS) {
         i2s_channel_disable(tx_channel_);
@@ -308,6 +327,9 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(const voice::AudioFrame& frame) {
 
 Status Esp32s3PcmAudioPorts::Impl::FlushOutput() {
 #ifdef ESP_PLATFORM
+    if (amplifier_callback_) {
+        amplifier_callback_(false);  // 播放打断/清空：经板级仲裁请求关闭功放。
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     output_queue_.clear();
     return Status::Ok();
@@ -328,6 +350,9 @@ bool Esp32s3PcmAudioPorts::Impl::OutputIdle() const {
 
 Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
 #ifdef ESP_PLATFORM
+    if (amplifier_callback_) {
+        amplifier_callback_(false);  // 输出关闭：请求关闭功放。
+    }
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (output_open_) {
@@ -356,8 +381,9 @@ Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
 #endif
 }
 
-Esp32s3PcmAudioPorts::Esp32s3PcmAudioPorts(AudioBoardProfile profile, AudioPortOptions options)
-    : impl_(std::make_unique<Impl>(std::move(profile), options)) {}
+Esp32s3PcmAudioPorts::Esp32s3PcmAudioPorts(AudioBoardProfile profile, AudioPortOptions options,
+                                           AmplifierCallback amplifier_callback)
+    : impl_(std::make_unique<Impl>(std::move(profile), options, std::move(amplifier_callback))) {}
 
 Esp32s3PcmAudioPorts::~Esp32s3PcmAudioPorts() = default;
 

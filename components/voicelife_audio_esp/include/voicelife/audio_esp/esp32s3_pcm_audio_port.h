@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 #include "voicelife/audio_esp/audio_board_profile.h"
@@ -49,12 +50,18 @@ struct AudioPortStats {
  */
 class Esp32s3PcmAudioPorts final {
    public:
+    /** @brief 功放请求回调（经板级仲裁，不得直接写 GPIO）。 */
+    using AmplifierCallback = std::function<void(bool)>;
+
+   public:
     /**
      * @brief 构造音频端口。
      * @param profile 音频板 Profile。
      * @param options 端口选项。
+     * @param amplifier_callback 可选功放请求回调（经板级仲裁）。
      */
-    Esp32s3PcmAudioPorts(AudioBoardProfile profile, AudioPortOptions options = {});
+    Esp32s3PcmAudioPorts(AudioBoardProfile profile, AudioPortOptions options = {},
+                         AmplifierCallback amplifier_callback = {});
     /** @brief 析构音频端口。 */
     ~Esp32s3PcmAudioPorts();
 

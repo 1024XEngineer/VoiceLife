@@ -5,6 +5,7 @@ idf_component_register(
         "src/pcm_frame_assembler.cc"
         "src/esp32s3_pcm_audio_port.cc"
         "src/esp32s3_pcm_i2s_runtime.cc"
+        "src/es8311_codec_control.cc"
         "src/esp_multinet_wake_detector.cc"
     INCLUDE_DIRS "include"
     REQUIRES voicelife_contracts voicelife_voice

@@ -28,8 +28,11 @@ i2s_data_bit_width_t WireWidth(const I2sEndpointProfile& endpoint) {
     return endpoint.wire_bits_per_sample == 32 ? I2S_DATA_BIT_WIDTH_32BIT : I2S_DATA_BIT_WIDTH_16BIT;
 }
 
-i2s_std_config_t MakeStdConfig(const I2sEndpointProfile& endpoint, bool tx) {
+i2s_std_config_t MakeStdConfig(const I2sEndpointProfile& endpoint, bool tx, const I2sEndpointProfile* peer) {
     const i2s_slot_mode_t mode = endpoint.format.channels == 1 ? I2S_SLOT_MODE_MONO : I2S_SLOT_MODE_STEREO;
+    // 全双工（外部 Codec）时两侧 init 都填 dout+din，对齐官方 CreateDuplexChannels
+    // 的同一 config 双 init 做法，避免 ESP-IDF 双工通道 GPIO 一致性校验失败。
+    const int peer_data = peer != nullptr ? peer->data : I2S_GPIO_UNUSED;
     i2s_std_config_t config = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(endpoint.format.sample_rate_hz),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(WireWidth(endpoint), mode),
@@ -38,8 +41,10 @@ i2s_std_config_t MakeStdConfig(const I2sEndpointProfile& endpoint, bool tx) {
                 .mclk = endpoint.mclk == -1 ? I2S_GPIO_UNUSED : static_cast<gpio_num_t>(endpoint.mclk),
                 .bclk = static_cast<gpio_num_t>(endpoint.bclk),
                 .ws = static_cast<gpio_num_t>(endpoint.ws),
-                .dout = tx ? static_cast<gpio_num_t>(endpoint.data) : I2S_GPIO_UNUSED,
-                .din = tx ? I2S_GPIO_UNUSED : static_cast<gpio_num_t>(endpoint.data),
+                .dout = tx ? static_cast<gpio_num_t>(endpoint.data)
+                           : (peer != nullptr ? static_cast<gpio_num_t>(peer_data) : I2S_GPIO_UNUSED),
+                .din = tx ? (peer != nullptr ? static_cast<gpio_num_t>(peer_data) : I2S_GPIO_UNUSED)
+                          : static_cast<gpio_num_t>(endpoint.data),
                 .invert_flags = {},
             },
     };
@@ -109,8 +114,11 @@ Status Esp32s3PcmAudioPorts::Impl::TryInitializeChannelsLocked() {
     if (playback_format_.has_value()) {
         playback_endpoint.format = *playback_format_;
     }
-    const i2s_std_config_t tx_config = detail::MakeStdConfig(playback_endpoint, true);
-    const i2s_std_config_t rx_config = detail::MakeStdConfig(profile_.capture_i2s, false);
+    const bool full_duplex = profile_.topology == AudioBoardTopology::kExternalCodecDuplex;
+    const i2s_std_config_t tx_config =
+        detail::MakeStdConfig(playback_endpoint, true, full_duplex ? &profile_.capture_i2s : nullptr);
+    const i2s_std_config_t rx_config =
+        detail::MakeStdConfig(profile_.capture_i2s, false, full_duplex ? &playback_endpoint : nullptr);
     error = i2s_channel_init_std_mode(tx_channel_, &tx_config);
     if (error == ESP_OK) {
         error = i2s_channel_init_std_mode(rx_channel_, &rx_config);

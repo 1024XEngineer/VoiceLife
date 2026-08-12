@@ -78,8 +78,14 @@ class Esp32s3PcmAudioPorts::Impl final {
         Impl& owner_;
     };
 
-    Impl(AudioBoardProfile profile, AudioPortOptions options)
-        : profile_(std::move(profile)), options_(options), input_port_(*this), output_port_(*this) {}
+    using AmplifierCallback = std::function<void(bool)>;
+
+    Impl(AudioBoardProfile profile, AudioPortOptions options, AmplifierCallback amplifier_callback)
+        : profile_(std::move(profile)),
+          options_(options),
+          input_port_(*this),
+          output_port_(*this),
+          amplifier_callback_(std::move(amplifier_callback)) {}
 
     ~Impl();
 
@@ -123,6 +129,10 @@ class Esp32s3PcmAudioPorts::Impl final {
     AudioPortOptions options_;
     InputPort input_port_;
     OutputPort output_port_;
+    /** @brief 功放请求回调（经板级仲裁，不得直接写 GPIO）。 */
+    std::function<void(bool)> amplifier_callback_;
+    /** @brief ES8311 是否已初始化（duplex 首次打开时）。 */
+    [[maybe_unused]] bool codec_initialized_ = false;
     mutable std::mutex mutex_;
     std::condition_variable input_cv_;
     std::condition_variable output_cv_;
