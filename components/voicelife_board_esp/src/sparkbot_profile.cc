@@ -57,12 +57,12 @@ Status SparkBotBoardProfile::Validate() const {
     }
 
     const Status pin_status = ValidateDistinctPins({
-        display.dc_gpio,     display.cs_gpio,     display.clk_gpio,    display.mosi_gpio,   display.backlight_gpio,
-        audio.i2c_sda_gpio,  audio.i2c_scl_gpio,  audio.mclk_gpio,     audio.ws_gpio,       audio.bclk_gpio,
-        audio.din_gpio,      audio.dout_gpio,     camera.data_gpio[0], camera.data_gpio[1], camera.data_gpio[2],
-        camera.data_gpio[3], camera.data_gpio[4], camera.data_gpio[5], camera.data_gpio[6], camera.data_gpio[7],
-        camera.xclk_gpio,    camera.pclk_gpio,    camera.vsync_gpio,   camera.hsync_gpio,   chassis.tx_gpio,
-        chassis.rx_gpio,     boot_button_gpio,
+        display.dc_gpio,     display.cs_gpio,     display.clk_gpio,    display.mosi_gpio,   audio.i2c_sda_gpio,
+        audio.i2c_scl_gpio,  audio.mclk_gpio,     audio.ws_gpio,       audio.bclk_gpio,     audio.din_gpio,
+        audio.dout_gpio,     camera.data_gpio[0], camera.data_gpio[1], camera.data_gpio[2], camera.data_gpio[3],
+        camera.data_gpio[4], camera.data_gpio[5], camera.data_gpio[6], camera.data_gpio[7], camera.xclk_gpio,
+        camera.pclk_gpio,    camera.vsync_gpio,   camera.hsync_gpio,   chassis.tx_gpio,     chassis.rx_gpio,
+        boot_button_gpio,
     });
     if (!pin_status.ok()) {
         return pin_status;

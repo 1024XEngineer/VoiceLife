@@ -8,6 +8,7 @@ using voicelife::test::Check;
 
 int main() {
     using voicelife::board_esp::BoardCapability;
+    using voicelife::board_esp::BoardProbeReport;
     using voicelife::board_esp::CapabilityStatus;
     using voicelife::board_esp::Esp32s3BoardProbe;
     using voicelife::board_esp::FindCapability;
@@ -43,10 +44,38 @@ int main() {
           "没有证据的 IMU 必须保持 needs-board-test");
     const auto* display = FindCapability(profile, BoardCapability::kDisplay);
     Check(display != nullptr && display->status == CapabilityStatus::kVerified, "官方屏幕事实必须标记 verified");
+    Check(FindCapability(profile, static_cast<BoardCapability>(255)) == nullptr, "未知能力标识不能伪造能力证据");
 
+    auto invalid_identity = profile;
+    invalid_identity.id.clear();
+    Check(invalid_identity.Validate().code == ErrorCode::kInvalidArgument, "缺少 Profile ID 必须拒绝");
+    auto invalid_capacity = profile;
+    invalid_capacity.expected_flash_bytes = 8U * 1024U * 1024U;
+    Check(invalid_capacity.Validate().code == ErrorCode::kInvalidArgument, "错误的 Flash 容量必须拒绝");
     auto invalid_display = profile;
     invalid_display.display.spi_mode = 0;
     Check(invalid_display.Validate().code == ErrorCode::kInvalidArgument, "错误的 ST7789 SPI mode 必须拒绝");
+    auto invalid_audio = profile;
+    invalid_audio.audio.output_sample_rate_hz = 24000;
+    Check(invalid_audio.Validate().code == ErrorCode::kInvalidArgument, "错误的 ES8311 输出采样率必须拒绝");
+    auto invalid_chassis = profile;
+    invalid_chassis.chassis.baud_rate = 9600;
+    Check(invalid_chassis.Validate().code == ErrorCode::kInvalidArgument, "错误的底盘 UART 波特率必须拒绝");
+    auto invalid_shared = profile;
+    invalid_shared.shared_power.active_high = false;
+    Check(invalid_shared.Validate().code == ErrorCode::kInvalidArgument, "错误的 GPIO46 有效电平必须拒绝");
+    auto invalid_pin = profile;
+    invalid_pin.display.dc_gpio = 49;
+    Check(invalid_pin.Validate().code == ErrorCode::kInvalidArgument, "超范围 GPIO 必须拒绝");
+    auto reused_pin = profile;
+    reused_pin.display.dc_gpio = reused_pin.display.cs_gpio;
+    Check(reused_pin.Validate().code == ErrorCode::kInvalidArgument, "不应共享的 GPIO 必须拒绝");
+    auto invalid_shared_audio_pin = profile;
+    invalid_shared_audio_pin.audio.mclk_gpio = invalid_shared_audio_pin.shared_power.gpio;
+    Check(invalid_shared_audio_pin.Validate().code == ErrorCode::kInvalidArgument, "GPIO46 不能同时作为音频时钟线");
+    auto invalid_camera = profile;
+    invalid_camera.camera.xclk_frequency_hz = 12U * 1000U * 1000U;
+    Check(invalid_camera.Validate().code == ErrorCode::kInvalidArgument, "错误的 OV2640 XCLK 必须拒绝");
 
     Gpio46PowerArbiter power(profile.shared_power);
     Check(power.Validate().ok() && power.idle_safe() && !power.line_enabled() && !power.state().line_level,
@@ -62,6 +91,29 @@ int main() {
     invalid_shared_profile.gpio = 45;
     Gpio46PowerArbiter invalid_arbiter(invalid_shared_profile);
     Check(invalid_arbiter.Validate().code == ErrorCode::kInvalidArgument, "共享线错绑时仲裁器必须拒绝");
+    Check(invalid_arbiter.SetBacklightEnabled(true).code == ErrorCode::kInvalidArgument,
+          "共享线错绑时不能更新背光请求");
+    Check(invalid_arbiter.SetAudioOutputEnabled(true).code == ErrorCode::kInvalidArgument,
+          "共享线错绑时不能更新音频请求");
+
+    BoardProbeReport matching_report;
+    matching_report.chip_model = "ESP32-S3";
+    matching_report.flash_bytes = profile.expected_flash_bytes;
+    matching_report.psram_bytes = profile.expected_psram_bytes;
+    matching_report.partitions.push_back({.label = "factory", .type = 0, .subtype = 0});
+    Check(matching_report.matches_profile(profile), "完整芯片、容量和分区报告必须匹配 Profile");
+    auto wrong_chip = matching_report;
+    wrong_chip.chip_model = "ESP32";
+    Check(!wrong_chip.matches_profile(profile), "错误芯片型号不能匹配 Profile");
+    auto wrong_flash = matching_report;
+    wrong_flash.flash_bytes = 8U * 1024U * 1024U;
+    Check(!wrong_flash.matches_profile(profile), "错误 Flash 容量不能匹配 Profile");
+    auto wrong_psram = matching_report;
+    wrong_psram.psram_bytes = 4U * 1024U * 1024U;
+    Check(!wrong_psram.matches_profile(profile), "错误 PSRAM 容量不能匹配 Profile");
+    auto no_partitions = matching_report;
+    no_partitions.partitions.clear();
+    Check(!no_partitions.matches_profile(profile), "缺少分区报告不能匹配 Profile");
 
     Esp32s3BoardProbe probe;
     const auto host_result = probe.Run(profile);
