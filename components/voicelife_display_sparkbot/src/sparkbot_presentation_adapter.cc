@@ -112,11 +112,15 @@ voicelife::Status SparkBotPresentationAdapter::Start() {
 
 voicelife::Status SparkBotPresentationAdapter::Stop() {
 #ifdef ESP_PLATFORM
-    if (task_handle_ != nullptr) {
-        vTaskDelete(static_cast<TaskHandle_t>(task_handle_));
+    if (started_) {
+        // 请求退出并等待任务自行 vTaskDelete（不能删除条件变量等待中的任务）。
+        stop_requested_ = true;
+        for (int i = 0; i < 50 && !task_exited_.load(); ++i) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
         task_handle_ = nullptr;
+        started_ = false;
     }
-    started_ = false;
     return voicelife::Status::Ok();
 #else
     (void)0;
@@ -133,17 +137,22 @@ void SparkBotPresentationAdapter::DisplayTaskLoop() {
 #ifdef ESP_PLATFORM
     // 显示任务只消费快照；所有 LVGL 调用都在 lvgl_port 锁内执行。
     voicelife::voice::DisplaySnapshot snapshot;
-    while (queue_.WaitPop(&snapshot, 0)) {
+    while (!stop_requested_.load()) {
+        if (!queue_.WaitPop(&snapshot, 50)) {
+            continue;  // 超时轮询停止请求。
+        }
         if (snapshot.revision <= last_rendered_revision_) {
             continue;  // 旧 revision 丢弃：防止旧状态覆盖新状态。
         }
-        last_rendered_revision_ = snapshot.revision;
         if (lvgl_port_lock(0) == ESP_OK) {
             (void)renderer_.Render(snapshot);
+            // 锁内推进 revision：锁失败时不推进，快照将在下次重试。
+            last_rendered_revision_ = snapshot.revision;
             lvgl_port_unlock();
         }
     }
-    // 队列因 Stop 唤醒后任务退出。
+    task_exited_ = true;
+    vTaskDelete(nullptr);  // 任务自行退出，避免删除等待中的任务。
 #endif
 }
 

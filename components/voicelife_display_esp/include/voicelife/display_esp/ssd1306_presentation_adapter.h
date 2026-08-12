@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mutex>
 #include <string>
 
 #include "voicelife/contracts/status.h"
@@ -61,6 +62,8 @@ class Ssd1306PresentationAdapter : public voicelife::voice::PresentationPort {
     /** @brief 滚动定时器回调（仅 ESP 构建使用）。 */
     static void ScrollEntry(void* arg);
 
+    /** @brief 滚动状态互斥（Render 线程与 esp_timer 回调并发保护）。 */
+    mutable std::mutex state_mutex_;
     /** @brief 最近一次快照（滚动渲染数据源）。 */
     [[maybe_unused]] voicelife::voice::DisplaySnapshot last_snapshot_;
     /** @brief 滚动定时器句柄（仅 ESP 构建使用）。 */

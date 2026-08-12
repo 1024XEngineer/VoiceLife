@@ -90,6 +90,7 @@ const voicelife::voice::DisplayCapabilities& Ssd1306PresentationAdapter::capabil
 }
 
 voicelife::Status Ssd1306PresentationAdapter::Render(const voicelife::voice::DisplaySnapshot& snapshot) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
     last_snapshot_ = snapshot;
 #ifdef ESP_PLATFORM
     const voicelife::Status status =
@@ -133,6 +134,7 @@ void Ssd1306PresentationAdapter::RestartScrollTimer(const std::string& content) 
 void Ssd1306PresentationAdapter::ScrollEntry(void* arg) {
 #ifdef ESP_PLATFORM
     auto* self = static_cast<Ssd1306PresentationAdapter*>(arg);
+    std::lock_guard<std::mutex> lock(self->state_mutex_);
     const std::size_t codepoints = CountCodepoints(self->last_snapshot_.content_text);
     if (codepoints <= kScrollWindow) {
         esp_timer_stop(static_cast<esp_timer_handle_t>(self->scroll_timer_));

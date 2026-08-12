@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <functional>
 
@@ -106,6 +107,10 @@ class SparkBotPresentationAdapter : public voicelife::voice::PresentationPort {
     [[maybe_unused]] uint64_t last_rendered_revision_ = 0;
     /** @brief 是否已启动。 */
     [[maybe_unused]] bool started_ = false;
+    /** @brief 停止请求标志（显示任务轮询退出）。 */
+    [[maybe_unused]] std::atomic<bool> stop_requested_{false};
+    /** @brief 显示任务已退出标志。 */
+    [[maybe_unused]] std::atomic<bool> task_exited_{false};
     /** @brief 背光回调（板级仲裁）。 */
     [[maybe_unused]] BacklightCallback backlight_cb_;
     /** @brief 上次背光请求状态。 */
