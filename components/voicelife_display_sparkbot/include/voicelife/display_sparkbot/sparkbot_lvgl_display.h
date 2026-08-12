@@ -57,7 +57,9 @@ class SparkBotLvglDisplay {
     /** @brief 虚析构函数。 */
     ~SparkBotLvglDisplay();
 
+    /** @brief 禁止拷贝构造。 */
     SparkBotLvglDisplay(const SparkBotLvglDisplay&) = delete;
+    /** @brief 禁止拷贝赋值。 */
     SparkBotLvglDisplay& operator=(const SparkBotLvglDisplay&) = delete;
 
     /**
@@ -78,6 +80,8 @@ class SparkBotLvglDisplay {
 
    private:
     SparkBotLcdConfig config_;
+    /** @brief lv_display_t*（LVGL 类型只存在于本组件实现内）。 */
+    void* display_ = nullptr;
 };
 
 }  // namespace voicelife::display_sparkbot

@@ -28,6 +28,15 @@ class PlatformAssembly {
      * @return 显示端口引用。
      */
     virtual voicelife::voice::PresentationPort& presentation() = 0;
+
+    /**
+     * @brief 启动板级资源（如显示初始化）。
+     *
+     * 默认空实现；需要真实硬件初始化的 Assembly 覆写。host 构建不触碰
+     * 硬件，应返回明确状态而不是伪装成功。
+     * @return 启动结果。
+     */
+    virtual voicelife::Status Start() { return voicelife::Status::Ok(); }
 };
 
 }  // namespace voicelife::runtime

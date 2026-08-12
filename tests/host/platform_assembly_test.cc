@@ -37,5 +37,13 @@ int main() {
     const auto sparkbot_render = sparkbot_as_interface.presentation().Render(voicelife::voice::DisplaySnapshot{});
     Check(sparkbot_render.code == voicelife::ErrorCode::kUnavailable, "SparkBot 骨架 Render 必须返回 kUnavailable");
 
+    // Start() 生命周期：VoiceLife PCB 默认空实现成功；SparkBot 的
+    // ST7789/LVGL 初始化已移植，但 host 构建不触碰硬件，必须返回
+    // kUnavailable 而非伪装成功（真实初始化由 ESP 构建 + 实板验证）。
+    Check(pcb_as_interface.Start().ok(), "VoiceLife PCB Assembly Start 必须成功（默认空实现）");
+    const auto sparkbot_start = sparkbot_as_interface.Start();
+    Check(sparkbot_start.code == voicelife::ErrorCode::kUnavailable,
+          "SparkBot Assembly Start 在 host 构建必须返回 kUnavailable（不触碰硬件）");
+
     return 0;
 }
