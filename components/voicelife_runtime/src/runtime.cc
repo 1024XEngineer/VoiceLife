@@ -29,6 +29,10 @@
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #include "voicelife/audio_esp/esp_multinet_wake_detector.h"
 #include "voicelife/display_esp/ssd1306_status_display.h"
+#include "voicelife/im/esp_http_transport_factory.h"
+#include "voicelife/im/im_config_store.h"
+#include "voicelife/im/im_retry_policy.h"
+#include "voicelife/im/im_runtime.h"
 #include "voicelife/linx/linx_speech_provider.h"
 #include "voicelife/linx/linx_types.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
@@ -36,6 +40,7 @@
 #include "voicelife/schedule/schedule_service.h"
 #endif
 
+#include "im_runtime_bootstrap.h"
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
 #include "schedule_mcp_tools.h"
@@ -53,6 +58,11 @@ constexpr int64_t kWakeAckDisplayUs = 400 * 1000;
 constexpr int64_t kVolumeOverlayUs = 1500 * 1000;
 constexpr uint32_t kListenTimeoutMs = 15000;
 constexpr uint32_t kFinalSttTimeoutMs = 5000;
+#if CONFIG_VOICELIFE_IM_GATEWAY
+constexpr bool kImGatewayEnabled = true;
+#else
+constexpr bool kImGatewayEnabled = false;
+#endif
 
 #if CONFIG_NVS_ENCRYPTION
 Result<std::string> ReadNvsString(nvs_handle_t handle, const char* key) {
@@ -302,6 +312,8 @@ class Runtime final {
         }
         (void)display_esp::SetEmotion("neutral", "连接", {});
         linx_config_ = std::move(*connection.value);
+        // IM 的 SNTP、Gateway 探针和退避全部在独立任务中完成，语音启动路径不等待网络。
+        StartImRuntime();
         auto result = registry.Create("xrobot-websocket", {});
 #else
         auto result = registry.Create("scaffold", {});
@@ -407,6 +419,71 @@ class Runtime final {
 
    private:
 #ifdef ESP_PLATFORM
+    void StartImRuntime() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        // 物理 USB 窗口也用于显式轮换 Quick Tunnel URL 与设备 Token，因此即使已有配置也启动。
+        if (!StartImProvisioningTask()) {
+            ESP_LOGW(kTag, "IM_PROVISION_TASK_FAILED=1");
+        }
+        bool expected = false;
+        if (!im_lifecycle_started_.compare_exchange_strong(expected, true)) return;
+        if (xTaskCreate(&Runtime::ImLifecycleTaskEntry, "voicelife_im_lifecycle", 8192, this, 3, &im_lifecycle_task_) !=
+            pdPASS) {
+            im_lifecycle_started_.store(false);
+            ESP_LOGW(kTag, "IM_RUNTIME_TASK_FAILED=1");
+        }
+#else
+        ESP_LOGI(kTag, "IM_RUNTIME_DISABLED=1");
+#endif
+    }
+
+    static void ImLifecycleTaskEntry(void* context) { static_cast<Runtime*>(context)->ImLifecycleTask(); }
+
+    void ImLifecycleTask() {
+        im::ImRetryPolicy retry_policy;
+        while (true) {
+            Status status = Status::Error(ErrorCode::kUnavailable, "IM Runtime 等待网络");
+            im::ImHttpResponse response{.status = im::ImTransportStatus::kNetworkFailure,
+                                        .status_code = 0,
+                                        .body = {},
+                                        .message = "IM 前置条件未就绪"};
+
+            if (im_readiness_.NetworkReady() && !im_readiness_.SystemTimeReady()) {
+                status = SynchronizeSystemTime();
+            }
+            status = im_runtime_.Start();
+            if (im_runtime_.state() == im::ImRuntimeState::kProbing) {
+                response = im_runtime_.ProbeGateway();
+                if (im_runtime_.state() != im::ImRuntimeState::kReady) {
+                    status = Status::Error(ErrorCode::kUnavailable, "IM Gateway 认证探针失败");
+                }
+            }
+
+            if (im_runtime_.state() == im::ImRuntimeState::kReady) {
+                ESP_LOGI(kTag, "IM_RUNTIME_READY=1");
+                break;
+            }
+            if (im_runtime_.state() == im::ImRuntimeState::kDisabled) {
+                ESP_LOGI(kTag, "IM_RUNTIME_DISABLED=1");
+                break;
+            }
+            if (im_runtime_.state() == im::ImRuntimeState::kUnconfigured) {
+                ESP_LOGW(kTag, "IM_RUNTIME_DEGRADED=1 state=%d code=%d", static_cast<int>(im_runtime_.state()),
+                         static_cast<int>(status.code));
+                break;
+            }
+
+            ESP_LOGW(kTag, "IM_RUNTIME_DEGRADED=1 state=%d code=%d http_status=%d",
+                     static_cast<int>(im_runtime_.state()), static_cast<int>(status.code), response.status_code);
+            const auto delay_ms = retry_policy.NextDelay(response);
+            if (!delay_ms.has_value()) break;
+            ESP_LOGI(kTag, "IM_RUNTIME_RETRY attempt=%u delay_ms=%u", static_cast<unsigned>(retry_policy.attempts()),
+                     static_cast<unsigned>(*delay_ms));
+            vTaskDelay(pdMS_TO_TICKS(*delay_ms));
+        }
+        vTaskDelete(nullptr);
+    }
+
     enum class BoardRequestKind : uint8_t {
         kWakeWord,
         kRestoreStandby,
@@ -1168,6 +1245,13 @@ class Runtime final {
     }
 
     NvsSecretResolver linx_secrets_;
+    NvsImSecretStore im_secret_store_;
+    im::StoredImConfigProvider im_config_{im_secret_store_, kImGatewayEnabled};
+    EspImRuntimeReadiness im_readiness_;
+    im::ImRuntime im_runtime_{im_config_, im_config_, im_readiness_,
+                              [](const std::string& origin) { return im::CreateEspHttpTransport(origin); }};
+    std::atomic_bool im_lifecycle_started_{false};
+    TaskHandle_t im_lifecycle_task_ = nullptr;
     mcp::McpServer mcp_server_;
     schedule::ScheduleService schedule_service_;
     Status init_status_ = Status::Ok();
