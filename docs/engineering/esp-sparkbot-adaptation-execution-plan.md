@@ -5,7 +5,7 @@
 
 一句话结论：新板不是旧的 ESP32-S3 + SSD1306 + NoAudioCodec 组合，而是 `esp-sparkbot`：ESP32-S3、16MB Flash、8MB PSRAM、240x240 ST7789 彩屏、ES8311 双工音频、OV2640 摄像头和底盘 UART。适配必须从板级能力抽象开始，不能把 GPIO、显示和音频条件继续堆进 `runtime.cc`。
 
-一句话动作：在 `feat/esp-sparkbot-adapter` 独立工作树中，先完成探针和能力矩阵，再按显示、音频、交互、摄像头/底盘分阶段提交；PR #226 只提取可复用的视觉语义和动画思路，不能整体合并。
+一句话动作：在 `feat/esp-sparkbot-adapter` 独立工作树中，先完成探针和能力矩阵，再按官方 SparkBot 原样显示、音频、交互、摄像头/底盘分阶段提交；PR #226 只提取可复用的视觉语义和动画思路，不能整体合并。
 
 ## 1. 执行基线
 
@@ -52,7 +52,7 @@ State: starting -> activating -> idle
 | MCU | 启动日志：ESP32-S3 rev 0.2 | 使用 ESP-IDF ESP32-S3 构建目标 |
 | Flash | `esptool flash_id`：16MB | 以实际分区表为准，不因容量增加而覆盖未知分区 |
 | PSRAM | 启动日志：Found 8MB PSRAM | 图像缓存、LVGL 缓冲和音频队列优先放 PSRAM |
-| 显示 | 小智 profile：ST7789 SPI、240x240 | 新建 SparkBot Renderer，不能调用 SSD1306 初始化 |
+| 显示 | 小智 profile：ST7789 SPI、240x240 | 直接照搬官方 SparkBot 显示方案，不能调用 SSD1306 初始化或自行改 UI |
 | Codec | ES8311，日志显示 Duplex channels created | 使用双工 Codec Profile，不能沿用 NoAudioCodec simplex |
 | 音频 GPIO | MCLK45、WS41、BCLK39、DIN40、DOUT42 | 在 `AudioHardware` 内声明，runtime 不直接写 GPIO |
 | Codec I2C | SDA4、SCL5、ES8311 默认地址 | 启动阶段检查 I2C ACK 和 Codec reset |
@@ -74,7 +74,7 @@ State: starting -> activating -> idle
 
 - Wi-Fi 首选、回退、重新配网和自动重连；
 - ES8311 录音、TTS 播放、本地唤醒/告别提示音；
-- ST7789 方向、颜色、刷新、状态动画和长文本显示；
+- 官方 SparkBot 的 ST7789 方向、颜色、刷新、状态动画和文本显示，禁止自行改动显示方案；
 - BOOT 按键的唤醒、打断、配网语义；
 - `Idle -> Listening -> Finalizing -> Thinking -> Speaking -> Followup/Idle` 完整回合；
 - 灯光和功放在各状态下的明确开关状态；
@@ -148,13 +148,14 @@ AudioHardware
 
 ### 4.2 显示渲染契约
 
-逻辑状态和物理渲染分离：
+**硬约束：SparkBot 屏幕显示方案直接照搬官方实现，不做任何修改。**
 
-- `Ssd1306Renderer` 保留旧板 128x32 兼容；
-- `SparkBotLvglRenderer` 使用 240x240 屏幕和动画资源；
-- 状态、用户文本、助手文本是三个独立字段，任何状态更新不得覆盖角色文本；
-- 动画只由显示任务刷新，禁止在音频 DeliveryLoop、WSS 回调或 Provider 回调中直接操作 LVGL/I2C；
-- 文本采用完整 CJK 字体资源和统一 ASCII/标点字号，禁止继续扩展少量手写字形表来覆盖任意 STT/TTS。
+- 直接复用官方 SparkBot 的 ST7789/LVGL 初始化、布局、主题、动画资源、状态映射、字体、字号、颜色、滚动和刷新节奏；
+- 不把 VoiceLife 旧板的 SSD1306 牛头布局移植为新板界面；
+- 不重新设计状态栏、文本区域、动画时序或屏幕交互；
+- VoiceLife 只负责把语音会话状态转换为官方 SparkBot 已有的状态/文本输入，显示层不得反向改变会话状态；
+- 动画只由显示任务刷新，禁止在音频 DeliveryLoop、WSS 回调或 Provider 回调中直接操作 LVGL；
+- 只有官方 SparkBot 显示方案无法编译或无法在实板工作时，才记录阻塞证据并暂停，不能自行发明替代 UI。
 
 ## 5. 分阶段执行
 
@@ -184,17 +185,16 @@ feat(board): add SparkBot hardware profile and probe
 
 ### 阶段 B：显示驱动和动画
 
-目标：显示能稳定表达 VoiceLife 状态，不影响音频。
+目标：原样接入官方 SparkBot 显示方案，让 VoiceLife 状态接入既有显示输入，不影响音频。
 
 任务：
 
-1. 接入 ST7789/LVGL Renderer；
-2. 复用小智 SparkBot 的 `boot/connecting/idle/listening/thinking/speaking/error` 动画资源；
-3. 将 PR #226 的牛头视觉语义转为 SparkBot 可用的动画/表情状态，不复制 SSD1306 点阵实现；
-4. 设计状态栏、用户文本、助手文本、时间和滚动布局；
-5. 测试中文、英文、数字、标点的字号和间距；
-6. 确认 LVGL tick、flush 和动画缓存不会运行在音频任务栈上；
-7. 开机、联网、空闲、聆听、处理中、播报、告别、错误逐项截图留档。
+1. 原样接入官方 SparkBot 的 ST7789/LVGL Renderer；
+2. 原样复用官方 `boot/connecting/idle/listening/thinking/speaking/error` 动画资源；
+3. 原样复用官方状态栏、文本布局、字体、字号、标点、滚动和刷新时序；
+4. 仅建立 VoiceLife 状态到官方 SparkBot 显示输入的适配映射，不改显示方案本身；
+5. 确认 LVGL tick、flush 和动画缓存不会运行在音频任务栈上；
+6. 开机、联网、空闲、聆听、处理中、播报、告别、错误逐项截图留档，并与官方 SparkBot 参考行为比对。
 
 建议提交：
 
@@ -305,7 +305,7 @@ PR #226 当前是 Open、非 Draft、`mergeable=CONFLICTING`、`mergeStateStatus
 | Followup | 回复排空后保持聆听，超时后一次告别并回 Idle |
 | goodbye | 服务端正常关闭不显示错误 |
 | 断网 | 只启动一个重连流程，不出现联网循环 |
-| 屏幕 | 240x240 方向、动画、长文本、英文标点均正确 |
+| 屏幕 | 240x240 方向、布局、动画、字体、字号、长文本和英文标点与官方 SparkBot 完全一致 |
 | 摄像头 | 单帧拍照成功，语音任务不死锁 |
 | 底盘 | 前进/后退/转向/急停均有超时和日志 |
 | 稳定性 | 20 轮连续对话、5 次快速唤醒、3 次断网恢复 |
