@@ -18,6 +18,7 @@ set(known_components
     voicelife_audio_esp
     voicelife_board_esp
     voicelife_display_esp
+    voicelife_display_sparkbot
 )
 
 function(idf_component_register)
@@ -102,6 +103,8 @@ assert_dependencies(voicelife_linx_esp PRIVATE esp_websocket_client esp-tls esp_
 assert_dependencies(voicelife_audio_esp PUBLIC voicelife_contracts voicelife_voice)
 assert_dependencies(voicelife_display_esp PUBLIC voicelife_contracts voicelife_voice)
 assert_dependencies(voicelife_display_esp PRIVATE driver esp_lcd)
+assert_dependencies(voicelife_display_sparkbot PUBLIC voicelife_contracts)
+assert_dependencies(voicelife_display_sparkbot PRIVATE)
 assert_dependencies(voicelife_audio_esp PRIVATE esp_driver_i2c esp_driver_i2s espressif__esp-sr)
 assert_dependencies(voicelife_board_esp PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_board_esp PRIVATE esp_hw_support esp_partition esp_psram esp_system spi_flash)

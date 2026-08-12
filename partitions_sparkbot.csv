@@ -1,0 +1,10 @@
+# ESP32-S3 ESP-SparkBot partition table（官方实板布局，16MB Flash 芯片）
+# 与实板验证的小智官方 2.4.0 分区表一致：单 factory 应用 + 1MB assets 资源分区。
+# 说明：SparkBot 不使用 VoiceLife 默认双 OTA 布局；assets 分区用于字体/emoji
+# GIF 等显示资源（mmap 读取）。
+# Name,   Type, SubType, Offset,   Size,      Flags
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xd000,   0x2000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  0x2F0000,
+assets,   data, spiffs,  0x300000, 0x100000,
