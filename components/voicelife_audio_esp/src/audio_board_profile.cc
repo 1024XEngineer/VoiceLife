@@ -99,10 +99,12 @@ Status AudioBoardProfile::Validate() const {
         if (control.addresses.es8311_8bit == 0 || (control.addresses.es8311_8bit & 1U) != 0) {
             return Invalid("ES8311 必须使用合法的 8-bit 偶数 I2C 地址");
         }
-        if (control.addresses.es7210_8bit == 0 || (control.addresses.es7210_8bit & 1U) != 0) {
+        // ES7210/PCA9557 为可选接线：地址为 0 表示未接线（ES8311-only 板型合法），
+        // 非零时仍校验合法性。
+        if (control.addresses.es7210_8bit != 0 && (control.addresses.es7210_8bit & 1U) != 0) {
             return Invalid("ES7210 必须使用合法的 8-bit 偶数 I2C 地址");
         }
-        if (control.addresses.pca9557_7bit == 0 || control.addresses.pca9557_7bit >= 0x80) {
+        if (control.addresses.pca9557_7bit != 0 && control.addresses.pca9557_7bit >= 0x80) {
             return Invalid("PCA9557 必须使用合法的 7-bit I2C 地址");
         }
         pins.push_back(control.i2c.sda);
