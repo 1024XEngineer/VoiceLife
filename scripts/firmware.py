@@ -21,7 +21,7 @@ PROFILES = ROOT / "config" / "profiles"
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 CAPABILITY_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
 SDKCONFIG_PATTERN = re.compile(r"^CONFIG_[A-Z0-9_]+=.+$")
-ADAPTER_KINDS = ("audio", "speech", "storage", "im")
+ADAPTER_KINDS = ("audio", "speech", "storage", "im", "display", "input", "wake", "connectivity")
 SUPPORTED_TARGETS = {"esp32s3"}
 
 
@@ -39,17 +39,49 @@ def load_profile(path: Path) -> dict:
 
 
 def validate_profile(profile: dict, path: Path) -> None:
-    allowed_root = {"schemaVersion", "id", "target", "adapters", "sdkconfig"}
+    allowed_root = {
+        "schemaVersion",
+        "id",
+        "boardId",
+        "boardRevision",
+        "target",
+        "capabilities",
+        "resourceBudget",
+        "adapters",
+        "sdkconfig",
+    }
     unknown_root = set(profile) - allowed_root
     if unknown_root:
         raise ProfileError(f"{path}: 未知字段 {sorted(unknown_root)}")
-    if profile.get("schemaVersion") != 1:
-        raise ProfileError(f"{path}: 仅支持 schemaVersion=1")
+    if profile.get("schemaVersion") != 2:
+        raise ProfileError(f"{path}: 仅支持 schemaVersion=2")
     profile_id = profile.get("id")
     if not isinstance(profile_id, str) or not ID_PATTERN.fullmatch(profile_id):
         raise ProfileError(f"{path}: id 只能使用小写字母、数字、点和连字符")
+    for field in ("boardId", "boardRevision"):
+        value = profile.get(field)
+        if not isinstance(value, str) or not ID_PATTERN.fullmatch(value):
+            raise ProfileError(f"{path}: {field} 只能使用小写字母、数字、点和连字符")
     if profile.get("target") not in SUPPORTED_TARGETS:
         raise ProfileError(f"{path}: 当前主干只验证 esp32s3")
+
+    platform_capabilities = profile.get("capabilities")
+    if not isinstance(platform_capabilities, list):
+        raise ProfileError(f"{path}: capabilities 必须是数组")
+    if any(not isinstance(item, str) or not CAPABILITY_PATTERN.fullmatch(item) for item in platform_capabilities):
+        raise ProfileError(f"{path}: capabilities 格式错误")
+    if len(platform_capabilities) != len(set(platform_capabilities)):
+        raise ProfileError(f"{path}: capabilities 不能重复")
+
+    resource_budget = profile.get("resourceBudget")
+    if not isinstance(resource_budget, dict) or set(resource_budget) != {"flashBytes", "psramBytes"}:
+        raise ProfileError(f"{path}: resourceBudget 必须且只能包含 flashBytes, psramBytes")
+    for field in ("flashBytes", "psramBytes"):
+        value = resource_budget[field]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ProfileError(f"{path}: resourceBudget.{field} 必须是非负整数")
+    if resource_budget["flashBytes"] == 0:
+        raise ProfileError(f"{path}: resourceBudget.flashBytes 必须大于零")
 
     adapters = profile.get("adapters")
     if not isinstance(adapters, dict) or set(adapters) != set(ADAPTER_KINDS):
@@ -63,18 +95,28 @@ def validate_profile(profile: dict, path: Path) -> None:
         driver = adapter.get("driver")
         if not isinstance(driver, str) or not ID_PATTERN.fullmatch(driver):
             raise ProfileError(f"{path}: adapters.{kind}.driver 格式错误")
-        capabilities = adapter.get("capabilities")
-        if not isinstance(capabilities, list):
+        adapter_capabilities = adapter.get("capabilities")
+        if not isinstance(adapter_capabilities, list):
             raise ProfileError(f"{path}: adapters.{kind}.capabilities 必须是数组")
-        if any(not isinstance(item, str) or not CAPABILITY_PATTERN.fullmatch(item) for item in capabilities):
+        if any(not isinstance(item, str) or not CAPABILITY_PATTERN.fullmatch(item) for item in adapter_capabilities):
             raise ProfileError(f"{path}: adapters.{kind}.capabilities 格式错误")
-        if len(capabilities) != len(set(capabilities)):
+        if len(adapter_capabilities) != len(set(adapter_capabilities)):
             raise ProfileError(f"{path}: adapters.{kind}.capabilities 不能重复")
         config_ref = adapter.get("configRef")
         if config_ref is not None and (
             not isinstance(config_ref, str) or not re.fullmatch(r"(nvs|env|secret)://.+", config_ref)
         ):
             raise ProfileError(f"{path}: adapters.{kind}.configRef 只能引用 nvs/env/secret")
+
+    display_capabilities = adapters["display"]["capabilities"]
+    if "image-presentation" in display_capabilities and resource_budget["psramBytes"] == 0:
+        raise ProfileError(f"{path}: image-presentation 显示能力必须声明正数 psramBytes 预算")
+    declared_adapter_capabilities = {
+        capability for adapter in adapters.values() for capability in adapter["capabilities"]
+    }
+    if not declared_adapter_capabilities.issubset(set(platform_capabilities)):
+        missing = sorted(declared_adapter_capabilities - set(platform_capabilities))
+        raise ProfileError(f"{path}: adapters 声明了未列入平台 capabilities 的能力 {missing}")
 
     sdkconfig = profile.get("sdkconfig")
     if not isinstance(sdkconfig, list):
@@ -99,7 +141,7 @@ def list_profiles(as_json: bool) -> None:
         return
     for profile in profiles:
         adapters = ", ".join(f"{kind}={value['driver']}" for kind, value in profile["adapters"].items())
-        print(f"{profile['id']:<20} {profile['target']:<10} {adapters}")
+        print(f"{profile['id']:<30} {profile['boardId']:<20} {profile['target']:<10} {adapters}")
 
 
 def validate_all() -> None:

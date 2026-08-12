@@ -4,20 +4,50 @@
   "title": "VoiceLife Adapter Profile",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "id", "target", "adapters", "sdkconfig"],
+  "required": [
+    "schemaVersion",
+    "id",
+    "boardId",
+    "boardRevision",
+    "target",
+    "capabilities",
+    "resourceBudget",
+    "adapters",
+    "sdkconfig"
+  ],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*$" },
+    "boardId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*$" },
+    "boardRevision": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*$" },
     "target": { "enum": ["esp32s3"] },
+    "capabilities": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+      "uniqueItems": true
+    },
+    "resourceBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flashBytes", "psramBytes"],
+      "properties": {
+        "flashBytes": { "type": "integer", "minimum": 1 },
+        "psramBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
     "adapters": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["audio", "speech", "storage", "im"],
+      "required": ["audio", "speech", "storage", "im", "display", "input", "wake", "connectivity"],
       "properties": {
         "audio": { "$ref": "#/$defs/adapter" },
         "speech": { "$ref": "#/$defs/adapter" },
         "storage": { "$ref": "#/$defs/adapter" },
-        "im": { "$ref": "#/$defs/adapter" }
+        "im": { "$ref": "#/$defs/adapter" },
+        "display": { "$ref": "#/$defs/adapter" },
+        "input": { "$ref": "#/$defs/adapter" },
+        "wake": { "$ref": "#/$defs/adapter" },
+        "connectivity": { "$ref": "#/$defs/adapter" }
       }
     },
     "sdkconfig": {

@@ -105,14 +105,33 @@ voicelife_runtime                  只组装
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "esp32s3-production",
+  "boardId": "esp32s3-production",
+  "boardRevision": "rev-a",
   "target": "esp32s3",
+  "capabilities": [
+    "wake-word",
+    "aec",
+    "image-presentation",
+    "streaming-asr",
+    "tool-call",
+    "tts",
+    "atomic-calendar-write",
+    "restart-recovery",
+    "notification",
+    "interactive-action"
+  ],
+  "resourceBudget": { "flashBytes": 16777216, "psramBytes": 8388608 },
   "adapters": {
     "audio": { "driver": "xiaozhi-afe", "capabilities": ["wake-word", "aec"] },
     "speech": { "driver": "xrobot-websocket", "capabilities": ["streaming-asr", "tool-call", "tts"] },
     "storage": { "driver": "sqlite", "capabilities": ["atomic-calendar-write", "restart-recovery"] },
-    "im": { "driver": "voicelife-gateway", "capabilities": ["notification", "interactive-action"], "configRef": "nvs://im-gateway" }
+    "im": { "driver": "voicelife-gateway", "capabilities": ["notification", "interactive-action"], "configRef": "nvs://im-gateway" },
+    "display": { "driver": "board-display", "capabilities": ["image-presentation"] },
+    "input": { "driver": "disabled", "capabilities": [] },
+    "wake": { "driver": "board-wake", "capabilities": ["wake-word"] },
+    "connectivity": { "driver": "disabled", "capabilities": [] }
   },
   "sdkconfig": ["CONFIG_SPIRAM=y"]
 }
@@ -121,11 +140,12 @@ voicelife_runtime                  只组装
 约束：
 
 - Profile 保存选择和非敏感参数，不保存 token、密码、用户标识和私钥。
+- `boardId`、`boardRevision` 和 `resourceBudget` 是构建准入与固件回退证据的一部分；它们不替代板级真机验证。
 - `configRef` 只能使用 `nvs://`、`env://` 或 `secret://` 引用。
 - `driver` 是稳定注册名；重命名属于兼容性变更，需要迁移脚本或别名窗口。
-- `capabilities` 是 Adapter 对外承诺，启动时必须与 Use Case 的必需能力核对。
+- 顶层 `capabilities` 是本 Platform 对 Runtime 的完整能力并集；每个 Adapter 的能力都必须是其子集，启动时以此与 Use Case 的必需能力核对。
 - 未实现的能力不能为了通过配置而虚报；降级策略要在调用前明确。
-- Profile Schema 变更需要版本号、兼容读取规则和 ADR。
+- Profile Schema 变更需要版本号、兼容读取规则和 ADR。Profile v2 已将仓库内已知 v1 Profile 原子迁移；构建工具明确拒绝 v1，外部 Profile 必须补齐板卡身份、资源预算和新增 Adapter 键后再进入构建。
 
 ### 6.2 不做万能插件基类
 

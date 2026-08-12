@@ -1,7 +1,14 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "esp32s3-dev",
+  "boardId": "esp32s3-devkit",
+  "boardRevision": "unknown",
   "target": "esp32s3",
+  "capabilities": ["atomic-calendar-write"],
+  "resourceBudget": {
+    "flashBytes": 16777216,
+    "psramBytes": 0
+  },
   "adapters": {
     "audio": {
       "driver": "scaffold",
@@ -16,6 +23,22 @@
       "capabilities": ["atomic-calendar-write"]
     },
     "im": {
+      "driver": "disabled",
+      "capabilities": []
+    },
+    "display": {
+      "driver": "disabled",
+      "capabilities": []
+    },
+    "input": {
+      "driver": "disabled",
+      "capabilities": []
+    },
+    "wake": {
+      "driver": "disabled",
+      "capabilities": []
+    },
+    "connectivity": {
       "driver": "disabled",
       "capabilities": []
     }

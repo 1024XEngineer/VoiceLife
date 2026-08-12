@@ -112,6 +112,9 @@ add_voicelife_library(audio_esp voicelife_audio_esp
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_pcm_audio_port.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_pcm_i2s_runtime.cc")
 target_link_libraries(audio_esp PUBLIC contracts voice)
+add_voicelife_library(platform voicelife_platform
+    "${ROOT_DIR}/components/voicelife_platform/src/platform_profile.cc")
+target_link_libraries(platform PUBLIC contracts)
 
 enable_testing()
 
@@ -243,6 +246,9 @@ target_link_libraries(linx_esp_transport_contract_test PRIVATE linx_esp)
 add_voicelife_test(audio_board_profile_contract_test "unit;voice;audio;esp;contract"
     audio_board_profile_contract_test.cc)
 target_link_libraries(audio_board_profile_contract_test PRIVATE audio_esp)
+
+add_voicelife_test(platform_profile_contract_test "unit;platform;contract" platform_profile_contract_test.cc)
+target_link_libraries(platform_profile_contract_test PRIVATE platform)
 
 add_voicelife_test(pcm_frame_assembler_contract_test "unit;voice;audio;esp;contract"
     pcm_frame_assembler_contract_test.cc)

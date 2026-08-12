@@ -1,7 +1,29 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "esp32s3-voicelife-pcb-pcm",
+  "boardId": "voicelife-pcb",
+  "boardRevision": "unknown",
   "target": "esp32s3",
+  "capabilities": [
+    "pcm-port",
+    "bounded-input",
+    "bounded-output",
+    "direct-i2s-simplex",
+    "transport-frame-assembly",
+    "streaming-asr",
+    "tts",
+    "cancel-generation",
+    "pcm",
+    "atomic-calendar-write",
+    "button-input",
+    "monochrome-status-display",
+    "wake-word",
+    "wifi-station"
+  ],
+  "resourceBudget": {
+    "flashBytes": 16777216,
+    "psramBytes": 8388608
+  },
   "adapters": {
     "audio": {
       "driver": "esp32s3-pcm-port",
@@ -26,6 +48,22 @@
     "im": {
       "driver": "disabled",
       "capabilities": []
+    },
+    "display": {
+      "driver": "ssd1306-status-display",
+      "capabilities": ["monochrome-status-display"]
+    },
+    "input": {
+      "driver": "voicelife-pcb-buttons",
+      "capabilities": ["button-input"]
+    },
+    "wake": {
+      "driver": "esp-multinet",
+      "capabilities": ["wake-word"]
+    },
+    "connectivity": {
+      "driver": "esp-wifi-station",
+      "capabilities": ["wifi-station"]
     }
   },
   "sdkconfig": [

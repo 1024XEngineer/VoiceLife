@@ -1,7 +1,14 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "esp32s3-lichuang-audio-probe",
+  "boardId": "esp32s3-lichuang",
+  "boardRevision": "unknown",
   "target": "esp32s3",
+  "capabilities": ["pcm-probe", "external-codec-duplex", "atomic-calendar-write"],
+  "resourceBudget": {
+    "flashBytes": 16777216,
+    "psramBytes": 8388608
+  },
   "adapters": {
     "audio": {
       "driver": "esp32s3-pcm-probe",
@@ -17,6 +24,22 @@
       "capabilities": ["atomic-calendar-write"]
     },
     "im": {
+      "driver": "disabled",
+      "capabilities": []
+    },
+    "display": {
+      "driver": "disabled",
+      "capabilities": []
+    },
+    "input": {
+      "driver": "disabled",
+      "capabilities": []
+    },
+    "wake": {
+      "driver": "disabled",
+      "capabilities": []
+    },
+    "connectivity": {
       "driver": "disabled",
       "capabilities": []
     }
