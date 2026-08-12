@@ -104,7 +104,7 @@ voicelife::Status SparkBotPresentationAdapter::Start() {
         return init;
     }
     if (xTaskCreate(DisplayTaskEntry, "sparkbot_disp", kDisplayTaskStackWords, this, kDisplayTaskPriority,
-                    static_cast<TaskHandle_t*>(&task_handle_)) != pdPASS) {
+                    reinterpret_cast<TaskHandle_t*>(&task_handle_)) != pdPASS) {
         return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "显示任务创建失败");
     }
     started_ = true;
