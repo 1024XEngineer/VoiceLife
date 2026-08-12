@@ -100,21 +100,22 @@ Versioned Board Profile + Kconfig + CMake
 
 ## 4. 分阶段修正计划
 
-### 4.0 稳定单板保护计划（所有 Milestone 的前置门禁）
+### 4.0 可恢复基线与同级板型保护（所有 Milestone 的前置门禁）
 
-目标：将当前 VoiceLife PCB 的稳定实现作为金样基线保护。架构演进可以改变装配方式，不能降低这块已验证硬件的构建、启动、语音交互或故障回退能力。
+目标：将当前 VoiceLife PCB 的 `main@0bc930d` 作为首个可恢复金样版本，而非永久冻结的兼容性承诺。VoiceLife PCB 与 SparkBot 是同级板型：两者都可以在各自的 Profile 和 Adapter 中迭代；每一次发布只需能说明相对上一已验证版本改变了什么，并能刷回上一产物排障或恢复。
 
 工作项：
 
-- 将 `main@0bc930d` 记录为本轮迁移基线；在对应 Design Issue 中固化板卡版本、Profile ID、已验证固件配置、烧录方式、主机测试结果和真机证据链接。经人工确认后再创建受保护的基线 tag 和可复现固件产物；本草案不直接创建 tag 或发布产物；
-- 保留 `esp32s3-voicelife-pcb-pcm` 作为永久兼容 Profile，并为其建立独立的构建、Profile 校验、启动冒烟和录放音/状态机真机回归清单；主机测试只能验证契约，不能替代真机回归；
-- 新的 `PlatformAssembly` 先以 `LegacyVoiceLifePcbAssembly` 包装当前稳定的音频、显示、按键、唤醒和启动序列，再逐项迁移到新 Adapter；每个 PR 只迁移一个边界，禁止在同一 PR 同时改行为、硬件参数和抽象层；
-- 在主线保留一条稳定板兼容门禁：该 Profile 构建、架构检查、主机测试和硬件回归均通过，才允许合入会触及 Runtime、Audio、Profile、显示、输入或启动流程的 PR；
-- 每次可影响稳定板的合并前，保存可刷写的上一版固件、manifest、配置摘要和回退步骤。出现启动失败、无声、唤醒异常、状态机回归或资源超预算时，停止扩展工作，优先回退到上一个基线产物并登记缺陷；
-- 允许第二平台先在实验 Profile 和独立 Adapter 中演进，但不得修改金样 Profile 的 GPIO、I2S 参数、codec 初始化顺序、显示时序或交互默认行为，除非该改动附带稳定板的对比证据并经专门 Review 批准；
-- 为每次迁移建立兼容性矩阵：至少比较构建身份、启动日志、能力集、录音格式、播放首帧、唤醒路径、按键路径、联网重连、空闲功耗和异常恢复。未验证项必须显式标为未知，不能写作“保持兼容”。
 
-完成标志：任一架构 PR 均能回答“稳定板使用哪个 Profile、跑过哪些回归、失败时刷回哪个已验证产物”；在第二平台尚未成熟前，稳定板仍可独立构建、烧录和交付。
+- 将 `main@0bc930d` 记录为 VoiceLife PCB 的首个迁移基线；在对应 Design Issue 中固化板卡版本、Profile ID、已验证固件配置、烧录方式、主机测试结果和真机证据链接。经人工确认后创建 tag 和可复现固件产物；本草案不直接创建 tag 或发布产物；
+- 为每个受支持 Profile 建立独立的构建、Profile 校验、启动冒烟和录放音/状态机真机回归清单。`esp32s3-voicelife-pcb-pcm` 与 SparkBot Profile 都可以修改和演进；主机测试只能验证契约，不能替代真机回归；
+- 新的 `PlatformAssembly` 先以 `VoiceLifePcbAssembly` 保持当前 PCB 的可用路径，再逐项迁移到通用 Adapter。这个包装是迁移起点，不是冻结旧板的永久实现；每个 PR 只迁移一个边界，禁止在同一 PR 同时改行为、硬件参数和抽象层；
+- 对所有受支持板型实行同一发布门禁：改动了哪个 Profile，就验证哪个 Profile 的构建、架构检查、主机测试和对应真机回归。改动共享 Runtime/Voice/公共 Port 时，所有受支持 Profile 均需通过适用回归；
+- 每次发布前，保存所有受影响板型的上一已验证固件、manifest、配置摘要和回退步骤。出现启动失败、无声、唤醒异常、状态机回归或资源超预算时，先刷回上一产物恢复可用性，再登记缺陷并定位；
+- 新板可先在独立 Profile 和 Adapter 中演进；旧板也可改 GPIO、I2S、Codec 初始化、显示时序和交互默认行为，但必须以新的 Profile/固件版本、行为差异、真机证据和可刷回上一版本的方式交付，不能伪称“未变”；
+- 为每次迁移建立板型兼容性矩阵：至少比较构建身份、启动日志、能力集、录音格式、播放首帧、唤醒路径、按键路径、联网重连、空闲功耗和异常恢复。未验证项必须显式标为未知，不能写作“保持兼容”。
+
+完成标志：任一架构 PR 均能回答“影响了哪些 Profile、各自跑过哪些回归、失败时刷回哪个已验证产物”；任何受支持板型都能独立构建、烧录和交付。
 
 ### MS-A：平台能力与装配骨架
 
@@ -129,7 +130,7 @@ Versioned Board Profile + Kconfig + CMake
 - 将 `VoiceLifePcbEsp32s3Profile()` 从 Runtime 移到 ESP32-S3 Adapter 注册表；
 - 用 `Scaffold`、`Headless` 和当前 `VoiceLife PCB` 三个 Profile 跑通组装；
 - 将 GPIO、显示、按键、音量和唤醒器配置从 `runtime.cc` 移至板级 Adapter；
-- 将当前 `DisplaySnapshot` 的 SSD1306 字符串/滚动翻译移动到 `Ssd1306PresentationAdapter`；该 Adapter 是稳定板的行为冻结点，第一步不得改 OLED 布局、字体、刷新节奏或既有表情语义；
+- 将当前 `DisplaySnapshot` 的 SSD1306 字符串/滚动翻译移动到 `Ssd1306PresentationAdapter`；第一步以现有行为作为迁移对照，后续 OLED 布局、字体、刷新节奏和表情语义均可在该 Adapter 内独立演进并留存真机对比；
 - 为 `DisplayCapabilities`、资源预算和无图片能力的降级路径增加 Profile/主机测试；
 - 保留当前主机测试，并新增 Profile 缺能力、冲突能力和不支持目标的失败测试。
 
@@ -159,14 +160,14 @@ Versioned Board Profile + Kconfig + CMake
 
 工作项：
 
-- 先实现 `Ssd1306PresentationAdapter` 并以当前 VoiceLife PCB 回归证据冻结其行为；
+- 先实现 `Ssd1306PresentationAdapter` 并以当前 VoiceLife PCB 回归证据建立迁移对照；
 - 再实现 `SparkBotPresentationAdapter`，将 ST7789/LVGL 初始化、RGB565 flush、主题、字体、GIF 和预览图片限制在该 Adapter；
 - 为 SparkBot 资源包建立生成清单，记录逻辑 `asset_id`、来源、许可证、上游 commit、内容哈希、尺寸、解码峰值和 PSRAM/Flash 预算；
 - 以 `DisplaySnapshot` fixture 验证两种 Adapter 的语义映射：启动、联网、待机、聆听、思考、播报、错误、长文本、中文/英文混排和无图片降级；图片/GIF 验证以截图、视频、帧率、峰值内存和连续对话稳定性为准；
 - 对图片预览定义并发和取消策略：同一 `request_id` 幂等，过期/会话切 generation/内存不足时可取消且释放资源；不允许旧会话图片覆盖新会话状态；
 - 显示基础实现采用小智代码时，先完成许可证和上游版本审查。若上游依赖与 VoiceLife 的 ESP-IDF 版本、构建选项或资源分区不兼容，应记录差异并在 Adapter 内最小改写；不得因“原样移植”要求阻断必要的安全、许可证、稳定板保护或架构边界修正。
 
-完成标志：SparkBot 图片/GIF 的加载、刷新、取消与释放不发生在音频实时路径；稳定板仍使用原有 SSD1306 Adapter，且不因彩屏资源、LVGL 依赖或新 Profile 而改变产物。
+完成标志：SparkBot 图片/GIF 的加载、刷新、取消与释放不发生在音频实时路径；VoiceLife PCB 与 SparkBot 都通过各自 Profile 构建，并可各自独立演进或回退。
 
 ### MS-C：音频与语音 Provider 的多平台适配
 
@@ -273,9 +274,9 @@ public:
 
 ### 架构验收
 
-- [ ] 当前 VoiceLife PCB 金样 Profile 在每个迁移 PR 中保持独立构建、Profile 校验和既有主机回归通过；
-- [ ] 触及稳定板路径的变更有对应真机证据，且与基线的能力矩阵差异可追溯；
-- [ ] 每个可影响稳定板的发布产物均保留 manifest、可刷写固件与明确回退步骤；
+- [ ] 每个受影响 Profile 在迁移 PR 中通过独立构建、Profile 校验和适用主机回归；
+- [ ] 每个受影响板型的行为变更有对应真机证据，且与上一已验证版本的能力矩阵差异可追溯；
+- [ ] 每个受影响板型的发布产物均保留 manifest、可刷写固件与明确回退步骤；
 - [ ] `main.cc` 不包含板型细节；
 - [ ] Runtime 不直接引用具体 GPIO、OLED、按键和音频 Profile 工厂函数；
 - [ ] Runtime 不直接引用 SSD1306/ST7789/LVGL、显示资源文件或图形框架对象；
@@ -322,7 +323,7 @@ public:
 | --- | --- | --- |
 | 不同 MCU 的音频能力差异很大 | Port 过度抽象或运行时失败 | 先定义能力和资源预算，无法满足时显式降级，不用假实现掩盖 |
 | Profile 与固件编译选项分裂 | 编译成功但运行时选错 Adapter | 由构建脚本从单一 Profile 生成描述符和 manifest，记录提交/工具链/哈希；启动时只校验，不接受动态改写硬件配置 |
-| 架构迁移破坏稳定单板 | 已可用硬件出现无声、无法启动或交互退化，且难以定位 | 金样 Profile 独立门禁、逐边界迁移、产物留存和真机对比；回归即暂停扩展并回退 |
+| 架构迁移破坏任一已支持板型 | 已可用硬件出现无声、无法启动或交互退化，且难以定位 | 受影响 Profile 的独立门禁、逐边界迁移、产物留存和真机对比；回归即先恢复上一产物，再定位和修复 |
 | 多线程事件导致状态错乱 | 唤醒、按键、TTS 和超时互相覆盖 | 单一事件循环 + generation + 有界队列 |
 | SQLite 提交延迟进入实时路径 | 丢帧、卡顿、看似随机的音频故障 | 业务事件进入异步队列，存储只在 Use Case/Store 边界执行 |
 | 图片/GIF 和 LVGL 资源挤占内存或阻塞音频 | 彩屏看似可用，但播放卡顿、重连不稳或连续对话崩溃 | 用资源清单和 Profile 声明峰值内存/刷新预算；图形框架在专属任务运行，真机验证峰值内存与连续会话 |
@@ -347,10 +348,10 @@ public:
 ## 10. 交付顺序与文档归档
 
 1. 将本计划拆成一个架构 Design Issue，锁定 MS-A/MS-B 的接口和验收标准。
-2. 人工确认后建立稳定板基线 tag、可刷写产物和回归证据索引，并将金样 Profile 门禁加入后续 PR 模板与 CI。
+2. 人工确认后建立每个已支持板型的基线 tag、可刷写产物和回归证据索引，并将“受影响 Profile 的回归与回退”加入后续 PR 模板与 CI。
 3. 提交空骨架 PR，先评审 `PlatformAssembly`、能力模型和 `InteractionEventLoop`，不混入真实板卡功能。
-4. 先将当前 SSD1306 渲染器迁移为稳定板 `PresentationPort` Adapter，完成金样回归；再以独立 PR 接入 SparkBot 的彩屏/图片 Adapter 与资源清单。
-5. 合并骨架后，分别提交 Runtime 解耦、事件循环、音频工厂和真实 Store PR；每个 PR 都先通过稳定板保护计划。
+4. 先将当前 SSD1306 渲染器迁移为 VoiceLife PCB 的 `PresentationPort` Adapter，完成基线对照；再以独立 PR 接入 SparkBot 的彩屏/图片 Adapter 与资源清单。
+5. 合并骨架后，分别提交 Runtime 解耦、事件循环、音频工厂和真实 Store PR；每个 PR 都先通过受影响板型的回归与回退门禁。
 6. 每个 Milestone 复盘新增能力和边界变化；旧的设计基线不覆盖，只新增演进记录。
 7. 第二平台真实适配完成后，再更新 README 的“当前状态”和 Profile 支持矩阵。
 
