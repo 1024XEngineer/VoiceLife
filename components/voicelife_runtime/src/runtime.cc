@@ -273,6 +273,17 @@ class Runtime final {
             } else {
                 ESP_LOGW(kTag, "BUILTIN_LED_GPIO48_INIT_FAILED");
             }
+            // clear 后把 GPIO48 配成输出低并保持：RMT 句柄删除后数据线若悬空，
+            // WS2812 会因电平漂移重新点亮；拉低可锁定灯灭。
+            gpio_config_t led_lock = {};
+            led_lock.pin_bit_mask = 1ULL << GPIO_NUM_48;
+            led_lock.mode = GPIO_MODE_OUTPUT;
+            led_lock.pull_up_en = GPIO_PULLUP_DISABLE;
+            led_lock.pull_down_en = GPIO_PULLDOWN_ENABLE;
+            led_lock.intr_type = GPIO_INTR_DISABLE;
+            if (gpio_config(&led_lock) == ESP_OK) {
+                (void)gpio_set_level(GPIO_NUM_48, 0);
+            }
         }
         if (const Status display_status = display_esp::InitializeStatusDisplay(); !display_status.ok()) {
             ESP_LOGW(kTag, "OLED 状态屏初始化失败: %s", display_status.message.c_str());

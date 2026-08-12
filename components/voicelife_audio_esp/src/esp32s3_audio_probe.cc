@@ -52,6 +52,12 @@ i2s_std_config_t MakeStdConfig(const I2sEndpointProfile& endpoint, bool tx) {
     } else {
         config.slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
     }
+    // 与官方小智/MVP 的 NoAudioCodec 一致：数据左对齐（MSB 对齐 slot 高位）。
+    // 我们写 32bit wire（16bit PCM << pcm_shift_bits），若 left_align=false（右对齐）
+    // 高 16 位数据会被当作低位处理，导致功放无声。
+#if SOC_I2S_HW_VERSION_2
+    config.slot_cfg.left_align = true;
+#endif
     return config;
 }
 
