@@ -5,7 +5,7 @@
 
 一句话结论：新板不是旧的 ESP32-S3 + SSD1306 + NoAudioCodec 组合，而是 `esp-sparkbot`：ESP32-S3、16MB Flash、8MB PSRAM、240x240 ST7789 彩屏、ES8311 双工音频、OV2640 摄像头和底盘 UART。适配必须从板级能力抽象开始，不能把 GPIO、显示和音频条件继续堆进 `runtime.cc`。
 
-一句话动作：在 `feat/esp-sparkbot-adapter` 独立工作树中，先完成探针和能力矩阵，再按官方 SparkBot 原样显示、音频、交互、摄像头/底盘分阶段提交；PR #226 只提取可复用的视觉语义和动画思路，不能整体合并。
+一句话动作：在 `feat/esp-sparkbot-adapter` 独立工作树中，先完成探针和能力矩阵，再按小智官方 SparkBot 原样显示、音频、交互、摄像头/底盘分阶段提交；屏幕动效/动画表现参考 PR #226，但不能整体合并。
 
 ## 1. 执行基线
 
@@ -148,14 +148,15 @@ AudioHardware
 
 ### 4.2 显示渲染契约
 
-**硬约束：SparkBot 屏幕显示方案直接照搬小智官方实现，不做任何修改。**
+**硬约束：SparkBot 屏幕基础显示方案直接照搬小智官方实现；屏幕动效和动画表现只参考 PR #226。**
 
 - 直接移植小智仓库 `main/boards/espressif/esp-sparkbot/`、`main/display/lcd_display.cc` 和 `main/display/lvgl_display/` 中的 ST7789/LVGL 初始化、布局、主题、动画资源、状态映射、字体、字号、颜色、滚动和刷新节奏；
 - 不把 VoiceLife 旧板的 SSD1306 牛头布局移植为新板界面；
 - 不重新设计状态栏、文本区域、动画时序或屏幕交互；
 - VoiceLife 只负责把语音会话状态转换为小智 SparkBot 显示实现已有的状态/文本输入，显示层不得反向改变会话状态；
 - 动画只由显示任务刷新，禁止在音频 DeliveryLoop、WSS 回调或 Provider 回调中直接操作 LVGL；
-- 只有官方 SparkBot 显示方案无法编译或无法在实板工作时，才记录阻塞证据并暂停，不能自行发明替代 UI。
+- PR #226 只允许参考动效/动画节奏、动画触发时机和动画表现，不得复制其旧 OLED 布局、字体实现、协议、音频或状态机代码；
+- 只有小智官方 SparkBot 基础显示方案无法编译或无法在实板工作时，才记录阻塞证据并暂停，不能自行发明替代基础 UI。
 
 ## 5. 分阶段执行
 
@@ -185,14 +186,14 @@ feat(board): add SparkBot hardware profile and probe
 
 ### 阶段 B：显示驱动和动画
 
-目标：直接移植小智官方 SparkBot 显示代码和资源，让 VoiceLife 状态接入既有显示输入，不影响音频。
+目标：直接移植小智官方 SparkBot 显示代码和资源，让 VoiceLife 状态接入既有显示输入；动效/动画的表现参考 PR #226，不影响音频。
 
 任务：
 
 1. 直接移植小智官方 SparkBot 的 ST7789/LVGL Renderer 代码；
-2. 直接移植小智官方 `boot/connecting/idle/listening/thinking/speaking/error` 动画资源；
+2. 直接移植小智官方 `boot/connecting/idle/listening/thinking/speaking/error` 基础动画资源；
 3. 直接移植小智官方状态栏、文本布局、字体、字号、标点、滚动和刷新时序；
-4. 仅建立 VoiceLife 状态到小智 SparkBot 显示输入的适配映射，不改显示方案本身；
+4. 仅建立 VoiceLife 状态到小智 SparkBot 显示输入的适配映射；动效/动画表现参考 PR #226，但不改变小智基础显示方案；
 5. 确认 LVGL tick、flush 和动画缓存不会运行在音频任务栈上；
 6. 开机、联网、空闲、聆听、处理中、播报、告别、错误逐项截图留档，并与官方 SparkBot 参考行为比对。
 
@@ -277,7 +278,7 @@ PR #226 当前是 Open、非 Draft、`mergeable=CONFLICTING`、`mergeStateStatus
 4. 确认新 PR 具备 Issue 引用、验收、测试和 reviewer 后关闭 #226，不合并；
 5. 新板最终 PR 才使用 `Fixes #新Issue`，探针、架构和中间 PR 使用 `Refs #新Issue`。
 
-可提取：牛头视觉语义、表情命名、状态映射、UTF-8 边界处理、动画测试思路。
+可提取：仅限屏幕动效/动画表现、动画节奏、动画触发时机、牛头视觉语义、表情命名和动画测试思路。基础显示实现以小智 SparkBot 源码为唯一来源。
 
 不可提取：旧 OLED 布局、少量手写中文字形、阻塞式 wake callback、忽略 `fin` 的 WebSocket 重组、协议/音频/状态机/显示混合提交。
 
