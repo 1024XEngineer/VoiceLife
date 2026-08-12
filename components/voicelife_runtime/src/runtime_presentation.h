@@ -15,6 +15,14 @@ namespace voicelife::runtime {
 /** @brief VoiceLife PCB 的 SSD1306 会话状态投影与短暂显示覆盖层。 */
 class VoiceLifePcbPresentation final {
    public:
+    /** @brief 初始化旧板 OLED 并关闭板载状态灯。 */
+    void InitializeHardware();
+    /** @brief 显示启动中的联网状态。 */
+    void ShowNetworkSetup();
+    /** @brief 显示启动中的服务连接状态。 */
+    void ShowServiceConnecting();
+    /** @brief 显示启动失败状态。 */
+    void ShowStartupError();
     /** @brief 将已接受的会话状态机事件投影为 OLED 快照。 */
     void ApplyInteraction(voice::VoiceInteractionState state, voice::VoiceInteractionEvent event, bool show_wake_ack,
                           std::string_view user_text);
