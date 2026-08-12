@@ -30,6 +30,7 @@
 #include "linx_ota_bootstrap.h"
 #include "nvs.h"
 #include "voicelife/im/im_endpoint.h"
+#include "voicelife/im/im_pairing_controller.h"
 #include "voicelife/im/im_provisioning.h"
 
 namespace voicelife::runtime {
@@ -40,6 +41,79 @@ constexpr char kImNamespace[] = "im";
 constexpr int kProvisionTimeoutMs = 60000;
 constexpr std::size_t kMaximumStoredStringBytes = 1024;
 std::atomic_bool g_provisioning_started{false};
+std::atomic<im::ImPairingPort*> g_pairing_client{nullptr};
+std::optional<std::string> g_pairing_user_id;
+
+class EspPairingClock final : public im::ImPairingClock {
+   public:
+    uint64_t MonotonicMillis() const override { return static_cast<uint64_t>(esp_timer_get_time() / 1000); }
+};
+
+bool IsPairingTrigger(std::span<const uint8_t> bytes) {
+    constexpr std::array<uint8_t, 4> kMagic{'V', 'L', 'P', '1'};
+    return bytes.size() >= kMagic.size() && std::equal(kMagic.begin(), kMagic.end(), bytes.begin());
+}
+
+const char* PairingStatusName(im::PairingFlowStatus status) {
+    switch (status) {
+        case im::PairingFlowStatus::kPending:
+            return "pending";
+        case im::PairingFlowStatus::kRetrying:
+            return "retrying";
+        case im::PairingFlowStatus::kConfirmed:
+            return "confirmed";
+        case im::PairingFlowStatus::kExpired:
+            return "expired";
+        case im::PairingFlowStatus::kCancelled:
+            return "cancelled";
+        case im::PairingFlowStatus::kNotFound:
+            return "not_found";
+        case im::PairingFlowStatus::kTimedOut:
+            return "timed_out";
+        case im::PairingFlowStatus::kCredentialRejected:
+            return "credential_rejected";
+        case im::PairingFlowStatus::kFailed:
+            return "failed";
+        default:
+            return "waiting";
+    }
+}
+
+Status RunPairingAcceptance(std::span<const uint8_t> frame) {
+    auto trigger = im::ParseImPairingTrigger(frame);
+    if (!trigger.ok() || !trigger.value.has_value()) return trigger.status;
+    im::ImPairingPort* client = g_pairing_client.load(std::memory_order_acquire);
+    if (client == nullptr) return Status::Error(ErrorCode::kUnavailable, "IM Runtime 尚未 ready");
+
+    EspPairingClock clock;
+    im::PairingSessionController controller(*client, clock);
+    const auto begun =
+        controller.Begin({.user_id = g_pairing_user_id, .expires_in_minutes = trigger.value->expires_in_minutes});
+    if (begun.status != im::PairingFlowStatus::kPending) {
+        ESP_LOGW(kTag, "IM_PAIRING_STATUS=%s", PairingStatusName(begun.status));
+        return Status::Error(ErrorCode::kUnavailable, "创建配对会话失败");
+    }
+    ESP_LOGI(kTag, "IM_PAIRING_CODE=%s expires_at=%s", begun.display_code.c_str(), begun.expires_at.c_str());
+    ESP_LOGI(kTag, "IM_PAIRING_STATUS=pending");
+
+    while (controller.active()) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        const auto result = controller.Poll();
+        if (result.status == im::PairingFlowStatus::kWaiting) continue;
+        ESP_LOGI(kTag, "IM_PAIRING_STATUS=%s", PairingStatusName(result.status));
+        if (result.status == im::PairingFlowStatus::kCredentialRejected ||
+            result.status == im::PairingFlowStatus::kFailed) {
+            return Status::Error(ErrorCode::kUnavailable, "配对状态查询失败");
+        }
+    }
+    return Status::Ok();
+}
+
+struct ConsoleCommandResult {
+    Status status;
+    bool pairing = false;
+    bool restart = false;
+};
 
 Status PrepareProvisioningConsole() {
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
@@ -144,43 +218,57 @@ Status StoreProvisioningRequest(im::ImProvisioningRequest& request) {
 #endif
 }
 
-Status ProvisionImFromConsole() {
+ConsoleCommandResult ReadImConsoleCommand() {
     const Status console_status = PrepareProvisioningConsole();
-    if (!console_status.ok()) return console_status;
+    if (!console_status.ok()) return {.status = console_status};
     ESP_LOGW(kTag, "IM_PROVISION_READY=1 timeout_ms=%d", kProvisionTimeoutMs);
+    ESP_LOGW(kTag, "IM_PAIRING_READY=1 timeout_ms=%d", kProvisionTimeoutMs);
     std::array<uint8_t, im::kImProvisioningHeaderSize> header_bytes{};
     if (!ReadConsoleBytes(header_bytes.data(), header_bytes.size(), kProvisionTimeoutMs)) {
-        return Status::Error(ErrorCode::kNotFound, "未收到物理串口 IM provisioning 请求");
+        return {.status = Status::Error(ErrorCode::kNotFound, "未收到物理串口 IM 请求")};
+    }
+    if (IsPairingTrigger(header_bytes)) {
+        return {.status = RunPairingAcceptance(header_bytes), .pairing = true};
     }
     auto header = im::ParseImProvisioningHeader(header_bytes);
-    if (!header.ok() || !header.value.has_value()) return header.status;
+    if (!header.ok() || !header.value.has_value()) return {.status = header.status};
 
     std::vector<uint8_t> frame(header_bytes.begin(), header_bytes.end());
     frame.resize(header_bytes.size() + header.value->payload_size);
     if (!ReadConsoleBytes(frame.data() + header_bytes.size(), header.value->payload_size, kProvisionTimeoutMs)) {
         std::fill(frame.begin(), frame.end(), 0);
-        return Status::Error(ErrorCode::kInvalidArgument, "物理串口 IM provisioning 内容不完整");
+        return {.status = Status::Error(ErrorCode::kInvalidArgument, "物理串口 IM provisioning 内容不完整")};
     }
     auto request = im::ParseImProvisioningRequest(frame);
     std::fill(frame.begin(), frame.end(), 0);
-    if (!request.ok() || !request.value.has_value()) return request.status;
+    if (!request.ok() || !request.value.has_value()) return {.status = request.status};
 
     const Status status = StoreProvisioningRequest(*request.value);
     SecureClear(request.value->device_token);
     if (status.ok()) ESP_LOGI(kTag, "IM_PROVISIONED=1");
-    return status;
+    return {.status = status, .restart = status.ok()};
 }
 
 void ProvisioningTask(void*) {
-    const Status status = ProvisionImFromConsole();
-    if (!status.ok()) {
-        ESP_LOGW(kTag, "IM_PROVISION_FAILED code=%d", static_cast<int>(status.code));
-        g_provisioning_started.store(false);
-        vTaskDelete(nullptr);
-        return;
+    while (true) {
+        const ConsoleCommandResult result = ReadImConsoleCommand();
+        if (result.restart) {
+            vTaskDelay(pdMS_TO_TICKS(300));
+            esp_restart();
+        }
+        if (result.pairing) {
+            if (!result.status.ok()) {
+                ESP_LOGW(kTag, "IM_PAIRING_FAILED code=%d", static_cast<int>(result.status.code));
+            }
+            continue;
+        }
+        if (!result.status.ok()) {
+            ESP_LOGW(kTag, "IM_PROVISION_FAILED code=%d", static_cast<int>(result.status.code));
+        }
+        break;
     }
-    vTaskDelay(pdMS_TO_TICKS(300));
-    esp_restart();
+    g_provisioning_started.store(false);
+    vTaskDelete(nullptr);
 }
 
 }  // namespace
@@ -291,6 +379,12 @@ bool StartImProvisioningTask() {
         return false;
     }
     return true;
+}
+
+void RegisterImPairingAcceptance(im::ImPairingPort* client, std::optional<std::string> user_id) {
+    if (client == nullptr) return;
+    g_pairing_user_id = std::move(user_id);
+    g_pairing_client.store(client, std::memory_order_release);
 }
 
 }  // namespace voicelife::runtime

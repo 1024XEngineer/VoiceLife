@@ -460,6 +460,7 @@ class Runtime final {
             }
 
             if (im_runtime_.state() == im::ImRuntimeState::kReady) {
+                RegisterImPairingAcceptance(im_runtime_.pairing_client(), im_runtime_.user_id());
                 ESP_LOGI(kTag, "IM_RUNTIME_READY=1");
                 break;
             }

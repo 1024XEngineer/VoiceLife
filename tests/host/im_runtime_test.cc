@@ -245,6 +245,24 @@ void TestProvisioningFrameIsStrictAndBounded() {
           "运行时会拒绝的空格 Token 必须在 provisioning 阶段拒绝");
 }
 
+void TestPairingTriggerFrameIsPhysicalAndBounded() {
+    const std::vector<uint8_t> valid{'V', 'L', 'P', '1', 5, 0, 0, 0, 0, 0, 0, 0};
+    const auto parsed = voicelife::im::ParseImPairingTrigger(valid);
+    Check(parsed.ok() && parsed.value.has_value() && parsed.value->expires_in_minutes == 5,
+          "VLP1 物理触发帧必须携带 1~10 分钟有效期");
+
+    auto bad_magic = valid;
+    bad_magic[3] = '2';
+    Check(!voicelife::im::ParseImPairingTrigger(bad_magic).ok(), "未知配对触发 magic 必须拒绝");
+    auto bad_expiry = valid;
+    bad_expiry[4] = 0;
+    Check(!voicelife::im::ParseImPairingTrigger(bad_expiry).ok(), "越界配对有效期必须拒绝");
+    auto reserved = valid;
+    reserved[11] = 1;
+    Check(!voicelife::im::ParseImPairingTrigger(reserved).ok(), "非零保留字节必须 fail closed");
+    Check(!voicelife::im::ParseImPairingTrigger(std::span(valid).first(11)).ok(), "截断触发帧必须拒绝");
+}
+
 void TestReadinessFailureDegradesWithoutTransport() {
     RuntimeFixture no_network;
     no_network.readiness.network_ready = false;
@@ -280,9 +298,13 @@ void TestAuthenticatedProbeMakesRuntimeReady() {
               fixture.transport->last_request.headers.front().value == "Bearer device-token",
           "探针必须携带设备 Bearer 凭据且不发送业务载荷");
     Check(fixture.runtime.reporting_channel() != nullptr, "认证成功后 Runtime 必须发布上报通道");
+    Check(fixture.runtime.pairing_client() != nullptr, "认证成功后 Runtime 必须持有配对客户端");
+    Check(fixture.runtime.user_id() == "user-test", "Runtime 必须保留非敏感 userId 供显式配对使用");
+    Check(fixture.transport->post_calls == 0, "普通启动和 ready 装配不得自动创建 PairingSession");
 
     Check(fixture.runtime.Start().ok(), "重复启动应幂等成功");
-    Check(fixture.factory_calls == 1, "重复启动不得创建重复 Transport 或任务");
+    Check(fixture.factory_calls == 1 && fixture.transport->post_calls == 0,
+          "重复启动不得创建重复 Transport、任务或 PairingSession");
 }
 
 void TestTransientReadinessCanRecoverWithoutDuplicateTransport() {
@@ -311,7 +333,8 @@ void TestCredentialProbeFailureStaysDegraded() {
 
     const ImHttpResponse response = fixture.runtime.ProbeGateway();
     Check(response.status == voicelife::im::ImTransportStatus::kCredentialRejected, "401 必须保留凭据拒绝分类");
-    Check(fixture.runtime.state() == ImRuntimeState::kDegraded && fixture.runtime.reporting_channel() == nullptr,
+    Check(fixture.runtime.state() == ImRuntimeState::kDegraded && fixture.runtime.reporting_channel() == nullptr &&
+              fixture.runtime.pairing_client() == nullptr,
           "错误凭据不得进入 ready 或发布上报通道");
 }
 
@@ -439,6 +462,7 @@ int main() {
     TestRetryPolicyIsBoundedAndStopsOnCredentials();
     TestRetryPolicyClampsAndHandles408();
     TestProvisioningFrameIsStrictAndBounded();
+    TestPairingTriggerFrameIsPhysicalAndBounded();
     TestReadinessFailureDegradesWithoutTransport();
     TestAuthenticatedProbeMakesRuntimeReady();
     TestTransientReadinessCanRecoverWithoutDuplicateTransport();

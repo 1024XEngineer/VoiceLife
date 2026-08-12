@@ -65,6 +65,26 @@ test('pairing creation parses untrusted device input before authentication', asy
     }
 });
 
+test('pairing device responses never expose the internal display code hash', async () => {
+    const { gateway } = buildGateway();
+    const created = await gateway.deviceApi.postPairingSession({
+        authorization: 'Bearer fixture-device-token',
+        body: {
+            userId: 'user-fixture',
+            deviceId: 'device-fixture',
+            allowedPlatforms: ['wechat_official'],
+            expiresInMinutes: 5,
+        },
+    });
+    assert.equal('displayCodeHash' in created.session, false);
+
+    const status = await gateway.deviceApi.getPairingSession({
+        authorization: 'Bearer fixture-device-token',
+        pairingSessionId: created.session.id,
+    });
+    assert.equal(status === undefined ? undefined : 'displayCodeHash' in status, false);
+});
+
 test('notification rejects a body for another device principal', async () => {
     const { gateway } = buildGateway();
 

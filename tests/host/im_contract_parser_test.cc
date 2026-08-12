@@ -5,6 +5,7 @@
 #include "support/test_support.h"
 #include "voicelife/contracts/im/notification_intent.h"
 #include "voicelife/contracts/im/notification_submission.h"
+#include "voicelife/contracts/im/pairing_session.h"
 #include "voicelife/contracts/im/reminder_action_command.h"
 #include "voicelife/contracts/im/reminder_action_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
@@ -13,11 +14,17 @@
 using voicelife::ErrorCode;
 using voicelife::JsonValue;
 using voicelife::Status;
+using voicelife::contracts::im::CreatedPairingSession;
+using voicelife::contracts::im::CreatePairingSessionRequest;
 using voicelife::contracts::im::kDeviceContractVersion;
 using voicelife::contracts::im::NotificationIntent;
 using voicelife::contracts::im::NotificationSubmission;
+using voicelife::contracts::im::PairingSessionStatus;
+using voicelife::contracts::im::ParseCreatedPairingSession;
+using voicelife::contracts::im::ParseCreatePairingSessionRequest;
 using voicelife::contracts::im::ParseNotificationIntent;
 using voicelife::contracts::im::ParseNotificationSubmission;
+using voicelife::contracts::im::ParsePairingSessionStatus;
 using voicelife::contracts::im::ParseReminderActionCommand;
 using voicelife::contracts::im::ParseReminderActionResult;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
@@ -42,6 +49,15 @@ Status ParseFixture(const char* name, NotificationIntent& out) {
         return json_status;
     }
     return ParseNotificationIntent(root, out);
+}
+
+template <typename Output, typename Parser>
+Status ParsePairingFixture(const char* name, Output& out, Parser parser) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) {
+        return json_status;
+    }
+    return parser(root, out);
 }
 
 Status ParseScheduleReceiptFixture(const char* name, ScheduleReceiptIntent& out) {
@@ -109,6 +125,56 @@ void RequireSubmissionRejected(const char* name, const char* message) {
 }  // namespace
 
 int main() {
+    CreatePairingSessionRequest pairing_request;
+    Check(ParsePairingFixture("pairing-create-request.json", pairing_request, ParseCreatePairingSessionRequest).ok(),
+          "完整配对创建请求 fixture 必须被 C++ 解析");
+    Check(pairing_request.deviceId == "device-fixture" && pairing_request.userId == "user-fixture" &&
+              pairing_request.allowedPlatforms.has_value() && pairing_request.allowedPlatforms->size() == 1 &&
+              pairing_request.expiresInMinutes == 5,
+          "配对创建请求字段必须与 TypeScript 语义一致");
+    CreatePairingSessionRequest minimal_pairing_request;
+    Check(ParsePairingFixture("pairing-create-request-minimal.json", minimal_pairing_request,
+                              ParseCreatePairingSessionRequest)
+              .ok(),
+          "最小配对创建请求 fixture 必须被 C++ 解析");
+    Check(!ParsePairingFixture("pairing-create-request-invalid-expiry.json", pairing_request,
+                               ParseCreatePairingSessionRequest)
+               .ok(),
+          "越界配对有效期必须被 C++ 拒绝");
+    Check(!ParsePairingFixture("pairing-create-request-invalid-platform.json", pairing_request,
+                               ParseCreatePairingSessionRequest)
+               .ok(),
+          "未知配对平台必须被 C++ 拒绝");
+
+    CreatedPairingSession created_pairing;
+    Check(ParsePairingFixture("pairing-created.json", created_pairing, ParseCreatedPairingSession).ok(),
+          "配对创建响应 fixture 必须被 C++ 解析");
+    Check(created_pairing.displayCode == "123456" && created_pairing.session.status == "pending",
+          "创建响应必须保留六位展示码和 pending 状态");
+    Check(!ParsePairingFixture("pairing-created-invalid-code.json", created_pairing, ParseCreatedPairingSession).ok(),
+          "非六位数字 displayCode 必须被 C++ 拒绝");
+    Check(!ParsePairingFixture("pairing-created-invalid-secret.json", created_pairing, ParseCreatedPairingSession).ok(),
+          "含 displayCodeHash 的创建响应必须 fail closed");
+
+    PairingSessionStatus pairing_status;
+    Check(ParsePairingFixture("pairing-status.json", pairing_status, ParsePairingSessionStatus).ok(),
+          "pending 配对状态 fixture 必须被 C++ 解析");
+    Check(ParsePairingFixture("pairing-status-confirmed.json", pairing_status, ParsePairingSessionStatus).ok() &&
+              pairing_status.status == "confirmed" && pairing_status.confirmedAt.has_value(),
+          "confirmed 配对状态必须保留 confirmedAt");
+    Check(ParsePairingFixture("pairing-status-expired.json", pairing_status, ParsePairingSessionStatus).ok() &&
+              pairing_status.status == "expired",
+          "expired 配对状态必须被 C++ 解析");
+    Check(ParsePairingFixture("pairing-status-cancelled.json", pairing_status, ParsePairingSessionStatus).ok() &&
+              pairing_status.status == "cancelled",
+          "cancelled 配对状态必须被 C++ 解析");
+    Check(!ParsePairingFixture("pairing-status-invalid-status.json", pairing_status, ParsePairingSessionStatus).ok(),
+          "未知配对状态必须被 C++ 拒绝");
+    Check(!ParsePairingFixture("pairing-status-invalid-time.json", pairing_status, ParsePairingSessionStatus).ok(),
+          "非法配对时间必须被 C++ 拒绝");
+    Check(!ParsePairingFixture("pairing-status-invalid-secret.json", pairing_status, ParsePairingSessionStatus).ok(),
+          "含 displayCodeHash 的状态响应必须 fail closed");
+
     // 强提醒：双端共享版本，字段与 TS 语义一致
     NotificationIntent strong;
     Check(ParseFixture("notification-strong.json", strong).ok(), "共享强提醒 fixture 必须被 C++ 解析");

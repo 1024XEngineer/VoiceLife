@@ -39,15 +39,21 @@ class FakeReadiness final : public im::ImRuntimeReadinessPort {
 
 class FakeTransport final : public im::ImTransport {
    public:
-    im::ImHttpResponse Post(const im::ImHttpRequest&) override { return {}; }
+    im::ImHttpResponse Post(const im::ImHttpRequest& request) override {
+        ++post_calls;
+        last_request = request;
+        return next_post_response;
+    }
     im::ImHttpResponse Get(const im::ImHttpRequest& request) override {
         ++get_calls;
         last_request = request;
         return next_get_response;
     }
 
+    int post_calls = 0;
     int get_calls = 0;
     im::ImHttpRequest last_request;
+    im::ImHttpResponse next_post_response{};
     im::ImHttpResponse next_get_response{
         .status = im::ImTransportStatus::kHttpError,
         .status_code = 404,

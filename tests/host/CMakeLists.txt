@@ -45,7 +45,8 @@ add_voicelife_library(contracts voicelife_contracts
     "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_receipt.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_result.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_command.cc"
-    "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_submission.cc")
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_submission.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/pairing_session.cc")
 target_link_libraries(contracts PRIVATE yyjson)
 add_voicelife_library(im voicelife_im
     "${ROOT_DIR}/components/voicelife_im/src/im_reporting_channel.cc"
@@ -55,6 +56,8 @@ add_voicelife_library(im voicelife_im
     "${ROOT_DIR}/components/voicelife_im/src/im_config_store.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_retry_policy.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_provisioning.cc"
+    "${ROOT_DIR}/components/voicelife_im/src/im_pairing_client.cc"
+    "${ROOT_DIR}/components/voicelife_im/src/im_pairing_controller.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_wire.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_endpoint.cc"
     "${ROOT_DIR}/components/voicelife_im/src/transport/im_response_reader.cc")
@@ -283,6 +286,10 @@ target_compile_definitions(im_sse_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}
 
 add_voicelife_test(im_response_reader_test "unit;im" im_response_reader_test.cc)
 target_link_libraries(im_response_reader_test PRIVATE im contracts)
+
+add_voicelife_test(im_pairing_client_test "unit;im;pairing" im_pairing_client_test.cc)
+target_link_libraries(im_pairing_client_test PRIVATE im contracts)
+target_compile_definitions(im_pairing_client_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
 
 add_voicelife_test(im_runtime_test "unit;im;runtime" im_runtime_test.cc)
 target_link_libraries(im_runtime_test PRIVATE im contracts)

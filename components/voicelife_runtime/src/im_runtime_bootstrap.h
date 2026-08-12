@@ -1,10 +1,12 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <string_view>
 
 #include "voicelife/contracts/status.h"
 #include "voicelife/im/im_config_store.h"
+#include "voicelife/im/im_pairing_client.h"
 #include "voicelife/im/im_runtime.h"
 
 namespace voicelife::runtime {
@@ -35,6 +37,13 @@ class EspImRuntimeReadiness final : public im::ImRuntimeReadinessPort {
  * @return 任务已存在或创建成功时为 true。
  */
 bool StartImProvisioningTask();
+
+/**
+ * @brief 在 Gateway 探针成功后发布物理 USB 可用的配对端口。
+ * @param client Runtime 持有且生命周期覆盖设备运行期的客户端。
+ * @param user_id 已配置的非敏感用户引用。
+ */
+void RegisterImPairingAcceptance(im::ImPairingPort* client, std::optional<std::string> user_id);
 
 /**
  * @brief 幂等地启动并等待一次 SNTP 时间同步。
