@@ -45,6 +45,8 @@ class VoiceLifePcbAssembly : public PlatformAssembly {
     void LogAudioStats() override;
     /** @brief 返回 PCB 唤醒门控。 @return WakeGateAudioInput。 */
     voicelife::voice::WakeGateAudioInput& wake_gate() override;
+    /** @brief 返回 PCB 板型身份。 @return voicelife-pcb。 */
+    std::string_view board_identity() const override { return "voicelife-pcb"; }
     /** @brief 初始化 PCB LED（GPIO48 锁定灭）。 */
     void InitializeBoardLeds() override;
 
@@ -95,6 +97,8 @@ class SparkBotAssembly : public PlatformAssembly {
     void LogAudioStats() override;
     /** @brief 返回 SparkBot 唤醒门控。 @return WakeGateAudioInput。 */
     voicelife::voice::WakeGateAudioInput& wake_gate() override;
+    /** @brief 返回 SparkBot 板型身份。 @return esp-sparkbot。 */
+    std::string_view board_identity() const override { return "esp-sparkbot"; }
     /** @brief SparkBot 无 LED（GPIO48 为底盘 UART RX，不写入）。 */
     void InitializeBoardLeds() override {}
 

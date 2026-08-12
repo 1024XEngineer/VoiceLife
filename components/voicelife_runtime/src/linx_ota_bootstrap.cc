@@ -42,7 +42,6 @@ constexpr char kSecretPartition[] = "linx_secrets";
 constexpr char kTokenKey[] = "token";
 constexpr char kTokenReference[] = "nvs://linx/token";
 constexpr char kClientIdKey[] = "client_id";
-constexpr char kBoardName[] = "voicelife-pcb";
 constexpr char kWifiNamespace[] = "wifi";
 constexpr char kWifiSsidKey[] = "ssid";
 constexpr char kWifiPasswordKey[] = "password";
@@ -452,11 +451,11 @@ Status InitializeLinxSecretStore() {
 #endif
 }
 
-Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig() {
+Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig(std::string_view board_identity) {
     Result<linx::LinxConnectionConfig> last_failure =
         Result<linx::LinxConnectionConfig>::Failure(ErrorCode::kUnavailable, "Linx OTA 初始化失败");
     for (int attempt = 1; attempt <= kOtaAttempts; ++attempt) {
-        auto device = ReadOtaDeviceInfo();
+        auto device = ReadOtaDeviceInfo(board_identity);
         if (!device.ok() || !device.value.has_value()) {
             last_failure = Result<linx::LinxConnectionConfig>::Failure(device.status.code, device.status.message);
         } else {

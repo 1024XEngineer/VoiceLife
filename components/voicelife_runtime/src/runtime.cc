@@ -280,7 +280,7 @@ class Runtime final {
             ShowDisplay(voice::VoiceMood::kSad, "错误", "");
             return secret_store;
         }
-        auto connection = BootstrapLinxOtaConfig();
+        auto connection = BootstrapLinxOtaConfig(assembly_->board_identity());
         if (!connection.ok() || !connection.value.has_value()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=linx_bootstrap code=%d", static_cast<int>(connection.status.code));
             ShowDisplay(voice::VoiceMood::kSad, "错误", "");

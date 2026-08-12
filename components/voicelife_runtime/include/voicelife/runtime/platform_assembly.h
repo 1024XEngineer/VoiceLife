@@ -68,6 +68,12 @@ class PlatformAssembly {
     virtual voicelife::voice::WakeGateAudioInput& wake_gate() = 0;
 
     /**
+     * @brief 返回构建期板型身份（OTA/策略请求用，如 esp-sparkbot）。
+     * @return 板型标识。
+     */
+    virtual std::string_view board_identity() const = 0;
+
+    /**
      * @brief 初始化板级 LED（构建期板型专属；无 LED 板为空实现）。
      */
     virtual void InitializeBoardLeds() {}
