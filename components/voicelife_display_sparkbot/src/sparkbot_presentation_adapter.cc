@@ -74,12 +74,12 @@ voicelife::Status SparkBotPresentationAdapter::Render(const voicelife::voice::Di
     return voicelife::Status::Ok();
 }
 
-void SparkBotPresentationAdapter::UpdateBacklight(const voicelife::voice::DisplaySnapshot& snapshot) {
-    // 待机时经板级仲裁关闭背光（功放由音频侧仲裁，本阶段仅背光）。
-    const bool want_on = snapshot.phase != voicelife::voice::VoiceInteractionState::kStandby;
-    if (want_on != backlight_on_ && backlight_cb_) {
-        backlight_cb_(want_on);
-        backlight_on_ = want_on;
+void SparkBotPresentationAdapter::UpdateBacklight(const voicelife::voice::DisplaySnapshot& /*snapshot*/) {
+    // 生产运行期待机保持背光（idle GIF 长期可见）；省电必须引入显式
+    // DisplayPowerMode，不能由交互状态推导，因此这里不随 standby 关背光。
+    if (!backlight_on_ && backlight_cb_) {
+        backlight_cb_(true);
+        backlight_on_ = true;
     }
 }
 

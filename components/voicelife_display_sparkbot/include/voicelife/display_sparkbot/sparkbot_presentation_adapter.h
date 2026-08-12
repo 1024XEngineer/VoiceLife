@@ -128,8 +128,8 @@ class SparkBotPresentationAdapter : public voicelife::voice::PresentationPort {
     [[maybe_unused]] std::atomic<bool> task_exited_{false};
     /** @brief 背光回调（板级仲裁）。 */
     [[maybe_unused]] BacklightCallback backlight_cb_;
-    /** @brief 上次背光请求状态。 */
-    [[maybe_unused]] bool backlight_on_ = true;
+    /** @brief 上次背光请求状态（初始未请求）。 */
+    [[maybe_unused]] bool backlight_on_ = false;
 
     /** @brief 按快照阶段更新背光（待机关闭）。 */
     void UpdateBacklight(const voicelife::voice::DisplaySnapshot& snapshot);

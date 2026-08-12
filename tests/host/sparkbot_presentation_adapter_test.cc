@@ -58,17 +58,18 @@ int main() {
         }
         ++backlight_calls;
     });
+    // 生产运行期待机保持背光（idle GIF 可见）；省电需显式 DisplayPowerMode。
     DisplaySnapshot standby;
     standby.revision = 2;
     standby.phase = voicelife::voice::VoiceInteractionState::kStandby;
     Check(backlight_adapter.Render(standby).ok(), "待机快照必须可提交");
-    Check(backlight_calls == 1 && !backlight_requests[0], "待机必须请求关闭背光（经板级仲裁）");
+    Check(backlight_calls == 1 && backlight_requests[0], "首次渲染（含待机）必须请求开启背光，待机不关闭");
     DisplaySnapshot listening;
     listening.revision = 3;
     listening.phase = voicelife::voice::VoiceInteractionState::kListening;
     Check(backlight_adapter.Render(listening).ok(), "聆听快照必须可提交");
-    Check(backlight_calls == 2 && backlight_requests[1], "非待机必须请求开启背光");
-    Check(backlight_adapter.Render(listening).ok() && backlight_calls == 2, "相同背光状态不得重复请求");
+    Check(backlight_calls == 1 && backlight_requests[0], "首次渲染必须请求开启背光");
+    Check(backlight_adapter.Render(listening).ok() && backlight_calls == 1, "背光保持开启不得重复请求");
 
     // generation -> revision 消费丢弃：四种顺序（P1 回归保护）。
     using voicelife::display_sparkbot::ShouldDropDisplaySnapshot;
