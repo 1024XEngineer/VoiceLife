@@ -217,7 +217,8 @@ void TestControllerStopsOnTerminalAndDeadline() {
     transport.responses = {Response(ImTransportStatus::kSuccess, 201, ReadFixture("pairing-created.json"))};
     ImPairingClient client(transport, credentials);
     PairingSessionController controller(client, clock);
-    Check(controller.Begin({.expires_in_minutes = 1}).status == PairingFlowStatus::kPending, "一分钟会话必须创建成功");
+    Check(controller.Begin({.user_id = std::nullopt, .expires_in_minutes = 1}).status == PairingFlowStatus::kPending,
+          "一分钟会话必须创建成功");
     clock.now_ms += 60000;
     Check(controller.Poll().status == PairingFlowStatus::kTimedOut && !controller.active() &&
               transport.requests.size() == 1,
