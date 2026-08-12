@@ -37,6 +37,7 @@
 #include "linx_secret_resolver.h"
 #include "runtime_audio_diagnostics.h"
 #include "runtime_board_input.h"
+#include "runtime_scaffold.h"
 #include "schedule_mcp_tools.h"
 #include "voicelife/voice/voice_interaction_controller.h"
 #include "voicelife/voice/voice_ports.h"
@@ -54,46 +55,6 @@ constexpr uint32_t kListenTimeoutMs = 15000;
 constexpr uint32_t kFinalSttTimeoutMs = 5000;
 
 #endif
-
-class ScaffoldAudioInput final : public voice::AudioInputPort {
-   public:
-    void SetAudioSink(voice::AudioFrameSink) override {}
-    Status Open(const voice::AudioFormat&) override { return Status::Ok(); }
-    Status StartCapture(voice::VoiceMode) override { return Status::Ok(); }
-    Status StopCapture() override { return Status::Ok(); }
-    void Close() override {}
-};
-
-class ScaffoldAudioOutput final : public voice::AudioOutputPort {
-   public:
-    Status Open(const voice::AudioFormat&) override { return Status::Ok(); }
-    Status Push(const voice::AudioFrame&) override { return Status::Ok(); }
-    Status Flush() override { return Status::Ok(); }
-    bool IsIdle() const override { return true; }
-    void Close() override {}
-};
-
-class ScaffoldSpeechProvider final : public voice::SpeechProviderAdapter {
-   public:
-    Status Connect(const voice::VoiceSessionConfig&, voice::VoiceEventSink) override { return Status::Ok(); }
-    Status StartCapture(voice::VoiceMode) override { return Status::Ok(); }
-    Status StopCapture() override { return Status::Ok(); }
-    Status SendAudio(const voice::AudioFrame&) override { return Status::Ok(); }
-    Status Abort(std::string_view) override { return Status::Ok(); }
-    Status Speak(std::string_view) override { return Status::Ok(); }
-    Status NotifyLocalWakeWord(std::string_view) override { return Status::Ok(); }
-    Status Disconnect() override { return Status::Ok(); }
-    Result<voice::VoiceAudioFormats> audio_formats() const override {
-        voice::VoiceAudioFormats fmt;
-        fmt.capture = voice::AudioFormat{};
-        fmt.playback = voice::AudioFormat{};
-        return Result<voice::VoiceAudioFormats>::Success(fmt);
-    }
-    const voice::CapabilityProfile& capabilities() const override { return profile_; }
-
-   private:
-    voice::CapabilityProfile profile_{"scaffold", {"streaming-asr", "tts"}};
-};
 
 class Runtime final {
    public:
