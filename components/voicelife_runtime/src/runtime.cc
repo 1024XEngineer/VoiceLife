@@ -19,22 +19,14 @@
 #include "generated/wake_ack_pcm.h"
 #include "voicelife/audio_esp/audio_board_profile.h"
 #include "voicelife/audio_esp/esp32s3_audio_probe.h"
-#include "voicelife/linx/linx_speech_provider.h"
-#include "voicelife/linx/linx_types.h"
-#include "voicelife/linx_esp/esp_websocket_transport.h"
-#include "voicelife/mcp/mcp_server.h"
-#include "voicelife/schedule/schedule_service.h"
 #endif
 
-#include "linx_mcp_bridge.h"
-#include "linx_ota_bootstrap.h"
-#include "linx_secret_resolver.h"
 #include "runtime_audio_diagnostics.h"
 #include "runtime_board_input.h"
+#include "runtime_linx_bootstrap.h"
 #include "runtime_presentation.h"
 #include "runtime_scaffold.h"
 #include "runtime_voice_wiring.h"
-#include "schedule_mcp_tools.h"
 #include "voicelife/voice/voice_interaction_controller.h"
 #include "voicelife/voice/voice_ports.h"
 #include "voicelife/voice/voice_session.h"
@@ -56,43 +48,31 @@ class Runtime final {
     Runtime() {
         auto& registry = voice::SpeechProviderRegistry::Instance();
 #ifdef ESP_PLATFORM
-        init_status_ = RegisterScheduleMcpTools(mcp_server_, schedule_service_);
-        if (init_status_.ok()) {
-            ESP_LOGI(kTag, "MCP_TOOLS_READY count=2 names=schedule.create,schedule.query");
-        }
-        registry.Register("xrobot-websocket", linx::LinxSpeechProviderAdapter::DefaultCapabilities(), [this]() {
-            return std::make_unique<linx::LinxSpeechProviderAdapter>(
-                *linx_transport_, linx_codec_, linx_config_, linx::LinxSpeechProviderAdapter::DefaultCapabilities(),
-                [this](std::string_view payload, std::string_view session_id) {
-                    return HandleLinxMcpPayload(payload, mcp_server_, session_id);
-                });
-        });
+        init_status_ = linx_bootstrap_.Initialize();
 #endif
         registry.Register("scaffold", voice::CapabilityProfile{"scaffold", {"streaming-asr", "tts"}},
                           []() { return std::make_unique<ScaffoldSpeechProvider>(); });
     }
 
     Status Start() {
-        auto& registry = voice::SpeechProviderRegistry::Instance();
         if (!init_status_.ok()) return init_status_;
 #ifdef ESP_PLATFORM
         presentation_.InitializeHardware();
         presentation_.ShowNetworkSetup();
-        if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) {
+        if (const Status secret_store = linx_bootstrap_.InitializeSecretStore(); !secret_store.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=secret_store code=%d", static_cast<int>(secret_store.code));
             presentation_.ShowStartupError();
             return secret_store;
         }
-        auto connection = BootstrapLinxOtaConfig();
-        if (!connection.ok() || !connection.value.has_value()) {
-            ESP_LOGW(kTag, "STARTUP_ERROR stage=linx_bootstrap code=%d", static_cast<int>(connection.status.code));
+        if (const Status connection_status = linx_bootstrap_.LoadOtaConnectionConfig(); !connection_status.ok()) {
+            ESP_LOGW(kTag, "STARTUP_ERROR stage=linx_bootstrap code=%d", static_cast<int>(connection_status.code));
             presentation_.ShowStartupError();
-            return connection.status;
+            return connection_status;
         }
         presentation_.ShowServiceConnecting();
-        linx_config_ = std::move(*connection.value);
-        auto result = registry.Create("xrobot-websocket", {});
+        auto result = linx_bootstrap_.CreateProvider();
 #else
+        auto& registry = voice::SpeechProviderRegistry::Instance();
         auto result = registry.Create("scaffold", {});
 #endif
         if (!result.ok() || !result.value.has_value()) {
@@ -658,14 +638,8 @@ class Runtime final {
         }
     }
 
-    NvsSecretResolver linx_secrets_;
-    mcp::McpServer mcp_server_;
-    schedule::ScheduleService schedule_service_;
     Status init_status_ = Status::Ok();
-    linx::LinxJsonCodec linx_codec_;
-    linx::LinxConnectionConfig linx_config_;
-    std::unique_ptr<linx_esp::EspWebSocketTransport> linx_transport_ =
-        std::make_unique<linx_esp::EspWebSocketTransport>(linx_secrets_);
+    RuntimeLinxBootstrap linx_bootstrap_;
     VoiceLifePcbVoiceWiring voice_wiring_;
     QueueHandle_t wake_queue_ = nullptr;
     TaskHandle_t wake_task_ = nullptr;
