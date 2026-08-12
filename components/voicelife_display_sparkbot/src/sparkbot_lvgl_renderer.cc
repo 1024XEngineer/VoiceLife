@@ -168,9 +168,15 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
     }
 
     // 官方 SetEmotion：优先 emoji GIF（assets 分区），失败回退字形。
+    // 仅 emotion（mood 映射的 asset）变化时切换 GIF/字形；同状态下只更新
+    // 文本，避免状态文本刷新反复重建并重启动画。
     const std::string_view emotion = EmotionKeyForMood(snapshot.mood);
+    const bool emotion_changed = emotion != current_emotion_;
+    if (emotion_changed) {
+        current_emotion_ = std::string(emotion);
+    }
     bool using_gif = false;
-    if (emoji_assets_ != nullptr && assets_ready_) {
+    if (emotion_changed && emoji_assets_ != nullptr && assets_ready_) {
         const auto asset = emoji_assets_->Load(emotion);
         if (asset.ok() && asset.value.has_value() && asset.value->data != nullptr && asset.value->size > 0) {
             // 停止并释放上一帧 GIF（与官方 SetEmotion 同一锁语义）。
@@ -201,7 +207,7 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
 
     auto* emoji_label = static_cast<lv_obj_t*>(emoji_label_);
     auto* emoji_image = static_cast<lv_obj_t*>(emoji_image_);
-    if (!using_gif) {
+    if (!using_gif && emotion_changed) {
         const char* utf8 = noto_emoji_get_utf8(emotion.data());
         const lv_font_t* emotion_font = &font_noto_emoji_30_4;
         if (utf8 == nullptr) {

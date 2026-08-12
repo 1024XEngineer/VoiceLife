@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <string_view>
 
 #include "voicelife/contracts/status.h"
@@ -78,6 +79,8 @@ class SparkBotLvglRenderer {
     [[maybe_unused]] void* gif_controller_ = nullptr;
     /** @brief assets 分区是否已成功初始化。 */
     [[maybe_unused]] bool assets_ready_ = false;
+    /** @brief 当前 emotion key（同状态不重建 GIF/字形）。 */
+    [[maybe_unused]] std::string current_emotion_;
 };
 
 }  // namespace voicelife::display_sparkbot
