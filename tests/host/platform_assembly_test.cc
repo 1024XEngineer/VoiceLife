@@ -27,12 +27,13 @@ int main() {
     Check(pcb_submit.code == voicelife::ErrorCode::kUnavailable,
           "SSD1306 点阵屏的资源命令必须返回 kUnavailable（能力不支持）");
 
-    // SparkBot：完整显示链路（队列 -> 显示任务 -> Renderer），available=true。
+    // SparkBot：完整显示链路（队列 -> 显示任务 -> Renderer）。available 只在
+    // 显示启动成功后置真；host 下未启动必须为 false（不产生假成功）。
     SparkBotAssembly sparkbot_assembly;
     PlatformAssembly& sparkbot_as_interface = sparkbot_assembly;
     const auto& sparkbot_caps = sparkbot_as_interface.presentation().capabilities();
-    Check(sparkbot_caps.available && sparkbot_caps.text && sparkbot_caps.animation,
-          "SparkBot Assembly 显示链路闭合后必须声明可用能力（实板未验证另行标注）");
+    Check(!sparkbot_caps.available && sparkbot_caps.text && sparkbot_caps.animation,
+          "SparkBot 显示启动前 available 必须为 false，能力声明保留文本/动画");
 
     // Render 提交快照到有界队列：立即返回 Ok（异步渲染由显示任务执行）。
     voicelife::voice::DisplaySnapshot snapshot;

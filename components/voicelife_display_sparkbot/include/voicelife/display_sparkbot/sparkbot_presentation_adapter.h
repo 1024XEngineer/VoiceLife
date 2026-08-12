@@ -108,6 +108,8 @@ class SparkBotPresentationAdapter : public voicelife::voice::PresentationPort {
 
     /** @brief 显示初始化与 ST7789/LVGL 上下文。 */
     SparkBotLvglDisplay display_;
+    /** @brief 动态能力声明（available 由显示启动结果决定）。 */
+    voicelife::voice::DisplayCapabilities capabilities_;
     /** @brief 官方简单模式 Renderer。 */
     SparkBotLvglRenderer renderer_;
     /** @brief 有界快照队列（满时丢最旧）。 */

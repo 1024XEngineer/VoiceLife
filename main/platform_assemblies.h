@@ -1,5 +1,7 @@
 #pragma once
 
+#include <mutex>
+
 #include "voicelife/board_esp/gpio46_power_arbiter.h"
 #include "voicelife/display_esp/ssd1306_presentation_adapter.h"
 #include "voicelife/display_sparkbot/sparkbot_presentation_adapter.h"
@@ -68,9 +70,11 @@ class SparkBotAssembly : public PlatformAssembly {
     /** @brief 配置 GPIO46 为输出（唯一物理 owner，ESP 构建）。 */
     void ConfigureSharedPowerGpio();
 
-    /** @brief 按仲裁结果写 GPIO46 电平（ESP 构建）。 */
-    void WriteSharedPowerLine();
+    /** @brief 按仲裁结果写 GPIO46 电平（ESP 构建；调用方必须已持锁）。 */
+    void WriteSharedPowerLineLocked();
 
+    /** @brief GPIO46 仲裁与写入互斥（显示回调与音频任务并发保护）。 */
+    mutable std::mutex power_mutex_;
     voicelife::board_esp::Gpio46PowerArbiter arbiter_;
     voicelife::display_sparkbot::SparkBotPresentationAdapter adapter_;
 };

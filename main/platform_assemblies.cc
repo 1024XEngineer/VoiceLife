@@ -64,20 +64,22 @@ voicelife::Status SparkBotAssembly::Start() {
 }
 
 voicelife::Status SparkBotAssembly::SetAudioOutputEnabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(power_mutex_);
 #ifdef ESP_PLATFORM
     ESP_LOGI(kPowerTag, "GPIO46_AUDIO_REQUEST=%d", enabled ? 1 : 0);
 #endif
     (void)arbiter_.SetAudioOutputEnabled(enabled);
-    WriteSharedPowerLine();
+    WriteSharedPowerLineLocked();
     return voicelife::Status::Ok();
 }
 
 void SparkBotAssembly::ApplyBacklight(bool enabled) {
+    std::lock_guard<std::mutex> lock(power_mutex_);
 #ifdef ESP_PLATFORM
     ESP_LOGI(kPowerTag, "GPIO46_BACKLIGHT_REQUEST=%d", enabled ? 1 : 0);
 #endif
     (void)arbiter_.SetBacklightEnabled(enabled);
-    WriteSharedPowerLine();
+    WriteSharedPowerLineLocked();
 }
 
 void SparkBotAssembly::ConfigureSharedPowerGpio() {
@@ -99,7 +101,7 @@ void SparkBotAssembly::ConfigureSharedPowerGpio() {
 #endif
 }
 
-void SparkBotAssembly::WriteSharedPowerLine() {
+void SparkBotAssembly::WriteSharedPowerLineLocked() {
 #ifdef ESP_PLATFORM
     const auto profile = voicelife::board_esp::SparkBotProfile().shared_power;
     if (profile.gpio < 0) {

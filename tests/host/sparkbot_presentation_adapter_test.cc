@@ -15,9 +15,10 @@ int main() {
     SparkBotLcdConfig config;  // 官方默认参数（240x240 SPI mode 2）
     SparkBotPresentationAdapter adapter(config);
 
-    // 显示链路已闭合：available=true，文本/静态图/动画能力声明。
+    // 显示链路能力声明：硬件能力为 true，但 available 只在显示启动成功后置真；
+    // host 下未启动，available 必须为 false（不产生“运行正常但屏幕不可用”假成功）。
     const auto& caps = adapter.capabilities();
-    Check(caps.available, "显示链路闭合后 available 必须为 true");
+    Check(!caps.available, "host 下未启动显示，available 必须为 false");
     Check(caps.text && caps.static_image && caps.animation && !caps.preview_image,
           "能力声明必须包含文本/静态图/动画，且不含预览图");
     Check(caps.max_frame_bytes == 240U * 240U * 2U, "帧缓冲硬件上限必须为 240x240 RGB565");

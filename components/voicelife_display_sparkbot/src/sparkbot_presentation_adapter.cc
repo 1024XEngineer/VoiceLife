@@ -21,7 +21,7 @@ namespace {
 constexpr std::size_t kQueueCapacity = 8;
 
 /** @brief SparkBot 彩屏能力声明：显示链路已闭合（代码级）。 */
-constexpr voicelife::voice::DisplayCapabilities kSparkBotCapabilities{
+[[maybe_unused]] constexpr voicelife::voice::DisplayCapabilities kSparkBotCapabilities{
     .available = true,
     .text = true,
     .static_image = true,
@@ -57,13 +57,16 @@ bool ShouldDropDisplaySnapshot(uint64_t generation, uint64_t revision, uint64_t 
 }
 
 SparkBotPresentationAdapter::SparkBotPresentationAdapter(const SparkBotLcdConfig& config, BacklightCallback backlight)
-    : display_(config), queue_(kQueueCapacity), backlight_cb_(std::move(backlight)) {}
+    : display_(config), queue_(kQueueCapacity), backlight_cb_(std::move(backlight)) {
+    // 显示链路声明硬件能力，但 available 只在显示启动成功后置真；
+    // 初始化失败时保持 false，不产生“运行正常但屏幕不可用”的假成功。
+    capabilities_ = kSparkBotCapabilities;
+    capabilities_.available = false;
+}
 
 SparkBotPresentationAdapter::~SparkBotPresentationAdapter() { (void)Stop(); }
 
-const voicelife::voice::DisplayCapabilities& SparkBotPresentationAdapter::capabilities() const {
-    return kSparkBotCapabilities;
-}
+const voicelife::voice::DisplayCapabilities& SparkBotPresentationAdapter::capabilities() const { return capabilities_; }
 
 voicelife::Status SparkBotPresentationAdapter::Render(const voicelife::voice::DisplaySnapshot& snapshot) {
     queue_.Push(snapshot);
@@ -101,13 +104,15 @@ voicelife::Status SparkBotPresentationAdapter::Start() {
     }
     const voicelife::Status init = display_.Initialize();
     if (!init.ok()) {
-        return init;
+        return init;  // 显示初始化失败：available 保持 false，调用方可诊断并停止。
     }
+    capabilities_.available = true;
     if (xTaskCreate(DisplayTaskEntry, "sparkbot_disp", kDisplayTaskStackWords, this, kDisplayTaskPriority,
                     reinterpret_cast<TaskHandle_t*>(&task_handle_)) != pdPASS) {
         return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "显示任务创建失败");
     }
     started_ = true;
+    ESP_LOGI(kTag, "SPARKBOT_DISPLAY_TASK_STARTED=1");
     return voicelife::Status::Ok();
 #else
     (void)0;
@@ -151,11 +156,20 @@ void SparkBotPresentationAdapter::DisplayTaskLoop() {
                                       last_rendered_revision_)) {
             continue;  // 迟到快照：防止旧状态覆盖新状态。
         }
-        if (lvgl_port_lock(0) == ESP_OK) {
-            (void)renderer_.Render(snapshot);
-            // 锁内推进基准：锁失败时不推进，快照将在下次重试。
-            last_generation_ = snapshot.generation;
-            last_rendered_revision_ = snapshot.revision;
+        // esp_lvgl_port returns bool; 0 means wait indefinitely, not success.
+        // The dedicated display task may block here, but producers never do.
+        if (lvgl_port_lock(0)) {
+            const voicelife::Status render_status = renderer_.Render(snapshot);
+            if (!render_status.ok()) {
+                ESP_LOGW(kTag, "SPARKBOT_DISPLAY_RENDER_FAILED code=%d", static_cast<int>(render_status.code));
+            } else {
+                // 锁内推进基准：锁失败时不推进，快照将在下次重试。
+                last_generation_ = snapshot.generation;
+                last_rendered_revision_ = snapshot.revision;
+                ESP_LOGI(kTag, "SPARKBOT_DISPLAY_SNAPSHOT_RENDERED generation=%llu revision=%llu",
+                         static_cast<unsigned long long>(snapshot.generation),
+                         static_cast<unsigned long long>(snapshot.revision));
+            }
             lvgl_port_unlock();
         }
     }

@@ -197,6 +197,28 @@ Status RunAudioPortSmoke() {
     return Status::Ok();
 }
 #endif
+
+#if CONFIG_VOICELIFE_SPARKBOT_HARDWARE_DEMO
+constexpr uint32_t kSparkBotDemoToneHz = 1000;
+constexpr uint32_t kSparkBotDemoToneMs = 1000;
+constexpr uint32_t kSparkBotDemoEmotionHoldMs = 1500;
+
+voice::AudioFrame MakeSparkBotDemoToneFrame(const voice::AudioFormat& format, uint64_t sequence) {
+    constexpr double kPi = 3.14159265358979323846;
+    voice::AudioFrame frame;
+    frame.sequence = sequence;
+    frame.format = format;
+    const std::size_t samples = static_cast<std::size_t>(format.sample_rate_hz) * format.frame_duration_ms / 1000U;
+    frame.payload.resize(samples * sizeof(int16_t));
+    for (std::size_t i = 0; i < samples; ++i) {
+        const double angle = 2.0 * kPi * static_cast<double>(kSparkBotDemoToneHz) * static_cast<double>(i) /
+                             static_cast<double>(format.sample_rate_hz);
+        const int16_t sample = static_cast<int16_t>(std::sin(angle) * 6000.0);
+        std::memcpy(frame.payload.data() + i * sizeof(sample), &sample, sizeof(sample));
+    }
+    return frame;
+}
+#endif
 #endif
 
 class ScaffoldAudioInput final : public voice::AudioInputPort {
@@ -297,8 +319,13 @@ class Runtime final {
             }
         }
         if (const Status display_status = assembly_->Start(); !display_status.ok()) {
-            ESP_LOGW(kTag, "显示启动失败: %s", display_status.message.c_str());
+            ESP_LOGE(kTag, "STARTUP_ERROR stage=display_start code=%d msg=%s", static_cast<int>(display_status.code),
+                     display_status.message.c_str());
+            return display_status;
         }
+#if CONFIG_VOICELIFE_SPARKBOT_HARDWARE_DEMO
+        return RunSparkBotHardwareDemo();
+#endif
         ShowDisplay(voice::VoiceMood::kThinking, "联网", "");
         if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=secret_store code=%d", static_cast<int>(secret_store.code));
@@ -966,6 +993,61 @@ class Runtime final {
         ++snapshot_.revision;
         CommitSnapshot();
     }
+
+#if CONFIG_VOICELIFE_SPARKBOT_HARDWARE_DEMO
+    Status RunSparkBotHardwareDemo() {
+        // This mode deliberately stops before secrets, Provider, and VoiceSession.
+        // It exercises only the already-injected presentation and audio ports.
+        ESP_LOGI(kTag, "SPARKBOT_DEMO_MODE=1");
+        ShowDisplay(voice::VoiceMood::kNeutral, "SparkBot demo", "Idle animation");
+        ESP_LOGI(kTag, "SPARKBOT_DEMO_DISPLAY_SUBMITTED=1");
+        vTaskDelay(pdMS_TO_TICKS(kSparkBotDemoEmotionHoldMs));
+
+        audio_esp::Esp32s3PcmAudioPorts ports(
+            assembly_->audio_profile(), audio_esp::AudioPortOptions{},
+            [this](bool enabled) { (void)assembly_->SetAudioOutputEnabled(enabled); });
+        const auto profile = assembly_->audio_profile();
+        Status status = ports.input().Open(profile.capture_i2s.format);
+        if (!status.ok()) {
+            ESP_LOGW(kTag, "SPARKBOT_DEMO_AUDIO_FAILED stage=input_open code=%d", static_cast<int>(status.code));
+            ShowDisplay(voice::VoiceMood::kSad, "Audio error", "input open failed");
+            return status;
+        }
+        status = ports.output().Open(profile.playback_i2s.format);
+        if (!status.ok()) {
+            ports.input().Close();
+            ESP_LOGW(kTag, "SPARKBOT_DEMO_AUDIO_FAILED stage=output_open code=%d", static_cast<int>(status.code));
+            ShowDisplay(voice::VoiceMood::kSad, "Audio error", "output open failed");
+            return status;
+        }
+        ESP_LOGI(kTag, "SPARKBOT_DEMO_AUDIO_READY=1");
+
+        ShowDisplay(voice::VoiceMood::kSpeaking, "Playing 1 kHz", "Listen for the tone");
+        const uint32_t frames = kSparkBotDemoToneMs / profile.playback_i2s.format.frame_duration_ms;
+        for (uint32_t sequence = 0; sequence < frames; ++sequence) {
+            status = ports.output().Push(MakeSparkBotDemoToneFrame(profile.playback_i2s.format, sequence));
+            if (!status.ok()) {
+                break;
+            }
+        }
+        if (status.ok()) {
+            ESP_LOGI(kTag, "SPARKBOT_DEMO_TONE_QUEUED=1 frames=%u", static_cast<unsigned>(frames));
+            vTaskDelay(pdMS_TO_TICKS(kSparkBotDemoToneMs + 250));
+        } else {
+            ESP_LOGW(kTag, "SPARKBOT_DEMO_AUDIO_FAILED stage=tone_queue code=%d", static_cast<int>(status.code));
+        }
+        ports.output().Close();
+        ports.input().Close();
+        if (!status.ok()) {
+            ShowDisplay(voice::VoiceMood::kSad, "Audio error", "tone queue failed");
+            return status;
+        }
+        ShowDisplay(voice::VoiceMood::kHappy, "Demo complete", "Display and audio passed");
+        ESP_LOGI(kTag, "SPARKBOT_DEMO_COMPLETE=1");
+        vTaskDelay(pdMS_TO_TICKS(kSparkBotDemoEmotionHoldMs));
+        return Status::Ok();
+    }
+#endif
 
     // 临时 overlay 快照：不改业务快照，过期后由业务快照覆盖（音量/告别提示）。
     void ShowOverlay(voice::VoiceMood mood, std::string_view status, std::string_view content) {
