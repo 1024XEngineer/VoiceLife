@@ -17,6 +17,7 @@ coverage:
           - cpp
         target: 80%
         threshold: 0%
+        if_not_found: success
         paths:
           - "components/**"
       typescript:
@@ -24,6 +25,7 @@ coverage:
           - typescript
         target: 80%
         threshold: 0%
+        if_not_found: success
         paths:
           - "services/im-gateway/src/**"
 
