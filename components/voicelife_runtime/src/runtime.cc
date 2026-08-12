@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <string_view>
 
 #include "driver/gpio.h"
@@ -803,10 +804,6 @@ class Runtime final {
         // 统一提交时间快照。
         // 事件化：状态迁移由事件循环唯一执行，拒绝日志在事件循环统一输出。
         EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
-        if (false) {
-            ESP_LOGW(kTag, "STAND_BY_READY_REJECTED state=%d err=%s", static_cast<int>(interaction_.state()),
-                     ready_status.message.c_str());
-        }
         // 待机原子条件校验：控制器/会话/唤醒门三态一致。
         // 仅全部满足才显示 Standby 时间快照；不满足则为假待机，保留告警文案并记录。
         const bool controller_ok = interaction_.state() == voice::VoiceInteractionState::kStandby;
@@ -1338,8 +1335,8 @@ class Runtime final {
                 // 唤醒被拒（如控制器不在 kStandby）：重启检测器，否则后续永远叫不醒。
                 ESP_LOGW(kTag, "WAKE_REJECTED state=%d err=%s", static_cast<int>(interaction_.state()),
                          wake_status.message.c_str());
-                if (wake_detector_ != nullptr) {
-                    (void)wake_detector_->Start();
+                if (wake_gate_ != nullptr) {
+                    (void)wake_gate_->StartStandby();
                 }
             }
         }

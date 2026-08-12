@@ -55,8 +55,8 @@ void VoiceLifePcbAssembly::LogAudioStats() {
 #ifdef ESP_PLATFORM
     const auto stats = audio_ports_.stats();
     ESP_LOGI("voicelife_pcb_audio", "AUDIO_STATS input=%llu output=%llu short_write=%llu",
-             static_cast<unsigned long long>(stats.input_frames), static_cast<unsigned long long>(stats.output_frames),
-             static_cast<unsigned long long>(stats.output_short_writes));
+             static_cast<unsigned long long>(stats.captured_frames),
+             static_cast<unsigned long long>(stats.played_frames), static_cast<unsigned long long>(stats.short_writes));
 #endif
 }
 
@@ -79,8 +79,8 @@ void SparkBotAssembly::LogAudioStats() {
 #ifdef ESP_PLATFORM
     const auto stats = audio_ports_.stats();
     ESP_LOGI(kPowerTag, "AUDIO_STATS input=%llu output=%llu short_write=%llu",
-             static_cast<unsigned long long>(stats.input_frames), static_cast<unsigned long long>(stats.output_frames),
-             static_cast<unsigned long long>(stats.output_short_writes));
+             static_cast<unsigned long long>(stats.captured_frames),
+             static_cast<unsigned long long>(stats.played_frames), static_cast<unsigned long long>(stats.short_writes));
 #endif
 }
 
