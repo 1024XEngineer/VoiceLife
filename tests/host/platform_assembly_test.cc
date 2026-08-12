@@ -22,11 +22,6 @@ int main() {
     // SSD1306 Adapter：Render 走旧渲染路径（host 下无副作用），Submit 明确不支持。
     const auto pcb_render = pcb_as_interface.presentation().Render(voicelife::voice::DisplaySnapshot{});
     Check(pcb_render.ok(), "点阵 Adapter 的 Render 契约路径必须可执行");
-    const auto pcb_submit = pcb_as_interface.presentation().Submit(
-        voicelife::voice::PresentationCommand{.asset_id = "idle", .generation = 0, .request_id = {}});
-    Check(pcb_submit.code == voicelife::ErrorCode::kUnavailable,
-          "SSD1306 点阵屏的资源命令必须返回 kUnavailable（能力不支持）");
-
     // SparkBot：完整显示链路（队列 -> 显示任务 -> Renderer）。available 只在
     // 显示启动成功后置真；host 下未启动必须为 false（不产生假成功）。
     SparkBotAssembly sparkbot_assembly;

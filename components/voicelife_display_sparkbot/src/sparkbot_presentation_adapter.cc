@@ -33,22 +33,6 @@ constexpr std::size_t kQueueCapacity = 8;
     .refresh_budget_hz = 0U,
 };
 
-/** @brief 官方牛头表情的受控标识列表（与 manifest.json 一致）。 */
-constexpr std::array<std::string_view, 10> kControlledAssetIds = {
-    "boot", "connecting", "error", "happy", "idle", "listening", "provisioning", "sleepy", "speaking", "thinking",
-};
-
-bool IsPathLike(std::string_view asset_id) {
-    return asset_id.empty() || asset_id.find('/') != std::string_view::npos ||
-           asset_id.find('\\') != std::string_view::npos || asset_id.find("..") != std::string_view::npos;
-}
-
-#ifdef ESP_PLATFORM
-constexpr const char* kTag = "sparkbot_adapter";
-constexpr uint32_t kDisplayTaskStackWords = 4096;
-constexpr uint32_t kDisplayTaskPriority = 1;
-#endif
-
 }  // namespace
 
 bool ShouldDropDisplaySnapshot(uint64_t generation, uint64_t revision, uint64_t last_generation,
@@ -81,20 +65,6 @@ void SparkBotPresentationAdapter::UpdateBacklight(const voicelife::voice::Displa
         backlight_cb_(true);
         backlight_on_ = true;
     }
-}
-
-voicelife::Status SparkBotPresentationAdapter::Submit(voicelife::voice::PresentationCommand command) {
-    if (IsPathLike(command.asset_id)) {
-        return voicelife::Status::Error(voicelife::ErrorCode::kInvalidArgument,
-                                        "资源标识必须是非空、无路径分隔符的受控名称");
-    }
-    const bool controlled = std::find(kControlledAssetIds.begin(), kControlledAssetIds.end(), command.asset_id) !=
-                            kControlledAssetIds.end();
-    if (!controlled) {
-        return voicelife::Status::Error(voicelife::ErrorCode::kNotFound, "资源不在官方 SparkBot 资源清单中");
-    }
-    // 独立资源命令（如预览图）本阶段未实现；动画由 Render 快照 mood 驱动。
-    return voicelife::Status::Error(voicelife::ErrorCode::kUnavailable, "独立资源命令未实现；动画由 Render 快照驱动");
 }
 
 voicelife::Status SparkBotPresentationAdapter::Start() {

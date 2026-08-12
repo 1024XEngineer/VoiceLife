@@ -103,10 +103,6 @@ voicelife::Status Ssd1306PresentationAdapter::Render(const voicelife::voice::Dis
 #endif
 }
 
-voicelife::Status Ssd1306PresentationAdapter::Submit(voicelife::voice::PresentationCommand /*command*/) {
-    return voicelife::Status::Error(voicelife::ErrorCode::kUnavailable, "SSD1306 点阵屏不支持图片/动画资源命令");
-}
-
 void Ssd1306PresentationAdapter::RestartScrollTimer(const std::string& content) {
 #ifdef ESP_PLATFORM
     scroll_offset_ = 0;

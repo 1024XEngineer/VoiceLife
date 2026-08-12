@@ -15,7 +15,7 @@ namespace voicelife::display_esp {
  * 把 DisplaySnapshot 业务语义映射为旧点阵界面（牛头表情 + 状态栏 + 内容
  * 栏）。下行长文本滚动（400ms/字符，末尾留 6 字符窗口）在本 Adapter 的
  * 专属上下文（esp_timer 回调 + SetEmotion）执行，保持旧板滚动行为；
- * 点阵屏无图片/动画能力，Submit 一律返回 kUnavailable。
+ * 点阵屏无图片/动画能力。
  */
 class Ssd1306PresentationAdapter : public voicelife::voice::PresentationPort {
    public:
@@ -45,15 +45,6 @@ class Ssd1306PresentationAdapter : public voicelife::voice::PresentationPort {
      * @return 渲染结果。
      */
     voicelife::Status Render(const voicelife::voice::DisplaySnapshot& snapshot) override;
-
-    /**
-     * @brief 提交受资源清单约束的显示命令。
-     *
-     * 点阵屏不支持图片/动画资源，一律返回 kUnavailable。
-     * @param command 逻辑资源命令。
-     * @return 恒为 kUnavailable（能力不支持）。
-     */
-    voicelife::Status Submit(voicelife::voice::PresentationCommand command) override;
 
    private:
     /** @brief 重启下行长文本滚动定时器（仅 ESP 构建使用）。 */

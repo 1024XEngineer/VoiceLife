@@ -77,17 +77,6 @@ class SparkBotPresentationAdapter : public voicelife::voice::PresentationPort {
     voicelife::Status Render(const voicelife::voice::DisplaySnapshot& snapshot) override;
 
     /**
-     * @brief 提交受资源清单约束的显示命令。
-     *
-     * 只接受受控 asset_id；非法格式返回 kInvalidArgument，未知资源返回
-     * kNotFound。独立资源命令（如预览图）本阶段未实现，返回 kUnavailable；
-     * 动画由 Render 快照的 mood 驱动。
-     * @param command 逻辑资源 ID、代次和幂等请求 ID。
-     * @return 按契约返回明确状态。
-     */
-    voicelife::Status Submit(voicelife::voice::PresentationCommand command) override;
-
-    /**
      * @brief 初始化 ST7789/LVGL 并启动专属显示任务。
      * @return 启动结果。
      */

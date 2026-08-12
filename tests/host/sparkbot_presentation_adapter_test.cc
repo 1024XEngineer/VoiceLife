@@ -6,7 +6,6 @@
 using voicelife::ErrorCode;
 using voicelife::test::Check;
 using voicelife::voice::DisplaySnapshot;
-using voicelife::voice::PresentationCommand;
 
 int main() {
     using voicelife::display_sparkbot::SparkBotLcdConfig;
@@ -30,19 +29,6 @@ int main() {
     snapshot.status_text = "播报中";
     const auto render_status = adapter.Render(snapshot);
     Check(render_status.ok(), "Render 必须接受快照并入队");
-
-    // Submit 契约：非法格式 kInvalidArgument、未知资源 kNotFound、
-    // 受控资源 kUnavailable（独立资源命令未实现）。
-    Check(adapter.Submit(PresentationCommand{.asset_id = "", .request_id = {}}).code == ErrorCode::kInvalidArgument,
-          "空 asset_id 必须返回 kInvalidArgument");
-    Check(adapter.Submit(PresentationCommand{.asset_id = "../evil.gif", .request_id = {}}).code ==
-              ErrorCode::kInvalidArgument,
-          "路径特征 asset_id 必须返回 kInvalidArgument");
-    Check(adapter.Submit(PresentationCommand{.asset_id = "not_in_manifest", .request_id = {}}).code ==
-              ErrorCode::kNotFound,
-          "未知资源必须返回 kNotFound");
-    Check(adapter.Submit(PresentationCommand{.asset_id = "idle", .request_id = {}}).code == ErrorCode::kUnavailable,
-          "受控资源命令未实现必须返回 kUnavailable");
 
     // host 构建不启动真实显示任务。
     Check(adapter.Start().code == ErrorCode::kUnavailable,

@@ -51,29 +51,13 @@ struct DisplayCapabilities {
 };
 
 /**
- * @brief 显示侧可消费的逻辑资源命令。
- *
- * asset_id 必须是官方资源清单（manifest）约束的逻辑标识；Voice/domain
- * 不构造资源路径、不接受 URL 或任意字节流。未知 asset_id 必须返回
- * kNotFound；空值、含路径分隔符或 .. 等非法格式返回 kInvalidArgument。
- */
-struct PresentationCommand {
-    /** @brief 受资源清单约束的逻辑资源 ID。 */
-    std::string asset_id;
-    /** @brief 当前语义回合的请求代次。 */
-    uint64_t generation = 0;
-    /** @brief 资源命令的幂等请求 ID。 */
-    std::string request_id;
-};
-
-/**
  * @brief 业务语义到板级显示实现的端口。
  *
  * 调用上下文契约：
  * - 唯一提交者是交互事件循环（InteractionEventLoop 或等效的显示快照生产
  *   者）；Provider 回调、音频实时任务、输入回调和定时器不得直接调用
- *   Render/Submit，只能投递事件。
- * - Render/Submit 必须在显示适配器专属的显示任务/受控上下文内执行，由
+ *   Render，只能投递事件。
+ * - Render 必须在显示适配器专属的显示任务/受控上下文内执行，由
  *   Adapter 负责串行化、丢弃旧 revision/旧 generation 并防止阻塞音频任务。
  * - LVGL 对象、GIF 解码、缓存、路径和像素缓冲区只存在于具体显示 Adapter
  *   的专属上下文中，不反向暴露给 Runtime 或 Domain。
@@ -93,13 +77,6 @@ class PresentationPort {
      * @return 快照被接受或明确失败时的状态。
      */
     virtual Status Render(const DisplaySnapshot& snapshot) = 0;
-
-    /**
-     * @brief 提交受资源清单约束的显示命令。
-     * @param command 逻辑资源 ID、代次和幂等请求 ID。
-     * @return 命令被接受或明确失败时的状态。
-     */
-    virtual Status Submit(PresentationCommand command) = 0;
 };
 
 /** @brief 硬件音频采集设备抽象（I2S 麦克风、AFE 管线等）。 */
