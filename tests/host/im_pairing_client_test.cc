@@ -158,6 +158,57 @@ void TestClientFailsClosedAndClassifiesErrors() {
     Check(transport.requests.size() == before, "本地凭据错误不得发出网络请求");
 }
 
+void TestClientEscapesJsonAndRejectsInvalidInputsLocally() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    transport.responses = {Response(ImTransportStatus::kSuccess, 201, ReadFixture("pairing-created.json"))};
+    ImPairingClient client(transport, credentials);
+
+    std::string special_user_id = "quote\" slash\\ backspace\b formfeed\f newline\n return\r tab\t control";
+    special_user_id.push_back('\x01');
+    const auto created = client.Create({.user_id = special_user_id, .expires_in_minutes = 5});
+    Check(created.status == PairingClientStatus::kSuccess, "含 JSON 特殊字符的 user id 必须可安全序列化");
+    voicelife::JsonValue request_json;
+    voicelife::contracts::im::CreatePairingSessionRequest request_contract;
+    Check(voicelife::ParseJson(transport.requests[0].body, request_json).ok() &&
+              voicelife::contracts::im::ParseCreatePairingSessionRequest(request_json, request_contract).ok() &&
+              request_contract.userId == special_user_id,
+          "JSON 转义后必须无损还原全部特殊字符");
+
+    const std::size_t before = transport.requests.size();
+    Check(client.Create({.user_id = std::nullopt, .expires_in_minutes = 0}).status == PairingClientStatus::kRejected,
+          "零分钟配对窗口必须本地拒绝");
+    Check(client.Create({.user_id = std::nullopt, .expires_in_minutes = 11}).status == PairingClientStatus::kRejected,
+          "超过上限的配对窗口必须本地拒绝");
+    Check(client.Create({.user_id = "", .expires_in_minutes = 5}).status == PairingClientStatus::kRejected,
+          "显式空 user id 必须本地拒绝");
+    Check(client.Query("").status == PairingClientStatus::kRejected, "空 session id 必须本地拒绝");
+    Check(transport.requests.size() == before, "非法输入不得发出网络请求");
+
+    credentials.device_id.clear();
+    Check(client.Query("pairing-1").status == PairingClientStatus::kCredentialRejected,
+          "缺少 device id 时查询必须本地拒绝");
+    Check(transport.requests.size() == before, "缺少设备身份不得发出查询请求");
+}
+
+void TestClientRejectsCreateAndQueryFailures() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    transport.responses = {
+        Response(ImTransportStatus::kHttpError, 503),
+        Response(ImTransportStatus::kSuccess, 201, R"({"session":{}})"),
+        Response(
+            ImTransportStatus::kSuccess, 200,
+            R"({"id":"pairing-1","deviceId":"device-fixture","status":"confirmed","expiresAt":"2026-08-03T00:10:00.000Z","createdAt":"2026-08-03T00:00:00.000Z"})"),
+    };
+    ImPairingClient client(transport, credentials);
+
+    Check(client.Create({}).status == PairingClientStatus::kRetryable, "创建时服务端 5xx 必须映射为可重试");
+    Check(client.Create({}).status == PairingClientStatus::kInvalidResponse, "非法创建响应必须 fail closed");
+    Check(client.Query("pairing-1").status == PairingClientStatus::kInvalidResponse,
+          "confirmed 与 confirmedAt 不一致的查询响应必须 fail closed");
+}
+
 void TestControllerPollsFinitelyAndRejectsDuplicateStart() {
     FakeTransport transport;
     FakeCredentials credentials;
@@ -263,13 +314,54 @@ void TestControllerStopsOnNotFoundCredentialsAndRetryExhaustion() {
           "重试预算耗尽后必须停止并释放 active session");
 }
 
+void TestControllerStopsWhenCreationOrQueryIsRejected() {
+    {
+        FakeTransport transport;
+        FakeCredentials credentials;
+        FakeClock clock;
+        credentials.token.clear();
+        ImPairingClient client(transport, credentials);
+        PairingSessionController controller(client, clock);
+        Check(controller.Begin({}).status == PairingFlowStatus::kCredentialRejected && !controller.active(),
+              "创建凭据被拒绝时控制器必须返回专用终态");
+    }
+    {
+        FakeTransport transport;
+        FakeCredentials credentials;
+        FakeClock clock;
+        transport.responses = {Response(ImTransportStatus::kHttpError, 400)};
+        ImPairingClient client(transport, credentials);
+        PairingSessionController controller(client, clock);
+        Check(controller.Begin({}).status == PairingFlowStatus::kFailed && !controller.active(),
+              "创建请求被拒绝时控制器必须停止");
+    }
+    {
+        FakeTransport transport;
+        FakeCredentials credentials;
+        FakeClock clock;
+        transport.responses = {
+            Response(ImTransportStatus::kSuccess, 201, ReadFixture("pairing-created.json")),
+            Response(ImTransportStatus::kSuccess, 200, R"({"id":"pairing-1"})"),
+        };
+        ImPairingClient client(transport, credentials);
+        PairingSessionController controller(client, clock);
+        Check(controller.Begin({}).status == PairingFlowStatus::kPending, "异常查询测试必须先创建会话");
+        clock.now_ms += 3000;
+        Check(controller.Poll().status == PairingFlowStatus::kFailed && !controller.active(),
+              "非法查询响应必须停止控制器并释放 active session");
+    }
+}
+
 }  // namespace
 
 int main() {
     TestClientCreatesAndQueriesWithAuthenticatedContract();
     TestClientFailsClosedAndClassifiesErrors();
+    TestClientEscapesJsonAndRejectsInvalidInputsLocally();
+    TestClientRejectsCreateAndQueryFailures();
     TestControllerPollsFinitelyAndRejectsDuplicateStart();
     TestControllerStopsOnTerminalAndDeadline();
     TestControllerStopsOnNotFoundCredentialsAndRetryExhaustion();
+    TestControllerStopsWhenCreationOrQueryIsRejected();
     return 0;
 }
