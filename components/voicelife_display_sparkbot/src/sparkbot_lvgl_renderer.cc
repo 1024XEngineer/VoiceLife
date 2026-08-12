@@ -18,8 +18,8 @@ namespace {
 constexpr const char* kTag = "sparkbot_renderer";
 
 // 官方 SparkBot 强制 dark 主题颜色（lcd_display.cc InitializeLcdThemes）。
-constexpr lv_color_t kBackgroundColor = lv_color_hex(0x000000);
-constexpr lv_color_t kTextColor = lv_color_hex(0xFFFFFF);
+const lv_color_t kBackgroundColor = lv_color_hex(0x000000);
+const lv_color_t kTextColor = lv_color_hex(0xFFFFFF);
 
 LV_FONT_DECLARE(font_noto_sans_basic_14_1);
 LV_FONT_DECLARE(font_material_symbols_14_1);
@@ -172,7 +172,7 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
     bool using_gif = false;
     if (emoji_assets_ != nullptr && assets_ready_) {
         const auto asset = emoji_assets_->Load(emotion);
-        if (asset.ok() && asset.value.data != nullptr && asset.value.size > 0) {
+        if (asset.ok() && asset.value.has_value() && asset.value->data != nullptr && asset.value->size > 0) {
             // 停止并释放上一帧 GIF（与官方 SetEmotion 同一锁语义）。
             if (gif_controller_ != nullptr) {
                 auto* old_gif = static_cast<LvglGif*>(gif_controller_);
