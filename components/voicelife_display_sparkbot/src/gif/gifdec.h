@@ -9,6 +9,8 @@ extern "C" {
 #endif
 
 #include <lvgl.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 typedef struct _gd_Palette {
@@ -29,6 +31,10 @@ typedef struct _gd_GIF {
     const char* data;
     uint8_t is_file;
     uint32_t f_rw_p;
+    /* Zero preserves the legacy, unbounded in-memory data API. */
+    size_t data_size;
+    /* True after an in-memory read or seek exceeds data_size. */
+    bool io_error;
     int32_t anim_start;
     uint16_t width, height;
     uint16_t depth;
@@ -51,6 +57,9 @@ typedef struct _gd_GIF {
 gd_GIF* gd_open_gif_file(const char* fname);
 
 gd_GIF* gd_open_gif_data(const void* data);
+
+/* Opens one bounded GIF asset without reading into adjacent packed data. */
+gd_GIF* gd_open_gif_data_sized(const void* data, size_t length);
 
 void gd_render_frame(gd_GIF* gif, uint8_t* buffer);
 

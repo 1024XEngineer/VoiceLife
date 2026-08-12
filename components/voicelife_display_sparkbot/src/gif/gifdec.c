@@ -68,6 +68,17 @@ gd_GIF* gd_open_gif_data(const void* data) {
     return gif_open(&gif_base);
 }
 
+gd_GIF* gd_open_gif_data_sized(const void* data, size_t length) {
+    gd_GIF gif_base;
+    memset(&gif_base, 0, sizeof(gif_base));
+    if (data == NULL || length == 0) return NULL;
+
+    bool res = f_gif_open(&gif_base, data, false);
+    if (!res) return NULL;
+    gif_base.data_size = length;
+    return gif_open(&gif_base);
+}
+
 static gd_GIF* gif_open(gd_GIF* gif_base) {
     uint8_t sigver[3];
     uint16_t width, height, depth;
@@ -675,8 +686,10 @@ static void dispose(gd_GIF* gif) {
 int gd_get_frame(gd_GIF* gif) {
     char sep;
 
+    if (gif == NULL || gif->io_error) return -1;
     dispose(gif);
     f_gif_read(gif, &sep, 1);
+    if (gif->io_error) return -1;
     while (sep != ',') {
         if (sep == ';') {
             f_gif_seek(gif, gif->anim_start, LV_FS_SEEK_SET);
@@ -689,9 +702,11 @@ int gd_get_frame(gd_GIF* gif) {
             read_ext(gif);
         else
             return -1;
+        if (gif->io_error) return -1;
         f_gif_read(gif, &sep, 1);
+        if (gif->io_error) return -1;
     }
-    if (read_image(gif) == -1) return -1;
+    if (read_image(gif) == -1 || gif->io_error) return -1;
     return 1;
 }
 
@@ -710,6 +725,8 @@ void gd_close_gif(gd_GIF* gif) {
 static bool f_gif_open(gd_GIF* gif, const void* path, bool is_file) {
     gif->f_rw_p = 0;
     gif->data = NULL;
+    gif->data_size = 0;
+    gif->io_error = false;
     gif->is_file = is_file;
 
     if (is_file) {
@@ -728,6 +745,12 @@ static void f_gif_read(gd_GIF* gif, void* buf, size_t len) {
     if (gif->is_file) {
         lv_fs_read(&gif->fd, buf, len, NULL);
     } else {
+        if (gif->data_size != 0 &&
+            (gif->f_rw_p > gif->data_size || len > gif->data_size - gif->f_rw_p)) {
+            memset(buf, 0, len);
+            gif->io_error = true;
+            return;
+        }
         memcpy(buf, &gif->data[gif->f_rw_p], len);
         gif->f_rw_p += len;
     }
@@ -740,10 +763,18 @@ static int f_gif_seek(gd_GIF* gif, size_t pos, int k) {
         lv_fs_tell(&gif->fd, &x);
         return x;
     } else {
+        size_t next = gif->f_rw_p;
         if (k == LV_FS_SEEK_CUR)
-            gif->f_rw_p += pos;
+            next += pos;
         else if (k == LV_FS_SEEK_SET)
-            gif->f_rw_p = pos;
+            next = pos;
+        if (gif->data_size != 0 && next > gif->data_size) {
+            gif->f_rw_p = (uint32_t)gif->data_size;
+            gif->io_error = true;
+            return gif->f_rw_p;
+        }
+        if (k == LV_FS_SEEK_CUR || k == LV_FS_SEEK_SET)
+            gif->f_rw_p = (uint32_t)next;
         return gif->f_rw_p;
     }
 }

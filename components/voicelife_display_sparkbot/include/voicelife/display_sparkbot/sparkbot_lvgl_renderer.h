@@ -62,6 +62,18 @@ class SparkBotLvglRenderer {
     /** @brief 是否已调用 SetupUI（防止重复构建）。 */
     [[maybe_unused]] bool setup_ui_called_ = false;
     /** @brief LVGL 对象句柄（仅 ESP 构建使用，void* 避免公共头依赖 LVGL）。 */
+    [[maybe_unused]] void* container_ = nullptr;
+    /** @brief 官方顶部状态栏。 */
+    [[maybe_unused]] void* top_bar_ = nullptr;
+    /** @brief 官方顶部网络图标。 */
+    [[maybe_unused]] void* network_label_ = nullptr;
+    /** @brief 官方顶部音量状态图标。 */
+    [[maybe_unused]] void* mute_label_ = nullptr;
+    /** @brief 官方顶部电池状态图标。 */
+    [[maybe_unused]] void* battery_label_ = nullptr;
+    /** @brief 官方顶部能力图标。 */
+    [[maybe_unused]] void* capability_label_ = nullptr;
+    /** @brief 中央 emoji 舞台。 */
     [[maybe_unused]] void* emoji_box_ = nullptr;
     /** @brief 字形 fallback 标签（仅 ESP 构建使用）。 */
     [[maybe_unused]] void* emoji_label_ = nullptr;
