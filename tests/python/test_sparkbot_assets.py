@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import struct
+import sys
 import unittest
 from pathlib import Path
 
@@ -162,6 +163,64 @@ class SparkBotAssetManifestTest(unittest.TestCase):
                 self.assertEqual(
                     getattr(im, "n_frames", 1), entry["frame_count"], f"{entry['file']} PIL 帧数与清单不一致"
                 )
+
+    def test_assets_image_matches_official_format(self) -> None:
+        """assets 镜像必须与小智 pack_assets_simple 字节级一致。"""
+        import subprocess
+        import tempfile
+
+        def official_pack(gif_dir: Path) -> bytes:
+            """xiaozhi-esp32@37d1aee scripts/build_default_assets.py pack_assets_simple 算法副本。"""
+            merged = bytearray()
+            infos: list[tuple[str, int, int]] = []
+            for path in sorted(gif_dir.iterdir()):
+                if path.suffix.lower() != ".gif":
+                    continue
+                data = path.read_bytes()
+                infos.append((path.name, len(merged), len(data)))
+                merged.extend(b"\x5a" * 2)
+                merged.extend(data)
+            table = bytearray()
+            for name, offset, size in infos:
+                fixed = name.encode("utf-8")[:32].ljust(32, b"\x00")
+                table.extend(fixed)
+                table.extend(struct.pack("<IIHH", size, offset, 0, 0))
+            combined = bytes(table) + bytes(merged)
+            header = struct.pack("<III", len(infos), sum(combined) & 0xFFFF, len(combined))
+            return header + combined
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "assets.bin"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "build_sparkbot_assets.py"),
+                    "--gif-dir",
+                    str(GIF_DIR),
+                    "--output",
+                    str(out),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            ours = out.read_bytes()
+        official = official_pack(GIF_DIR)
+        self.assertEqual(ours, official, "assets 镜像必须与小智 pack_assets_simple 字节级一致")
+
+    def test_gif_sentinel_and_truncation(self) -> None:
+        """解码器必须在 trailer 0x3B 停止；截断/越界数据必须拒绝。"""
+        for entry in self.assets:
+            data = (GIF_DIR / entry["file"]).read_bytes()
+            # 尾部附加非法哨兵（0x06），正常解码不受影响（解码停在 trailer）。
+            width, height, frames, durations = parse_gif(data + b"\x06" * 32)
+            self.assertEqual(frames, entry["frame_count"])
+            self.assertEqual(sum(durations), entry["duration_ms"])
+            # 截断数据（去掉 trailer 或尾部子块）必须报结构错误，不允许越界读取。
+            for cut in (len(data) - 1, len(data) - 4, max(1, len(data) // 2)):
+                with self.assertRaises(GifParseError, msg=f"{entry['file']} 截断 {cut} 字节必须拒绝"):
+                    parse_gif(data[:cut])
+            # 首帧尺寸与全部分帧一致（无半图尺寸漂移）。
+            self.assertEqual((width, height), (96, 96), f"{entry['file']} 尺寸必须 96x96")
 
 
 if __name__ == "__main__":
