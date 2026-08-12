@@ -5,6 +5,11 @@
 
 #ifdef ESP_PLATFORM
 #include <driver/gpio.h>
+#include <esp_log.h>
+
+namespace {
+constexpr const char* kPowerTag = "sparkbot_power";
+}
 #endif
 
 namespace voicelife::runtime {
@@ -59,12 +64,18 @@ voicelife::Status SparkBotAssembly::Start() {
 }
 
 voicelife::Status SparkBotAssembly::SetAudioOutputEnabled(bool enabled) {
+#ifdef ESP_PLATFORM
+    ESP_LOGI(kPowerTag, "GPIO46_AUDIO_REQUEST=%d", enabled ? 1 : 0);
+#endif
     (void)arbiter_.SetAudioOutputEnabled(enabled);
     WriteSharedPowerLine();
     return voicelife::Status::Ok();
 }
 
 void SparkBotAssembly::ApplyBacklight(bool enabled) {
+#ifdef ESP_PLATFORM
+    ESP_LOGI(kPowerTag, "GPIO46_BACKLIGHT_REQUEST=%d", enabled ? 1 : 0);
+#endif
     (void)arbiter_.SetBacklightEnabled(enabled);
     WriteSharedPowerLine();
 }

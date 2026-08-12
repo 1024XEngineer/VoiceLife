@@ -2,10 +2,13 @@
 
 #ifdef ESP_PLATFORM
 #include <driver/i2c_master.h>
+#include <es8311_codec.h>
 #include <esp_check.h>
+#include <esp_codec_dev.h>
+#include <esp_codec_dev_defaults.h>
 #include <esp_log.h>
-#include <esp_timer.h>
-#include <rom/ets_sys.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #endif
 
 namespace voicelife::audio_esp {
@@ -15,100 +18,107 @@ namespace {
 
 constexpr const char* kTag = "es8311";
 
-/** @brief 寄存器写入。 @return ESP_OK 表示写入成功。 */
-esp_err_t WriteReg(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t value) {
-    const uint8_t payload[2] = {reg, value};
-    return i2c_master_transmit(dev, payload, sizeof(payload), 100);
-}
+/** @brief 保留 Codec 设备句柄（音量/静音等后续控制使用）。 */
+esp_codec_dev_handle_t g_codec_dev = nullptr;
 
-/** @brief 官方 es8311 初始化寄存器序列（xiaozhi-esp32@37d1aee es8311.c）。 */
-esp_err_t WriteInitSequence(i2c_master_dev_handle_t dev) {
-    // 软复位。
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x00, 0x1F), kTag, "软复位");
-    esp_rom_delay_us(5000);
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x0D, 0xFA), kTag, "REG0D");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x44, 0x08), kTag, "REG44");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x44, 0x08), kTag, "REG44");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x01, 0x30), kTag, "REG01");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x02, 0x00), kTag, "REG02");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x03, 0x10), kTag, "REG03");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x04, 0x10), kTag, "REG04");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x05, 0x00), kTag, "REG05");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x16, 0x24), kTag, "REG16");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x0B, 0x00), kTag, "REG0B");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x0C, 0x00), kTag, "REG0C");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x10, 0x1F), kTag, "REG10");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x11, 0x7F), kTag, "REG11");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x00, 0x80), kTag, "REG00 slave");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x01, 0x3F), kTag, "REG01 use_mclk");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x06, 0x00), kTag, "REG06 清反相");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x13, 0x10), kTag, "REG13");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x1B, 0x0A), kTag, "REG1B");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x1C, 0x6A), kTag, "REG1C");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x44, 0x08), kTag, "REG44 无 DAC 参考");
-    // 16kHz / 12.288MHz MCLK 系数（官方 coeff 表行）。
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x02, 0x03), kTag, "fs coeff 02");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x05, 0x01), kTag, "fs coeff 05");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x03, 0x01), kTag, "fs coeff 03");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x04, 0x01), kTag, "fs coeff 04");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x07, 0x00), kTag, "fs coeff 07");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x08, 0x00), kTag, "fs coeff 08");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x06, 0xFF), kTag, "fs coeff 06");
-    // I2S Philips、16bit。
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x09, 0x04), kTag, "REG09 Philips");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x0A, 0x10), kTag, "REG0A 16bit");
-    // 启动序列。
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x00, 0x80), kTag, "启动 REG00");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x01, 0x3F), kTag, "启动 REG01");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x17, 0xBF), kTag, "启动 REG17");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x0E, 0x02), kTag, "启动 REG0E");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x12, 0x00), kTag, "启动 REG12 DAC");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x14, 0x1A), kTag, "启动 REG14");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x0D, 0x01), kTag, "启动 REG0D");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x15, 0x40), kTag, "启动 REG15");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x37, 0x08), kTag, "启动 REG37");
-    ESP_RETURN_ON_ERROR(WriteReg(dev, 0x45, 0x00), kTag, "启动 REG45");
-    return ESP_OK;
+/** @brief 读回并打印关键寄存器（时钟/格式/启动证据）。 */
+void LogKeyRegisters(const audio_codec_ctrl_if_t* ctrl_if) {
+    static constexpr uint8_t kRegs[] = {0x00, 0x01, 0x09, 0x0A, 0x17};
+    for (uint8_t reg : kRegs) {
+        uint8_t value = 0;
+        if (ctrl_if->read_reg(ctrl_if, reg, 1, &value, 1) == ESP_OK) {
+            ESP_LOGI(kTag, "ES8311_REG_READBACK reg=0x%02X value=0x%02X", reg, value);
+        } else {
+            ESP_LOGW(kTag, "ES8311_REG_READBACK_FAILED reg=0x%02X", reg);
+        }
+    }
 }
 
 }  // namespace
 #endif  // ESP_PLATFORM
 
-voicelife::Status InitializeEs8311(int i2c_port, int sda_gpio, int scl_gpio, uint8_t es8311_8bit) {
+voicelife::Status InitializeEs8311(const Es8311ControlConfig& config) {
 #ifdef ESP_PLATFORM
+    // I2C 总线（复用现有总线配置模式）。
     i2c_master_bus_config_t bus_config = {};
-    bus_config.i2c_port = static_cast<i2c_port_num_t>(i2c_port);
-    bus_config.sda_io_num = static_cast<gpio_num_t>(sda_gpio);
-    bus_config.scl_io_num = static_cast<gpio_num_t>(scl_gpio);
+    bus_config.i2c_port = static_cast<i2c_port_num_t>(config.i2c_port);
+    bus_config.sda_io_num = static_cast<gpio_num_t>(config.sda_gpio);
+    bus_config.scl_io_num = static_cast<gpio_num_t>(config.scl_gpio);
     bus_config.clk_source = I2C_CLK_SRC_DEFAULT;
     bus_config.glitch_ignore_cnt = 7;
     bus_config.flags.enable_internal_pullup = 1;
     i2c_master_bus_handle_t bus = nullptr;
-    esp_err_t error = i2c_new_master_bus(&bus_config, &bus);
-    if (error != ESP_OK) {
-        return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "创建 ES8311 I2C 总线失败");
+    ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus_config, &bus), kTag, "创建 ES8311 I2C 总线失败");
+
+    // I2C 控制接口（官方 audio_codec）。
+    audio_codec_i2c_cfg_t i2c_cfg = {};
+    i2c_cfg.port = static_cast<int>(config.i2c_port);
+    i2c_cfg.addr = static_cast<uint16_t>(config.es8311_8bit >> 1);
+    i2c_cfg.bus_handle = bus;
+    const audio_codec_ctrl_if_t* ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+    if (ctrl_if == nullptr) {
+        i2c_del_master_bus(bus);
+        return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "创建 ES8311 I2C 控制接口失败");
     }
-    i2c_device_config_t dev_config = {};
-    dev_config.dev_addr_length = I2C_ADDR_BIT_LEN_7;
-    dev_config.device_address = static_cast<uint16_t>(es8311_8bit >> 1);
-    dev_config.scl_speed_hz = 100000;
-    i2c_master_dev_handle_t dev = nullptr;
-    error = i2c_master_bus_add_device(bus, &dev_config, &dev);
-    if (error != ESP_OK) {
-        return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "添加 ES8311 I2C 设备失败");
+
+    // 软件复位（官方 ResetCodec：REG00=0x1F + 5ms）。
+    uint8_t reset_value = 0x1F;
+    if (ctrl_if->write_reg(ctrl_if, 0x00, 1, &reset_value, 1) != ESP_OK) {
+        return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "ES8311 软件复位失败");
     }
-    error = WriteInitSequence(dev);
-    i2c_master_bus_rm_device(dev);
-    i2c_del_master_bus(bus);
-    if (error != ESP_OK) {
-        return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "ES8311 初始化寄存器序列失败");
+    vTaskDelay(pdMS_TO_TICKS(5));
+
+    // I2S 数据接口（使用现有双工通道）。
+    audio_codec_i2s_cfg_t i2s_cfg = {};
+    i2s_cfg.port = 0;
+    i2s_cfg.rx_handle = config.rx_channel;
+    i2s_cfg.tx_handle = config.tx_channel;
+    const audio_codec_data_if_t* data_if = audio_codec_new_i2s_data(&i2s_cfg);
+    if (data_if == nullptr) {
+        return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "创建 ES8311 I2S 数据接口失败");
     }
+    const audio_codec_gpio_if_t* gpio_if = audio_codec_new_gpio();
+
+    // ES8311 Codec（PA 不接管，由 GPIO46 板级仲裁）。
+    es8311_codec_cfg_t codec_cfg = {};
+    codec_cfg.ctrl_if = ctrl_if;
+    codec_cfg.gpio_if = gpio_if;
+    codec_cfg.codec_mode = ESP_CODEC_DEV_WORK_MODE_BOTH;
+    codec_cfg.pa_pin = -1;
+    codec_cfg.use_mclk = true;
+    codec_cfg.hw_gain.pa_voltage = 5.0;
+    codec_cfg.hw_gain.codec_dac_voltage = 3.3;
+    const audio_codec_if_t* codec_if = es8311_codec_new(&codec_cfg);
+    if (codec_if == nullptr) {
+        return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "创建 ES8311 Codec 失败");
+    }
+
+    // 打开 IN_OUT 设备（16-bit / 1ch / 官方采样率，MCLK 由 I2S x256 提供）。
+    esp_codec_dev_cfg_t dev_cfg = {};
+    dev_cfg.dev_type = ESP_CODEC_DEV_TYPE_IN_OUT;
+    dev_cfg.codec_if = codec_if;
+    dev_cfg.data_if = data_if;
+    esp_codec_dev_handle_t dev = esp_codec_dev_new(&dev_cfg);
+    if (dev == nullptr) {
+        return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "创建 ESP Codec 设备失败");
+    }
+    esp_codec_dev_sample_info_t fs = {};
+    fs.bits_per_sample = 16;
+    fs.channel = 1;
+    fs.channel_mask = 0;
+    fs.sample_rate = static_cast<uint32_t>(config.sample_rate_hz);
+    fs.mclk_multiple = 0;
+    const esp_err_t open_err = esp_codec_dev_open(dev, &fs);
+    if (open_err != ESP_OK) {
+        return voicelife::Status::Error(voicelife::ErrorCode::kInternal,
+                                        std::string("ES8311 打开失败: ") + esp_err_to_name(open_err));
+    }
+    g_codec_dev = dev;
+    ESP_LOGI(kTag, "ES8311_OPEN_OK sr=%d bits=16 ch=1 mclk_multiple=0", config.sample_rate_hz);
+    LogKeyRegisters(ctrl_if);
     return voicelife::Status::Ok();
 #else
-    (void)i2c_port;
-    (void)sda_gpio;
-    (void)scl_gpio;
-    (void)es8311_8bit;
+    (void)config;
     return voicelife::Status::Error(voicelife::ErrorCode::kUnavailable, "主机构建不初始化 ES8311 I2C");
 #endif
 }

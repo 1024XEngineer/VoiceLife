@@ -1,23 +1,41 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+
 #include "voicelife/contracts/status.h"
 
 namespace voicelife::audio_esp {
 
+/** @brief ES8311 控制面初始化参数（官方 esp_codec_dev 组件方式）。 */
+struct Es8311ControlConfig {
+    /** @brief I2C 控制器编号。 */
+    int i2c_port = 0;
+    /** @brief SDA GPIO。 */
+    int sda_gpio = -1;
+    /** @brief SCL GPIO。 */
+    int scl_gpio = -1;
+    /** @brief ES8311 8-bit I2C 地址（含读写位）。 */
+    uint8_t es8311_8bit = 0;
+    /** @brief I2S 播放通道句柄（i2s_chan_handle_t，audio_codec data_if 用）。 */
+    void* tx_channel = nullptr;
+    /** @brief I2S 采集通道句柄（i2s_chan_handle_t）。 */
+    void* rx_channel = nullptr;
+    /** @brief 采样率（官方 16kHz）。 */
+    int sample_rate_hz = 16000;
+};
+
 /**
- * @brief ES8311 Codec I2C 初始化（官方小智 SparkBot 寄存器流程移植）。
+ * @brief 初始化 ES8311 Codec 控制面（官方小智方式：esp_codec_dev 组件）。
  *
- * 只负责 ES8311 寄存器写入（软复位 -> 初始化序列 -> 16kHz 采样率 ->
- * I2S Philips 16bit -> 启动序列），不持有 I2S 通道。MCLK 由 I2S 输出
- * （12.288MHz = 16kHz * 768）。实板验证阶段按 ACK/录放音证据校正。
- * host 构建不触碰 I2C，返回 kUnavailable。
- *
- * @param i2c_port I2C 控制器编号。
- * @param sda_gpio SDA GPIO。
- * @param scl_gpio SCL GPIO。
- * @param es8311_8bit ES8311 8-bit I2C 地址（含读写位）。
+ * 建立 I2C 控制接口 + I2S 数据接口 + ES8311 codec，打开 IN_OUT 设备
+ * （16-bit / 1ch / sample_rate / MCLK 由 I2S 提供，官方 x256）。PA 功放
+ * 不在此接管（pa_pin=-1），统一由 GPIO46 板级仲裁处理。初始化后读回
+ * 关键寄存器（REG00/01/09/0A/17）并打印，供实板验证时钟锁定。
+ * host 构建不触碰硬件，返回 kUnavailable。
+ * @param config 初始化参数。
  * @return 初始化结果。
  */
-[[nodiscard]] voicelife::Status InitializeEs8311(int i2c_port, int sda_gpio, int scl_gpio, uint8_t es8311_8bit);
+[[nodiscard]] voicelife::Status InitializeEs8311(const Es8311ControlConfig& config);
 
 }  // namespace voicelife::audio_esp

@@ -166,8 +166,15 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
     }
     if (profile_.topology == AudioBoardTopology::kExternalCodecDuplex && !codec_initialized_) {
         const auto& control = *profile_.codec_control;
-        const Status codec_status =
-            InitializeEs8311(control.i2c_port, control.i2c.sda, control.i2c.scl, control.addresses.es8311_8bit);
+        Es8311ControlConfig codec_config;
+        codec_config.i2c_port = control.i2c_port;
+        codec_config.sda_gpio = control.i2c.sda;
+        codec_config.scl_gpio = control.i2c.scl;
+        codec_config.es8311_8bit = control.addresses.es8311_8bit;
+        codec_config.tx_channel = tx_channel_;
+        codec_config.rx_channel = rx_channel_;
+        codec_config.sample_rate_hz = static_cast<int>(profile_.playback_i2s.format.sample_rate_hz);
+        const Status codec_status = InitializeEs8311(codec_config);
         if (!codec_status.ok()) {
             i2s_channel_disable(tx_channel_);
             output_running_ = false;
@@ -359,7 +366,7 @@ Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
             output_running_ = false;
             output_queue_.clear();
             output_cv_.notify_all();
-            if (tx_channel_ != nullptr) {
+            if (tx_channel_ != nullptr && output_task_ != nullptr) {
                 i2s_channel_disable(tx_channel_);
             }
         }
