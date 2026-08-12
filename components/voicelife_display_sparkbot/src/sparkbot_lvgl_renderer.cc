@@ -186,6 +186,9 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
             if (gif->IsLoaded()) {
                 gif->SetFrameCallback(
                     [this, gif]() { lv_image_set_src(static_cast<lv_obj_t*>(emoji_image_), gif->image_dsc()); });
+                // 官方 SetEmotion：设置初始帧并启动动画播放。
+                lv_image_set_src(static_cast<lv_obj_t*>(emoji_image_), gif->image_dsc());
+                gif->Start();
                 lv_obj_add_flag(static_cast<lv_obj_t*>(emoji_label_), LV_OBJ_FLAG_HIDDEN);
                 lv_obj_remove_flag(static_cast<lv_obj_t*>(emoji_image_), LV_OBJ_FLAG_HIDDEN);
                 gif_controller_ = gif;
