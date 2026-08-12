@@ -6,6 +6,9 @@
 #include <material_symbols.h>
 #include <noto_emoji.h>
 #include <sdkconfig.h>
+
+#include "gif/lvgl_gif.h"
+#include "voicelife/display_sparkbot/sparkbot_emoji_assets.h"
 #endif
 
 namespace voicelife::display_sparkbot {
@@ -47,7 +50,18 @@ std::string_view EmotionKeyForMood(voicelife::voice::VoiceMood mood) {
     }
 }
 
-SparkBotLvglRenderer::~SparkBotLvglRenderer() = default;
+SparkBotLvglRenderer::~SparkBotLvglRenderer() {
+#ifdef ESP_PLATFORM
+    if (gif_controller_ != nullptr) {
+        auto* gif = static_cast<LvglGif*>(gif_controller_);
+        gif->Stop();
+        delete gif;
+        gif_controller_ = nullptr;
+    }
+    delete static_cast<SparkBotEmojiAssets*>(emoji_assets_);
+    emoji_assets_ = nullptr;
+#endif
+}
 
 voicelife::Status SparkBotLvglRenderer::SetupUI() {
 #ifdef ESP_PLATFORM
@@ -130,6 +144,13 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     bottom_bar_ = bottom_bar;
     chat_message_label_ = chat_message_label;
 
+    // emoji GIF 资源：官方 assets 分区格式；失败不阻塞 UI（字形 fallback）。
+    emoji_assets_ = new SparkBotEmojiAssets();
+    assets_ready_ = emoji_assets_->Initialize().ok();
+    if (!assets_ready_) {
+        ESP_LOGW(kTag, "assets 分区不可用，emoji 回退字形");
+    }
+
     return voicelife::Status::Ok();
 #else
     (void)0;
@@ -146,21 +167,50 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
         }
     }
 
-    // 官方 SetEmotion 字形 fallback（emoji 资源未接入前）。
+    // 官方 SetEmotion：优先 emoji GIF（assets 分区），失败回退字形。
     const std::string_view emotion = EmotionKeyForMood(snapshot.mood);
-    const char* utf8 = noto_emoji_get_utf8(emotion.data());
-    const lv_font_t* emotion_font = &font_noto_emoji_30_4;
-    if (utf8 == nullptr) {
-        utf8 = material_symbols_get_utf8(emotion.data());
-        emotion_font = &font_material_symbols_30_4;
+    bool using_gif = false;
+    if (emoji_assets_ != nullptr && assets_ready_) {
+        const auto asset = emoji_assets_->Load(emotion);
+        if (asset.ok() && asset.value.data != nullptr && asset.value.size > 0) {
+            // 停止并释放上一帧 GIF（与官方 SetEmotion 同一锁语义）。
+            if (gif_controller_ != nullptr) {
+                auto* old_gif = static_cast<LvglGif*>(gif_controller_);
+                old_gif->Stop();
+                delete old_gif;
+                gif_controller_ = nullptr;
+            }
+            lv_img_dsc_t img_dsc{};
+            img_dsc.data = static_cast<const uint8_t*>(asset.value.data);
+            auto* gif = new LvglGif(&img_dsc);
+            if (gif->IsLoaded()) {
+                gif->SetFrameCallback(
+                    [this, gif]() { lv_image_set_src(static_cast<lv_obj_t*>(emoji_image_), gif->image_dsc()); });
+                lv_obj_add_flag(static_cast<lv_obj_t*>(emoji_label_), LV_OBJ_FLAG_HIDDEN);
+                lv_obj_remove_flag(static_cast<lv_obj_t*>(emoji_image_), LV_OBJ_FLAG_HIDDEN);
+                gif_controller_ = gif;
+                using_gif = true;
+            } else {
+                delete gif;
+            }
+        }
     }
+
     auto* emoji_label = static_cast<lv_obj_t*>(emoji_label_);
     auto* emoji_image = static_cast<lv_obj_t*>(emoji_image_);
-    if (utf8 != nullptr) {
-        lv_obj_set_style_text_font(emoji_label, emotion_font, 0);
-        lv_label_set_text(emoji_label, utf8);
-        lv_obj_add_flag(emoji_image, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_flag(emoji_label, LV_OBJ_FLAG_HIDDEN);
+    if (!using_gif) {
+        const char* utf8 = noto_emoji_get_utf8(emotion.data());
+        const lv_font_t* emotion_font = &font_noto_emoji_30_4;
+        if (utf8 == nullptr) {
+            utf8 = material_symbols_get_utf8(emotion.data());
+            emotion_font = &font_material_symbols_30_4;
+        }
+        if (utf8 != nullptr) {
+            lv_obj_set_style_text_font(emoji_label, emotion_font, 0);
+            lv_label_set_text(emoji_label, utf8);
+            lv_obj_add_flag(emoji_image, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(emoji_label, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
     // 官方状态栏：显示快照 status_text。

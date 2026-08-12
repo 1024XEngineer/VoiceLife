@@ -51,7 +51,7 @@ class SparkBotLvglRenderer {
     [[nodiscard]] voicelife::Status SetupUI();
 
     /**
-     * @brief 渲染一份显示快照（官方状态映射 + 文本栏）。
+     * @brief 渲染一份显示快照（官方状态映射 + emoji GIF/字形 + 文本栏）。
      * @param snapshot 只包含业务语义的显示快照。
      * @return 渲染结果。
      */
@@ -64,7 +64,7 @@ class SparkBotLvglRenderer {
     [[maybe_unused]] void* emoji_box_ = nullptr;
     /** @brief 字形 fallback 标签（仅 ESP 构建使用）。 */
     [[maybe_unused]] void* emoji_label_ = nullptr;
-    /** @brief emoji 图片节点（后续 GIF 资源接入用）。 */
+    /** @brief emoji 图片节点（GIF 播放目标）。 */
     [[maybe_unused]] void* emoji_image_ = nullptr;
     /** @brief 状态栏标签。 */
     [[maybe_unused]] void* status_label_ = nullptr;
@@ -72,6 +72,12 @@ class SparkBotLvglRenderer {
     [[maybe_unused]] void* bottom_bar_ = nullptr;
     /** @brief 底部消息标签。 */
     [[maybe_unused]] void* chat_message_label_ = nullptr;
+    /** @brief emoji GIF 资源加载器（官方 assets 分区格式）。 */
+    [[maybe_unused]] class SparkBotEmojiAssets* emoji_assets_ = nullptr;
+    /** @brief 当前 GIF 播放控制器（LvglGif*）。 */
+    [[maybe_unused]] void* gif_controller_ = nullptr;
+    /** @brief assets 分区是否已成功初始化。 */
+    [[maybe_unused]] bool assets_ready_ = false;
 };
 
 }  // namespace voicelife::display_sparkbot
