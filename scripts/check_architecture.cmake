@@ -102,7 +102,7 @@ assert_dependencies(voicelife_linx_esp PUBLIC voicelife_contracts voicelife_linx
 assert_dependencies(voicelife_linx_esp PRIVATE esp_websocket_client esp-tls esp_event esp_timer freertos heap)
 assert_dependencies(voicelife_audio_esp PUBLIC voicelife_contracts voicelife_voice)
 assert_dependencies(voicelife_display_esp PUBLIC voicelife_contracts voicelife_voice)
-assert_dependencies(voicelife_display_esp PRIVATE driver esp_lcd)
+assert_dependencies(voicelife_display_esp PRIVATE driver esp_lcd esp_timer)
 assert_dependencies(voicelife_display_sparkbot PUBLIC voicelife_contracts voicelife_voice)
 assert_dependencies(voicelife_display_sparkbot PRIVATE esp_driver_spi esp_lcd esp_partition esp_psram freertos spi_flash)
 assert_dependencies(voicelife_audio_esp PRIVATE esp_driver_i2c esp_driver_i2s esp_timer espressif__esp-sr)
