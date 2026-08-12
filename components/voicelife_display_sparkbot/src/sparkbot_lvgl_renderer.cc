@@ -133,7 +133,7 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     top_bar_ = top_bar;
 
     auto* network_label = lv_label_create(top_bar);
-    lv_label_set_text(network_label, MATERIAL_SYMBOLS_WIFI);
+    lv_label_set_text(network_label, "");
     lv_obj_set_style_text_font(network_label, &font_material_symbols_14_1, 0);
     lv_obj_set_style_text_color(network_label, kTextColor, 0);
     network_label_ = network_label;
@@ -147,13 +147,13 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_obj_set_flex_align(right_icons, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     auto* mute_label = lv_label_create(right_icons);
-    lv_label_set_text(mute_label, MATERIAL_SYMBOLS_VOLUME_UP);
+    lv_label_set_text(mute_label, "");
     lv_obj_set_style_text_font(mute_label, &font_material_symbols_14_1, 0);
     lv_obj_set_style_text_color(mute_label, kTextColor, 0);
     mute_label_ = mute_label;
 
     auto* battery_label = lv_label_create(right_icons);
-    lv_label_set_text(battery_label, MATERIAL_SYMBOLS_BATTERY_ANDROID_FRAME_FULL);
+    lv_label_set_text(battery_label, "");
     lv_obj_set_style_text_font(battery_label, &font_material_symbols_14_1, 0);
     lv_obj_set_style_text_color(battery_label, kTextColor, 0);
     lv_obj_set_style_margin_left(battery_label, 2, 0);
