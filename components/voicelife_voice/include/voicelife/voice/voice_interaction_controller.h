@@ -12,6 +12,8 @@ namespace voicelife::voice {
 enum class VoiceInteractionState {
     kBooting,
     kStandby,
+    /** 采集请求已提交，等待 capture_started 确认（事务式启动，避免假"聆听中"）。 */
+    kOpeningCapture,
     kListening,
     /** 语音端点已检测到（VAD 静音）：已发 listen.stop，等待最终 STT。 */
     kFinalizing,

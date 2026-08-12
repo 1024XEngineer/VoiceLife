@@ -66,8 +66,10 @@ int main() {
     CheckTransition(controller, VoiceInteractionEvent::kTransportConnected, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "重连完成后应重新可被唤醒");
 
-    CheckTransition(controller, VoiceInteractionEvent::kPressDown, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kStartCapture, "触摸按下应开始手动采集");
+    CheckTransition(controller, VoiceInteractionEvent::kPressDown, VoiceInteractionState::kOpeningCapture,
+                    VoiceInteractionAction::kStartCapture, "触摸按下应提交采集请求（事务式启动）");
+    CheckTransition(controller, VoiceInteractionEvent::kCaptureStarted, VoiceInteractionState::kListening,
+                    VoiceInteractionAction::kNone, "capture_started 确认后才进入聆听中");
     CheckTransition(controller, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kFinalizing,
                     VoiceInteractionAction::kStopVoiceTurn, "触摸松开应进入等待最终 STT");
     CheckTransition(controller, VoiceInteractionEvent::kFinalizationTimedOut, VoiceInteractionState::kStandby,

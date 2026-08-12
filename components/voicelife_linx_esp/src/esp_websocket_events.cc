@@ -151,12 +151,17 @@ void EspWebSocketTransport::Impl::TxLoop() {
         delete item;
         item = nullptr;
         if (sent < 0 || static_cast<size_t>(sent) != want) {
-            // 发送失败（写阻塞/短写/连接已断）：主动关闭连接，让 transport 走
-            // 自动重连重新 hello，避免 session 误以为连接仍可用而无法二次唤醒。
-            ESP_LOGW(detail::kTag, "LINX_TX_SEND_FAIL sent=%d want=%u, closing for reconnect", sent,
+            // 发送失败（写阻塞/短写/连接已断）：不能直接 esp_websocket_client_stop
+            // ——stop 会停止客户端，ESP 内建自动重连（disable_auto_reconnect=false）
+            // 随之失效，Session 永久卡在非 Ready（无法二次唤醒/说话）。
+            // 正确做法：停止后立即重启 client，让内建自动重连继续负责重连
+            // （单一重连执行者），随后断开事件会走 transport_disconnected 恢复。
+            ESP_LOGW(detail::kTag, "LINX_TX_SEND_FAIL sent=%d want=%u, restart client for reconnect", sent,
                      static_cast<unsigned>(want));
             if (client_ != nullptr && !closing_.load()) {
                 (void)esp_websocket_client_stop(client_);
+                // 重启以恢复内建自动重连；start 会重新进入连接流程并自动重连。
+                (void)esp_websocket_client_start(client_);
             }
             // 清理队列中剩余项，避免堆积。
             detail::LinxTxItem* remaining = nullptr;

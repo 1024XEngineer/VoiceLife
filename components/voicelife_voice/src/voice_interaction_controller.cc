@@ -24,7 +24,9 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             break;
         case VoiceInteractionEvent::kToggleChat:
             if (state_ == VoiceInteractionState::kStandby) {
-                state_ = VoiceInteractionState::kListening;
+                // 事务式启动：先提交采集请求（kOpeningCapture），
+                // 收到 capture_started 才进入 kListening，避免假"聆听中"。
+                state_ = VoiceInteractionState::kOpeningCapture;
                 transition.action = VoiceInteractionAction::kStartCapture;
             } else if (state_ == VoiceInteractionState::kListening) {
                 // BOOT 短按停止：进 kFinalizing（发 listen.stop 等最终 STT），
@@ -40,7 +42,8 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             break;
         case VoiceInteractionEvent::kPressDown:
             if (state_ == VoiceInteractionState::kStandby) {
-                state_ = VoiceInteractionState::kListening;
+                // 事务式启动：先提交采集请求，capture_started 后才进入 kListening。
+                state_ = VoiceInteractionState::kOpeningCapture;
                 transition.action = VoiceInteractionAction::kStartCapture;
             } else if (state_ == VoiceInteractionState::kSpeaking || state_ == VoiceInteractionState::kThinking) {
                 state_ = VoiceInteractionState::kListening;
@@ -71,7 +74,13 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             }
             break;
         case VoiceInteractionEvent::kCaptureStarted:
-            if (state_ != VoiceInteractionState::kListening) return InvalidTransition(state_, event);
+            // 事务式启动确认：kOpeningCapture → kListening（采集真正开始）；
+            // kListening 幂等（重复 capture_started 无害）。
+            if (state_ == VoiceInteractionState::kOpeningCapture) {
+                state_ = VoiceInteractionState::kListening;
+            } else if (state_ != VoiceInteractionState::kListening) {
+                return InvalidTransition(state_, event);
+            }
             break;
         case VoiceInteractionEvent::kEndpointDetected:
             // VAD 检测到说话结束：停止采集并发送 listen.stop（kStopVoiceTurn），
@@ -128,7 +137,7 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             break;
         case VoiceInteractionEvent::kStandbyReady:
             if (state_ != VoiceInteractionState::kStandby && state_ != VoiceInteractionState::kError &&
-                state_ != VoiceInteractionState::kInterrupting) {
+                state_ != VoiceInteractionState::kInterrupting && state_ != VoiceInteractionState::kOpeningCapture) {
                 return InvalidTransition(state_, event);
             }
             state_ = VoiceInteractionState::kStandby;

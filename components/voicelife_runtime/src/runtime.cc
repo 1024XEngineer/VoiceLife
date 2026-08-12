@@ -50,6 +50,7 @@ namespace {
 constexpr char kTag[] = "VoiceLifeRuntime";
 constexpr uint32_t kWakeFeedbackMs = 800;
 constexpr int64_t kWakeAckDisplayUs = 400 * 1000;
+constexpr int64_t kVolumeOverlayUs = 1500 * 1000;
 constexpr uint32_t kListenTimeoutMs = 15000;
 constexpr uint32_t kFinalSttTimeoutMs = 5000;
 
@@ -487,11 +488,23 @@ class Runtime final {
     void SetVolume(int volume) {
         volume_ = std::clamp(volume, 0, 100);
         if (audio_ports_) audio_ports_->SetOutputVolume(volume_);
-        // 音量通知 overlay：保留牛头布局（上行“音量”，下行数值），不触发会话事件，
-        // 不调用全屏 SetStatus 以免清空牛头；下次快照提交时自动恢复。
+        // 音量通知 overlay：临时覆盖显示，1.5s 后恢复最新快照（不修改会话状态）。
+        // 连续调音量只重置同一个计时器。
         char text[16] = {};
         std::snprintf(text, sizeof(text), "VOL:%d", volume_);
         (void)display_esp::SetEmotion("neutral", "音量", text);
+        volume_overlay_until_us_ = esp_timer_get_time() + kVolumeOverlayUs;
+        if (volume_overlay_timer_ == nullptr) {
+            esp_timer_create_args_t args = {};
+            args.callback = &VolumeOverlayEntry;
+            args.arg = this;
+            args.name = "voicelife_volume_overlay";
+            (void)esp_timer_create(&args, &volume_overlay_timer_);
+        }
+        if (volume_overlay_timer_ != nullptr) {
+            (void)esp_timer_stop(volume_overlay_timer_);
+            (void)esp_timer_start_once(volume_overlay_timer_, kVolumeOverlayUs);
+        }
     }
 
     // 本地提示音：播放 popup.ogg 解码的 PCM（16kHz S16LE），按协商播放格式重采样。
@@ -582,6 +595,14 @@ class Runtime final {
     }
 
     // 下行长文本滚动：每 400ms 推进一个字符（按码点），滚动到末尾停止并停用定时器。
+    // 音量 overlay 到期：递增 revision 触发 CommitSnapshot 恢复最新快照。
+    static void VolumeOverlayEntry(void* context) {
+        auto* self = static_cast<Runtime*>(context);
+        self->volume_overlay_until_us_ = 0;
+        ++self->snapshot_.revision;
+        self->CommitSnapshot();
+    }
+
     static void ScrollEntry(void* context) {
         auto* self = static_cast<Runtime*>(context);
         const size_t codepoints = CountCodepoints(self->scroll_content_);
@@ -781,7 +802,8 @@ class Runtime final {
                     session_ ? session_->BeginCapture() : Status::Error(ErrorCode::kUnavailable, "语音会话尚未启动");
                 if (!capture.ok()) {
                     ESP_LOGW(kTag, "板级按键开始采集失败: %s", capture.message.c_str());
-                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+                    // 事务式启动失败：回待机（kStandbyReady），不显示"出错了/牛牛走了"。
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kStandbyReady);
                 }
                 continue;
             }
@@ -807,7 +829,8 @@ class Runtime final {
                 const Status capture = interrupt.ok() ? session_->BeginCapture() : interrupt;
                 if (!capture.ok()) {
                     ESP_LOGW(kTag, "板级打断后开始采集失败: %s", capture.message.c_str());
-                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+                    // 打断后启动失败：回待机，不显示"出错了/牛牛走了"。
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kStandbyReady);
                 }
                 continue;
             }
@@ -818,7 +841,8 @@ class Runtime final {
             const Status capture = session_->BeginCapture();
             if (!capture.ok()) {
                 ESP_LOGW(kTag, "唤醒后开始采集失败: %s", capture.message.c_str());
-                (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFailure);
+                // 唤醒启动失败：回待机，不显示"出错了/牛牛走了"。
+                (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kStandbyReady);
             }
         }
     }
@@ -831,6 +855,8 @@ class Runtime final {
                 return "开机";
             case voice::VoiceInteractionState::kStandby:
                 return "空闲";
+            case voice::VoiceInteractionState::kOpeningCapture:
+                return "聆听中";  // 采集请求提交中（事务式启动过渡）
             case voice::VoiceInteractionState::kListening:
                 return "聆听中";
             case voice::VoiceInteractionState::kFinalizing:
@@ -1160,6 +1186,9 @@ class Runtime final {
     int64_t last_wake_at_ = 0;
     // WakeAck 显示租约截止时刻（esp_timer_us）：到期前下行栏显示“收到！”。
     int64_t wake_ack_until_us_ = 0;
+    // 音量 overlay 截止时刻（esp_timer_us）：到期后恢复最新快照。
+    int64_t volume_overlay_until_us_ = 0;
+    esp_timer_handle_t volume_overlay_timer_ = nullptr;
     // 显示模型快照：会话阶段 → 可见状态的推导结果；revision 驱动增量重绘。
     voice::DisplaySnapshot snapshot_;
     uint64_t last_rendered_revision_ = 0;
