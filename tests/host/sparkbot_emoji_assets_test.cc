@@ -39,6 +39,9 @@ int main() {
     const auto bad = assets.Load("../evil.gif");
     Check(!bad.ok() && bad.status.code == ErrorCode::kInvalidArgument,
           "非法 asset_id 在任何构建下都必须返回 kInvalidArgument");
+    const auto font = assets.LoadCommonTextFont();
+    Check(!font.ok() && font.status.code == ErrorCode::kUnavailable,
+          "host 构建 LoadCommonTextFont 必须返回 kUnavailable");
 
     return 0;
 }

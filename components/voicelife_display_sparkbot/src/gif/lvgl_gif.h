@@ -31,7 +31,8 @@ class LvglGif {
     /**
      * Start/restart GIF animation
      */
-    void Start();
+    /** @return true only after the first frame has been decoded and rendered. */
+    bool Start();
 
     /**
      * Pause GIF animation

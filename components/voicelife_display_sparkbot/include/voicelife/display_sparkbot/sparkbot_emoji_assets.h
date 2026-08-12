@@ -35,6 +35,12 @@ struct GifAssetView {
     std::size_t size = 0;
 };
 
+/** @brief 从 assets 分区加载的固定 common 文本字体视图（mmap 只读，不持有所有权）。 */
+struct FontAssetView {
+    const void* data = nullptr;
+    std::size_t size = 0;
+};
+
 /**
  * @brief SparkBot emoji GIF 资源加载器（官方 assets 分区格式移植）。
  *
@@ -70,6 +76,13 @@ class SparkBotEmojiAssets {
      * @return 资源视图。
      */
     [[nodiscard]] voicelife::Result<GifAssetView> Load(std::string_view asset_id);
+
+    /**
+     * @brief 加载固定的官方 Noto Sans common 14px/1bpp 字库。
+     *
+     * 不接受调用方路径或名称，确保 Runtime 不能扩展资源访问边界。
+     */
+    [[nodiscard]] voicelife::Result<FontAssetView> LoadCommonTextFont();
 
    private:
     /** @brief spi_flash_mmap_handle_t（仅 ESP 构建使用）。 */

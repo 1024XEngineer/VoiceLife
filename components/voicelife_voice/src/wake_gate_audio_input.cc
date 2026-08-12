@@ -9,8 +9,9 @@ Status Unavailable(std::string message) { return Status::Error(ErrorCode::kUnava
 
 }  // namespace
 
-WakeGateAudioInput::WakeGateAudioInput(AudioInputPort& physical_input, LocalWakeDetectorPort& detector)
-    : physical_input_(physical_input), detector_(detector) {}
+WakeGateAudioInput::WakeGateAudioInput(AudioInputPort& physical_input, LocalWakeDetectorPort& detector,
+                                       bool local_wake_enabled)
+    : physical_input_(physical_input), detector_(detector), local_wake_enabled_(local_wake_enabled) {}
 
 void WakeGateAudioInput::SetWakeSink(WakeSink sink) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -36,6 +37,7 @@ Status WakeGateAudioInput::Open(const AudioFormat& format) {
 }
 
 Status WakeGateAudioInput::StartDetectorLocked() {
+    if (!local_wake_enabled_) return Status::Ok();
     if (detector_running_) return Status::Ok();
     const Status status = detector_.Start([this](std::string_view wake_word) { HandleWakeWord(wake_word); });
     if (status.ok()) detector_running_ = true;
@@ -53,6 +55,14 @@ Status WakeGateAudioInput::StartStandby() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!opened_) return Unavailable("本地待机前必须先打开输入端口");
     if (forwarding_) return Unavailable("云端采集进行中，不能进入本地待机");
+    if (!local_wake_enabled_) {
+        if (physical_running_) {
+            const Status status = physical_input_.StopCapture();
+            if (!status.ok()) return status;
+            physical_running_ = false;
+        }
+        return Status::Ok();
+    }
     Status status = StartDetectorLocked();
     if (!status.ok()) return status;
     if (physical_running_) return Status::Ok();
@@ -87,6 +97,12 @@ Status WakeGateAudioInput::StopCapture() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!opened_) return Status::Ok();
     forwarding_ = false;
+    if (!local_wake_enabled_) {
+        if (!physical_running_) return Status::Ok();
+        const Status status = physical_input_.StopCapture();
+        if (status.ok()) physical_running_ = false;
+        return status;
+    }
     return StartDetectorLocked();
 }
 
@@ -107,6 +123,7 @@ void WakeGateAudioInput::Close() {
 
 bool WakeGateAudioInput::standby() const {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (!local_wake_enabled_) return opened_ && !physical_running_ && !forwarding_;
     return opened_ && physical_running_ && detector_running_ && !forwarding_;
 }
 

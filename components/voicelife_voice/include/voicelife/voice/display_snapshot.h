@@ -39,6 +39,8 @@ struct DisplaySnapshot {
     uint64_t generation = 0;
     VoiceInteractionState phase = VoiceInteractionState::kBooting;
     VoiceMood mood = VoiceMood::kNeutral;
+    /** 当前网络是否已获得可用连接；由 Runtime 写入，Renderer 仅据此显示图标。 */
+    bool network_connected = false;
     /** 上行状态栏文本（如“聆听中...”“处理中...”）。 */
     std::string status_text;
     /** 下行内容栏文本（用户语音 / 助手回复 / 系统提示）。 */

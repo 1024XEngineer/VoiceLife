@@ -1,6 +1,7 @@
 #include "voicelife/display_sparkbot/sparkbot_lvgl_renderer.h"
 
 #ifdef ESP_PLATFORM
+#include <cbin_font.h>
 #include <esp_log.h>
 #include <lvgl.h>
 #include <material_symbols.h>
@@ -16,6 +17,7 @@
 #ifdef ESP_PLATFORM
 LV_FONT_DECLARE(font_noto_sans_basic_14_1);
 LV_FONT_DECLARE(font_material_symbols_14_1);
+LV_FONT_DECLARE(font_material_symbols_20_4);
 LV_FONT_DECLARE(font_material_symbols_30_4);
 LV_FONT_DECLARE(font_noto_emoji_30_4);
 #endif
@@ -29,6 +31,26 @@ constexpr const char* kTag = "sparkbot_renderer";
 // 官方 SparkBot 强制 dark 主题颜色（lcd_display.cc InitializeLcdThemes）。
 const lv_color_t kBackgroundColor = lv_color_hex(0x000000);
 const lv_color_t kTextColor = lv_color_hex(0xFFFFFF);
+
+bool HasRenderableGlyph(const lv_font_t* font, uint32_t codepoint, uint16_t* advance) {
+    if (font == nullptr) {
+        return false;
+    }
+    lv_font_glyph_dsc_t glyph{};
+    if (!lv_font_get_glyph_dsc(font, &glyph, codepoint, 0) || glyph.resolved_font == nullptr || glyph.box_w == 0 ||
+        glyph.box_h == 0 || glyph.adv_w == 0) {
+        return false;
+    }
+    if (advance != nullptr) {
+        *advance = glyph.adv_w;
+    }
+    // lv_font_get_glyph_bitmap() decodes into an LVGL draw buffer for this
+    // font format. SetupUI has no draw buffer, so descriptor resolution is
+    // the safe startup-time proof; the renderer obtains the bitmap later in
+    // LVGL's normal draw context.
+    lv_font_glyph_release_draw_data(&glyph);
+    return true;
+}
 #endif
 }  // namespace
 
@@ -62,6 +84,10 @@ SparkBotLvglRenderer::~SparkBotLvglRenderer() {
         delete gif;
         gif_controller_ = nullptr;
     }
+    if (common_text_font_ != nullptr) {
+        cbin_font_delete(static_cast<lv_font_t*>(common_text_font_));
+        common_text_font_ = nullptr;
+    }
     delete static_cast<SparkBotEmojiAssets*>(emoji_assets_);
     emoji_assets_ = nullptr;
 #endif
@@ -78,8 +104,43 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     // 官方简单模式布局（lcd_display.cc SetupUI，CONFIG_USE_WECHAT_MESSAGE_STYLE=n）：
     // 黑底白字 dark 主题；中央 96x96 emoji 舞台（y=60..156）、顶部状态栏
     // 192x28（y=24）、底部消息栏 224x56。布局数值不得自行修改。
+    // 小智 SparkBot 使用 14px/1bpp 文本字体。common CBIN 覆盖常见文字，
+    // basic 仅作 fallback；字号、行高和布局保持官方原值。
+    emoji_assets_ = new SparkBotEmojiAssets();
+    assets_ready_ = emoji_assets_->Initialize().ok();
+    const lv_font_t* text_font = &font_noto_sans_basic_14_1;
+    if (assets_ready_) {
+        const auto common_font_asset = emoji_assets_->LoadCommonTextFont();
+        if (common_font_asset.ok() && common_font_asset.value.has_value()) {
+            auto* common_font = cbin_font_create(
+                const_cast<uint8_t*>(static_cast<const uint8_t*>(common_font_asset.value->data)));
+            if (common_font != nullptr && common_font->line_height == 16 && common_font->base_line == 2 &&
+                common_font->dsc != nullptr && static_cast<const lv_font_fmt_txt_dsc_t*>(common_font->dsc)->bpp == 1) {
+                common_font->fallback = &font_noto_sans_basic_14_1;
+                common_text_font_ = common_font;
+                text_font = common_font;
+                ESP_LOGI(kTag, "SPARKBOT_COMMON_FONT_READY size=14 bpp=1 line_height=16");
+            } else {
+                if (common_font != nullptr) {
+                    cbin_font_delete(common_font);
+                }
+                ESP_LOGW(kTag, "common 14px 字体元数据不符合官方规格，回退 basic");
+            }
+        }
+    }
+    if (!assets_ready_) {
+        ESP_LOGW(kTag, "assets 分区不可用，emoji 与文本回退内置字形");
+    }
+    uint16_t kai_advance = 0;
+    uint16_t xian_advance = 0;
+    const bool kai_ok = HasRenderableGlyph(text_font, 0x5F00, &kai_advance);   // 开
+    const bool xian_ok = HasRenderableGlyph(text_font, 0x95F2, &xian_advance); // 闲
+    ESP_LOGI(kTag, "SPARKBOT_TEXT_GLYPH_CHECK kai=%d kai_adv=%u xian=%d xian_adv=%u common_font=%d", kai_ok,
+             static_cast<unsigned>(kai_advance), xian_ok, static_cast<unsigned>(xian_advance),
+             common_text_font_ != nullptr);
+
     auto* screen = lv_screen_active();
-    lv_obj_set_style_text_font(screen, &font_noto_sans_basic_14_1, 0);
+    lv_obj_set_style_text_font(screen, text_font, 0);
     lv_obj_set_style_text_color(screen, kTextColor, 0);
     lv_obj_set_style_bg_color(screen, kBackgroundColor, 0);
 
@@ -132,11 +193,11 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_obj_align(top_bar, LV_ALIGN_TOP_MID, 0, 0);
     top_bar_ = top_bar;
 
-    // 无传感数据源时图标保持空（隐藏策略）：Wi-Fi/静音/电池状态由受控显示
-    // 语义提供；本板未提供对应传感能力前不渲染 glyph，避免乱码与伪造状态。
+    // Wi-Fi 图标由 DisplaySnapshot 的受控网络语义驱动；Renderer 不读取
+    // Wi-Fi 驱动或板级状态，保持 Runtime/Adapter 边界。
     auto* network_label = lv_label_create(top_bar);
     lv_label_set_text(network_label, "");
-    lv_obj_set_style_text_font(network_label, &font_material_symbols_14_1, 0);
+    lv_obj_set_style_text_font(network_label, &font_material_symbols_20_4, 0);
     lv_obj_set_style_text_color(network_label, kTextColor, 0);
     network_label_ = network_label;
 
@@ -150,23 +211,31 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
 
     auto* mute_label = lv_label_create(right_icons);
     lv_label_set_text(mute_label, "");
-    lv_obj_set_style_text_font(mute_label, &font_material_symbols_14_1, 0);
+    lv_obj_set_style_text_font(mute_label, &font_material_symbols_20_4, 0);
     lv_obj_set_style_text_color(mute_label, kTextColor, 0);
     mute_label_ = mute_label;
 
     auto* battery_label = lv_label_create(right_icons);
     lv_label_set_text(battery_label, "");
-    lv_obj_set_style_text_font(battery_label, &font_material_symbols_14_1, 0);
+    lv_obj_set_style_text_font(battery_label, &font_material_symbols_20_4, 0);
     lv_obj_set_style_text_color(battery_label, kTextColor, 0);
     lv_obj_set_style_margin_left(battery_label, 2, 0);
     battery_label_ = battery_label;
 
-    auto* capability_label = lv_label_create(right_icons);
-    lv_label_set_text(capability_label, MATERIAL_SYMBOLS_MIC "  " MATERIAL_SYMBOLS_PHOTO_CAMERA);
-    lv_obj_set_style_text_font(capability_label, &font_material_symbols_14_1, 0);
-    lv_obj_set_style_text_color(capability_label, lv_color_hex(0x6DD8E8), 0);
-    lv_obj_set_style_margin_left(capability_label, 2, 0);
-    capability_label_ = capability_label;
+    // Material Symbols 子集不包含 ASCII space；将两个能力 glyph 拆为独立
+    // label，以 margin 控制官方同等间距，避免空格落到缺字框而显示乱码。
+    auto* microphone_label = lv_label_create(right_icons);
+    lv_label_set_text(microphone_label, MATERIAL_SYMBOLS_MIC);
+    lv_obj_set_style_text_font(microphone_label, &font_material_symbols_20_4, 0);
+    lv_obj_set_style_text_color(microphone_label, lv_color_hex(0x6DD8E8), 0);
+    lv_obj_set_style_margin_left(microphone_label, 2, 0);
+
+    auto* camera_label = lv_label_create(right_icons);
+    lv_label_set_text(camera_label, MATERIAL_SYMBOLS_PHOTO_CAMERA);
+    lv_obj_set_style_text_font(camera_label, &font_material_symbols_20_4, 0);
+    lv_obj_set_style_text_color(camera_label, lv_color_hex(0x6DD8E8), 0);
+    lv_obj_set_style_margin_left(camera_label, 4, 0);
+    capability_label_ = camera_label;
 
     // 状态栏：192x28 @ TOP_MID y=24，官方状态标签（居中、CLIP 滚动）。
     auto* status_bar = lv_obj_create(screen);
@@ -175,14 +244,27 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_obj_set_style_bg_opa(status_bar, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(status_bar, 0, 0);
     lv_obj_set_style_pad_all(status_bar, 0, 0);
+    // 与小智 lcd_display.cc 一致：状态栏采用绝对布局和上下 2px 留白。
+    // 空文本创建后的 label 不依赖内容尺寸，固定使用 16px 官方行框。
+    lv_obj_set_style_pad_top(status_bar, 2, 0);
+    lv_obj_set_style_pad_bottom(status_bar, 2, 0);
+    lv_obj_set_style_layout(status_bar, LV_LAYOUT_NONE, 0);
+    // CBIN 字体来自 assets mmap，不能依赖跨层对象的样式继承。状态/消息
+    // label 都显式绑定同一个字体，保证常用中文在 SparkBot 上可见。
+    lv_obj_set_style_text_font(status_bar, text_font, 0);
+    lv_obj_set_style_text_color(status_bar, kTextColor, 0);
+    lv_obj_set_style_text_opa(status_bar, LV_OPA_COVER, 0);
     lv_obj_set_scrollbar_mode(status_bar, LV_SCROLLBAR_MODE_OFF);
     lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 24);
 
     auto* status_label = lv_label_create(status_bar);
     lv_obj_set_width(status_label, 192);
+    lv_obj_set_height(status_label, text_font->line_height);
     lv_label_set_long_mode(status_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(status_label, text_font, 0);
     lv_obj_set_style_text_color(status_label, kTextColor, 0);
+    lv_obj_set_style_text_opa(status_label, LV_OPA_COVER, 0);
     lv_label_set_text(status_label, "");
     lv_obj_align(status_label, LV_ALIGN_CENTER, 0, 0);
     status_label_ = status_label;
@@ -193,7 +275,9 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_obj_set_style_radius(bottom_bar, 0, 0);
     lv_obj_set_style_bg_color(bottom_bar, kBackgroundColor, 0);
     lv_obj_set_style_bg_opa(bottom_bar, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_text_font(bottom_bar, text_font, 0);
     lv_obj_set_style_text_color(bottom_bar, kTextColor, 0);
+    lv_obj_set_style_text_opa(bottom_bar, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(bottom_bar, 0, 0);
     lv_obj_set_style_border_width(bottom_bar, 0, 0);
     lv_obj_set_scrollbar_mode(bottom_bar, LV_SCROLLBAR_MODE_OFF);
@@ -205,18 +289,13 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_label_set_long_mode(chat_message_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_height(chat_message_label, 56);
     lv_obj_set_style_text_align(chat_message_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(chat_message_label, text_font, 0);
     lv_obj_set_style_text_color(chat_message_label, kTextColor, 0);
+    lv_obj_set_style_text_opa(chat_message_label, LV_OPA_COVER, 0);
     lv_obj_align(chat_message_label, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(bottom_bar, LV_OBJ_FLAG_HIDDEN);  // 有内容才显示
     bottom_bar_ = bottom_bar;
     chat_message_label_ = chat_message_label;
-
-    // emoji GIF 资源：官方 assets 分区格式；失败不阻塞 UI（字形 fallback）。
-    emoji_assets_ = new SparkBotEmojiAssets();
-    assets_ready_ = emoji_assets_->Initialize().ok();
-    if (!assets_ready_) {
-        ESP_LOGW(kTag, "assets 分区不可用，emoji 回退字形");
-    }
 
     return voicelife::Status::Ok();
 #else
@@ -258,14 +337,20 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
             if (gif->IsLoaded()) {
                 gif->SetFrameCallback(
                     [this, gif]() { lv_image_set_src(static_cast<lv_obj_t*>(emoji_image_), gif->image_dsc()); });
-                // 官方 SetEmotion：设置初始帧并启动动画播放。
-                lv_image_set_src(static_cast<lv_obj_t*>(emoji_image_), gif->image_dsc());
-                gif->Start();
-                lv_obj_add_flag(static_cast<lv_obj_t*>(emoji_label_), LV_OBJ_FLAG_HIDDEN);
-                lv_obj_remove_flag(static_cast<lv_obj_t*>(emoji_image_), LV_OBJ_FLAG_HIDDEN);
-                gif_controller_ = gif;
-                using_gif = true;
-                ESP_LOGI(kTag, "SPARKBOT_GIF_STARTED asset=%.*s", static_cast<int>(emotion.size()), emotion.data());
+                // 只有首帧真正解码成功才替换回退 glyph；此前 IsLoaded 只代表
+                // GIF 头部可读，不能证明图像可显示。
+                if (gif->Start()) {
+                    lv_image_set_src(static_cast<lv_obj_t*>(emoji_image_), gif->image_dsc());
+                    lv_obj_add_flag(static_cast<lv_obj_t*>(emoji_label_), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_remove_flag(static_cast<lv_obj_t*>(emoji_image_), LV_OBJ_FLAG_HIDDEN);
+                    gif_controller_ = gif;
+                    using_gif = true;
+                    ESP_LOGI(kTag, "SPARKBOT_GIF_STARTED asset=%.*s", static_cast<int>(emotion.size()), emotion.data());
+                } else {
+                    delete gif;
+                    ESP_LOGW(kTag, "SPARKBOT_GIF_FIRST_FRAME_FAILED asset=%.*s", static_cast<int>(emotion.size()),
+                             emotion.data());
+                }
             } else {
                 delete gif;
                 ESP_LOGW(kTag, "SPARKBOT_GIF_LOAD_FAILED asset=%.*s", static_cast<int>(emotion.size()), emotion.data());
@@ -295,6 +380,8 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
 
     // 官方状态栏：显示快照 status_text。
     auto* status_label = static_cast<lv_obj_t*>(status_label_);
+    auto* network_label = static_cast<lv_obj_t*>(network_label_);
+    lv_label_set_text(network_label, snapshot.network_connected ? MATERIAL_SYMBOLS_WIFI : "");
     if (!snapshot.status_text.empty()) {
         lv_label_set_text(status_label, snapshot.status_text.c_str());
         lv_obj_remove_flag(status_label, LV_OBJ_FLAG_HIDDEN);
@@ -311,6 +398,11 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
     } else {
         lv_obj_add_flag(bottom_bar, LV_OBJ_FLAG_HIDDEN);
     }
+    ESP_LOGI(kTag, "SPARKBOT_TEXT_RENDER status_bytes=%u content_bytes=%u status_visible=%d status_xywh=%d,%d,%d,%d content_visible=%d common_font=%d",
+             static_cast<unsigned>(snapshot.status_text.size()), static_cast<unsigned>(snapshot.content_text.size()),
+             !snapshot.status_text.empty(), static_cast<int>(lv_obj_get_x(status_label)),
+             static_cast<int>(lv_obj_get_y(status_label)), static_cast<int>(lv_obj_get_width(status_label)),
+             static_cast<int>(lv_obj_get_height(status_label)), !snapshot.content_text.empty(), common_text_font_ != nullptr);
     return voicelife::Status::Ok();
 #else
     (void)snapshot;

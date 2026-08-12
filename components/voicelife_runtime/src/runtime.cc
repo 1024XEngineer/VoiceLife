@@ -29,6 +29,7 @@
 #include "voicelife/audio_esp/esp32s3_audio_probe.h"
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #include "voicelife/audio_esp/esp_multinet_wake_detector.h"
+#include "nvs_flash.h"
 #include "voicelife/im/esp_http_transport_factory.h"
 #include "voicelife/im/im_config_store.h"
 #include "voicelife/im/im_retry_policy.h"
@@ -268,6 +269,18 @@ class Runtime final {
         if (!init_status_.ok()) return init_status_;
 #ifdef ESP_PLATFORM
         // 立创实战派 ESP32-S3 板载 WS2812 灯珠接 GPIO48（小智 BUILTIN_LED_GPIO）。
+        // 主 NVS 分区初始化（Wi-Fi 驱动/凭据等依赖；linx_secrets 为加密分区另行初始化）。
+        {
+            esp_err_t nvs_error = nvs_flash_init();
+            if (nvs_error == ESP_ERR_NVS_NO_FREE_PAGES || nvs_error == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+                (void)nvs_flash_erase();
+                nvs_error = nvs_flash_init();
+            }
+            if (nvs_error != ESP_OK) {
+                ESP_LOGE(kTag, "STARTUP_ERROR stage=nvs_flash_init code=%d", static_cast<int>(nvs_error));
+                return Status::Error(ErrorCode::kInternal, "主 NVS 初始化失败");
+            }
+        }
         // 板级 LED 初始化（板型专属，Assembly 持有）。
         assembly_->InitializeBoardLeds();
         if (const Status display_status = assembly_->Start(); !display_status.ok()) {
@@ -282,6 +295,10 @@ class Runtime final {
             return secret_store;
         }
         auto connection = BootstrapLinxOtaConfig(assembly_->board_identity());
+        // Bootstrap 无论是下发连接配置还是返回“待控制台激活”，均可能已经
+        // 完成 STA 关联。由 Runtime 把受控网络事实写入快照，Renderer 只显示
+        // 语义而不触碰 ESP Wi-Fi API。
+        snapshot_.network_connected = LinxWifiStaConnected();
         if (!connection.ok() || !connection.value.has_value()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=linx_bootstrap code=%d", static_cast<int>(connection.status.code));
             ShowDisplay(voice::VoiceMood::kSad, "错误", "");
@@ -304,7 +321,9 @@ class Runtime final {
 #ifdef ESP_PLATFORM
         // 音频端口由 Assembly 注入（业务 PCM 语义，不暴露 I2S/Codec）。
         assembly_->SetOutputVolume(static_cast<uint8_t>(volume_));
-        assembly_->wake_gate().SetWakeSink([this](std::string_view wake_word) { QueueWakeWord(wake_word); });
+        if (assembly_->uses_local_wake_detector()) {
+            assembly_->wake_gate().SetWakeSink([this](std::string_view wake_word) { QueueWakeWord(wake_word); });
+        }
         session_ = std::make_unique<voice::VoiceSession>(
             assembly_->wake_gate(), assembly_->audio_output(), *provider_,
             [this](const voice::VoiceEvidence& evidence) { LogVoiceEvidence(evidence); });
@@ -753,7 +772,8 @@ class Runtime final {
         // 仅全部满足才显示 Standby 时间快照；不满足则为假待机，保留告警文案并记录。
         const bool controller_ok = interaction_.state() == voice::VoiceInteractionState::kStandby;
         const bool session_ok = session_ && session_->state() == voice::VoiceSessionState::kReady;
-        const bool gate_ok = assembly_ != nullptr && assembly_->wake_gate().standby();
+        const bool gate_ok = assembly_ != nullptr &&
+                             (!assembly_->uses_local_wake_detector() || assembly_->wake_gate().standby());
         const bool atomic_ok = controller_ok && session_ok && gate_ok;
         ESP_LOGI(kTag, "WAKE_REARM controller=%d session=%d gate=%d atomic=%d", controller_ok ? 1 : 0,
                  session_ok ? 1 : 0, gate_ok ? 1 : 0, atomic_ok ? 1 : 0);
@@ -1246,7 +1266,9 @@ class Runtime final {
                 // 唤醒被拒（如控制器不在 kStandby）：重启检测器，否则后续永远叫不醒。
                 ESP_LOGW(kTag, "WAKE_REJECTED state=%d err=%s", static_cast<int>(interaction_.state()),
                          wake_status.message.c_str());
-                (void)assembly_->wake_gate().StartStandby();
+                if (assembly_->uses_local_wake_detector()) {
+                    (void)assembly_->wake_gate().StartStandby();
+                }
             }
         }
         event_loop_stopped_ = true;

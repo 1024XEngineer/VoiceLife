@@ -281,9 +281,34 @@ int main() {
         Check(ToHex(hasher.Final()) == sha, "文件 SHA-256 必须与 manifest 记录一致");
     }
 
-    Check(yyjson_get_uint(yyjson_obj_get(budget, "total_bytes")) == total_bytes,
-          "budget.total_bytes 必须等于全部资源字节数之和");
-    Check(total_bytes == 142683, "素材总大小必须与已验证的 142683 字节一致");
+    Check(total_bytes == 142683, "GIF 总大小必须与已验证的 142683 字节一致");
+    Check(yyjson_get_uint(yyjson_obj_get(budget, "gif_bytes")) == total_bytes,
+          "budget.gif_bytes 必须等于全部 GIF 字节数之和");
+
+    // 字体是固定受控资源，不进入 Runtime 可传入的 GIF asset_id 集合。
+    yyjson_val* text_font = yyjson_obj_get(root, "text_font");
+    Check(text_font != nullptr && yyjson_is_obj(text_font), "common 文本字体声明必须存在");
+    Check(yyjson_equals_str(yyjson_obj_get(text_font, "file"), "font_noto_sans_common_14_1.bin"),
+          "文本字体必须固定为官方 common 14px 文件");
+    Check(yyjson_get_int(yyjson_obj_get(text_font, "size_px")) == 14 &&
+              yyjson_get_int(yyjson_obj_get(text_font, "bpp")) == 1 &&
+              yyjson_get_int(yyjson_obj_get(text_font, "line_height")) == 16 &&
+              yyjson_get_int(yyjson_obj_get(text_font, "base_line")) == 2,
+          "common 文本字体必须保持官方 14px/1bpp/line_height=16/base_line=2");
+    const std::string font_file_path = asset_dir + "/fonts/font_noto_sans_common_14_1.bin";
+    const std::string font_data = ReadFile(font_file_path);
+    Check(!font_data.empty(), "common 文本字体文件必须存在");
+    Check(yyjson_get_uint(yyjson_obj_get(text_font, "size_bytes")) == font_data.size(),
+          "common 文本字体大小必须与清单一致");
+    const char* font_sha = yyjson_get_str(yyjson_obj_get(text_font, "sha256"));
+    Check(font_sha != nullptr, "common 文本字体必须记录 SHA-256");
+    Sha256 font_hasher;
+    font_hasher.Update(font_data);
+    Check(ToHex(font_hasher.Final()) == font_sha, "common 文本字体 SHA-256 必须与清单一致");
+    Check(yyjson_get_uint(yyjson_obj_get(budget, "common_text_font_bytes")) == font_data.size(),
+          "budget.common_text_font_bytes 必须与字体实际大小一致");
+    Check(yyjson_get_uint(yyjson_obj_get(budget, "total_bytes")) == total_bytes + font_data.size(),
+          "budget.total_bytes 必须等于 GIF 与 common 字体总字节数");
 
     // 受控标识集合必须与 SparkBotPresentationAdapter 的 allowlist 完全一致，
     // 防止 manifest 与 Adapter 校验失同步。

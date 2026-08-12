@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "board_id": "esp-sparkbot",
-  "asset_kind": "mascot_gif",
+  "asset_kind": "mascot_gif_and_common_text_font",
   "source": {
     "upstream_repository": "78/xiaozhi-esp32",
     "upstream_commit": "37d1aee793f99a9b865957acc3798d06335c3ad0",
@@ -23,13 +23,25 @@
     "allow_arbitrary_bytes": false
   },
   "budget": {
-    "total_bytes": 142683,
+    "gif_bytes": 142683,
+    "common_text_font_bytes": 269580,
+    "total_bytes": 412263,
     "assets_partition_bytes": 1048576,
     "single_frame_rgb565_bytes": 18432,
     "psram_decode_peak_bytes": null,
     "psram_note": "GIF 解码峰值内存尚未测量；Renderer 移植时以真机 heap 证据补充。",
-    "assets_image_sha256": "292d20d48616ba9132908b6664e2b3d9d77106bdb2f1ac2b4140e217978005df",
-    "assets_image_bytes": 143155
+    "assets_image_sha256": "555a029ba7a35e5c8232064850f434f227a9f16f91b73846428f7f1531027e3b",
+    "assets_image_bytes": 412781
+  },
+  "text_font": {
+    "file": "font_noto_sans_common_14_1.bin",
+    "source": "78/xiaozhi-fonts@2.0.0",
+    "size_px": 14,
+    "bpp": 1,
+    "line_height": 16,
+    "base_line": 2,
+    "size_bytes": 269580,
+    "sha256": "ccdfa4a7de73f584f0d7519be2d2785c4e9880446edf66c1635e676969c030ee"
   },
   "verification": {
     "verified_on_device": false,

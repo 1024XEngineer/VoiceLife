@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ASSET_DIR = ROOT / "components" / "voicelife_display_esp" / "assets" / "esp-sparkbot"
 MANIFEST = ASSET_DIR / "manifest.json"
 GIF_DIR = ASSET_DIR / "mascot" / "gifs"
+COMMON_FONT = ASSET_DIR / "fonts" / "font_noto_sans_common_14_1.bin"
 
 ALLOWED_ASSET_KEYS = {
     "asset_id",
@@ -108,7 +109,20 @@ class SparkBotAssetManifestTest(unittest.TestCase):
         self.assertEqual(self.manifest["source"]["license"], "MIT")
         self.assertTrue(self.manifest["source"]["upstream_commit"])
         self.assertEqual(len(self.assets), 10)
-        self.assertEqual(self.manifest["budget"]["total_bytes"], 142683)
+        self.assertEqual(self.manifest["budget"]["gif_bytes"], 142683)
+        self.assertEqual(self.manifest["budget"]["common_text_font_bytes"], 269580)
+        self.assertEqual(self.manifest["budget"]["total_bytes"], 412263)
+
+    def test_common_font_matches_official_14px_spec(self) -> None:
+        font = self.manifest["text_font"]
+        self.assertEqual(font["file"], COMMON_FONT.name)
+        self.assertEqual(font["size_px"], 14)
+        self.assertEqual(font["bpp"], 1)
+        self.assertEqual(font["line_height"], 16)
+        self.assertEqual(font["base_line"], 2)
+        data = COMMON_FONT.read_bytes()
+        self.assertEqual(len(data), font["size_bytes"])
+        self.assertEqual(hashlib.sha256(data).hexdigest(), font["sha256"])
 
     def test_asset_ids_unique_and_controlled(self) -> None:
         ids = [entry["asset_id"] for entry in self.assets]
@@ -160,7 +174,7 @@ class SparkBotAssetManifestTest(unittest.TestCase):
                 return "过短"
             total, _chk, ln = struct.unpack("<III", image[:HEADER])
             table_bytes = total * ENTRY
-            if total > 10 or table_bytes > ln:
+            if total > 11 or table_bytes > ln:
                 return "表越界"
             if ln > len(image) - HEADER:
                 return "长度非法"
@@ -180,6 +194,8 @@ class SparkBotAssetManifestTest(unittest.TestCase):
                     str(ROOT / "scripts" / "build_sparkbot_assets.py"),
                     "--gif-dir",
                     str(GIF_DIR),
+                    "--common-font",
+                    str(COMMON_FONT),
                     "--output",
                     str(out),
                 ],
@@ -226,9 +242,9 @@ class SparkBotAssetManifestTest(unittest.TestCase):
         import tempfile
 
         def official_pack(gif_dir: Path) -> bytes:
-            """xiaozhi-esp32@37d1aee scripts/build_default_assets.py pack_assets_simple 算法副本。"""
+            """小智 pack_assets_simple 算法，附固定的 common 文本字体。"""
             merged = bytearray()
-            infos: list[tuple[str, int, int]] = []
+            infos: list[tuple[str, int, int, int, int]] = []
             for path in sorted(gif_dir.iterdir()):
                 if path.suffix.lower() != ".gif":
                     continue
@@ -237,6 +253,10 @@ class SparkBotAssetManifestTest(unittest.TestCase):
                 infos.append((path.name, len(merged), len(data), width, height))
                 merged.extend(b"\x5a" * 2)
                 merged.extend(data)
+            font_data = COMMON_FONT.read_bytes()
+            infos.append((COMMON_FONT.name, len(merged), len(font_data), 0, 0))
+            merged.extend(b"\x5a" * 2)
+            merged.extend(font_data)
             table = bytearray()
             for name, offset, size, width, height in infos:
                 fixed = name.encode("utf-8")[:32].ljust(32, b"\x00")
@@ -254,6 +274,8 @@ class SparkBotAssetManifestTest(unittest.TestCase):
                     str(ROOT / "scripts" / "build_sparkbot_assets.py"),
                     "--gif-dir",
                     str(GIF_DIR),
+                    "--common-font",
+                    str(COMMON_FONT),
                     "--output",
                     str(out),
                 ],

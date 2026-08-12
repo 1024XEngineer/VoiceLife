@@ -68,6 +68,14 @@ class PlatformAssembly {
     virtual voicelife::voice::WakeGateAudioInput& wake_gate() = 0;
 
     /**
+     * @brief 是否在空闲态运行板载本地唤醒模型。
+     *
+     * 没有 ESP-SR model 分区的板型仍可经 BOOT 键进入云端采集；Runtime 依赖
+     * 此能力而非板型名称决定是否重启本地检测器。
+     */
+    virtual bool uses_local_wake_detector() const { return true; }
+
+    /**
      * @brief 返回构建期板型身份（OTA/策略请求用，如 esp-sparkbot）。
      * @return 板型标识。
      */

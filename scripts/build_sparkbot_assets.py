@@ -3,7 +3,7 @@
 
 直接移植 xiaozhi-esp32@37d1aee scripts/build_default_assets.py 的
 pack_assets_simple 打包逻辑（12B 头 + 44B/项文件表 + "ZZ" magic 数据 +
-checksum），只打包 SparkBot 牛头 emoji GIF；字体等资源后续阶段接入。
+checksum），打包 SparkBot 牛头 emoji GIF 与官方 common 14px 字体。
 生成后回读校验（与 SparkBotEmojiAssets 解析器逻辑一致）并输出 SHA-256。
 """
 
@@ -30,8 +30,8 @@ def compute_checksum(data: bytes) -> int:
     return sum(data) & 0xFFFF
 
 
-def pack_assets(gif_dir: Path, out_path: Path) -> tuple[int, bytes]:
-    """按官方格式打包 GIF 目录为 assets 镜像。
+def pack_assets(gif_dir: Path, common_font: Path) -> tuple[int, bytes]:
+    """按官方格式打包 GIF 目录与固定 common 字体为 assets 镜像。
 
     返回 (文件数, 完整镜像字节)。镜像布局：
       [0..4)   total_files  uint32 LE
@@ -42,6 +42,8 @@ def pack_assets(gif_dir: Path, out_path: Path) -> tuple[int, bytes]:
     files = sorted(p for p in gif_dir.iterdir() if p.suffix.lower() == ".gif")
     if not files:
         raise AssetPackError(f"{gif_dir} 中没有 .gif 文件")
+    if not common_font.is_file() or common_font.stat().st_size == 0:
+        raise AssetPackError(f"官方 common 字体不存在或为空: {common_font}")
 
     merged = bytearray()
     table: list[tuple[str, int, int, int, int]] = []
@@ -56,6 +58,12 @@ def pack_assets(gif_dir: Path, out_path: Path) -> tuple[int, bytes]:
         table.append((name, len(merged), len(data), width, height))
         merged.extend(MAGIC)
         merged.extend(data)
+
+    # 固定受控字体沿用官方 assets 容器，但不是图像，因此表内尺寸为 0。
+    font_data = common_font.read_bytes()
+    table.append((common_font.name, len(merged), len(font_data), 0, 0))
+    merged.extend(MAGIC)
+    merged.extend(font_data)
 
     mmap_table = bytearray()
     for name, offset, size, width, height in table:
@@ -76,7 +84,7 @@ def pack_assets(gif_dir: Path, out_path: Path) -> tuple[int, bytes]:
     return len(table), image
 
 
-def verify_image(image: bytes, expected_files: int, gif_dir: Path) -> None:
+def verify_image(image: bytes, expected_files: int, gif_dir: Path, common_font: Path) -> None:
     """回读校验镜像（与 SparkBotEmojiAssets 解析一致）。"""
     if len(image) < HEADER_BYTES:
         raise AssetPackError("镜像过短")
@@ -104,7 +112,10 @@ def verify_image(image: bytes, expected_files: int, gif_dir: Path) -> None:
             raise AssetPackError(f"{name} 数据越界")
         if combined[data_start : data_start + 2] != MAGIC:
             raise AssetPackError(f"{name} 缺少 ZZ magic")
-        disk = (gif_dir / name).read_bytes()
+        disk_path = common_font if name == common_font.name else gif_dir / name
+        if not disk_path.is_file():
+            raise AssetPackError(f"{name} 不在受控 GIF 或字体资源集合中")
+        disk = disk_path.read_bytes()
         if disk != combined[data_start + 2 : data_start + 2 + size]:
             raise AssetPackError(f"{name} 内容与磁盘不一致")
     if len(seen) != expected_files:
@@ -114,13 +125,14 @@ def verify_image(image: bytes, expected_files: int, gif_dir: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gif-dir", required=True, type=Path, help="牛头 emoji GIF 目录")
+    parser.add_argument("--common-font", required=True, type=Path, help="官方 Noto Sans common 14px CBIN")
     parser.add_argument("--output", required=True, type=Path, help="生成的 assets 镜像路径")
     parser.add_argument("--manifest", type=Path, help="可选的 manifest.json（用于记录资源包 SHA-256）")
     args = parser.parse_args()
 
     try:
-        count, image = pack_assets(args.gif_dir, args.output)
-        verify_image(image, count, args.gif_dir)
+        count, image = pack_assets(args.gif_dir, args.common_font)
+        verify_image(image, count, args.gif_dir, args.common_font)
     except AssetPackError as error:
         print(f"FAIL {error}", file=sys.stderr)
         return 1
@@ -128,7 +140,7 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(image)
     sha = hashlib.sha256(image).hexdigest()
-    print(f"PASS {count} 个 GIF -> {args.output} sha256={sha}")
+    print(f"PASS {count - 1} 个 GIF + common 14px 字体 -> {args.output} sha256={sha}")
 
     if args.manifest is not None:
         manifest = json.loads(args.manifest.read_text(encoding="utf-8"))

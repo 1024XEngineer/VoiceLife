@@ -4,6 +4,9 @@
 #include "gifdec.h"
 
 #include <esp_log.h>
+#ifdef ESP_PLATFORM
+#include <esp_heap_caps.h>
+#endif
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -128,7 +131,14 @@ static gd_GIF* gif_open(gd_GIF* gif_base) {
         ESP_LOGW(TAG, "Image dimensions are too large");
         goto fail;
     }
-    gif = lv_malloc(sizeof(gd_GIF) + 5 * width * height + LZW_CACHE_SIZE);
+    const size_t allocation_size = sizeof(gd_GIF) + 5 * width * height + LZW_CACHE_SIZE;
+#ifdef ESP_PLATFORM
+    ESP_LOGI(TAG, "GIF_OPEN width=%u height=%u bytes=%u psram_free=%u", (unsigned)width, (unsigned)height,
+             (unsigned)allocation_size, (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    gif = heap_caps_malloc(allocation_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    gif = lv_malloc(allocation_size);
+#endif
 #else
     if (0 == (INT_MAX - sizeof(gd_GIF)) / width / height / 5) {
         ESP_LOGW(TAG, "Image dimensions are too large");
@@ -136,7 +146,10 @@ static gd_GIF* gif_open(gd_GIF* gif_base) {
     }
     gif = lv_malloc(sizeof(gd_GIF) + 5 * width * height);
 #endif
-    if (!gif) goto fail;
+    if (!gif) {
+        ESP_LOGE(TAG, "GIF_ALLOC_FAILED bytes=%u", (unsigned)allocation_size);
+        goto fail;
+    }
     memcpy(gif, gif_base, sizeof(gd_GIF));
     gif->width = width;
     gif->height = height;
@@ -688,10 +701,16 @@ static void dispose(gd_GIF* gif) {
 int gd_get_frame(gd_GIF* gif) {
     char sep;
 
-    if (gif == NULL || gif->io_error) return -1;
+    if (gif == NULL || gif->io_error) {
+        ESP_LOGE(TAG, "GIF_PARSE_ERROR reason=preexisting_io pos=%u", gif == NULL ? 0U : gif->f_rw_p);
+        return -1;
+    }
     dispose(gif);
     f_gif_read(gif, &sep, 1);
-    if (gif->io_error) return -1;
+    if (gif->io_error) {
+        ESP_LOGE(TAG, "GIF_PARSE_ERROR reason=separator_read pos=%u", gif->f_rw_p);
+        return -1;
+    }
     while (sep != ',') {
         if (sep == ';') {
             f_gif_seek(gif, gif->anim_start, LV_FS_SEEK_SET);
@@ -702,13 +721,24 @@ int gd_get_frame(gd_GIF* gif) {
             }
         } else if (sep == '!')
             read_ext(gif);
-        else
+        else {
+            ESP_LOGE(TAG, "GIF_PARSE_ERROR reason=separator value=0x%02x pos=%u", (unsigned char)sep, gif->f_rw_p);
             return -1;
-        if (gif->io_error) return -1;
+        }
+        if (gif->io_error) {
+            ESP_LOGE(TAG, "GIF_PARSE_ERROR reason=extension pos=%u", gif->f_rw_p);
+            return -1;
+        }
         f_gif_read(gif, &sep, 1);
-        if (gif->io_error) return -1;
+        if (gif->io_error) {
+            ESP_LOGE(TAG, "GIF_PARSE_ERROR reason=next_separator pos=%u", gif->f_rw_p);
+            return -1;
+        }
     }
-    if (read_image(gif) == -1 || gif->io_error) return -1;
+    if (read_image(gif) == -1 || gif->io_error) {
+        ESP_LOGE(TAG, "GIF_PARSE_ERROR reason=image pos=%u io=%d", gif->f_rw_p, gif->io_error ? 1 : 0);
+        return -1;
+    }
     return 1;
 }
 
@@ -721,7 +751,11 @@ void gd_rewind(gd_GIF* gif) {
 
 void gd_close_gif(gd_GIF* gif) {
     f_gif_close(gif);
+#if LV_GIF_CACHE_DECODE_DATA && defined(ESP_PLATFORM)
+    heap_caps_free(gif);
+#else
     lv_free(gif);
+#endif
 }
 
 static bool f_gif_open(gd_GIF* gif, const void* path, bool is_file) {
@@ -750,6 +784,8 @@ static void f_gif_read(gd_GIF* gif, void* buf, size_t len) {
         if (gif->data_size != 0 && (gif->f_rw_p > gif->data_size || len > gif->data_size - gif->f_rw_p)) {
             memset(buf, 0, len);
             gif->io_error = true;
+            ESP_LOGE(TAG, "GIF_IO_ERROR op=read pos=%u len=%u size=%u", gif->f_rw_p, (unsigned)len,
+                     (unsigned)gif->data_size);
             return;
         }
         memcpy(buf, &gif->data[gif->f_rw_p], len);
@@ -772,6 +808,8 @@ static int f_gif_seek(gd_GIF* gif, size_t pos, int k) {
         if (gif->data_size != 0 && next > gif->data_size) {
             gif->f_rw_p = (uint32_t)gif->data_size;
             gif->io_error = true;
+            ESP_LOGE(TAG, "GIF_IO_ERROR op=seek pos=%u next=%u size=%u", gif->f_rw_p, (unsigned)next,
+                     (unsigned)gif->data_size);
             return gif->f_rw_p;
         }
         if (k == LV_FS_SEEK_CUR || k == LV_FS_SEEK_SET) gif->f_rw_p = (uint32_t)next;

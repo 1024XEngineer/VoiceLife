@@ -46,7 +46,8 @@ class WakeGateAudioInput final : public AudioInputPort {
      * @param physical_input 唯一的板载物理输入端口。
      * @param detector 本地唤醒检测器。
      */
-    WakeGateAudioInput(AudioInputPort& physical_input, LocalWakeDetectorPort& detector);
+    WakeGateAudioInput(AudioInputPort& physical_input, LocalWakeDetectorPort& detector,
+                       bool local_wake_enabled = true);
 
     /** @brief 设置唤醒命中后由控制层处理的回调。
      * @param sink 由控制任务消费的唤醒回调。
@@ -90,6 +91,7 @@ class WakeGateAudioInput final : public AudioInputPort {
 
     AudioInputPort& physical_input_;
     LocalWakeDetectorPort& detector_;
+    bool local_wake_enabled_ = true;
     mutable std::mutex mutex_;
     AudioFrameSink audio_sink_;
     WakeSink wake_sink_;

@@ -99,7 +99,7 @@ SparkBotAssembly::SparkBotAssembly()
       arbiter_(voicelife::board_esp::SparkBotProfile().shared_power),
       adapter_(MakeSparkBotLcdConfig(), [this](bool enabled) { ApplyBacklight(enabled); }) {
     wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
-    wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_.input(), *wake_detector_);
+    wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_.input(), *wake_detector_, false);
 }
 
 voicelife::voice::PresentationPort& SparkBotAssembly::presentation() { return adapter_; }

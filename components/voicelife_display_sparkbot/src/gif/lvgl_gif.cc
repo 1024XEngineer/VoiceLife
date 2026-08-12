@@ -42,11 +42,6 @@ LvglGif::LvglGif(const uint8_t* data, std::size_t size)
     img_dsc_.data = gif_->canvas;
     img_dsc_.data_size = gif_->width * gif_->height * 4;
 
-    // Render first frame
-    if (gif_->canvas) {
-        gd_render_frame(gif_, gif_->canvas);
-    }
-
     loaded_ = true;
     ESP_LOGD(TAG, "GIF loaded from image descriptor: %dx%d", gif_->width, gif_->height);
 }
@@ -63,10 +58,10 @@ const lv_img_dsc_t* LvglGif::image_dsc() const {
 }
 
 // Animation control methods
-void LvglGif::Start() {
+bool LvglGif::Start() {
     if (!loaded_ || !gif_) {
         ESP_LOGW(TAG, "GIF not loaded, cannot start");
-        return;
+        return false;
     }
 
     if (!timer_) {
@@ -85,11 +80,19 @@ void LvglGif::Start() {
         lv_timer_resume(timer_);
         lv_timer_reset(timer_);
 
-        // Render first frame
+        // Decode and render the first frame. Rendering before gd_get_frame()
+        // draws an uninitialized frame rectangle for optimized GIFs.
         NextFrame();
-
-        ESP_LOGD(TAG, "GIF animation started");
+        if (!playing_) {
+            // NextFrame failed and paused the timer. Do not let callers hide
+            // the fallback glyph behind an undecoded image descriptor.
+            return false;
+        }
+        ESP_LOGI(TAG, "SPARKBOT_GIF_FIRST_FRAME_OK width=%u height=%u", static_cast<unsigned>(gif_->width),
+                 static_cast<unsigned>(gif_->height));
+        return true;
     }
+    return false;
 }
 
 void LvglGif::Pause() {

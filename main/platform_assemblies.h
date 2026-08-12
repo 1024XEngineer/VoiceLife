@@ -99,6 +99,8 @@ class SparkBotAssembly : public PlatformAssembly {
     voicelife::voice::WakeGateAudioInput& wake_gate() override;
     /** @brief 返回 SparkBot 板型身份。 @return esp-sparkbot。 */
     std::string_view board_identity() const override { return "esp-sparkbot"; }
+    /** @brief SparkBot 使用 BOOT 键进入云端采集，不要求 ESP-SR 本地模型分区。 */
+    bool uses_local_wake_detector() const override { return false; }
     /** @brief SparkBot 无 LED（GPIO48 为底盘 UART RX，不写入）。 */
     void InitializeBoardLeds() override {}
 
