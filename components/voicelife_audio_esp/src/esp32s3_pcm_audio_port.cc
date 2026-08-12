@@ -59,6 +59,8 @@ Status Esp32s3PcmAudioPorts::Impl::OutputPort::Push(const voice::AudioFrame& fra
 
 Status Esp32s3PcmAudioPorts::Impl::OutputPort::Flush() { return owner_.FlushOutput(); }
 
+bool Esp32s3PcmAudioPorts::Impl::OutputPort::IsIdle() const { return owner_.OutputIdle(); }
+
 void Esp32s3PcmAudioPorts::Impl::OutputPort::Close() { (void)owner_.CloseOutput(); }
 
 Esp32s3PcmAudioPorts::Impl::~Impl() {
@@ -192,7 +194,7 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
         input_cv_.notify_all();
         return detail::Unavailable("创建 I2S 采集任务失败");
     }
-    if (xTaskCreate(&DeliveryTaskEntry, "voice_audio_sink", 3072, this, 4, &delivery_task_) != pdPASS) {
+    if (xTaskCreate(&DeliveryTaskEntry, "voice_audio_sink", 16384, this, 4, &delivery_task_) != pdPASS) {
         input_running_ = false;
         i2s_channel_disable(rx_channel_);
         input_cv_.notify_all();
@@ -311,6 +313,16 @@ Status Esp32s3PcmAudioPorts::Impl::FlushOutput() {
     return Status::Ok();
 #else
     return detail::Unavailable("ESP32-S3 PCM Audio Port 只能在 ESP-IDF 目标运行");
+#endif
+}
+
+bool Esp32s3PcmAudioPorts::Impl::OutputIdle() const {
+#ifdef ESP_PLATFORM
+    std::lock_guard<std::mutex> lock(mutex_);
+    // 播放排空 = 软件队列空 且 无正在写 I2S 的帧（同步阻塞写窗口）。
+    return output_queue_.empty() && !output_writing_;
+#else
+    return true;
 #endif
 }
 

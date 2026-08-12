@@ -342,7 +342,6 @@ bool EspWebSocketTransport::Impl::PrepareWorker() {
         CleanupWorker();
         return false;
     }
-
     return true;
 }
 
@@ -384,7 +383,6 @@ void EspWebSocketTransport::Impl::CleanupWorker() {
 #endif
         tx_control_queue_ = nullptr;
     }
-
     if (event_queue_ != nullptr) {
 #if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
         if (event_queue_uses_caps_) {

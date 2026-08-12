@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mutex>
+#include <string>
 #include <string_view>
 
 #include "voicelife/contracts/status.h"
@@ -12,6 +13,8 @@ enum class VoiceInteractionState {
     kBooting,
     kStandby,
     kListening,
+    /** 语音端点已检测到（VAD 静音）：已发 listen.stop，等待最终 STT。 */
+    kFinalizing,
     kThinking,
     kSpeaking,
     kInterrupting,
@@ -30,6 +33,12 @@ enum class VoiceInteractionEvent {
     kPressUp,
     kWakeDetected,
     kCaptureStarted,
+    /** VAD 检测到语音端点（说话结束）：发 listen.stop，等待最终 STT，不回待机。 */
+    kEndpointDetected,
+    /** 最终 STT 超时：kFinalizing → kStandby，中止残留服务端回合并恢复待机。 */
+    kFinalizationTimedOut,
+    /** 告别（再见/拜拜）回复播报完成：kSpeaking → kStandby，恢复待机。 */
+    kFarewellCompleted,
     kIntentReceived,
     kTtsStarted,
     kTtsStopped,
@@ -59,6 +68,40 @@ struct VoiceInteractionTransition {
     VoiceInteractionAction action = VoiceInteractionAction::kNone;
 };
 
+/** @brief 牛头表情键（显示模型层使用，与 OLED 渲染解耦）。 */
+enum class VoiceMood {
+    kNeutral,
+    kHappy,
+    kSad,
+    kThinking,
+    kSurprised,
+    kSpeaking,
+    kAngry,
+};
+
+/** @brief 内容栏当前展示的文本角色。 */
+enum class VoiceContentRole {
+    kNone,
+    kSystem,
+    kUser,
+    kAssistant,
+};
+
+/**
+ * @brief 显示模型快照：一次会话阶段变化后派生出的完整可见状态。
+ * 由 Runtime 维护，仅在 revision 变化时提交给渲染器，避免全屏重绘。
+ */
+struct DisplaySnapshot {
+    VoiceInteractionState phase = VoiceInteractionState::kBooting;
+    VoiceMood mood = VoiceMood::kNeutral;
+    /** 上行状态栏文本（如“聆听中...”“处理中...”）。 */
+    std::string status_text;
+    /** 下行内容栏文本（用户语音 / 助手回复 / 系统提示）。 */
+    std::string content_text;
+    VoiceContentRole role = VoiceContentRole::kNone;
+    uint64_t revision = 0;
+};
+
 /**
  * @brief 保持板端 UI 与用户控制和 VoiceSession 同步。
  *
@@ -75,8 +118,6 @@ class VoiceInteractionController {
 
     /** @brief 返回当前板端可见状态。 @return 当前交互状态。 */
     [[nodiscard]] VoiceInteractionState state() const;
-    /** @brief 返回适合 OLED 等窄屏的稳定短文本。 @return 当前状态文本。 */
-    [[nodiscard]] std::string_view display_text() const;
 
    private:
     mutable std::mutex mutex_;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 
@@ -59,6 +60,8 @@ class VoiceSession {
     [[nodiscard]] uint64_t generation() const;
     /** @brief 返回当前会话配置快照。 @return 会话配置。 */
     [[nodiscard]] VoiceSessionConfig config() const;
+    /** @brief 返回 Provider hello 协商后的下行播放格式。 @return 播放格式。 */
+    [[nodiscard]] AudioFormat playback_format() const;
 
    private:
     void Emit(std::string_view event, std::string_view detail);
@@ -79,6 +82,14 @@ class VoiceSession {
     VoiceAudioFormats audio_formats_;
     VoiceSessionState state_ = VoiceSessionState::kStopped;
     bool audio_ready_ = false;
+    // 本轮是否已收到有效输入（STT/工具调用），仅在其为 true 时接受服务端 TTS，
+    // 避免空闲态误收上一轮残留回复。
+    bool response_armed_ = false;
+    // VAD 端点：本地静音检测（无 AFE，用 RMS 能量近似）。
+    bool vad_speech_seen_ = false;
+    bool vad_silence_emitted_ = false;
+    bool vad_silence_pending_ = false;
+    std::chrono::steady_clock::time_point last_speech_at_{};
     uint64_t generation_ = 0;
     uint64_t next_sequence_ = 0;
 };

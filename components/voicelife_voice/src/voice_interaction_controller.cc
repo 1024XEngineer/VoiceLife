@@ -27,7 +27,9 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
                 state_ = VoiceInteractionState::kListening;
                 transition.action = VoiceInteractionAction::kStartCapture;
             } else if (state_ == VoiceInteractionState::kListening) {
-                state_ = VoiceInteractionState::kStandby;
+                // BOOT 短按停止：进 kFinalizing（发 listen.stop 等最终 STT），
+                // 由最终 STT/5s 超时收尾，不直接回 Standby。
+                state_ = VoiceInteractionState::kFinalizing;
                 transition.action = VoiceInteractionAction::kStopVoiceTurn;
             } else if (state_ == VoiceInteractionState::kSpeaking || state_ == VoiceInteractionState::kThinking) {
                 state_ = VoiceInteractionState::kInterrupting;
@@ -48,8 +50,10 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             }
             break;
         case VoiceInteractionEvent::kPressUp:
+            // 触摸松开/输入结束：Listening → kFinalizing（停止采集发 listen.stop，
+            // 等待最终 STT），由最终 STT 或 5s 超时收尾，不直接回 Standby。
             if (state_ != VoiceInteractionState::kListening) return InvalidTransition(state_, event);
-            state_ = VoiceInteractionState::kStandby;
+            state_ = VoiceInteractionState::kFinalizing;
             transition.action = VoiceInteractionAction::kStopVoiceTurn;
             break;
         case VoiceInteractionEvent::kWakeDetected:
@@ -69,22 +73,45 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
         case VoiceInteractionEvent::kCaptureStarted:
             if (state_ != VoiceInteractionState::kListening) return InvalidTransition(state_, event);
             break;
+        case VoiceInteractionEvent::kEndpointDetected:
+            // VAD 检测到说话结束：停止采集并发送 listen.stop（kStopVoiceTurn），
+            // 但进入 kFinalizing 等待服务端最终 STT，不直接回待机。
+            if (state_ != VoiceInteractionState::kListening) return InvalidTransition(state_, event);
+            state_ = VoiceInteractionState::kFinalizing;
+            transition.action = VoiceInteractionAction::kStopVoiceTurn;
+            break;
+        case VoiceInteractionEvent::kFinalizationTimedOut:
+            // 最终 STT 超时：kFinalizing → kStandby，恢复待机（由 runtime 中止残留回合）。
+            if (state_ != VoiceInteractionState::kFinalizing) return InvalidTransition(state_, event);
+            state_ = VoiceInteractionState::kStandby;
+            transition.action = VoiceInteractionAction::kRestoreStandby;
+            break;
+        case VoiceInteractionEvent::kFarewellCompleted:
+            // 告别回复播报完成：kSpeaking → kStandby，恢复待机。
+            if (state_ != VoiceInteractionState::kSpeaking) return InvalidTransition(state_, event);
+            state_ = VoiceInteractionState::kStandby;
+            transition.action = VoiceInteractionAction::kRestoreStandby;
+            break;
         case VoiceInteractionEvent::kIntentReceived:
-            if (state_ != VoiceInteractionState::kListening && state_ != VoiceInteractionState::kThinking) {
+            if (state_ != VoiceInteractionState::kListening && state_ != VoiceInteractionState::kThinking &&
+                state_ != VoiceInteractionState::kFinalizing) {
                 return InvalidTransition(state_, event);
             }
             state_ = VoiceInteractionState::kThinking;
             break;
         case VoiceInteractionEvent::kTtsStarted:
-            if (state_ != VoiceInteractionState::kListening && state_ != VoiceInteractionState::kThinking) {
+            if (state_ != VoiceInteractionState::kListening && state_ != VoiceInteractionState::kThinking &&
+                state_ != VoiceInteractionState::kFinalizing) {
                 return InvalidTransition(state_, event);
             }
             state_ = VoiceInteractionState::kSpeaking;
             break;
         case VoiceInteractionEvent::kTtsStopped:
             if (state_ != VoiceInteractionState::kSpeaking) return InvalidTransition(state_, event);
-            state_ = VoiceInteractionState::kStandby;
-            transition.action = VoiceInteractionAction::kRestoreStandby;
+            // 播报结束后进入 follow-up 聆听：保持开麦让用户可直接续说，
+            // 无需重新唤醒。长时间无输入由聆听超时结束本回合。
+            state_ = VoiceInteractionState::kListening;
+            transition.action = VoiceInteractionAction::kStartCapture;
             break;
         case VoiceInteractionEvent::kInterruptRequested:
             if (state_ != VoiceInteractionState::kListening && state_ != VoiceInteractionState::kThinking &&
@@ -132,29 +159,6 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
 VoiceInteractionState VoiceInteractionController::state() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return state_;
-}
-
-std::string_view VoiceInteractionController::display_text() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    switch (state_) {
-        case VoiceInteractionState::kBooting:
-            return "BOOT";
-        case VoiceInteractionState::kStandby:
-            return "IDLE";
-        case VoiceInteractionState::kListening:
-            return "LISTEN";
-        case VoiceInteractionState::kThinking:
-            return "THINK";
-        case VoiceInteractionState::kSpeaking:
-            return "SPEAK";
-        case VoiceInteractionState::kInterrupting:
-            return "STOP";
-        case VoiceInteractionState::kReconnecting:
-            return "RECONNECT";
-        case VoiceInteractionState::kError:
-            return "ERROR";
-    }
-    return "ERROR";
 }
 
 }  // namespace voicelife::voice

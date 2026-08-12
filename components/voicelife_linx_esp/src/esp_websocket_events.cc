@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "esp_log.h"
+#include "esp_tls_errors.h"
 #include "esp_websocket_client.h"
 #include "esp_websocket_impl.h"
 #include "freertos/FreeRTOS.h"
@@ -46,14 +47,27 @@ void EspWebSocketTransport::Impl::Enqueue(int32_t event_id, const esp_websocket_
             std::memcpy(envelope.data.data(), event_data->data_ptr, event_data->data_len);
         }
     } else if (event_id == WEBSOCKET_EVENT_ERROR) {
-        envelope.kind = detail::EventKind::kError;
-        if (event_data != nullptr) {
-            envelope.tls_last_error = event_data->error_handle.esp_tls_last_esp_err;
-            envelope.tls_stack_error = event_data->error_handle.esp_tls_stack_err;
-            envelope.tls_cert_flags = event_data->error_handle.esp_tls_cert_verify_flags;
-            envelope.handshake_status = event_data->error_handle.esp_ws_handshake_status_code;
-            envelope.socket_errno = event_data->error_handle.esp_transport_sock_errno;
-            envelope.opcode = static_cast<uint8_t>(event_data->error_handle.error_type);
+        // 服务端有序关闭是正常告别，不当故障：
+        // - 收到 WebSocket CLOSE 帧（SERVER_CLOSE）
+        // - TCP 有序 FIN（esp-tls 报 TCP_CLOSED_FIN）
+        // 均映射为 kDisconnected（触发自动重连），其余才是真正故障（证书/握手/超时）。
+        const auto error_type = event_data != nullptr ? event_data->error_handle.error_type : WEBSOCKET_ERROR_TYPE_NONE;
+        const bool ordered_close =
+            error_type == WEBSOCKET_ERROR_TYPE_SERVER_CLOSE ||
+            (event_data != nullptr && event_data->error_handle.esp_tls_last_esp_err == ESP_ERR_ESP_TLS_TCP_CLOSED_FIN);
+        if (ordered_close) {
+            envelope.kind = detail::EventKind::kDisconnected;
+            envelope.opcode = static_cast<uint8_t>(error_type);
+        } else {
+            envelope.kind = detail::EventKind::kError;
+            if (event_data != nullptr) {
+                envelope.tls_last_error = event_data->error_handle.esp_tls_last_esp_err;
+                envelope.tls_stack_error = event_data->error_handle.esp_tls_stack_err;
+                envelope.tls_cert_flags = event_data->error_handle.esp_tls_cert_verify_flags;
+                envelope.handshake_status = event_data->error_handle.esp_ws_handshake_status_code;
+                envelope.socket_errno = event_data->error_handle.esp_transport_sock_errno;
+                envelope.opcode = static_cast<uint8_t>(error_type);
+            }
         }
     } else {
         return;

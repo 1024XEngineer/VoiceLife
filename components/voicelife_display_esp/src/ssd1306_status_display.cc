@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cstring>
 #include <mutex>
+#include <string_view>
 
 #include "driver/i2c_master.h"
 #include "esp_lcd_panel_io.h"
@@ -19,16 +20,20 @@
 namespace voicelife::display_esp {
 namespace {
 
-constexpr int kWidth = 128;
-constexpr int kHeight = 32;
-constexpr int kPages = kHeight / 8;
-constexpr i2c_port_t kI2cPort = I2C_NUM_0;
+constexpr int kI2cPort = 0;
 constexpr gpio_num_t kSda = GPIO_NUM_41;
 constexpr gpio_num_t kScl = GPIO_NUM_42;
 constexpr uint8_t kAddress = 0x3c;
 
+constexpr int kWidth = 128;
+constexpr int kHeight = 32;
+constexpr int kPages = kHeight / 8;
+
+// 5x7 ASCII 字形（原字形表保持兼容，补充常用标点）。
 std::array<uint8_t, 5> Glyph(char value) {
     switch (value) {
+        case '!':
+            return {0x00, 0x00, 0x5f, 0x00, 0x00};
         case 'A':
             return {0x7e, 0x11, 0x11, 0x7e, 0x00};
         case 'B':
@@ -87,6 +92,10 @@ std::array<uint8_t, 5> Glyph(char value) {
             return {0x08, 0x08, 0x08, 0x08, 0x00};
         case ':':
             return {0x00, 0x36, 0x36, 0x00, 0x00};
+        case '/':
+            return {0x00, 0x04, 0x08, 0x10, 0x00};
+        case ' ':
+            return {0x00, 0x00, 0x00, 0x00, 0x00};
         default:
             return {0, 0, 0, 0, 0};
     }
@@ -661,27 +670,42 @@ Status Flush(DisplayState& state, std::string_view text) {
 
 Status DrawText(DisplayState& state, std::string_view text) {
     state.buffer.fill(0);
+    // 中文 16x16 占 2 页，ASCII 5x7 占 1 页；统一从页 1 开始以获得垂直居中。
+    int page = 1;
     int x = 0;
-    int page = 0;
-    for (const char raw : text) {
-        if (raw == '\n' || x + 6 > kWidth) {
+    size_t index = 0;
+    while (index < text.size() && page < kPages) {
+        if (text[index] == '\n') {
+            ++index;
             x = 0;
             ++page;
-            if (page >= kPages) break;
-            if (raw == '\n') continue;
+            continue;
         }
-        const auto glyph = Glyph(static_cast<char>(std::toupper(static_cast<unsigned char>(raw))));
-        for (int column = 0; column < 5 && x + column < kWidth; ++column) {
-            state.buffer[page * kWidth + x + column] = glyph[column];
+        size_t width = 0;
+        const uint32_t cp = DecodeUtf8(text.substr(index), width);
+        const size_t advance = Advance16(cp);
+        if (advance >= 17) {
+            // 中文/全角：16px 字形，占 2 页。
+            if (x + 16 > kWidth) {
+                x = 0;
+                page += 2;
+                if (page >= kPages) break;
+            }
+            DrawCodepoint16(state, x, page, cp);
+            x += advance;
+        } else {
+            // ASCII/半角：统一 16px 高度（Font16Provider），9px advance。
+            if (x + 9 > kWidth) {
+                x = 0;
+                ++page;
+                if (page >= kPages) break;
+            }
+            DrawCodepoint16(state, x, page, cp);
+            x += advance;
         }
-        x += 6;
+        index += width;
     }
-    const esp_err_t error = esp_lcd_panel_draw_bitmap(state.panel, 0, 0, kWidth, kHeight, state.buffer.data());
-    if (error != ESP_OK) {
-        return Status::Error(ErrorCode::kUnavailable, "OLED SSD1306 绘制失败");
-    }
-    ESP_LOGI("VoiceLifeDisplay", "DISPLAY_DRAW=1 text=%.*s", static_cast<int>(text.size()), text.data());
-    return Status::Ok();
+    return Flush(state, text);
 }
 
 }  // namespace
@@ -818,7 +842,6 @@ namespace voicelife::display_esp {
 Status InitializeStatusDisplay() { return Status::Ok(); }
 Status SetStatus(std::string_view) { return Status::Ok(); }
 Status SetEmotion(std::string_view, std::string_view, std::string_view, size_t) { return Status::Ok(); }
-
 }  // namespace voicelife::display_esp
 
 #endif

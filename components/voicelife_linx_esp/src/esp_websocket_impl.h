@@ -29,6 +29,14 @@ constexpr EventBits_t kFailedBit = BIT1;
 
 enum class EventKind : uint8_t { kConnected, kData, kDisconnected, kError, kShutdown };
 
+/** 统一 TX 队列项：文本/音频/barrier，由唯一 LinxTxTask 顺序发送。 */
+struct LinxTxItem {
+    enum class Kind : uint8_t { kText, kAudio, kBarrier };
+    Kind kind = Kind::kText;
+    std::vector<uint8_t> payload;
+    uint64_t generation = 0;
+};
+
 struct EventEnvelope {
     EventKind kind = EventKind::kError;
     uint64_t generation = 0;
@@ -43,14 +51,6 @@ struct EventEnvelope {
     int handshake_status = 0;
     int socket_errno = 0;
     std::array<uint8_t, kMaxEventChunkBytes> data{};
-};
-
-/** 统一 TX 队列项：文本/音频/barrier，由唯一 TxTask 顺序发送。 */
-struct LinxTxItem {
-    enum class Kind : uint8_t { kText, kAudio, kBarrier };
-    Kind kind = Kind::kText;
-    std::vector<uint8_t> payload;
-    uint64_t generation = 0;
 };
 
 }  // namespace detail
@@ -97,7 +97,6 @@ class EspWebSocketTransport::Impl final {
     QueueHandle_t tx_control_queue_ = nullptr;
     bool tx_queue_uses_caps_ = false;
     TaskHandle_t tx_task_ = nullptr;
-
     EventGroupHandle_t state_events_ = nullptr;
     SemaphoreHandle_t worker_stopped_ = nullptr;
     TaskHandle_t worker_ = nullptr;

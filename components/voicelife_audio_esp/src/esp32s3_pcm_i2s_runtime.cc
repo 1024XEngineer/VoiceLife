@@ -304,8 +304,16 @@ void Esp32s3PcmAudioPorts::Impl::OutputLoop() {
             frame = std::move(output_queue_.front());
             output_queue_.pop_front();
         }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            output_writing_ = true;
+        }
         if (WriteFrame(frame).ok()) {
             ++played_frames_;
+        }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            output_writing_ = false;
         }
     }
     MarkTaskDone(&output_task_);

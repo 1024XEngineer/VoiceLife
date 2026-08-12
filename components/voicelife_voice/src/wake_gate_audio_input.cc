@@ -133,6 +133,9 @@ void WakeGateAudioInput::HandleWakeWord(std::string_view wake_word) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (forwarding_ || !detector_running_) return;
+        // MultiNet 命中后其内部一次性停止（running_=false），同步本 Gate 标志，
+        // 否则 StartStandby 会误以为检测器仍在运行而跳过重启。
+        detector_running_ = false;
         sink = wake_sink_;
     }
     if (sink) sink(wake_word);
