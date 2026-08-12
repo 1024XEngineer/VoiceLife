@@ -123,7 +123,8 @@ add_voicelife_library(display_esp voicelife_display_esp
 target_link_libraries(display_esp PUBLIC contracts voice)
 add_voicelife_library(display_sparkbot voicelife_display_sparkbot
     "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_lvgl_display.cc"
-    "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_lvgl_renderer.cc")
+    "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_lvgl_renderer.cc"
+    "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_emoji_assets.cc")
 target_link_libraries(display_sparkbot PUBLIC contracts voice)
 
 enable_testing()
@@ -281,6 +282,10 @@ target_link_libraries(platform_assembly_test PRIVATE display_esp display_sparkbo
 add_voicelife_test(sparkbot_lvgl_renderer_test "unit;display;sparkbot;contract"
     sparkbot_lvgl_renderer_test.cc)
 target_link_libraries(sparkbot_lvgl_renderer_test PRIVATE display_sparkbot)
+
+add_voicelife_test(sparkbot_emoji_assets_test "unit;display;sparkbot;assets;contract"
+    sparkbot_emoji_assets_test.cc)
+target_link_libraries(sparkbot_emoji_assets_test PRIVATE display_sparkbot)
 
 add_voicelife_test(pcm_frame_assembler_contract_test "unit;voice;audio;esp;contract"
     pcm_frame_assembler_contract_test.cc)
