@@ -17,7 +17,7 @@ struct ImHttpHeader {
 struct ImHttpRequest {
     /// 网关路径，例如 "/v1/im/notifications"。
     std::string path;
-    /// HTTP 方法，当前固定为 "POST"。
+    /// HTTP 方法，例如 "GET" 或 "POST"。
     std::string method;
     /// 请求头列表。
     std::vector<ImHttpHeader> headers;
@@ -62,6 +62,12 @@ class ImTransport {
      * @return 传输结果，含分类与状态码。
      */
     virtual ImHttpResponse Post(const ImHttpRequest& request) = 0;
+    /**
+     * @brief 执行一次 HTTPS GET 请求。
+     * @param request 目标路径与请求头；请求体应为空。
+     * @return 传输结果，含分类与状态码。
+     */
+    virtual ImHttpResponse Get(const ImHttpRequest& request) = 0;
 };
 
 }  // namespace voicelife::im

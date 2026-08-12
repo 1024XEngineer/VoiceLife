@@ -44,6 +44,26 @@ class ProfileValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(firmware.ProfileError, "找不到命令 idf.py"):
             firmware.run(["idf.py", "build"])
 
+    def test_im_pcb_profile_accepts_input_from_its_usb_provisioning_port(self) -> None:
+        profile_path = ROOT / "config" / "profiles" / "esp32s3-voicelife-pcb-pcm.json"
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+        self.assertIn("CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_ESP_CONSOLE_SECONDARY_NONE=y", profile["sdkconfig"])
+
+    def test_im_pcb_profile_enables_dhcp_ntp_for_trusted_time(self) -> None:
+        profile_path = ROOT / "config" / "profiles" / "esp32s3-voicelife-pcb-pcm.json"
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+        self.assertIn("CONFIG_LWIP_DHCP_GET_NTP_SRV=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_LWIP_SNTP_MAX_SERVERS=2", profile["sdkconfig"])
+
+    def test_im_pcb_profile_verifies_cross_signed_cloudflare_chain(self) -> None:
+        profile_path = ROOT / "config" / "profiles" / "esp32s3-voicelife-pcb-pcm.json"
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+        self.assertIn("CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y", profile["sdkconfig"])
+
 
 if __name__ == "__main__":
     unittest.main()

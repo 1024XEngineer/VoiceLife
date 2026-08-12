@@ -67,6 +67,7 @@ class FakeTransport : public ImTransport {
         response.body = next_body;
         return response;
     }
+    ImHttpResponse Get(const ImHttpRequest& request) override { return Post(request); }
 };
 
 /// 可控凭据的假凭据提供者。
