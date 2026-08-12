@@ -1,15 +1,15 @@
 import type { ImGatewayApplication } from '../application/api.js';
 import { DefaultBindingApplication } from '../application/binding-application.js';
 import { DefaultChannelAccountApplication } from '../application/channel-account-application.js';
+import { DefaultInboundEventApplication } from '../application/inbound-event-application.js';
 import { DefaultPairingApplication } from '../application/pairing-application.js';
+import { DefaultPlatformEventApplication } from '../application/platform-event-application.js';
 import {
     DefaultActionApplication,
     DefaultActionUiApplication,
     DefaultDeliveryApplication,
     DefaultDeliveryDispatchApplication,
-    DefaultInboundEventApplication,
     DefaultNotificationApplication,
-    DefaultPlatformEventApplication,
     DefaultReceiptApplication,
 } from '../application/services.js';
 import type { DeviceId } from '../contracts/ids.js';

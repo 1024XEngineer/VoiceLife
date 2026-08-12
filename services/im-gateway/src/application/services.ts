@@ -8,7 +8,7 @@ import {
     type ReminderActionResult,
     type ScheduleReceiptIntent,
 } from '../contracts/device-gateway.js';
-import type { NormalizedDeliveryReceipt, NormalizedImEvent } from '../contracts/platform-events.js';
+import type { NormalizedDeliveryReceipt } from '../contracts/platform-events.js';
 import type {
     ActionStatus,
     ConversationRef,
@@ -40,10 +40,7 @@ import type {
     DeliveryApplication,
     DeliveryDetails,
     DeliveryDispatchApplication,
-    InboundEventApplication,
     NotificationApplication,
-    PairingApplication,
-    PlatformEventApplication,
     ReceiptApplication,
     TriggerPreparedActionCommand,
 } from './api.js';
@@ -54,156 +51,6 @@ const MAX_DELIVERY_RETRY_DELAY_MINUTES = 30;
 
 /** 派发领取租约时长；sending claim 超过该时长未续期即视为崩溃，允许其他 worker 重领。 */
 const DISPATCH_CLAIM_LEASE_SECONDS = 60;
-
-/** 规范化入站事件幂等落库与状态推进的默认实现。 */
-export class DefaultInboundEventApplication implements InboundEventApplication {
-    /**
-     * 创建入站事件应用服务。
-     * @param unitOfWork 事务工作单元。
-     * @param clock 业务时钟。
-     */
-    public constructor(
-        private readonly unitOfWork: ImUnitOfWork,
-        private readonly clock: Clock,
-    ) {}
-
-    /** {@inheritDoc InboundEventApplication.recordIfNew} */
-    public recordIfNew(event: NormalizedImEvent): Promise<'accepted' | 'duplicate'> {
-        return this.unitOfWork.transaction(async (tx) => {
-            const duplicate = await tx.inboundEvents.findByExternalEvent(event.channelAccountId, event.externalEventId);
-            if (duplicate !== undefined) {
-                if (duplicate.status !== 'failed') return 'duplicate';
-                await tx.inboundEvents.save({
-                    ...duplicate,
-                    id: event.id,
-                    payload: persistedInboundPayload(event),
-                    status: 'received',
-                    occurredAt: event.occurredAt,
-                    receivedAt: this.clock.now(),
-                });
-                return 'accepted';
-            }
-            await tx.inboundEvents.save({
-                id: event.id,
-                channelAccountId: event.channelAccountId,
-                externalEventId: event.externalEventId,
-                eventType: toInboundEventType(event.type),
-                payload: persistedInboundPayload(event),
-                status: 'received',
-                occurredAt: event.occurredAt,
-                receivedAt: this.clock.now(),
-            });
-            return 'accepted';
-        });
-    }
-
-    /** {@inheritDoc InboundEventApplication.markProcessing} */
-    public markProcessing(eventId: NormalizedImEvent['id']): Promise<void> {
-        return this.updateStatus(eventId, 'processing');
-    }
-
-    /** {@inheritDoc InboundEventApplication.markProcessed} */
-    public markProcessed(eventId: NormalizedImEvent['id']): Promise<void> {
-        return this.updateStatus(eventId, 'processed');
-    }
-
-    /** {@inheritDoc InboundEventApplication.markFailed} */
-    public markFailed(eventId: NormalizedImEvent['id']): Promise<void> {
-        return this.updateStatus(eventId, 'failed');
-    }
-
-    private updateStatus(
-        eventId: NormalizedImEvent['id'],
-        status: 'processing' | 'processed' | 'failed',
-    ): Promise<void> {
-        return this.unitOfWork.transaction(async (tx) => {
-            const event = await tx.inboundEvents.findById(eventId);
-            if (event === undefined) {
-                throw new ImGatewayError('invalid_transition', 'Inbound event was not found');
-            }
-            await tx.inboundEvents.save({ ...event, status });
-        });
-    }
-}
-
-function persistedInboundPayload(event: NormalizedImEvent): JsonValue {
-    if (event.type === 'binding.requested') return { kind: 'binding_requested' };
-    if (event.type === 'message.received') {
-        const payload = event.payload;
-        if (typeof payload !== 'object' || payload === null || Array.isArray(payload))
-            return { kind: 'message_received' };
-        const value = payload as Record<string, JsonValue>;
-        return {
-            kind: 'message_received',
-            ...(typeof value.messageType === 'string' ? { messageType: value.messageType } : {}),
-            ...(typeof value.event === 'string' ? { event: value.event } : {}),
-        };
-    }
-    return event.payload as JsonValue;
-}
-
-/** 将平台事件路由至绑定、回执或动作流程的默认实现。 */
-export class DefaultPlatformEventApplication implements PlatformEventApplication {
-    /**
-     * 创建平台事件路由服务。
-     * @param inboundEvents 入站事件状态服务。
-     * @param pairing 配对服务。
-     * @param receipts 回执服务。
-     * @param actionUi 动作入口服务。
-     */
-    public constructor(
-        private readonly inboundEvents: InboundEventApplication,
-        private readonly pairing: PairingApplication,
-        private readonly receipts: ReceiptApplication,
-        private readonly actionUi: ActionUiApplication,
-    ) {}
-
-    /** {@inheritDoc PlatformEventApplication.postEvent} */
-    public async postEvent(event: NormalizedImEvent): Promise<void | ReminderActionCommand> {
-        if ((await this.inboundEvents.recordIfNew(event)) === 'duplicate') return;
-        await this.inboundEvents.markProcessing(event.id);
-        try {
-            const result = await this.dispatch(event);
-            await this.inboundEvents.markProcessed(event.id);
-            return result;
-        } catch (error) {
-            await this.inboundEvents.markFailed(event.id);
-            throw error;
-        }
-    }
-
-    /**
-     * 分发一个已经完成平台归一化的入站事件。
-     * @param event 规范化入站事件。
-     * @returns 动作事件对应的设备命令；其他事件不返回值。
-     */
-    private async dispatch(event: NormalizedImEvent): Promise<void | ReminderActionCommand> {
-        if (event.type === 'action.triggered') {
-            return this.actionUi.execute(
-                event.payload,
-                event.externalIdentityId === undefined ? undefined : { actualIdentityId: event.externalIdentityId },
-            );
-        }
-
-        if (event.type === 'binding.requested') {
-            await this.pairing.confirm({
-                ...event.payload,
-                channelAccountId: event.channelAccountId,
-            });
-            return;
-        }
-
-        if (event.type === 'delivery.updated') {
-            if (event.payload.channelAccountId !== event.channelAccountId) {
-                throw new ImGatewayError(
-                    'invalid_transition',
-                    'Receipt channel does not match its normalized event envelope',
-                );
-            }
-            await this.receipts.record(event.payload);
-        }
-    }
-}
 
 /** 将设备通知意图转换为幂等投递记录的默认实现。 */
 export class DefaultNotificationApplication implements NotificationApplication {
@@ -1236,15 +1083,6 @@ function toCommand(action: ImAction): ReminderActionCommand {
         occurredAt: action.createdAt,
         expiresAt: action.expiresAt,
     };
-}
-
-/**
- * 将 InboundEventType 转换为归一化的入站事件类型。
- * @param type 要转换的类型。
- * @returns 归一化的入站事件类型。
- */
-function toInboundEventType(type: NormalizedImEvent['type']): NormalizedImEvent['type'] {
-    return type;
 }
 
 /**
