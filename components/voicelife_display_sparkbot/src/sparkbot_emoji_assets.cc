@@ -56,6 +56,31 @@ bool IsControlledAssetId(std::string_view asset_id) {
     return std::find(kControlledAssetIds.begin(), kControlledAssetIds.end(), asset_id) != kControlledAssetIds.end();
 }
 
+std::string_view AssetFilenameForId(std::string_view asset_id) {
+    if (!IsControlledAssetId(asset_id)) {
+        return {};
+    }
+    // manifest 的 file 字段为固定的单段文件名；不由 Runtime 或调用方传入。
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 10> kAssetFiles = {
+        std::pair{"boot", "boot.gif"},
+        std::pair{"connecting", "connecting.gif"},
+        std::pair{"error", "error.gif"},
+        std::pair{"happy", "happy.gif"},
+        std::pair{"idle", "idle.gif"},
+        std::pair{"listening", "listening.gif"},
+        std::pair{"provisioning", "provisioning.gif"},
+        std::pair{"sleepy", "sleepy.gif"},
+        std::pair{"speaking", "speaking.gif"},
+        std::pair{"thinking", "thinking.gif"},
+    };
+    for (const auto& [id, filename] : kAssetFiles) {
+        if (id == asset_id) {
+            return filename;
+        }
+    }
+    return {};
+}
+
 SparkBotEmojiAssets::~SparkBotEmojiAssets() {
 #ifdef ESP_PLATFORM
     if (mmap_handle_ != nullptr) {
@@ -98,7 +123,7 @@ voicelife::Status SparkBotEmojiAssets::Initialize() {
     mmap_root_ = mmap_root;
     mmap_handle_ = reinterpret_cast<void*>(static_cast<uintptr_t>(mmap_handle));
     initialized_ = true;
-    (void)stored_files;
+    ESP_LOGI(kTag, "SPARKBOT_ASSETS_MMAP_OK=1 files=%u", static_cast<unsigned>(stored_files));
     return voicelife::Status::Ok();
 #else
     (void)0;
@@ -118,18 +143,28 @@ voicelife::Result<GifAssetView> SparkBotEmojiAssets::Load(std::string_view asset
     const auto* root = static_cast<const uint8_t*>(mmap_root_);
     const uint32_t stored_files = *reinterpret_cast<const uint32_t*>(root + 0);
     const auto* table = reinterpret_cast<const MmappedAssetEntry*>(root + kHeaderBytes);
+    const std::string_view filename = AssetFilenameForId(asset_id);
     for (uint32_t i = 0; i < stored_files; ++i) {
         const MmappedAssetEntry& item = table[i];
-        if (std::string_view(item.name, strnlen(item.name, sizeof(item.name))) != asset_id) {
+        if (std::string_view(item.name, strnlen(item.name, sizeof(item.name))) != filename) {
             continue;
         }
+        // 边界校验：表 + 偏移 + ZZ(2) + 资源大小必须落在分区数据区内。
+        const uint32_t stored_len = *reinterpret_cast<const uint32_t*>(root + 8);
+        const std::size_t data_region = kHeaderBytes + stored_len;
         const std::size_t offset = kHeaderBytes + sizeof(MmappedAssetEntry) * stored_files + item.offset;
+        if (offset + 2 + item.size > data_region || offset + 2 < kHeaderBytes) {
+            return voicelife::Result<GifAssetView>::Failure(voicelife::ErrorCode::kInternal,
+                                                            "资源超出 assets 分区边界");
+        }
         const auto* data = static_cast<const char*>(mmap_root_) + offset;
         if (data[0] != 'Z' || data[1] != 'Z') {
             return voicelife::Result<GifAssetView>::Failure(voicelife::ErrorCode::kInternal, "资源缺少 ZZ magic");
         }
+        ESP_LOGI(kTag, "SPARKBOT_GIF_LOADED asset=%.*s", static_cast<int>(filename.size()), filename.data());
         return voicelife::Result<GifAssetView>::Success(GifAssetView{.data = data + 2, .size = item.size});
     }
+    ESP_LOGW(kTag, "SPARKBOT_GIF_LOAD_FAILED asset=%.*s", static_cast<int>(filename.size()), filename.data());
     return voicelife::Result<GifAssetView>::Failure(voicelife::ErrorCode::kNotFound, "资源不在 assets 分区中");
 #else
     (void)asset_id;

@@ -17,6 +17,16 @@ namespace voicelife::display_sparkbot {
  */
 [[nodiscard]] bool IsControlledAssetId(std::string_view asset_id);
 
+/**
+ * @brief 将受控逻辑 asset_id 映射为 assets 分区中的固定 GIF 文件名。
+ *
+ * 该映射只属于 SparkBot assets adapter；调用方始终只能传递逻辑 asset_id，
+ * 不会获得任意路径加载能力。未知标识返回空字符串。
+ * @param asset_id 受控逻辑资源标识。
+ * @return assets 分区内的固定 GIF 文件名；未知标识返回空串。
+ */
+[[nodiscard]] std::string_view AssetFilenameForId(std::string_view asset_id);
+
 /** @brief 从 assets 分区加载的 GIF 资源视图（mmap 只读，不持有所有权）。 */
 struct GifAssetView {
     /** @brief GIF 数据指针（已跳过 "ZZ" magic）。 */

@@ -16,6 +16,13 @@ namespace voicelife::display_sparkbot {
 class LvglGif {
    public:
     explicit LvglGif(const lv_img_dsc_t* img_dsc);
+
+    /**
+     * @brief 按资源视图构造（GIF 数据 + 大小，所有权仍归调用方）。
+     * @param data GIF 字节流（assets mmap 只读视图）。
+     * @param size 字节数。
+     */
+    LvglGif(const uint8_t* data, std::size_t size);
     virtual ~LvglGif();
 
     // LvglImage interface implementation

@@ -9,6 +9,9 @@
 namespace voicelife::display_sparkbot {
 
 LvglGif::LvglGif(const lv_img_dsc_t* img_dsc)
+    : LvglGif(img_dsc ? img_dsc->data : nullptr, img_dsc ? img_dsc->data_size : 0) {}
+
+LvglGif::LvglGif(const uint8_t* data, std::size_t size)
     : gif_(nullptr),
       timer_(nullptr),
       last_call_(0),
@@ -17,12 +20,12 @@ LvglGif::LvglGif(const lv_img_dsc_t* img_dsc)
       loop_delay_ms_(0),
       loop_waiting_(false),
       loop_wait_start_(0) {
-    if (!img_dsc || !img_dsc->data) {
-        ESP_LOGE(TAG, "Invalid image descriptor");
+    if (!data || size == 0) {
+        ESP_LOGE(TAG, "Invalid GIF data view");
         return;
     }
 
-    gif_ = gd_open_gif_data(img_dsc->data);
+    gif_ = gd_open_gif_data_sized(data, size);
     if (!gif_) {
         ESP_LOGE(TAG, "Failed to open GIF from image descriptor");
         return;

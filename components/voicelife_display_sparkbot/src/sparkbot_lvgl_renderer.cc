@@ -83,6 +83,15 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_obj_set_style_text_color(screen, kTextColor, 0);
     lv_obj_set_style_bg_color(screen, kBackgroundColor, 0);
 
+    // 官方简单模式的完整 240x240 dark 背景容器。
+    auto* container = lv_obj_create(screen);
+    lv_obj_set_size(container, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_radius(container, 0, 0);
+    lv_obj_set_style_pad_all(container, 0, 0);
+    lv_obj_set_style_border_width(container, 0, 0);
+    lv_obj_set_style_bg_color(container, kBackgroundColor, 0);
+    container_ = container;
+
     // 中央 emoji 舞台：固定 96x96，y=60..156。
     auto* emoji_box = lv_obj_create(screen);
     lv_obj_set_size(emoji_box, 96, 96);
@@ -104,6 +113,58 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_obj_center(emoji_image);
     lv_obj_add_flag(emoji_image, LV_OBJ_FLAG_HIDDEN);
     emoji_image_ = emoji_image;
+
+    // 官方 top_bar：左网络图标，右侧音量、电池和能力图标。
+    auto* top_bar = lv_obj_create(screen);
+    lv_obj_set_size(top_bar, LV_HOR_RES, 24);
+    lv_obj_set_style_radius(top_bar, 0, 0);
+    lv_obj_set_style_bg_opa(top_bar, LV_OPA_50, 0);
+    lv_obj_set_style_bg_color(top_bar, kBackgroundColor, 0);
+    lv_obj_set_style_border_width(top_bar, 0, 0);
+    lv_obj_set_style_pad_all(top_bar, 0, 0);
+    lv_obj_set_style_pad_top(top_bar, 2, 0);
+    lv_obj_set_style_pad_bottom(top_bar, 2, 0);
+    lv_obj_set_style_pad_left(top_bar, 4, 0);
+    lv_obj_set_style_pad_right(top_bar, 4, 0);
+    lv_obj_set_flex_flow(top_bar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(top_bar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_scrollbar_mode(top_bar, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_align(top_bar, LV_ALIGN_TOP_MID, 0, 0);
+    top_bar_ = top_bar;
+
+    auto* network_label = lv_label_create(top_bar);
+    lv_label_set_text(network_label, MATERIAL_SYMBOLS_WIFI);
+    lv_obj_set_style_text_font(network_label, &font_material_symbols_14_1, 0);
+    lv_obj_set_style_text_color(network_label, kTextColor, 0);
+    network_label_ = network_label;
+
+    auto* right_icons = lv_obj_create(top_bar);
+    lv_obj_set_size(right_icons, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(right_icons, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(right_icons, 0, 0);
+    lv_obj_set_style_pad_all(right_icons, 0, 0);
+    lv_obj_set_flex_flow(right_icons, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(right_icons, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    auto* mute_label = lv_label_create(right_icons);
+    lv_label_set_text(mute_label, MATERIAL_SYMBOLS_VOLUME_UP);
+    lv_obj_set_style_text_font(mute_label, &font_material_symbols_14_1, 0);
+    lv_obj_set_style_text_color(mute_label, kTextColor, 0);
+    mute_label_ = mute_label;
+
+    auto* battery_label = lv_label_create(right_icons);
+    lv_label_set_text(battery_label, MATERIAL_SYMBOLS_BATTERY_ANDROID_FRAME_FULL);
+    lv_obj_set_style_text_font(battery_label, &font_material_symbols_14_1, 0);
+    lv_obj_set_style_text_color(battery_label, kTextColor, 0);
+    lv_obj_set_style_margin_left(battery_label, 2, 0);
+    battery_label_ = battery_label;
+
+    auto* capability_label = lv_label_create(right_icons);
+    lv_label_set_text(capability_label, MATERIAL_SYMBOLS_MIC "  " MATERIAL_SYMBOLS_PHOTO_CAMERA);
+    lv_obj_set_style_text_font(capability_label, &font_material_symbols_14_1, 0);
+    lv_obj_set_style_text_color(capability_label, lv_color_hex(0x6DD8E8), 0);
+    lv_obj_set_style_margin_left(capability_label, 2, 0);
+    capability_label_ = capability_label;
 
     // 状态栏：192x28 @ TOP_MID y=24，官方状态标签（居中、CLIP 滚动）。
     auto* status_bar = lv_obj_create(screen);
@@ -176,23 +237,22 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
     // 文本，避免状态文本刷新反复重建并重启动画。
     const std::string_view emotion = EmotionKeyForMood(snapshot.mood);
     const bool emotion_changed = emotion != current_emotion_;
-    if (emotion_changed) {
-        current_emotion_ = std::string(emotion);
-    }
     bool using_gif = false;
+    if (emotion_changed && gif_controller_ != nullptr) {
+        // 和官方 SetEmotion 一样，在切换 source 的同一 LVGL 锁上下文中停掉
+        // 并释放旧解码器，避免定时器继续访问已经替换的 image 数据。
+        ESP_LOGI(kTag, "SPARKBOT_GIF_REPLACED old=%s new=%.*s", current_emotion_.c_str(),
+                 static_cast<int>(emotion.size()), emotion.data());
+        auto* old_gif = static_cast<LvglGif*>(gif_controller_);
+        old_gif->Stop();
+        delete old_gif;
+        gif_controller_ = nullptr;
+    }
     if (emotion_changed && emoji_assets_ != nullptr && assets_ready_) {
         const auto asset = emoji_assets_->Load(emotion);
         if (asset.ok() && asset.value.has_value() && asset.value->data != nullptr && asset.value->size > 0) {
-            // 停止并释放上一帧 GIF（与官方 SetEmotion 同一锁语义）。
-            if (gif_controller_ != nullptr) {
-                auto* old_gif = static_cast<LvglGif*>(gif_controller_);
-                old_gif->Stop();
-                delete old_gif;
-                gif_controller_ = nullptr;
-            }
-            lv_img_dsc_t img_dsc{};
-            img_dsc.data = static_cast<const uint8_t*>(asset.value->data);
-            auto* gif = new LvglGif(&img_dsc);
+            // 资源视图显式传给 LvglGif（数据所有权仍属 assets mmap）。
+            auto* gif = new LvglGif(static_cast<const uint8_t*>(asset.value->data), asset.value->size);
             if (gif->IsLoaded()) {
                 gif->SetFrameCallback(
                     [this, gif]() { lv_image_set_src(static_cast<lv_obj_t*>(emoji_image_), gif->image_dsc()); });
@@ -203,8 +263,10 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
                 lv_obj_remove_flag(static_cast<lv_obj_t*>(emoji_image_), LV_OBJ_FLAG_HIDDEN);
                 gif_controller_ = gif;
                 using_gif = true;
+                ESP_LOGI(kTag, "SPARKBOT_GIF_STARTED asset=%.*s", static_cast<int>(emotion.size()), emotion.data());
             } else {
                 delete gif;
+                ESP_LOGW(kTag, "SPARKBOT_GIF_LOAD_FAILED asset=%.*s", static_cast<int>(emotion.size()), emotion.data());
             }
         }
     }
@@ -224,6 +286,9 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
             lv_obj_add_flag(emoji_image, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(emoji_label, LV_OBJ_FLAG_HIDDEN);
         }
+    }
+    if (emotion_changed) {
+        current_emotion_ = std::string(emotion);
     }
 
     // 官方状态栏：显示快照 status_text。
