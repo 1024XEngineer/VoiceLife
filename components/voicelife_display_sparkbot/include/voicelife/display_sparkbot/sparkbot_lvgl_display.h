@@ -6,6 +6,16 @@
 
 namespace voicelife::display_sparkbot {
 
+/**
+ * @brief 校验逻辑 SPI 控制器序号（1/2/3，对应 SPI1/2/3_HOST）。
+ *
+ * 板级 Profile 只保存逻辑序号；映射到 ESP-IDF 的 SPI_HOST 符号在显示
+ * Adapter 内完成，禁止跨 SDK 版本硬编码枚举整数值。
+ * @param logical_spi 逻辑 SPI 序号。
+ * @return 序号合法返回 true。
+ */
+[[nodiscard]] bool IsValidLogicalSpiHost(int logical_spi);
+
 /** @brief ST7789/LVGL 初始化所需板级参数（调用方从 SparkBotProfile 提供）。 */
 struct SparkBotLcdConfig {
     /** @brief SPI 控制器编号（官方 SPI3_HOST）。 */

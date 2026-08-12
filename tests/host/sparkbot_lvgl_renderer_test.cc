@@ -1,6 +1,7 @@
 #include "voicelife/display_sparkbot/sparkbot_lvgl_renderer.h"
 
 #include "support/test_support.h"
+#include "voicelife/display_sparkbot/sparkbot_lvgl_display.h"
 #include "voicelife/voice/display_snapshot.h"
 
 using voicelife::ErrorCode;
@@ -10,6 +11,7 @@ using voicelife::voice::VoiceMood;
 
 int main() {
     using voicelife::display_sparkbot::EmotionKeyForMood;
+    using voicelife::display_sparkbot::IsValidLogicalSpiHost;
     using voicelife::display_sparkbot::SparkBotLvglRenderer;
 
     // 官方 emotion key 映射：全部落在官方/受控资源 key 集合内。
@@ -36,6 +38,11 @@ int main() {
     Check(
         EmotionKeyForMood(VoiceMood::kSpeaking) == "speaking" && EmotionKeyForMood(VoiceMood::kThinking) == "thinking",
         "speaking/thinking 必须直映官方同名表情");
+
+    // SPI 逻辑序号：1/2/3 合法（映射到 SDK 的 SPI1/2/3_HOST 符号在 Adapter
+    // 内完成，禁止跨 SDK 版本硬编码枚举整数值，防裸值回归）。
+    Check(IsValidLogicalSpiHost(1) && IsValidLogicalSpiHost(2) && IsValidLogicalSpiHost(3), "逻辑 SPI 1/2/3 必须合法");
+    Check(!IsValidLogicalSpiHost(0) && !IsValidLogicalSpiHost(4), "越界 SPI 序号必须拒绝");
 
     // host 构建不触碰 LVGL：SetupUI/Render 必须返回 kUnavailable。
     SparkBotLvglRenderer renderer;

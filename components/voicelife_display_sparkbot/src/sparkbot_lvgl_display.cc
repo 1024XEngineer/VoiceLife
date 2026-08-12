@@ -2,6 +2,8 @@
 
 #include <vector>
 
+#include "voicelife/display_sparkbot/sparkbot_lvgl_display.h"
+
 #ifdef ESP_PLATFORM
 #include <driver/gpio.h>
 #include <driver/spi_common.h>
@@ -17,9 +19,24 @@
 
 namespace voicelife::display_sparkbot {
 
+bool IsValidLogicalSpiHost(int logical_spi) { return logical_spi >= 1 && logical_spi <= 3; }
+
 namespace {
 #ifdef ESP_PLATFORM
 constexpr const char* kTag = "sparkbot_lvgl";
+
+/** @brief 逻辑 SPI 序号 -> ESP-IDF SPI_HOST 符号（跨 SDK 版本）。 */
+spi_host_device_t MapSpiHost(int logical_spi) {
+    switch (logical_spi) {
+        case 1:
+            return SPI1_HOST;
+        case 2:
+            return SPI2_HOST;
+        case 3:
+        default:
+            return SPI3_HOST;  // SparkBot 固定逻辑 SPI3。
+    }
+}
 
 /** @brief esp_err_t 转 Status。 */
 voicelife::Status EspStatus(esp_err_t err, const char* what) {
@@ -50,7 +67,7 @@ voicelife::Status SparkBotLvglDisplay::Initialize() {
     buscfg.quadwp_io_num = GPIO_NUM_NC;
     buscfg.quadhd_io_num = GPIO_NUM_NC;
     buscfg.max_transfer_sz = config_.width * config_.height * sizeof(uint16_t);
-    auto err = spi_bus_initialize(static_cast<spi_host_device_t>(config_.spi_host), &buscfg, SPI_DMA_CH_AUTO);
+    auto err = spi_bus_initialize(MapSpiHost(config_.spi_host), &buscfg, SPI_DMA_CH_AUTO);
     if (err != ESP_OK) {
         return EspStatus(err, "spi_bus_initialize");
     }
@@ -65,7 +82,7 @@ voicelife::Status SparkBotLvglDisplay::Initialize() {
     io_config.trans_queue_depth = 10;
     io_config.lcd_cmd_bits = 8;
     io_config.lcd_param_bits = 8;
-    err = esp_lcd_new_panel_io_spi(static_cast<spi_host_device_t>(config_.spi_host), &io_config, &panel_io);
+    err = esp_lcd_new_panel_io_spi(MapSpiHost(config_.spi_host), &io_config, &panel_io);
     if (err != ESP_OK) {
         return EspStatus(err, "esp_lcd_new_panel_io_spi");
     }
