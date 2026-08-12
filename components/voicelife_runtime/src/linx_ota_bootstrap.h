@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 
 #include "voicelife/contracts/status.h"
 #include "voicelife/linx/linx_types.h"
@@ -21,6 +22,6 @@ const char* LinxSecretPartitionLabel();
  * @brief 在已连接的 ESP STA 上拉取 Linx OTA 配置并受控写入 NVS。
  * @return 可用于创建 WSS Transport 的配置，或网络、激活、协议和安全存储错误。
  */
-Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig();
+Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig(std::string_view board_identity);
 
 }  // namespace voicelife::runtime

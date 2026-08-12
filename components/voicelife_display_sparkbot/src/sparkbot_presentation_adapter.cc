@@ -40,6 +40,14 @@ bool ShouldDropDisplaySnapshot(uint64_t generation, uint64_t revision, uint64_t 
     return generation < last_generation || (generation == last_generation && revision <= last_revision);
 }
 
+namespace {
+#ifdef ESP_PLATFORM
+constexpr const char* kTag = "sparkbot_adapter";
+constexpr uint32_t kDisplayTaskStackWords = 4096;
+constexpr uint32_t kDisplayTaskPriority = 1;
+#endif
+}  // namespace
+
 SparkBotPresentationAdapter::SparkBotPresentationAdapter(const SparkBotLcdConfig& config, BacklightCallback backlight)
     : display_(config), queue_(kQueueCapacity), backlight_cb_(std::move(backlight)) {
     // 显示链路声明硬件能力，但 available 只在显示启动成功后置真；
