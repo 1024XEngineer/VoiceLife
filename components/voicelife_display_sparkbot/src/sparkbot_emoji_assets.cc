@@ -114,6 +114,22 @@ voicelife::Status SparkBotEmojiAssets::Initialize() {
         esp_partition_munmap(mmap_handle);
         return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "assets 分区数据长度非法");
     }
+    // 文件表边界：表字节数必须落在 stored_len 内，文件数不超过受控集合数量。
+    constexpr std::size_t kMaxControlledFiles = 10;
+    const std::size_t table_bytes = static_cast<std::size_t>(stored_files) * sizeof(MmappedAssetEntry);
+    if (stored_files > kMaxControlledFiles || table_bytes > stored_len) {
+        esp_partition_munmap(mmap_handle);
+        return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "assets 分区文件表越界");
+    }
+    // 逐项校验：偏移 + ZZ(2) + 大小 不溢出数据区。
+    const auto* table = reinterpret_cast<const MmappedAssetEntry*>(root + kHeaderBytes);
+    for (uint32_t i = 0; i < stored_files; ++i) {
+        const std::size_t entry_offset = kHeaderBytes + sizeof(MmappedAssetEntry) * stored_files + table[i].offset;
+        if (entry_offset + 2 + table[i].size > kHeaderBytes + stored_len || entry_offset + 2 < kHeaderBytes) {
+            esp_partition_munmap(mmap_handle);
+            return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "assets 分区表项越界");
+        }
+    }
     const uint16_t calculated_checksum = CalculateChecksum(root + kHeaderBytes, stored_len);
     if (calculated_checksum != static_cast<uint16_t>(stored_checksum)) {
         esp_partition_munmap(mmap_handle);

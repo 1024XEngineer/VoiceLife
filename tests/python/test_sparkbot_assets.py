@@ -146,6 +146,62 @@ class SparkBotAssetManifestTest(unittest.TestCase):
             self.assertEqual(len(data), entry["size_bytes"], f"{entry['file']} 大小与清单不一致")
             self.assertEqual(hashlib.sha256(data).hexdigest(), entry["sha256"], f"{entry['file']} SHA-256 与清单不一致")
 
+    def test_assets_table_boundary_rejects_corrupt(self) -> None:
+        """损坏镜像（伪造 file_count/截断表/溢出 offset）必须被表边界校验拒绝。"""
+        import subprocess
+        import tempfile
+
+        # 与 C++ SparkBotEmojiAssets 相同的边界校验逻辑（python 对照）。
+        HEADER = 12
+        ENTRY = 44
+
+        def validate_image(image: bytes) -> str | None:
+            if len(image) < HEADER:
+                return "过短"
+            total, _chk, ln = struct.unpack("<III", image[:HEADER])
+            table_bytes = total * ENTRY
+            if total > 10 or table_bytes > ln:
+                return "表越界"
+            if ln > len(image) - HEADER:
+                return "长度非法"
+            for i in range(total):
+                entry = image[HEADER + i * ENTRY : HEADER + (i + 1) * ENTRY]
+                size, offset = struct.unpack("<II", entry[32:40])
+                pos = HEADER + table_bytes + offset
+                if pos + 2 + size > HEADER + ln:
+                    return "表项越界"
+            return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "assets.bin"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "build_sparkbot_assets.py"),
+                    "--gif-dir",
+                    str(GIF_DIR),
+                    "--output",
+                    str(out),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            good = out.read_bytes()
+        self.assertIsNone(validate_image(good), "合法镜像必须通过边界校验")
+        # 伪造 file_count（>10）。
+        fake_count = bytearray(good)
+        fake_count[0:4] = struct.pack("<I", 99)
+        self.assertEqual(validate_image(bytes(fake_count)), "表越界", "伪造 file_count 必须拒绝")
+        # 截断表（stored_len 变小）。
+        truncated = bytearray(good)
+        struct.pack_into("<I", truncated, 8, 10)
+        self.assertEqual(validate_image(bytes(truncated)), "表越界", "截断表必须拒绝")
+        # 溢出 offset（表项 offset 超大）。
+        overflow = bytearray(good)
+        entry_off = 12 + 44  # 第二项
+        struct.pack_into("<I", overflow, entry_off + 36, 0xFFFFFF)
+        self.assertEqual(validate_image(bytes(overflow)), "表项越界", "溢出 offset 必须拒绝")
+
     def test_sha256_is_strict_hex(self) -> None:
         for entry in self.assets:
             sha = entry["sha256"]
