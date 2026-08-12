@@ -28,7 +28,7 @@ Result<linx::LinxOtaDeviceInfo> ReadOtaDeviceInfo() {
     if (const esp_err_t error = esp_wifi_sta_get_ap_info(&access_point); error != ESP_OK) {
         return Result<linx::LinxOtaDeviceInfo>::Failure(ErrorCode::kUnavailable, "Linx OTA 需要已连接的 Wi-Fi STA");
     }
-    auto client_id = LoadOrCreateClientId();
+    auto client_id = LoadOrCreateLinxClientId();
     if (!client_id.ok() || !client_id.value.has_value()) {
         return Result<linx::LinxOtaDeviceInfo>::Failure(client_id.status.code, client_id.status.message);
     }
@@ -38,7 +38,7 @@ Result<linx::LinxOtaDeviceInfo> ReadOtaDeviceInfo() {
                                                         EspError("读取 Flash 容量", error).message);
     }
     const esp_app_desc_t* application = esp_app_get_description();
-    const std::string device_id = DeviceId();
+    const std::string device_id = ReadLinxOtaDeviceId();
     const std::string partitions = PartitionTableJson();
     if (application == nullptr || device_id.empty() || partitions == "[]") {
         return Result<linx::LinxOtaDeviceInfo>::Failure(ErrorCode::kUnavailable, "Linx OTA 设备信息不可用");
@@ -55,7 +55,7 @@ Result<linx::LinxOtaDeviceInfo> ReadOtaDeviceInfo() {
         .user_agent = std::string(kBoardName) + '/' + application->version,
         .application_name = kBoardName,
         .application_version = application->version,
-        .application_elf_sha256 = HexDigest(application->app_elf_sha256, sizeof(application->app_elf_sha256)),
+        .application_elf_sha256 = EncodeLinxOtaHexDigest(application->app_elf_sha256, sizeof(application->app_elf_sha256)),
         .chip_model_name = "esp32s3",
         .flash_size_bytes = flash_size,
         .psram_size_bytes = psram_size,

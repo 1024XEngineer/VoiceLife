@@ -30,6 +30,7 @@
 #include "esp_wifi.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "linx_ota_device_identity.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "voicelife/linx/linx_ota.h"
@@ -41,7 +42,6 @@ constexpr char kLinxNamespace[] = "linx";
 constexpr char kSecretPartition[] = "linx_secrets";
 constexpr char kTokenKey[] = "token";
 constexpr char kTokenReference[] = "nvs://linx/token";
-constexpr char kClientIdKey[] = "client_id";
 constexpr char kBoardName[] = "voicelife-pcb";
 constexpr char kWifiNamespace[] = "wifi";
 constexpr char kWifiSsidKey[] = "ssid";
@@ -312,62 +312,6 @@ Result<std::string> ReadNvsString(nvs_handle_t handle, const char* key) {
     }
     value.resize(size - 1);
     return Result<std::string>::Success(std::move(value));
-}
-
-std::string NewUuidV4() {
-    std::array<uint8_t, 16> bytes{};
-    for (size_t index = 0; index < bytes.size(); index += sizeof(uint32_t)) {
-        const uint32_t random = esp_random();
-        const size_t count = std::min(sizeof(random), bytes.size() - index);
-        std::memcpy(bytes.data() + index, &random, count);
-    }
-    bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0fU) | 0x40U);
-    bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3fU) | 0x80U);
-    char result[37]{};
-    std::snprintf(result, sizeof(result), "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                  bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9],
-                  bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]);
-    return result;
-}
-
-Result<std::string> LoadOrCreateClientId() {
-    nvs_handle_t handle = 0;
-    if (const esp_err_t error = OpenSecretNamespace(kLinxNamespace, NVS_READWRITE, &handle); error != ESP_OK) {
-        return Result<std::string>::Failure(ErrorCode::kUnavailable, "打开 Linx NVS 失败");
-    }
-    auto existing = ReadNvsString(handle, kClientIdKey);
-    if (existing.ok() && existing.value.has_value()) {
-        nvs_close(handle);
-        return existing;
-    }
-    const std::string client_id = NewUuidV4();
-    const esp_err_t write_status = nvs_set_str(handle, kClientIdKey, client_id.c_str());
-    const esp_err_t commit_status = write_status == ESP_OK ? nvs_commit(handle) : write_status;
-    nvs_close(handle);
-    if (commit_status != ESP_OK) {
-        return Result<std::string>::Failure(ErrorCode::kUnavailable, "保存 Linx Client-Id 失败");
-    }
-    return Result<std::string>::Success(client_id);
-}
-
-std::string DeviceId() {
-    uint8_t mac[6]{};
-    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) return {};
-    char value[18]{};
-    std::snprintf(value, sizeof(value), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4],
-                  mac[5]);
-    return value;
-}
-
-std::string HexDigest(const uint8_t* digest, size_t size) {
-    std::string result;
-    result.reserve(size * 2);
-    constexpr char kHex[] = "0123456789abcdef";
-    for (size_t index = 0; index < size; ++index) {
-        result.push_back(kHex[digest[index] >> 4U]);
-        result.push_back(kHex[digest[index] & 0x0fU]);
-    }
-    return result;
 }
 
 #include "linx_ota_device.inc"

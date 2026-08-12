@@ -1,5 +1,6 @@
 idf_component_register(
-    SRCS "src/runtime.cc" "src/linx_mcp_bridge.cc" "src/linx_ota_bootstrap.cc" "src/linx_secret_resolver.cc"
+    SRCS "src/runtime.cc" "src/linx_mcp_bridge.cc" "src/linx_ota_bootstrap.cc" "src/linx_ota_device_identity.cc"
+         "src/linx_secret_resolver.cc"
          "src/runtime_audio_diagnostics.cc" "src/runtime_board_input.cc" "src/runtime_presentation.cc"
          "src/runtime_voice_wiring.cc" "src/runtime_linx_bootstrap.cc"
          "src/schedule_mcp_tools.cc"
