@@ -4,6 +4,8 @@ idf_component_register(
         "src/wake_gate_audio_input.cc"
         "src/voice_interaction_controller.cc"
         "src/voice_provider_registry.cc"
+        "src/voice_frame_validation.cc"
+        "src/voice_vad_endpoint.cc"
         "src/voice_session.cc"
         "src/voice_session_coordinator.cc"
     INCLUDE_DIRS "include"

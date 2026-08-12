@@ -3,6 +3,9 @@
 #include <string>
 #include <utility>
 
+#include "voice_frame_validation.h"
+#include "voice_vad_endpoint.h"
+
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
 #endif
@@ -11,7 +14,13 @@ namespace voicelife::voice {
 
 VoiceSession::VoiceSession(AudioInputPort& input, AudioOutputPort& output, SpeechProviderAdapter& provider,
                            EvidenceSink evidence)
-    : input_(input), output_(output), provider_(provider), evidence_(std::move(evidence)) {}
+    : input_(input),
+      output_(output),
+      provider_(provider),
+      evidence_(std::move(evidence)),
+      vad_endpoint_(std::make_unique<VoiceVadEndpoint>()) {}
+
+VoiceSession::~VoiceSession() = default;
 
 void VoiceSession::Emit(std::string_view event, std::string_view detail) {
     VoiceEvidence evidence;
@@ -48,13 +57,8 @@ AudioFormat VoiceSession::playback_format() const {
 }
 
 bool VoiceSession::AcceptFrameLocked(const AudioFrame& frame) const {
-    const AudioFormat& expected = audio_formats_.capture;
-    const AudioFormat& actual = frame.format;
-    return state_ == VoiceSessionState::kCapturing && frame.generation == generation_ && actual.valid() &&
-           actual.codec == expected.codec && actual.sample_rate_hz == expected.sample_rate_hz &&
-           actual.channels == expected.channels && actual.bits_per_sample == expected.bits_per_sample &&
-           actual.frame_duration_ms == expected.frame_duration_ms && !frame.payload.empty() &&
-           frame.payload.size() <= AudioFrame::kMaxPayloadBytes;
+    return state_ == VoiceSessionState::kCapturing &&
+           frame_validation::MatchesSessionFrame(frame, audio_formats_.capture, generation_);
 }
 
 Status VoiceSession::Start(const VoiceSessionConfig& config) {
@@ -283,10 +287,7 @@ Status VoiceSession::BeginCapture() {
             next_sequence_ = 0;
             // 新回合开始：清零上一轮武装标记与 VAD 状态，只允许本轮有效输入武装回复。
             response_armed_ = false;
-            vad_speech_seen_ = false;
-            vad_silence_emitted_ = false;
-            vad_silence_pending_ = false;
-            last_speech_at_ = {};
+            vad_endpoint_->Reset();
         }
         Emit("capture_started", "");
         return Status::Ok();
@@ -382,49 +383,23 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
     std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
     uint64_t generation = 0;
     uint64_t sequence = 0;
+    bool vad_silence_pending = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (state_ != VoiceSessionState::kCapturing) {
             return Status::Error(ErrorCode::kUnavailable, "语音会话当前不能发送采集音频");
         }
-        const AudioFormat& expected = audio_formats_.capture;
-        if (!frame.format.valid() || frame.format.codec != expected.codec ||
-            frame.format.sample_rate_hz != expected.sample_rate_hz || frame.format.channels != expected.channels ||
-            frame.format.bits_per_sample != expected.bits_per_sample ||
-            frame.format.frame_duration_ms != expected.frame_duration_ms || frame.payload.empty() ||
-            frame.payload.size() > AudioFrame::kMaxPayloadBytes) {
+        if (!frame_validation::MatchesFormat(frame, audio_formats_.capture)) {
             return Status::Error(ErrorCode::kInvalidArgument, "采集帧格式与会话不一致");
         }
         generation = generation_;
         sequence = next_sequence_;
         frame.generation = generation;
         frame.sequence = sequence;
-        // 本地 VAD 端点（无 AFE，用 RMS 能量近似，PCM 已右移 14 位幅度较小）：
-        // 带迟滞：进入语音用较高阈值，一旦检测到语音后以更低阈值维持，静音超
-        // 1200ms 发一次 vad_silence 供上层进入最终 STT 等待。
-        const auto* pcm = reinterpret_cast<const int16_t*>(frame.payload.data());
-        const std::size_t sample_count = frame.payload.size() / sizeof(int16_t);
-        int64_t energy = 0;
-        for (std::size_t i = 0; i < sample_count; ++i) {
-            const int64_t sample = pcm[i];
-            energy += sample * sample;
-        }
-        const int64_t rms = sample_count > 0 ? energy / static_cast<int64_t>(sample_count) : 0;
-        constexpr int64_t kSpeechEnterThreshold = 300 * 300;  // 进入语音约 -40 dBFS
-        constexpr int64_t kSpeechExitThreshold = 180 * 180;   // 迟滞下限约 -44 dBFS
-        const auto now = std::chrono::steady_clock::now();
-        if (rms >= kSpeechEnterThreshold || (vad_speech_seen_ && rms >= kSpeechExitThreshold)) {
-            vad_speech_seen_ = true;
-            last_speech_at_ = now;
-        } else if (vad_speech_seen_ && !vad_silence_emitted_ && last_speech_at_.time_since_epoch().count() > 0 &&
-                   now - last_speech_at_ >= std::chrono::milliseconds(1200)) {
-            // 只在锁内置标志，锁外再 Emit，避免 Emit 重入 mutex_ 造成自死锁。
-            vad_silence_emitted_ = true;
-            vad_silence_pending_ = true;
-        }
+        // 锁内只更新 VAD 状态；锁外再 Emit，避免 evidence 回调重入 mutex_。
+        vad_silence_pending = vad_endpoint_->Observe(frame, std::chrono::steady_clock::now());
     }
-    if (vad_silence_pending_) {
-        vad_silence_pending_ = false;
+    if (vad_silence_pending) {
         Emit("vad_silence", "");
     }
     Status status = provider_.SendAudio(frame);
@@ -442,12 +417,7 @@ Status VoiceSession::HandleAudio(AudioFrame frame) {
     if (state_ != VoiceSessionState::kSpeaking) {
         return Status::Error(ErrorCode::kUnavailable, "语音会话当前不能播放音频");
     }
-    const AudioFormat& expected = audio_formats_.playback;
-    if (frame.generation != generation_ || frame.format.codec != expected.codec ||
-        frame.format.sample_rate_hz != expected.sample_rate_hz || frame.format.channels != expected.channels ||
-        frame.format.bits_per_sample != expected.bits_per_sample ||
-        frame.format.frame_duration_ms != expected.frame_duration_ms || frame.payload.empty() ||
-        frame.payload.size() > AudioFrame::kMaxPayloadBytes) {
+    if (!frame_validation::MatchesSessionFrame(frame, audio_formats_.playback, generation_)) {
         return Status::Error(ErrorCode::kInvalidArgument, "播放帧不属于当前会话");
     }
     return output_.Push(frame);

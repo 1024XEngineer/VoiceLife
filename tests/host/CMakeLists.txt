@@ -91,6 +91,8 @@ add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/wake_gate_audio_input.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_interaction_controller.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_provider_registry.cc"
+    "${ROOT_DIR}/components/voicelife_voice/src/voice_frame_validation.cc"
+    "${ROOT_DIR}/components/voicelife_voice/src/voice_vad_endpoint.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
 target_link_libraries(voice PUBLIC contracts)
@@ -223,6 +225,16 @@ target_link_libraries(voice_session_coordinator_test PRIVATE voice)
 
 add_voicelife_test(voice_session_contract_test "unit;voice;contract" voice_session_contract_test.cc)
 target_link_libraries(voice_session_contract_test PRIVATE voice)
+
+add_voicelife_test(voice_frame_validation_test "unit;voice;contract" voice_frame_validation_test.cc
+    "${ROOT_DIR}/components/voicelife_voice/src/voice_frame_validation.cc")
+target_include_directories(voice_frame_validation_test PRIVATE "${ROOT_DIR}/components/voicelife_voice/include"
+                                                            "${ROOT_DIR}/components/voicelife_voice/src")
+
+add_voicelife_test(voice_vad_endpoint_test "unit;voice;contract" voice_vad_endpoint_test.cc
+    "${ROOT_DIR}/components/voicelife_voice/src/voice_vad_endpoint.cc")
+target_include_directories(voice_vad_endpoint_test PRIVATE "${ROOT_DIR}/components/voicelife_voice/include"
+                                                        "${ROOT_DIR}/components/voicelife_voice/src")
 
 add_voicelife_test(audio_frame_queue_contract_test "unit;voice;audio;contract"
     audio_frame_queue_contract_test.cc)

@@ -1,12 +1,14 @@
 #pragma once
 
-#include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 
 #include "voicelife/voice/voice_ports.h"
 
 namespace voicelife::voice {
+
+class VoiceVadEndpoint;
 
 /** 编排音频端口和 Provider 的单次语音会话。 */
 class VoiceSession {
@@ -20,6 +22,7 @@ class VoiceSession {
      */
     VoiceSession(AudioInputPort& input, AudioOutputPort& output, SpeechProviderAdapter& provider,
                  EvidenceSink evidence = {});
+    ~VoiceSession();
 
     /**
      * @brief 连接 Provider 并准备音频设备。
@@ -85,11 +88,7 @@ class VoiceSession {
     // 本轮是否已收到有效输入（STT/工具调用），仅在其为 true 时接受服务端 TTS，
     // 避免空闲态误收上一轮残留回复。
     bool response_armed_ = false;
-    // VAD 端点：本地静音检测（无 AFE，用 RMS 能量近似）。
-    bool vad_speech_seen_ = false;
-    bool vad_silence_emitted_ = false;
-    bool vad_silence_pending_ = false;
-    std::chrono::steady_clock::time_point last_speech_at_{};
+    std::unique_ptr<VoiceVadEndpoint> vad_endpoint_;
     uint64_t generation_ = 0;
     uint64_t next_sequence_ = 0;
 };
