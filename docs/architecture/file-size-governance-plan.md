@@ -32,7 +32,7 @@
 | P0 | `components/voicelife_display_esp/src/ssd1306_status_display.cc` | 801 -> 687 | 已拆出 `display_text_layout` 和 `ssd1306_renderer`；前者锁定 UTF-8/全角标点/滚动字节偏移，后者锁定 128x32 页缓冲的文本与情绪布局。原文件仅保留旧板字形资产、字形选择和 I2C/面板生命周期 | 已新增主机像素位置、5x7 状态栏、情绪图和按字符滚动断言。内置字形表是受保护资产而非通用渲染职责；下一次修改字形资产或驱动序列前，先补旧板实机截图/串口回归证据。不得混入 SparkBot/LVGL |
 | P1 | `components/voicelife_voice/src/voice_session.cc` | 539 -> 509 | 已拆出 `voice_frame_validation`（上下行格式、载荷预算和 generation）与 `voice_vad_endpoint`（RMS 迟滞、1200 ms 静音端点）。`VoiceSession` 保留唯一的生命周期状态机、锁和端口调用顺序 | 新增帧格式/代次与 VAD 单测，既有会话契约不变。509 行是暂时例外：下一次同时调整事件映射和状态迁移时，先拆 `voice_session_event_policy`；不得为机械降行拆散同一回合的原子转换 |
 | P1 | `components/voicelife_runtime/src/linx_ota_bootstrap.cc` | 521 -> 464 | 已拆出 `linx_ota_device_identity`：独立管理 Client ID 的安全分区读取/创建、STA MAC 格式化和 ELF 摘要编码。保留 Wi-Fi 建连、HTTPS、服务端时间、激活判定和 token 持久化在同一 OTA 失败/重试事务 | NVS namespace/key、UUIDv4 格式、MAC 格式和设备快照调用顺序均保持。ESP-IDF 目标构建和旧板 OTA 真机回归待统一执行；不得在拆分中改变 OTA 签名、目标分区或回退流程 |
-| P1 | `services/im-gateway/src/application/services.ts` | 1,754 | 按通知投递、动作执行、幂等/事务协调拆成应用服务；不拆散同一业务事务 | TypeScript 契约、持久化回归与 IM Gateway CI 全量通过 |
+| P1 | `services/im-gateway/src/application/services.ts` | 1,754 -> 1,466 | 已拆出 `channel-account-application`、`pairing-application` 与 `binding-application`；保留入站事件、通知、投递、回执和动作的业务事务。后续优先拆通知受理或动作执行，但不拆散投递领取/失败/重试事务 | IM Gateway 全量 CI 通过（含 API 文档、类型与内存持久化契约）；PostgreSQL 契约须在可用服务环境补跑 |
 | P2 | `services/im-gateway/src/infrastructure/wechat/wechat-official-adapter.ts` | 584 | 按鉴权、消息编码、HTTP 客户端和错误映射拆分 | 保持平台防腐边界，领域层不出现微信字段 |
 
 `font16_data.h` 和 `farewell_pcm.h` 等生成资源不进入拆分列表。它们应在后续资源 PR 中维护 manifest、哈希、来源和 Flash/PSRAM 预算，而不是人工按行切文件。

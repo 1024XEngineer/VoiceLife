@@ -1,19 +1,6 @@
-import type {
-    ActionId,
-    BindingId,
-    ChannelAccountId,
-    DeliveryId,
-    DeviceId,
-    ExternalIdentityId,
-    OperationId,
-    PairingSessionId,
-    ReminderTriggerId,
-    UserId,
-} from '../contracts/ids.js';
+import type { ActionId, DeliveryId, DeviceId, OperationId, ReminderTriggerId, UserId } from '../contracts/ids.js';
 import {
     DEVICE_CONTRACT_VERSION,
-    MAX_PAIRING_SESSION_MINUTES,
-    MIN_PAIRING_SESSION_MINUTES,
     type NotificationIntent,
     type NotificationActionOption,
     type NotificationSubmission,
@@ -24,13 +11,10 @@ import {
 import type { NormalizedDeliveryReceipt, NormalizedImEvent } from '../contracts/platform-events.js';
 import type {
     ActionStatus,
-    ChannelAccount,
     ConversationRef,
     Delivery,
     DeliveryStatus,
     ImAction,
-    ImBinding,
-    PairingSession,
     PresentationType,
 } from '../domain/models.js';
 import type {
@@ -38,16 +22,12 @@ import type {
     ActionTokenClaims,
     ActionTokenPort,
     ChannelCapabilityResolver,
-    ChannelHealth,
-    ChannelHealthPort,
     Clock,
     ConversationResolverPort,
     DeliveryRendererPort,
-    ExternalIdentityProtector,
     IdGenerator,
     ImChannelPort,
     ImSendAcceptance,
-    PairingCodePort,
 } from '../ports/external.js';
 import type { ImUnitOfWork } from '../ports/repositories.js';
 import { ImGatewayError } from '../shared/errors.js';
@@ -57,11 +37,6 @@ import type {
     ActionApplication,
     ActionUiApplication,
     ActionUiView,
-    BindingApplication,
-    ChannelAccountApplication,
-    ConfirmPairingCommand,
-    CreatedPairingSession,
-    CreatePairingSessionCommand,
     DeliveryApplication,
     DeliveryDetails,
     DeliveryDispatchApplication,
@@ -70,278 +45,15 @@ import type {
     PairingApplication,
     PlatformEventApplication,
     ReceiptApplication,
-    RegisterChannelAccountCommand,
     TriggerPreparedActionCommand,
 } from './api.js';
 
 const DEFAULT_ACTION_WINDOW_MINUTES = 10;
-const DEFAULT_PAIRING_WINDOW_MINUTES = 10;
-const MAX_PAIRING_CODE_ISSUE_ATTEMPTS = 8;
 const MAX_AUTOMATIC_DELIVERY_ATTEMPTS = 5;
 const MAX_DELIVERY_RETRY_DELAY_MINUTES = 30;
 
 /** 派发领取租约时长；sending claim 超过该时长未续期即视为崩溃，允许其他 worker 重领。 */
 const DISPATCH_CLAIM_LEASE_SECONDS = 60;
-
-/** 渠道账号注册、停用、查询与健康检查的默认实现。 */
-export class DefaultChannelAccountApplication implements ChannelAccountApplication {
-    /**
-     * 创建渠道账号应用服务。
-     * @param unitOfWork 事务工作单元。
-     * @param ids 标识生成器。
-     * @param clock 业务时钟。
-     * @param healthPort 渠道健康检查端口。
-     */
-    public constructor(
-        private readonly unitOfWork: ImUnitOfWork,
-        private readonly ids: IdGenerator,
-        private readonly clock: Clock,
-        private readonly healthPort: ChannelHealthPort,
-    ) {}
-
-    /** {@inheritDoc ChannelAccountApplication.register} */
-    public register(command: RegisterChannelAccountCommand): Promise<ChannelAccount> {
-        return this.unitOfWork.transaction(async (tx) => {
-            const now = this.clock.now();
-            const account: ChannelAccount = {
-                id: this.ids.nextChannelAccountId(),
-                platform: command.platform,
-                tenantExternalId: command.tenantExternalId,
-                koishiBotId: command.koishiBotId,
-                credentialRef: command.credentialRef,
-                connectionMode: command.connectionMode,
-                ...(command.capabilityConfig === undefined ? {} : { capabilityConfig: command.capabilityConfig }),
-                status: 'active',
-                createdAt: now,
-                updatedAt: now,
-            };
-            await tx.channelAccounts.save(account);
-            return account;
-        });
-    }
-
-    /** {@inheritDoc ChannelAccountApplication.disable} */
-    public disable(channelAccountId: ChannelAccountId): Promise<void> {
-        return this.unitOfWork.transaction(async (tx) => {
-            const account = await tx.channelAccounts.findById(channelAccountId);
-            if (account === undefined) return;
-            await tx.channelAccounts.save({
-                ...account,
-                status: 'disabled',
-                updatedAt: this.clock.now(),
-            });
-        });
-    }
-
-    /** {@inheritDoc ChannelAccountApplication.find} */
-    public find(channelAccountId: ChannelAccountId): Promise<ChannelAccount | undefined> {
-        return this.unitOfWork.transaction((tx) => tx.channelAccounts.findById(channelAccountId));
-    }
-
-    /** {@inheritDoc ChannelAccountApplication.health} */
-    public async health(channelAccountId: ChannelAccountId): Promise<ChannelHealth> {
-        const account = await this.find(channelAccountId);
-        if (account === undefined) {
-            throw new ImGatewayError('binding_not_found', 'Channel account was not found');
-        }
-        return this.healthPort.check(account);
-    }
-}
-
-/** 配对会话签发、确认、取消与过期处理的默认实现。 */
-export class DefaultPairingApplication implements PairingApplication {
-    /**
-     * 创建配对应用服务。
-     * @param unitOfWork 事务工作单元。
-     * @param ids 标识生成器。
-     * @param clock 业务时钟。
-     * @param pairingCodes 配对码端口。
-     * @param identityProtector 外部身份保护端口。
-     */
-    public constructor(
-        private readonly unitOfWork: ImUnitOfWork,
-        private readonly ids: IdGenerator,
-        private readonly clock: Clock,
-        private readonly pairingCodes: PairingCodePort,
-        private readonly identityProtector: ExternalIdentityProtector,
-    ) {}
-
-    /** {@inheritDoc PairingApplication.create} */
-    public async create(command: CreatePairingSessionCommand): Promise<CreatedPairingSession> {
-        if (
-            command.expiresInMinutes !== undefined &&
-            (!Number.isInteger(command.expiresInMinutes) ||
-                command.expiresInMinutes < MIN_PAIRING_SESSION_MINUTES ||
-                command.expiresInMinutes > MAX_PAIRING_SESSION_MINUTES)
-        ) {
-            throw new ImGatewayError(
-                'invalid_contract',
-                `Pairing expiry must be an integer from ${MIN_PAIRING_SESSION_MINUTES} to ${MAX_PAIRING_SESSION_MINUTES} minutes`,
-            );
-        }
-        for (let attempt = 0; attempt < MAX_PAIRING_CODE_ISSUE_ATTEMPTS; attempt++) {
-            const code = await this.pairingCodes.issue();
-            const now = this.clock.now();
-            const session: PairingSession = {
-                id: this.ids.nextPairingSessionId(),
-                displayCodeHash: code.hash,
-                ...(command.userId === undefined ? {} : { userId: command.userId }),
-                deviceId: command.deviceId,
-                ...(command.allowedPlatforms === undefined ? {} : { allowedPlatforms: command.allowedPlatforms }),
-                status: 'pending',
-                expiresAt: this.clock.addMinutes(now, command.expiresInMinutes ?? DEFAULT_PAIRING_WINDOW_MINUTES),
-                createdAt: now,
-            };
-            if (await this.unitOfWork.transaction((tx) => tx.pairingSessions.createPendingIfAbsent(session))) {
-                return { session, displayCode: code.displayCode };
-            }
-        }
-        throw new ImGatewayError('resource_exhausted', 'Could not issue a unique pairing code', true);
-    }
-
-    /** {@inheritDoc PairingApplication.find} */
-    public async find(pairingSessionId: PairingSessionId): Promise<PairingSession | undefined> {
-        await this.expireDue();
-        return this.unitOfWork.transaction((tx) => tx.pairingSessions.findById(pairingSessionId));
-    }
-
-    /** {@inheritDoc PairingApplication.confirm} */
-    public async confirm(command: ConfirmPairingCommand): Promise<ImBinding> {
-        await this.expireDue();
-        const codeHash = await this.pairingCodes.hash(command.displayCode);
-        const protectedIdentity = await this.identityProtector.protect(command.externalUserId);
-        return this.unitOfWork.transaction(async (tx) => {
-            const session = await tx.pairingSessions.lockPendingByDisplayCodeHash(codeHash);
-            if (session === undefined || session.expiresAt <= this.clock.now()) {
-                throw new ImGatewayError('pairing_code_invalid', 'Pairing session is invalid or expired');
-            }
-            const account = await tx.channelAccounts.findById(command.channelAccountId);
-            if (account === undefined || account.status !== 'active') {
-                throw new ImGatewayError('binding_not_found', 'Channel account was not found');
-            }
-            if (session.allowedPlatforms !== undefined && !session.allowedPlatforms.includes(account.platform)) {
-                throw new ImGatewayError('capability_not_supported', 'Platform is not allowed by the pairing session');
-            }
-
-            if (session.userId !== undefined && command.userId !== undefined && session.userId !== command.userId) {
-                throw new ImGatewayError(
-                    'invalid_transition',
-                    'Pairing confirmation user does not match the pairing session',
-                );
-            }
-            const userId = session.userId ?? command.userId;
-            if (userId === undefined) {
-                throw new ImGatewayError('invalid_contract', 'Pairing confirmation requires an internal userId');
-            }
-
-            const now = this.clock.now();
-            let identity = await tx.identities.findByChannelAndHash(account.id, protectedIdentity.hash);
-            if (identity === undefined) {
-                identity = await tx.identities.createIfAbsent({
-                    id: this.ids.nextExternalIdentityId(),
-                    channelAccountId: account.id,
-                    externalUserIdCiphertext: protectedIdentity.ciphertext,
-                    externalUserIdHash: protectedIdentity.hash,
-                    ...(command.displayName === undefined ? {} : { displayName: command.displayName }),
-                    status: 'active',
-                    createdAt: now,
-                    updatedAt: now,
-                });
-            }
-            if (identity.status !== 'active') {
-                throw new ImGatewayError('invalid_transition', 'External identity is not active');
-            }
-
-            const binding = await tx.bindings.createActiveIfAbsent({
-                id: this.ids.nextBindingId(),
-                userId,
-                deviceId: session.deviceId,
-                externalIdentityId: identity.id,
-                priority: 100,
-                status: 'active',
-                boundAt: now,
-            });
-            await tx.pairingSessions.save({
-                ...session,
-                status: 'confirmed',
-                confirmedAt: now,
-            });
-            return binding;
-        });
-    }
-
-    /** {@inheritDoc PairingApplication.cancel} */
-    public cancel(pairingSessionId: PairingSessionId): Promise<void> {
-        return this.unitOfWork.transaction(async (tx) => {
-            const session = await tx.pairingSessions.findById(pairingSessionId);
-            if (session === undefined || session.status !== 'pending') return;
-            await tx.pairingSessions.save({ ...session, status: 'cancelled' });
-        });
-    }
-
-    /** {@inheritDoc PairingApplication.expireDue} */
-    public expireDue(): Promise<number> {
-        return this.unitOfWork.transaction(async (tx) => {
-            const sessions = await tx.pairingSessions.findExpiredPairingSessions(this.clock.now());
-            for (const session of sessions) {
-                await tx.pairingSessions.save({ ...session, status: 'expired' });
-            }
-            return sessions.length;
-        });
-    }
-}
-
-/** 外部身份绑定查询、解绑与撤销的默认实现。 */
-export class DefaultBindingApplication implements BindingApplication {
-    /**
-     * 创建绑定应用服务。
-     * @param unitOfWork 事务工作单元。
-     * @param clock 业务时钟。
-     */
-    public constructor(
-        private readonly unitOfWork: ImUnitOfWork,
-        private readonly clock: Clock,
-    ) {}
-
-    /** {@inheritDoc BindingApplication.list} */
-    public list(userId: UserId): Promise<readonly ImBinding[]> {
-        return this.unitOfWork.transaction((tx) => tx.bindings.listActiveByUser(userId));
-    }
-
-    /** {@inheritDoc BindingApplication.unbind} */
-    public unbind(bindingId: BindingId): Promise<void> {
-        return this.changeStatus(bindingId, 'unbound');
-    }
-
-    /** {@inheritDoc BindingApplication.revoke} */
-    public revoke(bindingId: BindingId): Promise<void> {
-        return this.changeStatus(bindingId, 'revoked');
-    }
-
-    /** {@inheritDoc BindingApplication.findActiveByExternalIdentity} */
-    public findActiveByExternalIdentity(externalIdentityId: ExternalIdentityId): Promise<ImBinding | undefined> {
-        return this.unitOfWork.transaction((tx) => tx.bindings.findActiveByIdentity(externalIdentityId));
-    }
-
-    private changeStatus(bindingId: BindingId, status: 'unbound' | 'revoked'): Promise<void> {
-        return this.unitOfWork.transaction(async (tx) => {
-            const binding = await tx.bindings.findById(bindingId);
-            if (binding === undefined) {
-                throw new ImGatewayError('binding_not_found', 'Binding was not found');
-            }
-            if (binding.status === status) return;
-            if (binding.status !== 'active') {
-                throw new ImGatewayError('invalid_transition', 'Binding is already in a terminal state');
-            }
-            const now = this.clock.now();
-            await tx.bindings.save({
-                ...binding,
-                status,
-                ...(status === 'unbound' ? { unboundAt: now } : { revokedAt: now }),
-            });
-        });
-    }
-}
 
 /** 规范化入站事件幂等落库与状态推进的默认实现。 */
 export class DefaultInboundEventApplication implements InboundEventApplication {
