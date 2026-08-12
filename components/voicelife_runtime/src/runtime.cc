@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstdio>
 #include <ctime>
 #include <memory>
@@ -23,7 +22,6 @@
 #include "generated/farewell_pcm.h"
 #include "generated/wake_ack_pcm.h"
 #include "led_strip.h"
-#include "nvs.h"
 #include "voicelife/audio_esp/audio_board_profile.h"
 #include "voicelife/audio_esp/esp32s3_audio_probe.h"
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
@@ -38,6 +36,8 @@
 
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
+#include "linx_secret_resolver.h"
+#include "runtime_audio_diagnostics.h"
 #include "schedule_mcp_tools.h"
 #include "voicelife/voice/voice_interaction_controller.h"
 #include "voicelife/voice/voice_ports.h"
@@ -54,139 +54,6 @@ constexpr int64_t kVolumeOverlayUs = 1500 * 1000;
 constexpr uint32_t kListenTimeoutMs = 15000;
 constexpr uint32_t kFinalSttTimeoutMs = 5000;
 
-#if CONFIG_NVS_ENCRYPTION
-Result<std::string> ReadNvsString(nvs_handle_t handle, const char* key) {
-    size_t required = 0;
-    esp_err_t error = nvs_get_str(handle, key, nullptr, &required);
-    if (error != ESP_OK || required <= 1) {
-        return Result<std::string>::Failure(ErrorCode::kNotFound, std::string("缺少 Linx NVS 配置: ") + key);
-    }
-    std::string value(required, '\0');
-    error = nvs_get_str(handle, key, value.data(), &required);
-    if (error != ESP_OK) {
-        return Result<std::string>::Failure(ErrorCode::kUnavailable, "读取 Linx NVS 配置失败");
-    }
-    value.resize(required > 0 ? required - 1 : 0);
-    if (value.empty()) {
-        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, std::string("Linx NVS 配置为空: ") + key);
-    }
-    return Result<std::string>::Success(std::move(value));
-}
-#endif
-
-class NvsSecretResolver final : public linx_esp::SecretResolverPort {
-   public:
-    Result<std::string> Resolve(std::string_view reference) override {
-#if !CONFIG_NVS_ENCRYPTION
-        (void)reference;
-        return Result<std::string>::Failure(ErrorCode::kUnavailable, "Linx token 解析需要启用 NVS encryption");
-#else
-        constexpr std::string_view prefix = "nvs://";
-        if (reference.rfind(prefix, 0) != 0) {
-            return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx token 引用必须使用 nvs://");
-        }
-        const std::string path(reference.substr(prefix.size()));
-        const auto separator = path.find('/');
-        if (separator == std::string::npos || separator == 0 || separator + 1 >= path.size()) {
-            return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx token 引用格式无效");
-        }
-        nvs_handle_t handle = 0;
-        const esp_err_t open_error = nvs_open_from_partition(LinxSecretPartitionLabel(),
-                                                             path.substr(0, separator).c_str(), NVS_READONLY, &handle);
-        if (open_error != ESP_OK) {
-            return Result<std::string>::Failure(ErrorCode::kNotFound, "Linx token NVS 命名空间不可用");
-        }
-        auto result = ReadNvsString(handle, path.substr(separator + 1).c_str());
-        nvs_close(handle);
-        return result;
-#endif
-    }
-};
-
-#if CONFIG_VOICELIFE_AUDIO_PORT_SMOKE
-Status RunAudioPortSmoke() {
-    const auto profile = audio_esp::VoiceLifePcbEsp32s3Profile();
-    audio_esp::Esp32s3PcmAudioPorts ports(profile);
-    std::atomic<std::size_t> captured_frames{0};
-    std::atomic<std::size_t> nonzero_samples{0};
-    ports.input().SetAudioSink([&](voice::AudioFrame frame) {
-        captured_frames.fetch_add(1);
-        for (std::size_t offset = 0; offset + 1 < frame.payload.size(); offset += 2) {
-            if (frame.payload[offset] != 0 || frame.payload[offset + 1] != 0) {
-                nonzero_samples.fetch_add(1);
-            }
-        }
-        return Status::Ok();
-    });
-
-    auto capture_format = profile.capture_i2s.format;
-    capture_format.frame_duration_ms = 60;
-    auto playback_format = profile.playback_i2s.format;
-    playback_format.frame_duration_ms = 60;
-
-    Status status = ports.input().Open(capture_format);
-    if (!status.ok()) {
-        return status;
-    }
-    status = ports.output().Open(playback_format);
-    if (!status.ok()) {
-        ports.input().Close();
-        return status;
-    }
-    status = ports.input().StartCapture(voice::VoiceMode::kManual);
-    if (!status.ok()) {
-        ports.output().Close();
-        ports.input().Close();
-        return status;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(300));
-    status = ports.input().StopCapture();
-    if (!status.ok()) {
-        ports.output().Close();
-        ports.input().Close();
-        return status;
-    }
-
-    voice::AudioFrame tone;
-    tone.format = playback_format;
-    const std::size_t tone_samples =
-        static_cast<std::size_t>(playback_format.sample_rate_hz) * playback_format.frame_duration_ms / 1000U;
-    tone.payload.resize(tone_samples * sizeof(int16_t));
-    for (std::size_t i = 0; i < tone_samples; ++i) {
-        const int16_t sample = (i / 24U) % 2U == 0U ? 1200 : -1200;
-        std::memcpy(tone.payload.data() + i * sizeof(sample), &sample, sizeof(sample));
-    }
-    status = ports.output().Push(tone);
-    if (status.ok()) {
-        vTaskDelay(pdMS_TO_TICKS(150));
-    }
-
-    const auto stats = ports.stats();
-    ESP_LOGI(kTag,
-             "AUDIO_PORT_READY=1 AUDIO_PORT_CAPTURE_FRAMES=%u AUDIO_PORT_PLAYED_FRAMES=%u "
-             "AUDIO_PORT_DROPPED_INPUT=%u AUDIO_PORT_REJECTED_OUTPUT=%u "
-             "AUDIO_PORT_SHORT_READS=%u AUDIO_PORT_SHORT_WRITES=%u "
-             "AUDIO_PORT_MIN_HEAP=%u AUDIO_PORT_SIGNAL=%d",
-             static_cast<unsigned>(captured_frames.load()), static_cast<unsigned>(stats.played_frames),
-             static_cast<unsigned>(stats.dropped_input_frames), static_cast<unsigned>(stats.rejected_output_frames),
-             static_cast<unsigned>(stats.short_reads), static_cast<unsigned>(stats.short_writes),
-             static_cast<unsigned>(stats.minimum_free_heap_bytes), nonzero_samples.load() > 0);
-
-    ports.output().Close();
-    ports.input().Close();
-    if (!status.ok()) {
-        return status;
-    }
-    if (captured_frames.load() == 0 || nonzero_samples.load() == 0) {
-        return Status::Error(ErrorCode::kUnavailable, "PCM Audio Port 未检测到可变化的总线输入");
-    }
-    if (stats.played_frames == 0) {
-        return Status::Error(ErrorCode::kUnavailable, "PCM Audio Port 未完成总线回放帧");
-    }
-    return Status::Ok();
-}
-#endif
 #endif
 
 class ScaffoldAudioInput final : public voice::AudioInputPort {
@@ -382,7 +249,7 @@ class Runtime final {
         }
 #endif
 #if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_AUDIO_PORT_SMOKE
-        const Status audio_port_status = RunAudioPortSmoke();
+        const Status audio_port_status = RunVoiceLifePcbAudioPortSmoke();
         if (!audio_port_status.ok()) {
             return audio_port_status;
         }
