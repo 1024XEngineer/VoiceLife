@@ -34,8 +34,16 @@ struct Es8311ControlConfig {
  * 关键寄存器（REG00/01/09/0A/17）并打印，供实板验证时钟锁定。
  * host 构建不触碰硬件，返回 kUnavailable。
  * @param config 初始化参数。
- * @return 初始化结果。
+ * @return 初始化结果；成功时 value 为 esp_codec_dev 句柄（归属调用方，
+ * 由 AudioPorts 持有并在 Close 时释放）。
  */
-[[nodiscard]] voicelife::Status InitializeEs8311(const Es8311ControlConfig& config);
+[[nodiscard]] voicelife::Result<void*> InitializeEs8311(const Es8311ControlConfig& config);
+
+/**
+ * @brief 释放 ES8311 Codec 设备（关闭 + 删除）。
+ * @param dev_handle 由 InitializeEs8311 返回的句柄。
+ * @return 释放结果。
+ */
+[[nodiscard]] voicelife::Status DeinitializeEs8311(void* dev_handle);
 
 }  // namespace voicelife::audio_esp

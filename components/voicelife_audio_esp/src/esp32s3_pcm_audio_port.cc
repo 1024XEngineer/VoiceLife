@@ -174,14 +174,15 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
         codec_config.tx_channel = tx_channel_;
         codec_config.rx_channel = rx_channel_;
         codec_config.sample_rate_hz = static_cast<int>(profile_.playback_i2s.format.sample_rate_hz);
-        const Status codec_status = InitializeEs8311(codec_config);
-        if (!codec_status.ok()) {
+        const auto codec_result = InitializeEs8311(codec_config);
+        if (!codec_result.ok()) {
             i2s_channel_disable(tx_channel_);
             output_running_ = false;
             output_open_ = false;
             playback_format_.reset();
-            return codec_status;
+            return codec_result.status;
         }
+        codec_dev_ = codec_result.value.value_or(nullptr);
         codec_initialized_ = true;
     }
     if (amplifier_callback_) {
@@ -359,6 +360,11 @@ Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
 #ifdef ESP_PLATFORM
     if (amplifier_callback_) {
         amplifier_callback_(false);  // 输出关闭：请求关闭功放。
+    }
+    if (codec_dev_ != nullptr) {
+        (void)DeinitializeEs8311(codec_dev_);
+        codec_dev_ = nullptr;
+        codec_initialized_ = false;
     }
     {
         std::lock_guard<std::mutex> lock(mutex_);

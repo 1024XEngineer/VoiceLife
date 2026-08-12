@@ -133,6 +133,8 @@ class Esp32s3PcmAudioPorts::Impl final {
     std::function<void(bool)> amplifier_callback_;
     /** @brief ES8311 是否已初始化（duplex 首次打开时）。 */
     [[maybe_unused]] bool codec_initialized_ = false;
+    /** @brief ES8311 Codec 设备句柄（归属本 AudioPorts，Close 时释放）。 */
+    [[maybe_unused]] void* codec_dev_ = nullptr;
     mutable std::mutex mutex_;
     std::condition_variable input_cv_;
     std::condition_variable output_cv_;
