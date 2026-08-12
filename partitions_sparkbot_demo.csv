@@ -1,0 +1,10 @@
+# ESP32-S3 ESP-SparkBot DEMO 分区表（与实板官方布局完全一致）
+# 仅用于硬件 bring-up（显示/GIF/ES8311 验证）：无 linx_secrets 分区、
+# 不访问 secret store，可只刷 factory 与 assets 即运行。
+# 生产固件使用 partitions_sparkbot.csv（含 linx_secrets，需分区迁移授权）。
+# Name,   Type, SubType, Offset,   Size,      Flags
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xd000,   0x2000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  0x2F0000,
+assets,   data, spiffs,  0x300000, 0x100000,

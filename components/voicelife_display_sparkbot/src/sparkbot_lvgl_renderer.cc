@@ -132,6 +132,8 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_obj_align(top_bar, LV_ALIGN_TOP_MID, 0, 0);
     top_bar_ = top_bar;
 
+    // 无传感数据源时图标保持空（隐藏策略）：Wi-Fi/静音/电池状态由受控显示
+    // 语义提供；本板未提供对应传感能力前不渲染 glyph，避免乱码与伪造状态。
     auto* network_label = lv_label_create(top_bar);
     lv_label_set_text(network_label, "");
     lv_obj_set_style_text_font(network_label, &font_material_symbols_14_1, 0);
