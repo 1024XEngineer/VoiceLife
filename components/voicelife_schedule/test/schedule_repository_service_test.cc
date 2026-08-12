@@ -92,7 +92,11 @@ void CheckFindAllFailure() {
     repository.fail_find_all = true;
     const ScheduleService service(repository);
 
-    const auto created = service.create_schedule(CreateScheduleCommand{.event = "读取失败"});
+    const auto created = service.create_schedule(CreateScheduleCommand{.event = "读取失败",
+                                                                       .start_time = std::nullopt,
+                                                                       .end_time = std::nullopt,
+                                                                       .location = std::nullopt,
+                                                                       .notes = std::nullopt});
     Check(created.status.code == ErrorCode::kUnavailable && created.error == "读取现有日程失败：读取故障",
           "创建应返回 Repository 读取错误");
     Check(repository.insert_calls == 0, "读取失败后不应继续写入");
@@ -112,7 +116,11 @@ void CheckInsertFailure() {
     repository.fail_insert = true;
     const ScheduleService service(repository);
 
-    const auto result = service.create_schedule(CreateScheduleCommand{.event = "写入失败"});
+    const auto result = service.create_schedule(CreateScheduleCommand{.event = "写入失败",
+                                                                      .start_time = std::nullopt,
+                                                                      .end_time = std::nullopt,
+                                                                      .location = std::nullopt,
+                                                                      .notes = std::nullopt});
     Check(result.status.code == ErrorCode::kInternal && result.error == "保存日程失败：写入故障",
           "创建应返回 Repository 写入错误");
     Check(repository.find_all_calls == 1 && repository.insert_calls == 1, "写入失败前应完成冲突读取和一次写入");
@@ -131,6 +139,8 @@ void CheckConflictOrchestration() {
         .event = "冲突日程",
         .start_time = At(2'500),
         .end_time = At(2'800),
+        .location = std::nullopt,
+        .notes = std::nullopt,
     };
     const auto rejected = service.create_schedule(command);
     Check(rejected.status.code == ErrorCode::kConflict && rejected.conflicts.size() == 1,
@@ -150,6 +160,8 @@ void CheckConflictOrchestration() {
         .event = "临近日程",
         .start_time = At(5'600),
         .end_time = At(6'000),
+        .location = std::nullopt,
+        .notes = std::nullopt,
     });
     Check(
         nearby.status.ok() && nearby.nearby_schedules.size() == 1 && nearby.message == "日程创建成功，附近还有其他日程",
