@@ -35,6 +35,8 @@ enum class VoiceContentRole {
  * 显示 Adapter 在其专属上下文中完成。
  */
 struct DisplaySnapshot {
+    /** @brief 语义回合代次（会话切换后递增，用于丢弃旧回合迟到快照）。 */
+    uint64_t generation = 0;
     VoiceInteractionState phase = VoiceInteractionState::kBooting;
     VoiceMood mood = VoiceMood::kNeutral;
     /** 上行状态栏文本（如“聆听中...”“处理中...”）。 */

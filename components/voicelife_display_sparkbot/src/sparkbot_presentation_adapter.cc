@@ -51,6 +51,11 @@ constexpr uint32_t kDisplayTaskPriority = 1;
 
 }  // namespace
 
+bool ShouldDropDisplaySnapshot(uint64_t generation, uint64_t revision, uint64_t last_generation,
+                               uint64_t last_revision) {
+    return generation < last_generation || (generation == last_generation && revision <= last_revision);
+}
+
 SparkBotPresentationAdapter::SparkBotPresentationAdapter(const SparkBotLcdConfig& config, BacklightCallback backlight)
     : display_(config), queue_(kQueueCapacity), backlight_cb_(std::move(backlight)) {}
 
@@ -141,12 +146,15 @@ void SparkBotPresentationAdapter::DisplayTaskLoop() {
         if (!queue_.WaitPop(&snapshot, 50)) {
             continue;  // 超时轮询停止请求。
         }
-        if (snapshot.revision <= last_rendered_revision_) {
-            continue;  // 旧 revision 丢弃：防止旧状态覆盖新状态。
+        // 先比 generation（旧回合整体丢弃），再比 revision（同回合旧状态丢弃）。
+        if (ShouldDropDisplaySnapshot(snapshot.generation, snapshot.revision, last_generation_,
+                                      last_rendered_revision_)) {
+            continue;  // 迟到快照：防止旧状态覆盖新状态。
         }
         if (lvgl_port_lock(0) == ESP_OK) {
             (void)renderer_.Render(snapshot);
-            // 锁内推进 revision：锁失败时不推进，快照将在下次重试。
+            // 锁内推进基准：锁失败时不推进，快照将在下次重试。
+            last_generation_ = snapshot.generation;
             last_rendered_revision_ = snapshot.revision;
             lvgl_port_unlock();
         }

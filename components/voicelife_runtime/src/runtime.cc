@@ -902,6 +902,16 @@ class Runtime final {
             ESP_LOGW(kTag, "忽略乱序板端交互事件=%d: %s", static_cast<int>(event), transition.status.message.c_str());
             return transition.status;
         }
+        // 新回合事件递增语义代次：显示任务按 generation -> revision 丢弃迟到快照。
+        switch (event) {
+            case voice::VoiceInteractionEvent::kToggleChat:
+            case voice::VoiceInteractionEvent::kPressDown:
+            case voice::VoiceInteractionEvent::kWakeDetected:
+                ++snapshot_.generation;
+                break;
+            default:
+                break;
+        }
         // 会话阶段 → 显示模型快照：状态栏文本 + 表情由阶段派生。
         snapshot_.phase = interaction_.state();
         snapshot_.mood = PhaseMood(snapshot_.phase);

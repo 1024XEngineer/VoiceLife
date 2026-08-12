@@ -13,6 +13,17 @@
 namespace voicelife::display_sparkbot {
 
 /**
+ * @brief 判断快照是否应被丢弃（generation 优先，同回合按 revision）。
+ * @param generation 快照语义代次。
+ * @param revision 快照修订号。
+ * @param last_generation 已渲染代次。
+ * @param last_revision 已渲染修订号。
+ * @return 旧回合或旧修订返回 true。
+ */
+[[nodiscard]] bool ShouldDropDisplaySnapshot(uint64_t generation, uint64_t revision, uint64_t last_generation,
+                                             uint64_t last_revision);
+
+/**
  * @brief ESP-SparkBot 彩屏显示适配器（完整显示链路）。
  *
  * 调用链：PresentationPort.Render -> 有界队列 -> 专属显示任务（LVGL 锁内）
@@ -105,6 +116,8 @@ class SparkBotPresentationAdapter : public voicelife::voice::PresentationPort {
     [[maybe_unused]] void* task_handle_ = nullptr;
     /** @brief 已渲染的最新 revision（旧 revision 丢弃基准）。 */
     [[maybe_unused]] uint64_t last_rendered_revision_ = 0;
+    /** @brief 已渲染的最新 generation（旧回合丢弃基准）。 */
+    [[maybe_unused]] uint64_t last_generation_ = 0;
     /** @brief 是否已启动。 */
     [[maybe_unused]] bool started_ = false;
     /** @brief 停止请求标志（显示任务轮询退出）。 */
