@@ -11,6 +11,15 @@
 #include "voicelife/display_sparkbot/sparkbot_emoji_assets.h"
 #endif
 
+// 字体符号由 xiaozhi-fonts 组件提供（全局链接）；LV_FONT_DECLARE 必须位于
+// 全局作用域，否则匿名命名空间会把引用变成内部链接导致 undefined reference。
+#ifdef ESP_PLATFORM
+LV_FONT_DECLARE(font_noto_sans_basic_14_1);
+LV_FONT_DECLARE(font_material_symbols_14_1);
+LV_FONT_DECLARE(font_material_symbols_30_4);
+LV_FONT_DECLARE(font_noto_emoji_30_4);
+#endif
+
 namespace voicelife::display_sparkbot {
 
 namespace {
@@ -20,11 +29,6 @@ constexpr const char* kTag = "sparkbot_renderer";
 // 官方 SparkBot 强制 dark 主题颜色（lcd_display.cc InitializeLcdThemes）。
 const lv_color_t kBackgroundColor = lv_color_hex(0x000000);
 const lv_color_t kTextColor = lv_color_hex(0xFFFFFF);
-
-LV_FONT_DECLARE(font_noto_sans_basic_14_1);
-LV_FONT_DECLARE(font_material_symbols_14_1);
-LV_FONT_DECLARE(font_material_symbols_30_4);
-LV_FONT_DECLARE(font_noto_emoji_30_4);
 #endif
 }  // namespace
 
