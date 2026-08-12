@@ -8,6 +8,7 @@
 
 namespace voicelife::voice {
 
+/** @brief VoiceSession 私有的本地 VAD 静音端点检测器。 */
 class VoiceVadEndpoint;
 
 /** 编排音频端口和 Provider 的单次语音会话。 */
@@ -22,6 +23,7 @@ class VoiceSession {
      */
     VoiceSession(AudioInputPort& input, AudioOutputPort& output, SpeechProviderAdapter& provider,
                  EvidenceSink evidence = {});
+    /** @brief 在完整类型可见的实现文件中销毁私有 VAD 检测器。 */
     ~VoiceSession();
 
     /**
