@@ -204,6 +204,15 @@ void LvglGif::NextFrame() {
 
     // Get next frame
     int has_next = gd_get_frame(gif_);
+    if (has_next < 0) {
+        // 解码错误（越界/坏帧）：停止动画并回退，不渲染坏帧。
+        ESP_LOGE(TAG, "GIF_DECODE_FAILED pos=%u", static_cast<unsigned>(pos_before));
+        playing_ = false;
+        if (timer_) {
+            lv_timer_pause(timer_);
+        }
+        return;
+    }
     if (has_next == 0) {
         // Animation truly finished (non-infinite loop)
         playing_ = false;

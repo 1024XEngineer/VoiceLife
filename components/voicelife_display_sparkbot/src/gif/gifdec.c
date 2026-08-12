@@ -286,7 +286,9 @@ static void read_ext(gd_GIF* gif) {
             read_application_ext(gif);
             break;
         default:
-            ESP_LOGW(TAG, "unknown extension: %02X\n", label);
+            // 未知扩展：跳过完整 data sub-blocks，防止后续解析失步。
+            ESP_LOGW(TAG, "unknown extension: %02X (跳过子块)", label);
+            discard_sub_blocks(gif);
     }
 }
 
@@ -745,8 +747,7 @@ static void f_gif_read(gd_GIF* gif, void* buf, size_t len) {
     if (gif->is_file) {
         lv_fs_read(&gif->fd, buf, len, NULL);
     } else {
-        if (gif->data_size != 0 &&
-            (gif->f_rw_p > gif->data_size || len > gif->data_size - gif->f_rw_p)) {
+        if (gif->data_size != 0 && (gif->f_rw_p > gif->data_size || len > gif->data_size - gif->f_rw_p)) {
             memset(buf, 0, len);
             gif->io_error = true;
             return;
@@ -773,8 +774,7 @@ static int f_gif_seek(gd_GIF* gif, size_t pos, int k) {
             gif->io_error = true;
             return gif->f_rw_p;
         }
-        if (k == LV_FS_SEEK_CUR || k == LV_FS_SEEK_SET)
-            gif->f_rw_p = (uint32_t)next;
+        if (k == LV_FS_SEEK_CUR || k == LV_FS_SEEK_SET) gif->f_rw_p = (uint32_t)next;
         return gif->f_rw_p;
     }
 }
