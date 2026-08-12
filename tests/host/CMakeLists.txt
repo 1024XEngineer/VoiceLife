@@ -250,6 +250,10 @@ target_link_libraries(audio_board_profile_contract_test PRIVATE audio_esp)
 add_voicelife_test(platform_profile_contract_test "unit;platform;contract" platform_profile_contract_test.cc)
 target_link_libraries(platform_profile_contract_test PRIVATE platform)
 
+add_voicelife_test(display_text_layout_test "unit;display;contract" display_text_layout_test.cc
+    "${ROOT_DIR}/components/voicelife_display_esp/src/display_text_layout.cc")
+target_include_directories(display_text_layout_test PRIVATE "${ROOT_DIR}/components/voicelife_display_esp/src")
+
 add_voicelife_test(pcm_frame_assembler_contract_test "unit;voice;audio;esp;contract"
     pcm_frame_assembler_contract_test.cc)
 target_link_libraries(pcm_frame_assembler_contract_test PRIVATE audio_esp)

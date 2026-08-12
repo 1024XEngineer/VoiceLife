@@ -1,5 +1,6 @@
 #include "voicelife/display_esp/ssd1306_status_display.h"
 
+#include "display_text_layout.h"
 #include "font16_provider.h"
 
 #ifdef ESP_PLATFORM
@@ -579,36 +580,6 @@ std::array<uint8_t, 32> MoodGlyph(std::string_view mood) {
     return CowNeutralGlyph();
 }
 
-// 解码 UTF-8 首个字符，返回码点与字节宽度；非法字节按 1 字节返回 0。
-uint32_t DecodeUtf8(std::string_view text, size_t& width) {
-    const uint8_t b0 = static_cast<uint8_t>(text[0]);
-    if (b0 < 0x80) {
-        width = 1;
-        return b0;
-    }
-    if ((b0 & 0xe0) == 0xc0 && text.size() >= 2) {
-        width = 2;
-        return ((b0 & 0x1f) << 6) | (static_cast<uint8_t>(text[1]) & 0x3f);
-    }
-    if ((b0 & 0xf0) == 0xe0 && text.size() >= 3) {
-        width = 3;
-        const uint32_t cp = ((b0 & 0x0f) << 12) | ((static_cast<uint8_t>(text[1]) & 0x3f) << 6) |
-                            (static_cast<uint8_t>(text[2]) & 0x3f);
-        // 全角标点（U+FF00-FF5E）映射到 ASCII 等价，避免多字节标点在 ASCII 分支乱码。
-        if (cp >= 0xff01 && cp <= 0xff5e) {
-            return cp - 0xff01 + 0x21;
-        }
-        return cp;
-    }
-    if ((b0 & 0xf8) == 0xf0 && text.size() >= 4) {
-        width = 4;
-        return ((b0 & 0x07) << 18) | ((static_cast<uint8_t>(text[1]) & 0x3f) << 12) |
-               ((static_cast<uint8_t>(text[2]) & 0x3f) << 6) | (static_cast<uint8_t>(text[3]) & 0x3f);
-    }
-    width = 1;
-    return 0;
-}
-
 struct DisplayState {
     i2c_master_bus_handle_t bus = nullptr;
     esp_lcd_panel_io_handle_t io = nullptr;
@@ -621,15 +592,6 @@ struct DisplayState {
 DisplayState& State() {
     static DisplayState state;
     return state;
-}
-
-// 字符水平前进宽度：中文 17px，ASCII/标点 9px（16px 高度统一基线）。
-size_t Advance16(uint32_t cp) {
-    if ((cp >= 0x4e00 && cp <= 0x9fff) || (cp >= 0x3000 && cp <= 0x303f) || (cp >= 0xff00 && cp <= 0xffef)) {
-        return 17;  // CJK 及全角标点
-    }
-    if (cp == ' ') return 9;
-    return 9;  // ASCII 统一 9px advance
 }
 
 // 绘制一个 16x16 汉字（2 页）。返回水平前进宽度。
@@ -681,9 +643,9 @@ Status DrawText(DisplayState& state, std::string_view text) {
             ++page;
             continue;
         }
-        size_t width = 0;
-        const uint32_t cp = DecodeUtf8(text.substr(index), width);
-        const size_t advance = Advance16(cp);
+        const auto decoded = text_layout::DecodeFirst(text.substr(index));
+        const uint32_t cp = decoded.codepoint;
+        const size_t advance = text_layout::Advance16(cp);
         if (advance >= 17) {
             // 中文/全角：16px 字形，占 2 页。
             if (x + 16 > kWidth) {
@@ -703,7 +665,7 @@ Status DrawText(DisplayState& state, std::string_view text) {
             DrawCodepoint16(state, x, page, cp);
             x += advance;
         }
-        index += width;
+        index += decoded.byte_width;
     }
     return Flush(state, text);
 }
@@ -784,8 +746,8 @@ Status SetEmotion(std::string_view mood, std::string_view status, std::string_vi
         int page = 0;
         size_t index = 0;
         while (index < status.size() && page + 2 <= 2) {
-            size_t width = 0;
-            const uint32_t cp = DecodeUtf8(status.substr(index), width);
+            const auto decoded = text_layout::DecodeFirst(status.substr(index));
+            const uint32_t cp = decoded.codepoint;
             if (cp >= 0x4e00 && cp <= 0x9fff) {
                 const auto glyph = Glyph16(cp);
                 const bool blank = std::all_of(glyph.begin(), glyph.end(), [](uint8_t b) { return b == 0; });
@@ -797,38 +759,30 @@ Status SetEmotion(std::string_view mood, std::string_view status, std::string_vi
                 DrawAscii(state, x, page, static_cast<char>(cp));
                 x += 6;
             }
-            index += width;
+            index += decoded.byte_width;
         }
     }
     // 下行内容栏：页 2-3；超宽时由 scroll_offset 逐字符滚动显示。
     if (!content.empty()) {
         // 跳过 scroll_offset 个字符（滚动窗口起点）。
-        size_t skipped = 0;
-        size_t index = 0;
-        while (index < content.size() && skipped < scroll_offset) {
-            size_t width = 0;
-            (void)DecodeUtf8(content.substr(index), width);
-            if (width == 0) width = 1;
-            index += width;
-            ++skipped;
-        }
+        size_t index = text_layout::ByteOffsetAfterCodepoints(content, scroll_offset);
         int x = 20;
         int page = 2;
         while (index < content.size() && page + 2 <= kPages) {
-            size_t width = 0;
-            const uint32_t cp = DecodeUtf8(content.substr(index), width);
-            const size_t advance = Advance16(cp);
+            const auto decoded = text_layout::DecodeFirst(content.substr(index));
+            const uint32_t cp = decoded.codepoint;
+            const size_t advance = text_layout::Advance16(cp);
             if (advance >= 17) {
                 if (x + 16 > kWidth) break;
                 DrawCodepoint16(state, x, page, cp);
             } else {
                 if (x + 9 > kWidth) break;
-                // cp 已由 DecodeUtf8 归一化（全角标点映射为 ASCII 等价），
+                // cp 已由文本布局归一化（全角标点映射为 ASCII 等价），
                 // 统一 16px 高度（Font16Provider），F/P 等英文可见。
                 DrawCodepoint16(state, x, page, cp);
             }
             x += advance;
-            index += width;
+            index += decoded.byte_width;
         }
     }
     return Flush(state, content.empty() ? status : content);
