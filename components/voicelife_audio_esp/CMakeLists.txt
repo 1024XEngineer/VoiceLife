@@ -9,5 +9,5 @@ idf_component_register(
         "src/esp_multinet_wake_detector.cc"
     INCLUDE_DIRS "include"
     REQUIRES voicelife_contracts voicelife_voice
-    PRIV_REQUIRES esp_driver_i2c esp_driver_i2s espressif__esp-sr
+    PRIV_REQUIRES esp_driver_i2c esp_driver_i2s esp_timer espressif__esp-sr
 )
