@@ -52,7 +52,7 @@ State: starting -> activating -> idle
 | MCU | 启动日志：ESP32-S3 rev 0.2 | 使用 ESP-IDF ESP32-S3 构建目标 |
 | Flash | `esptool flash_id`：16MB | 以实际分区表为准，不因容量增加而覆盖未知分区 |
 | PSRAM | 启动日志：Found 8MB PSRAM | 图像缓存、LVGL 缓冲和音频队列优先放 PSRAM |
-| 显示 | 小智 profile：ST7789 SPI、240x240 | 直接照搬官方 SparkBot 显示方案，不能调用 SSD1306 初始化或自行改 UI |
+| 显示 | 小智 profile：ST7789 SPI、240x240 | 直接照搬小智官方 `esp-sparkbot` 实现，不能调用 SSD1306 初始化或自行改 UI |
 | Codec | ES8311，日志显示 Duplex channels created | 使用双工 Codec Profile，不能沿用 NoAudioCodec simplex |
 | 音频 GPIO | MCLK45、WS41、BCLK39、DIN40、DOUT42 | 在 `AudioHardware` 内声明，runtime 不直接写 GPIO |
 | Codec I2C | SDA4、SCL5、ES8311 默认地址 | 启动阶段检查 I2C ACK 和 Codec reset |
@@ -148,12 +148,12 @@ AudioHardware
 
 ### 4.2 显示渲染契约
 
-**硬约束：SparkBot 屏幕显示方案直接照搬官方实现，不做任何修改。**
+**硬约束：SparkBot 屏幕显示方案直接照搬小智官方实现，不做任何修改。**
 
-- 直接复用官方 SparkBot 的 ST7789/LVGL 初始化、布局、主题、动画资源、状态映射、字体、字号、颜色、滚动和刷新节奏；
+- 直接移植小智仓库 `main/boards/espressif/esp-sparkbot/`、`main/display/lcd_display.cc` 和 `main/display/lvgl_display/` 中的 ST7789/LVGL 初始化、布局、主题、动画资源、状态映射、字体、字号、颜色、滚动和刷新节奏；
 - 不把 VoiceLife 旧板的 SSD1306 牛头布局移植为新板界面；
 - 不重新设计状态栏、文本区域、动画时序或屏幕交互；
-- VoiceLife 只负责把语音会话状态转换为官方 SparkBot 已有的状态/文本输入，显示层不得反向改变会话状态；
+- VoiceLife 只负责把语音会话状态转换为小智 SparkBot 显示实现已有的状态/文本输入，显示层不得反向改变会话状态；
 - 动画只由显示任务刷新，禁止在音频 DeliveryLoop、WSS 回调或 Provider 回调中直接操作 LVGL；
 - 只有官方 SparkBot 显示方案无法编译或无法在实板工作时，才记录阻塞证据并暂停，不能自行发明替代 UI。
 
@@ -185,14 +185,14 @@ feat(board): add SparkBot hardware profile and probe
 
 ### 阶段 B：显示驱动和动画
 
-目标：原样接入官方 SparkBot 显示方案，让 VoiceLife 状态接入既有显示输入，不影响音频。
+目标：直接移植小智官方 SparkBot 显示代码和资源，让 VoiceLife 状态接入既有显示输入，不影响音频。
 
 任务：
 
-1. 原样接入官方 SparkBot 的 ST7789/LVGL Renderer；
-2. 原样复用官方 `boot/connecting/idle/listening/thinking/speaking/error` 动画资源；
-3. 原样复用官方状态栏、文本布局、字体、字号、标点、滚动和刷新时序；
-4. 仅建立 VoiceLife 状态到官方 SparkBot 显示输入的适配映射，不改显示方案本身；
+1. 直接移植小智官方 SparkBot 的 ST7789/LVGL Renderer 代码；
+2. 直接移植小智官方 `boot/connecting/idle/listening/thinking/speaking/error` 动画资源；
+3. 直接移植小智官方状态栏、文本布局、字体、字号、标点、滚动和刷新时序；
+4. 仅建立 VoiceLife 状态到小智 SparkBot 显示输入的适配映射，不改显示方案本身；
 5. 确认 LVGL tick、flush 和动画缓存不会运行在音频任务栈上；
 6. 开机、联网、空闲、聆听、处理中、播报、告别、错误逐项截图留档，并与官方 SparkBot 参考行为比对。
 
@@ -305,7 +305,7 @@ PR #226 当前是 Open、非 Draft、`mergeable=CONFLICTING`、`mergeStateStatus
 | Followup | 回复排空后保持聆听，超时后一次告别并回 Idle |
 | goodbye | 服务端正常关闭不显示错误 |
 | 断网 | 只启动一个重连流程，不出现联网循环 |
-| 屏幕 | 240x240 方向、布局、动画、字体、字号、长文本和英文标点与官方 SparkBot 完全一致 |
+| 屏幕 | 240x240 方向、布局、动画、字体、字号、长文本和英文标点与小智官方 SparkBot 实现完全一致 |
 | 摄像头 | 单帧拍照成功，语音任务不死锁 |
 | 底盘 | 前进/后退/转向/急停均有超时和日志 |
 | 稳定性 | 20 轮连续对话、5 次快速唤醒、3 次断网恢复 |
