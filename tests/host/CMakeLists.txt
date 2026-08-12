@@ -254,6 +254,11 @@ add_voicelife_test(display_text_layout_test "unit;display;contract" display_text
     "${ROOT_DIR}/components/voicelife_display_esp/src/display_text_layout.cc")
 target_include_directories(display_text_layout_test PRIVATE "${ROOT_DIR}/components/voicelife_display_esp/src")
 
+add_voicelife_test(ssd1306_renderer_test "unit;display;contract" ssd1306_renderer_test.cc
+    "${ROOT_DIR}/components/voicelife_display_esp/src/display_text_layout.cc"
+    "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_renderer.cc")
+target_include_directories(ssd1306_renderer_test PRIVATE "${ROOT_DIR}/components/voicelife_display_esp/src")
+
 add_voicelife_test(pcm_frame_assembler_contract_test "unit;voice;audio;esp;contract"
     pcm_frame_assembler_contract_test.cc)
 target_link_libraries(pcm_frame_assembler_contract_test PRIVATE audio_esp)

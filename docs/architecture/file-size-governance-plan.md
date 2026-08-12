@@ -1,6 +1,6 @@
 # 单文件规模治理与拆分计划
 
-这份计划把“超过 500 行”变成需要解释和拆分设计的信号，而不是把代码机械切成小块。Runtime 的板级输入、显示投影、语音装配和 Linx 启动协调已经拆出；接下来先补 SSD1306 的回归保护，再处理仍然超线的显示和会话文件。生成资源、第三方代码和测试大样本不参与同一阈值。
+这份计划把“超过 500 行”变成需要解释和拆分设计的信号，而不是把代码机械切成小块。Runtime 的板级输入、显示投影、语音装配和 Linx 启动协调已经拆出；SSD1306 的文本布局和帧缓冲渲染也已隔离并有主机回归保护，接下来处理仍然超线的会话文件。生成资源、第三方代码和测试大样本不参与同一阈值。
 
 下一步：新功能 PR 从本计划的分级阈值执行；涉及高风险板级代码的拆分，必须先保留现有行为的回归测试和对应 Profile 的回退证据。SparkBot 应实现并列的 ST7789/LVGL 呈现与板级装配，不得复用 VoiceLife PCB 的 SSD1306、GPIO 或 Codec 适配器。
 
@@ -29,7 +29,7 @@
 | 优先级 | 文件 | 当前规模 | 拆分方向 | 保护条件 |
 | --- | --- | ---: | --- | --- |
 | P0 | `components/voicelife_runtime/src/runtime.cc` | 1,237 -> 693 | 已拆为 `runtime_linx_bootstrap`、`runtime_board_input`、`runtime_presentation`、`runtime_voice_wiring`；Runtime 暂保留启动编排和交互状态机。后续若再触及第二项职责，拆出 `runtime_interaction_coordinator` | 已保持 GPIO、I2S、Codec 初始化和 SSD1306 默认交互的调用顺序；每个移动步骤都有独立提交。ESP-IDF 构建和旧板真机回归仍待工具链/设备可用时补齐 |
-| P0 | `components/voicelife_display_esp/src/ssd1306_status_display.cc` | 847 | 拆成 SSD1306 总线初始化、字形/布局、状态渲染；对外仅保留语义化显示入口 | 尚未开始。先补当前像素/文本滚动的主机测试或捕获证据；不得混入 SparkBot/LVGL |
+| P0 | `components/voicelife_display_esp/src/ssd1306_status_display.cc` | 801 -> 687 | 已拆出 `display_text_layout` 和 `ssd1306_renderer`；前者锁定 UTF-8/全角标点/滚动字节偏移，后者锁定 128x32 页缓冲的文本与情绪布局。原文件仅保留旧板字形资产、字形选择和 I2C/面板生命周期 | 已新增主机像素位置、5x7 状态栏、情绪图和按字符滚动断言。内置字形表是受保护资产而非通用渲染职责；下一次修改字形资产或驱动序列前，先补旧板实机截图/串口回归证据。不得混入 SparkBot/LVGL |
 | P1 | `components/voicelife_voice/src/voice_session.cc` | 539 | 将状态迁移规则与协议事件映射分离，保持 `VoiceSession` 为会话语义所有者 | 每个状态迁移和 generation 隔离的现有契约测试必须不变 |
 | P1 | `components/voicelife_runtime/src/linx_ota_bootstrap.cc` | 521 | 拆出设备身份、OTA 配置解析和 ESP 启动协调 | OTA 签名、目标分区与回退流程不能随文件拆分改变 |
 | P1 | `services/im-gateway/src/application/services.ts` | 1,754 | 按通知投递、动作执行、幂等/事务协调拆成应用服务；不拆散同一业务事务 | TypeScript 契约、持久化回归与 IM Gateway CI 全量通过 |

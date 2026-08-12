@@ -1,14 +1,13 @@
 #include "voicelife/display_esp/ssd1306_status_display.h"
 
-#include "display_text_layout.h"
 #include "font16_provider.h"
+#include "ssd1306_renderer.h"
 
 #ifdef ESP_PLATFORM
 
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <cstring>
 #include <mutex>
 #include <string_view>
 
@@ -28,79 +27,6 @@ constexpr uint8_t kAddress = 0x3c;
 
 constexpr int kWidth = 128;
 constexpr int kHeight = 32;
-constexpr int kPages = kHeight / 8;
-
-// 5x7 ASCII 字形（原字形表保持兼容，补充常用标点）。
-std::array<uint8_t, 5> Glyph(char value) {
-    switch (value) {
-        case '!':
-            return {0x00, 0x00, 0x5f, 0x00, 0x00};
-        case 'A':
-            return {0x7e, 0x11, 0x11, 0x7e, 0x00};
-        case 'B':
-            return {0x7f, 0x49, 0x49, 0x36, 0x00};
-        case 'C':
-            return {0x3e, 0x41, 0x41, 0x22, 0x00};
-        case 'D':
-            return {0x7f, 0x41, 0x41, 0x3e, 0x00};
-        case 'E':
-            return {0x7f, 0x49, 0x49, 0x41, 0x00};
-        case 'G':
-            return {0x3e, 0x41, 0x49, 0x7a, 0x00};
-        case 'I':
-            return {0x41, 0x7f, 0x41, 0x00, 0x00};
-        case 'K':
-            return {0x7f, 0x08, 0x14, 0x63, 0x00};
-        case 'L':
-            return {0x7f, 0x40, 0x40, 0x40, 0x00};
-        case 'N':
-            return {0x7f, 0x06, 0x18, 0x7f, 0x00};
-        case 'O':
-            return {0x3e, 0x41, 0x41, 0x3e, 0x00};
-        case 'R':
-            return {0x7f, 0x09, 0x19, 0x66, 0x00};
-        case 'S':
-            return {0x46, 0x49, 0x49, 0x31, 0x00};
-        case 'T':
-            return {0x01, 0x7f, 0x01, 0x01, 0x00};
-        case 'W':
-            return {0x7f, 0x20, 0x18, 0x20, 0x7f};
-        case 'V':
-            return {0x07, 0x38, 0x40, 0x38, 0x07};
-        case 'Y':
-            return {0x03, 0x04, 0x78, 0x04, 0x03};
-        case '0':
-            return {0x3e, 0x45, 0x49, 0x51, 0x3e};
-        case '1':
-            return {0x00, 0x42, 0x7f, 0x40, 0x00};
-        case '2':
-            return {0x62, 0x51, 0x49, 0x49, 0x46};
-        case '3':
-            return {0x22, 0x49, 0x49, 0x49, 0x36};
-        case '4':
-            return {0x18, 0x14, 0x12, 0x7f, 0x10};
-        case '5':
-            return {0x2f, 0x49, 0x49, 0x49, 0x31};
-        case '6':
-            return {0x3e, 0x49, 0x49, 0x49, 0x32};
-        case '7':
-            return {0x01, 0x71, 0x09, 0x05, 0x03};
-        case '8':
-            return {0x36, 0x49, 0x49, 0x49, 0x36};
-        case '9':
-            return {0x26, 0x49, 0x49, 0x49, 0x3e};
-        case '-':
-            return {0x08, 0x08, 0x08, 0x08, 0x00};
-        case ':':
-            return {0x00, 0x36, 0x36, 0x00, 0x00};
-        case '/':
-            return {0x00, 0x04, 0x08, 0x10, 0x00};
-        case ' ':
-            return {0x00, 0x00, 0x00, 0x00, 0x00};
-        default:
-            return {0, 0, 0, 0, 0};
-    }
-}
 
 // 16x16 中文字形：按 SSD1306 页布局存储，共 32 字节，
 // 前 16 字节为第 0 页（高 8 像素，每字节一列），后 16 字节为第 1 页。
@@ -580,11 +506,82 @@ std::array<uint8_t, 32> MoodGlyph(std::string_view mood) {
     return CowNeutralGlyph();
 }
 
+std::array<uint8_t, 5> LegacyAsciiGlyph(char raw) {
+    switch (static_cast<char>(std::toupper(static_cast<unsigned char>(raw)))) {
+        case '!':
+            return {0x00, 0x00, 0x5f, 0x00, 0x00};
+        case 'A':
+            return {0x7e, 0x11, 0x11, 0x7e, 0x00};
+        case 'B':
+            return {0x7f, 0x49, 0x49, 0x36, 0x00};
+        case 'C':
+            return {0x3e, 0x41, 0x41, 0x22, 0x00};
+        case 'D':
+            return {0x7f, 0x41, 0x41, 0x3e, 0x00};
+        case 'E':
+            return {0x7f, 0x49, 0x49, 0x41, 0x00};
+        case 'G':
+            return {0x3e, 0x41, 0x49, 0x7a, 0x00};
+        case 'I':
+            return {0x41, 0x7f, 0x41, 0x00, 0x00};
+        case 'K':
+            return {0x7f, 0x08, 0x14, 0x63, 0x00};
+        case 'L':
+            return {0x7f, 0x40, 0x40, 0x40, 0x00};
+        case 'N':
+            return {0x7f, 0x06, 0x18, 0x7f, 0x00};
+        case 'O':
+            return {0x3e, 0x41, 0x41, 0x3e, 0x00};
+        case 'R':
+            return {0x7f, 0x09, 0x19, 0x66, 0x00};
+        case 'S':
+            return {0x46, 0x49, 0x49, 0x31, 0x00};
+        case 'T':
+            return {0x01, 0x7f, 0x01, 0x01, 0x00};
+        case 'W':
+            return {0x7f, 0x20, 0x18, 0x20, 0x7f};
+        case 'V':
+            return {0x07, 0x38, 0x40, 0x38, 0x07};
+        case 'Y':
+            return {0x03, 0x04, 0x78, 0x04, 0x03};
+        case '0':
+            return {0x3e, 0x45, 0x49, 0x51, 0x3e};
+        case '1':
+            return {0x00, 0x42, 0x7f, 0x40, 0x00};
+        case '2':
+            return {0x62, 0x51, 0x49, 0x49, 0x46};
+        case '3':
+            return {0x22, 0x49, 0x49, 0x49, 0x36};
+        case '4':
+            return {0x18, 0x14, 0x12, 0x7f, 0x10};
+        case '5':
+            return {0x2f, 0x49, 0x49, 0x49, 0x31};
+        case '6':
+            return {0x3e, 0x49, 0x49, 0x49, 0x32};
+        case '7':
+            return {0x01, 0x71, 0x09, 0x05, 0x03};
+        case '8':
+            return {0x36, 0x49, 0x49, 0x49, 0x36};
+        case '9':
+            return {0x26, 0x49, 0x49, 0x49, 0x3e};
+        case '-':
+            return {0x08, 0x08, 0x08, 0x08, 0x00};
+        case ':':
+            return {0x00, 0x36, 0x36, 0x00, 0x00};
+        case '/':
+            return {0x00, 0x04, 0x08, 0x10, 0x00};
+        case ' ':
+            return {0x00, 0x00, 0x00, 0x00, 0x00};
+        default:
+            return {0, 0, 0, 0, 0};
+    }
+}
+
 struct DisplayState {
     i2c_master_bus_handle_t bus = nullptr;
     esp_lcd_panel_io_handle_t io = nullptr;
     esp_lcd_panel_handle_t panel = nullptr;
-    std::array<uint8_t, kWidth * kPages> buffer{};
+    ssd1306_renderer::FrameBuffer buffer{};
     std::mutex mutex;
     bool initialized = false;
 };
@@ -592,33 +589,6 @@ struct DisplayState {
 DisplayState& State() {
     static DisplayState state;
     return state;
-}
-
-// 绘制一个 16x16 汉字（2 页）。返回水平前进宽度。
-void DrawChinese(DisplayState& state, int x, int page, const std::array<uint8_t, 32>& glyph) {
-    for (int p = 0; p < 2; ++p) {
-        if (page + p >= kPages) break;
-        for (int column = 0; column < 16 && x + column < kWidth; ++column) {
-            state.buffer[(page + p) * kWidth + x + column] |= glyph[p * 16 + column];
-        }
-    }
-}
-
-// 绘制一个 Unicode 码点：统一走 16px Font16Provider（中英文同高度）。
-void DrawCodepoint16(DisplayState& state, int x, int page, uint32_t cp) {
-    const auto glyph = Glyph16(cp);
-    const bool blank = std::all_of(glyph.begin(), glyph.end(), [](uint8_t b) { return b == 0; });
-    if (!blank) {
-        DrawChinese(state, x, page, glyph);
-    }
-}
-
-// 绘制一个 ASCII 字符（5x7，1 页）。返回水平前进宽度。
-void DrawAscii(DisplayState& state, int x, int page, char raw) {
-    const auto glyph = Glyph(static_cast<char>(std::toupper(static_cast<unsigned char>(raw))));
-    for (int column = 0; column < 5 && x + column < kWidth; ++column) {
-        state.buffer[page * kWidth + x + column] |= glyph[column];
-    }
 }
 
 Status Flush(DisplayState& state, std::string_view text) {
@@ -631,42 +601,7 @@ Status Flush(DisplayState& state, std::string_view text) {
 }
 
 Status DrawText(DisplayState& state, std::string_view text) {
-    state.buffer.fill(0);
-    // 中文 16x16 占 2 页，ASCII 5x7 占 1 页；统一从页 1 开始以获得垂直居中。
-    int page = 1;
-    int x = 0;
-    size_t index = 0;
-    while (index < text.size() && page < kPages) {
-        if (text[index] == '\n') {
-            ++index;
-            x = 0;
-            ++page;
-            continue;
-        }
-        const auto decoded = text_layout::DecodeFirst(text.substr(index));
-        const uint32_t cp = decoded.codepoint;
-        const size_t advance = text_layout::Advance16(cp);
-        if (advance >= 17) {
-            // 中文/全角：16px 字形，占 2 页。
-            if (x + 16 > kWidth) {
-                x = 0;
-                page += 2;
-                if (page >= kPages) break;
-            }
-            DrawCodepoint16(state, x, page, cp);
-            x += advance;
-        } else {
-            // ASCII/半角：统一 16px 高度（Font16Provider），9px advance。
-            if (x + 9 > kWidth) {
-                x = 0;
-                ++page;
-                if (page >= kPages) break;
-            }
-            DrawCodepoint16(state, x, page, cp);
-            x += advance;
-        }
-        index += decoded.byte_width;
-    }
+    ssd1306_renderer::RenderText(state.buffer, text, Glyph16);
     return Flush(state, text);
 }
 
@@ -734,57 +669,8 @@ Status SetEmotion(std::string_view mood, std::string_view status, std::string_vi
     auto& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
     if (!state.initialized) return Status::Error(ErrorCode::kUnavailable, "OLED 状态屏尚未初始化");
-    state.buffer.fill(0);
-    // 布局：左侧单个 16x16 牛头（x=2，页 1 垂直居中），右侧上行状态栏（x20 起，
-    // 页 0-1）与下行内容栏（x20 起，页 2-3）。DrawChinese 一次即画完整 16x16，
-    // 不得循环多次（否则上下堆叠出两个牛头）。
-    const auto mascot = MoodGlyph(mood);
-    DrawChinese(state, 2, 1, mascot);
-    // 上行状态栏：页 0-1。
-    {
-        int x = 20;
-        int page = 0;
-        size_t index = 0;
-        while (index < status.size() && page + 2 <= 2) {
-            const auto decoded = text_layout::DecodeFirst(status.substr(index));
-            const uint32_t cp = decoded.codepoint;
-            if (cp >= 0x4e00 && cp <= 0x9fff) {
-                const auto glyph = Glyph16(cp);
-                const bool blank = std::all_of(glyph.begin(), glyph.end(), [](uint8_t b) { return b == 0; });
-                if (!blank && x + 16 > kWidth) break;
-                DrawChinese(state, x, page, glyph);
-                x += blank ? 16 : 17;
-            } else {
-                if (x + 6 > kWidth) break;
-                DrawAscii(state, x, page, static_cast<char>(cp));
-                x += 6;
-            }
-            index += decoded.byte_width;
-        }
-    }
-    // 下行内容栏：页 2-3；超宽时由 scroll_offset 逐字符滚动显示。
-    if (!content.empty()) {
-        // 跳过 scroll_offset 个字符（滚动窗口起点）。
-        size_t index = text_layout::ByteOffsetAfterCodepoints(content, scroll_offset);
-        int x = 20;
-        int page = 2;
-        while (index < content.size() && page + 2 <= kPages) {
-            const auto decoded = text_layout::DecodeFirst(content.substr(index));
-            const uint32_t cp = decoded.codepoint;
-            const size_t advance = text_layout::Advance16(cp);
-            if (advance >= 17) {
-                if (x + 16 > kWidth) break;
-                DrawCodepoint16(state, x, page, cp);
-            } else {
-                if (x + 9 > kWidth) break;
-                // cp 已由文本布局归一化（全角标点映射为 ASCII 等价），
-                // 统一 16px 高度（Font16Provider），F/P 等英文可见。
-                DrawCodepoint16(state, x, page, cp);
-            }
-            x += advance;
-            index += decoded.byte_width;
-        }
-    }
+    ssd1306_renderer::RenderEmotion(state.buffer, mood, status, content, scroll_offset, MoodGlyph, Glyph16,
+                                    LegacyAsciiGlyph);
     return Flush(state, content.empty() ? status : content);
 }
 
