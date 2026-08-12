@@ -92,6 +92,7 @@ VoiceLife 使用 ESP-IDF 组件化模块单体。核心代码使用 C++，外部
 | `voicelife_linx` | Linx/XRobot 协议和 Provider Adapter | contracts、voice |
 | `voicelife_linx_esp` | ESP32-S3 WSS/TLS Transport 和分片重组 | contracts、linx |
 | `voicelife_audio_esp` | ESP32-S3 音频 Profile、探针和设备端 Port | contracts、voice |
+| `voicelife_board_esp` | ESP-SparkBot 板级 Profile、能力矩阵、共享电源仲裁和身份探针 | contracts |
 | `voicelife_mcp` | 工具 Schema、注册中心和调用路由 | contracts |
 | `voicelife_runtime` | 唯一组装入口 | contracts、mcp、voice、linx |
 

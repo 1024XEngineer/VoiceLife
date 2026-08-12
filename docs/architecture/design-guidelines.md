@@ -86,6 +86,12 @@ voicelife_runtime                  只组装
 
 `voicelife_platform` 当前只放内存存储、时钟和标识等轻量出站实现。某类 Adapter 一旦引入独立 SDK、持久化格式或生命周期，就拆成明确组件，例如 `voicelife_storage_sqlite`；不能继续把所有硬件和基础设施塞进 `platform`。
 
+### 4.2 ESP-SparkBot 板级边界
+
+`voicelife_board_esp` 只承载 ESP-SparkBot 的板级事实和设备探针契约：ST7789/ES8311/OV2640/UART1/BOOT 的引脚与总线参数、能力证据状态、GPIO46 功放/背光共享线的逻辑仲裁，以及只读的芯片、容量、MAC 指纹和分区报告。Profile 不暴露 ESP-IDF 句柄；仲裁器不直接写 GPIO；主机调用探针必须返回 `kUnavailable`，不能用模拟数据冒充实板证据。
+
+阶段 A 只把组件接入 `runtime` 的 CMake 装配并锁定主机契约，保持现有语音和 SSD1306 运行时不变。阶段 B 才将 VoiceLife 显示输入适配到小智官方 SparkBot 的 ST7789/LVGL 实现；阶段 C 才让 ES8311 驱动消费音频 Profile 和 GPIO46 仲裁结果。
+
 ## 5. Port 设计规则
 
 - 名称描述业务需要，例如 `CalendarStorePort`、`NotificationPort`，不要叫 `IManager` 或 `CommonService`。
