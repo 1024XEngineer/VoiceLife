@@ -28,3 +28,6 @@ __pycache__/
 .env
 *.bin
 audio-debug*.wav
+
+# Claude Code worktrees and session artifacts
+.claude/

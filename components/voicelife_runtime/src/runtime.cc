@@ -29,6 +29,9 @@
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #include "voicelife/audio_esp/esp_multinet_wake_detector.h"
 #include "voicelife/display_esp/ssd1306_status_display.h"
+#include "voicelife/im/esp_http_transport_factory.h"
+#include "voicelife/im/im_config_store.h"
+#include "voicelife/im/im_runtime.h"
 #include "voicelife/linx/linx_speech_provider.h"
 #include "voicelife/linx/linx_types.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
@@ -36,6 +39,7 @@
 #include "voicelife/schedule/schedule_service.h"
 #endif
 
+#include "im_runtime_bootstrap.h"
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
 #include "schedule_mcp_tools.h"
@@ -53,6 +57,11 @@ constexpr int64_t kWakeAckDisplayUs = 400 * 1000;
 constexpr int64_t kVolumeOverlayUs = 1500 * 1000;
 constexpr uint32_t kListenTimeoutMs = 15000;
 constexpr uint32_t kFinalSttTimeoutMs = 5000;
+#if CONFIG_VOICELIFE_IM_GATEWAY
+constexpr bool kImGatewayEnabled = true;
+#else
+constexpr bool kImGatewayEnabled = false;
+#endif
 
 #if CONFIG_NVS_ENCRYPTION
 Result<std::string> ReadNvsString(nvs_handle_t handle, const char* key) {
@@ -302,6 +311,13 @@ class Runtime final {
         }
         (void)display_esp::SetEmotion("neutral", "连接", {});
         linx_config_ = std::move(*connection.value);
+        // IM 前先同步系统时间：TLS 证书校验与 IM 就绪都需要可信时间。
+        // 时间同步失败只降级 IM（等待网络/时间），不阻塞本地语音、唤醒或音频。
+        const Status time_sync_status = SynchronizeSystemTime();
+        if (!time_sync_status.ok()) {
+            ESP_LOGW(kTag, "TIME_SYNC_SKIPPED code=%d im=degraded", static_cast<int>(time_sync_status.code));
+        }
+        StartImRuntime();
         auto result = registry.Create("xrobot-websocket", {});
 #else
         auto result = registry.Create("scaffold", {});
@@ -407,6 +423,26 @@ class Runtime final {
 
    private:
 #ifdef ESP_PLATFORM
+    void StartImRuntime() {
+        const Status status = im_runtime_.Start();
+        if (im_runtime_.state() == im::ImRuntimeState::kReady) {
+            ESP_LOGI(kTag, "IM_RUNTIME_READY=1");
+            return;
+        }
+        if (im_runtime_.state() == im::ImRuntimeState::kDisabled) {
+            ESP_LOGI(kTag, "IM_RUNTIME_DISABLED=1");
+            return;
+        }
+
+        ESP_LOGW(kTag, "IM_RUNTIME_DEGRADED=1 state=%d code=%d", static_cast<int>(im_runtime_.state()),
+                 static_cast<int>(status.code));
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        if (im_runtime_.state() == im::ImRuntimeState::kUnconfigured && !StartImProvisioningTask()) {
+            ESP_LOGW(kTag, "IM_PROVISION_TASK_FAILED=1");
+        }
+#endif
+    }
+
     enum class BoardRequestKind : uint8_t {
         kWakeWord,
         kRestoreStandby,
@@ -1168,6 +1204,11 @@ class Runtime final {
     }
 
     NvsSecretResolver linx_secrets_;
+    NvsImSecretStore im_secret_store_;
+    im::StoredImConfigProvider im_config_{im_secret_store_, kImGatewayEnabled};
+    EspImRuntimeReadiness im_readiness_;
+    im::ImRuntime im_runtime_{im_config_, im_config_, im_readiness_,
+                              [](const std::string& origin) { return im::CreateEspHttpTransport(origin); }};
     mcp::McpServer mcp_server_;
     schedule::ScheduleService schedule_service_;
     Status init_status_ = Status::Ok();

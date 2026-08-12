@@ -1,5 +1,14 @@
 menu "VoiceLife"
 
+config VOICELIFE_IM_GATEWAY
+    bool "Enable VoiceLife Gateway IM runtime"
+    default n
+    help
+        Assemble the base IM runtime from the encrypted `im` NVS namespace.
+        Missing or invalid configuration degrades IM without stopping local
+        voice/audio. No schedule receipt, notification or SSE action task is
+        started by this option.
+
 config VOICELIFE_AUDIO_PROBE
     bool "Enable ESP32-S3 audio wiring probe"
     default n

@@ -1,5 +1,6 @@
 #include "esp_http_transport.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -7,6 +8,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "im_response_reader.h"
+#include "voicelife/im/esp_http_transport_factory.h"
 #include "voicelife/im/im_endpoint.h"
 
 namespace voicelife::im {
@@ -33,6 +35,10 @@ class EspResponseReader : public ImResponseReader {
 }  // namespace
 
 EspHttpTransport::EspHttpTransport(std::string base_url) : base_url_(std::move(base_url)) {}
+
+std::unique_ptr<ImTransport> CreateEspHttpTransport(std::string gateway_origin) {
+    return std::make_unique<EspHttpTransport>(std::move(gateway_origin));
+}
 
 ImHttpResponse EspHttpTransport::Post(const ImHttpRequest& request) {
     ImHttpResponse result;
