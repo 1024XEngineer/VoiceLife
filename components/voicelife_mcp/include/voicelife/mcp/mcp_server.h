@@ -90,6 +90,14 @@ class Property {
                                      std::optional<ToolValue> default_value = std::nullopt);
 
     /**
+     * @brief 创建一个没有默认值但允许调用方省略的参数声明。
+     * @param name 参数名称。
+     * @param type 参数类型。
+     * @return 可选参数声明。
+     */
+    static Property Optional(std::string name, PropertyType type);
+
+    /**
      * @brief 获取参数名称。
      * @return 参数名称。
      */
@@ -118,6 +126,11 @@ class Property {
     [[nodiscard]] std::optional<std::size_t> min_length() const { return min_length_; }
     /** @brief 获取字符串最大长度。 @return 最大长度；未设置时为空。 */
     [[nodiscard]] std::optional<std::size_t> max_length() const { return max_length_; }
+    /**
+     * @brief 判断参数缺失时是否应拒绝调用。
+     * @return 参数必填时返回 true。
+     */
+    [[nodiscard]] bool required() const { return required_; }
 
    private:
     std::string name_;
@@ -127,6 +140,7 @@ class Property {
     std::optional<int64_t> maximum_;
     std::optional<std::size_t> min_length_;
     std::optional<std::size_t> max_length_;
+    bool required_ = true;
 };
 
 /// 工具参数声明及调用值的集合。

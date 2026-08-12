@@ -16,7 +16,7 @@ struct AudioPortOptions {
     /** @brief 输入队列深度。 */
     std::size_t input_queue_depth = 4;
     /** @brief 输出队列深度。 */
-    std::size_t output_queue_depth = 4;
+    std::size_t output_queue_depth = 50;
 };
 
 /** @brief 音频端口统计。 */
@@ -69,6 +69,10 @@ class Esp32s3PcmAudioPorts final {
     [[nodiscard]] voice::AudioOutputPort& output();
     /** @brief 端口统计。 @return 统计值。 */
     [[nodiscard]] AudioPortStats stats() const;
+    /** @brief 设置板端 PCM 播放音量（0-100）。 @param volume 目标音量百分比。 */
+    void SetOutputVolume(uint8_t volume);
+    /** @brief 返回当前板端 PCM 播放音量。 @return 当前音量百分比。 */
+    [[nodiscard]] uint8_t output_volume() const;
 
    private:
     /** @brief Pimpl 实现。 */

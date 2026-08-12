@@ -69,6 +69,10 @@ class AudioOutputPort {
      *  @return 刷新成功返回 Ok。 */
     virtual Status Flush() = 0;
 
+    /** @brief 查询播放队列是否已排空（无待播帧）。
+     *  @return true 表示播放已排空，可用于 TTS 结束后的收尾判断。 */
+    [[nodiscard]] virtual bool IsIdle() const = 0;
+
     /** @brief 释放硬件资源。 */
     virtual void Close() = 0;
 };
@@ -148,6 +152,7 @@ class TTSAdapter {
     virtual ~TTSAdapter() = default;
     /** @brief 播报指定文本。 @param text 要播报的文本。 @return 成功返回 Ok。 */
     virtual Status Speak(std::string_view text) = 0;
+
     /** @brief 转发 TTS 事件。 @param event 语音事件。 @return 处理成功返回 Ok。 */
     virtual Status OnEvent(const VoiceEvent& event) = 0;
 };
@@ -219,6 +224,14 @@ class SpeechProviderAdapter {
      *  @param text 要播报的文本。
      *  @return 请求成功返回 Ok。 */
     virtual Status Speak(std::string_view text) = 0;
+
+    /** @brief 将本地唤醒词通知 Provider，启动一次云端语音轮次。
+     *  @param wake_word 已由本地检测器确认的唤醒词。
+     *  @return 通知发送结果。
+     */
+    virtual Status NotifyLocalWakeWord(std::string_view /*wake_word*/) {
+        return Status::Error(ErrorCode::kUnavailable, "本地唤醒未实现");
+    }
 
     /** @brief 拆除 Provider 连接。 @return 断开成功返回 Ok。 */
     virtual Status Disconnect() = 0;

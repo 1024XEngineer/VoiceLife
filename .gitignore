@@ -33,3 +33,6 @@ audio-debug*.wav
 /third_party/sqlite3/CMakeLists.txt
 /third_party/sqlite3/sqlite3.c
 /third_party/sqlite3/sqlite3.h
+
+# Claude Code worktrees and session artifacts
+.claude/

@@ -48,7 +48,7 @@ struct LinxAudioParams {
 };
 
 /** 表示 Linx 入站控制消息的类别。 */
-enum class LinxMessageKind { kHello, kStt, kTts, kError };
+enum class LinxMessageKind { kHello, kStt, kTts, kMcp, kError, kGoodbye, kLlm };
 /** 表示 Linx TTS 消息的生命周期状态。 */
 enum class LinxTtsState { kStart, kSentenceStart, kStop };
 
@@ -60,6 +60,10 @@ struct LinxInboundMessage {
     std::optional<LinxTtsState> tts_state;
     std::string text;
     bool aborted = false;
+    /** @brief llm 表情消息的视觉表情，例如 "happy"。 */
+    std::optional<std::string> emotion;
+    /** @brief llm 表情消息的动作表情，例如 "thinking"。 */
+    std::optional<std::string> action;
 };
 
 /** 保存 Linx 传输层向 Provider 上报事件的回调集合。 */

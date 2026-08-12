@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -83,17 +84,27 @@ Result<LinxAudioParams> ParseAudioParams(const cJSON* audio) {
     } else {
         return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument, "不支持的 Linx 音频格式: " + format_str);
     }
-    const uint32_t sample_rate = static_cast<uint32_t>(sr->valuedouble);
-    const uint8_t channels = static_cast<uint8_t>(ch->valueint);
-    if (sr->valuedouble < 0 || sr->valuedouble > 0xFFFFFFFFULL || sample_rate == 0 || channels == 0) {
+    if (!std::isfinite(sr->valuedouble) || std::floor(sr->valuedouble) != sr->valuedouble || sr->valuedouble < 1 ||
+        sr->valuedouble > 0xFFFFFFFFULL || !std::isfinite(ch->valuedouble) ||
+        std::floor(ch->valuedouble) != ch->valuedouble || ch->valuedouble < 1 || ch->valuedouble > 255) {
         return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument, "Linx 音频参数超出范围");
     }
+    const uint32_t sample_rate = static_cast<uint32_t>(sr->valuedouble);
+    const uint8_t channels = static_cast<uint8_t>(ch->valuedouble);
     params.sample_rate_hz = sample_rate;
     params.channels = channels;
     const cJSON* bit = GetOptional(audio, "bit_depth", cJSON_Number);
-    if (bit != nullptr) params.bits_per_sample = static_cast<uint8_t>(bit->valueint);
+    if (bit != nullptr && (!std::isfinite(bit->valuedouble) || std::floor(bit->valuedouble) != bit->valuedouble ||
+                           bit->valuedouble < 1 || bit->valuedouble > 255)) {
+        return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument, "Linx bit_depth 超出范围");
+    }
+    if (bit != nullptr) params.bits_per_sample = static_cast<uint8_t>(bit->valuedouble);
     const cJSON* dur = GetOptional(audio, "frame_duration", cJSON_Number);
-    if (dur != nullptr) params.frame_duration_ms = static_cast<uint16_t>(dur->valueint);
+    if (dur != nullptr && (!std::isfinite(dur->valuedouble) || std::floor(dur->valuedouble) != dur->valuedouble ||
+                           dur->valuedouble < 1 || dur->valuedouble > 65535)) {
+        return Result<LinxAudioParams>::Failure(ErrorCode::kInvalidArgument, "Linx frame_duration 超出范围");
+    }
+    if (dur != nullptr) params.frame_duration_ms = static_cast<uint16_t>(dur->valuedouble);
     return Result<LinxAudioParams>::Success(params);
 }
 
@@ -110,6 +121,8 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
     JsonPtr root(cJSON_CreateObject());
     cJSON_AddStringToObject(root.get(), "type", "hello");
     cJSON_AddNumberToObject(root.get(), "version", 1);
+    cJSON* features = cJSON_AddObjectToObject(root.get(), "features");
+    cJSON_AddBoolToObject(features, "mcp", true);
     cJSON_AddStringToObject(root.get(), "transport", "websocket");
 
     cJSON* audio = cJSON_AddObjectToObject(root.get(), "audio_params");
@@ -279,10 +292,43 @@ Result<LinxInboundMessage> LinxJsonCodec::DecodeText(std::string_view message) c
         return Result<LinxInboundMessage>::Success(std::move(decoded));
     }
 
+    if (type_str == "mcp") {
+        const cJSON* payload = GetRequired(root.get(), "payload", cJSON_Object, error);
+        if (payload == nullptr) {
+            return Result<LinxInboundMessage>::Failure(ErrorCode::kInvalidArgument, error);
+        }
+        char* serialized = cJSON_PrintUnformatted(payload);
+        if (serialized == nullptr) {
+            return Result<LinxInboundMessage>::Failure(ErrorCode::kInternal, "Linx MCP payload 序列化失败");
+        }
+        decoded.kind = LinxMessageKind::kMcp;
+        decoded.text.assign(serialized);
+        cJSON_free(serialized);
+        return Result<LinxInboundMessage>::Success(std::move(decoded));
+    }
+
     if (type_str == "error") {
         decoded.kind = LinxMessageKind::kError;
         const cJSON* msg = GetOptional(root.get(), "message", cJSON_String);
         if (msg != nullptr) decoded.text = cJSON_GetStringValue(msg);
+        return Result<LinxInboundMessage>::Success(std::move(decoded));
+    }
+
+    if (type_str == "goodbye") {
+        decoded.kind = LinxMessageKind::kGoodbye;
+        const cJSON* msg = GetOptional(root.get(), "message", cJSON_String);
+        if (msg != nullptr) decoded.text = cJSON_GetStringValue(msg);
+        return Result<LinxInboundMessage>::Success(std::move(decoded));
+    }
+
+    if (type_str == "llm") {
+        decoded.kind = LinxMessageKind::kLlm;
+        const cJSON* text = GetOptional(root.get(), "text", cJSON_String);
+        if (text != nullptr) decoded.text = cJSON_GetStringValue(text);
+        const cJSON* emotion = GetOptional(root.get(), "emotion", cJSON_String);
+        if (emotion != nullptr) decoded.emotion = cJSON_GetStringValue(emotion);
+        const cJSON* action = GetOptional(root.get(), "action", cJSON_String);
+        if (action != nullptr) decoded.action = cJSON_GetStringValue(action);
         return Result<LinxInboundMessage>::Success(std::move(decoded));
     }
 

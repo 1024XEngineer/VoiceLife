@@ -34,11 +34,15 @@ enum class TransportState {
 /** 配置 ESP WebSocket 传输的容量、超时和安全策略。 */
 struct EspWebSocketTransportOptions {
     size_t max_message_bytes = 16 * 1024;
-    size_t event_queue_capacity = 8;
+    // A single envelope owns up to 4 KiB of frame data. 32 entries absorb
+    // short STT/TTS bursts without allowing unbounded protocol backlog.
+    size_t event_queue_capacity = 32;
     size_t event_chunk_bytes = 4096;
     uint32_t connect_timeout_ms = 10000;
     uint32_t network_timeout_ms = 10000;
     uint32_t reconnect_timeout_ms = 1000;
+    uint32_t websocket_task_stack_size = 12288;
+    uint32_t worker_task_stack_size = 12288;
     bool enable_close_reconnect = true;
     bool allow_insecure_ws = false;
 };

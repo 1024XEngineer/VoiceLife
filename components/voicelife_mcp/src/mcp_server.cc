@@ -77,6 +77,13 @@ Property Property::WithStringLength(std::string name, std::size_t minimum, std::
     property.default_value_ = std::move(default_value);
     property.min_length_ = minimum;
     property.max_length_ = maximum;
+    property.required_ = !property.default_value_.has_value();
+    return property;
+}
+
+Property Property::Optional(std::string name, PropertyType type) {
+    Property property(std::move(name), type);
+    property.required_ = false;
     return property;
 }
 
@@ -93,7 +100,7 @@ ToolInputSchema PropertyList::to_schema() const {
                              .min_length = property.min_length(),
                              .max_length = property.max_length()};
         schema.properties.emplace(property.name(), std::move(field));
-        if (!property.default_value().has_value()) {
+        if (property.required() && !property.default_value().has_value()) {
             schema.required.push_back(property.name());
         }
     }
