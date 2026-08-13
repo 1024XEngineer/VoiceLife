@@ -26,6 +26,10 @@ int main() {
           "pending task should be allowed to be cancelled");
     Check(CanTransition(TaskStatus::kExecuting, TaskStatus::kCompleted),
           "executing task should be allowed to complete");
+    Check(!CanTransition(TaskStatus::kPending, TaskStatus::kCompleted),
+          "pending task should not complete without executing");
+    Check(!CanTransition(TaskStatus::kExecuting, TaskStatus::kCancelled),
+          "executing task should not be cancelled after its callback starts");
     Check(!CanTransition(TaskStatus::kCompleted, TaskStatus::kExecuting),
           "completed task should not return to executing");
     Check(!CanTransition(TaskStatus::kCancelled, TaskStatus::kExecuting), "cancelled task should not start executing");
