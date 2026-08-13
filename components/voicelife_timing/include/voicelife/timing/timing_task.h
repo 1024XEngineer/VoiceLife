@@ -2,17 +2,36 @@
 
 #include <chrono>
 #include <cstddef>
+#include <deque>
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace voicelife::timing {
 
 /// 日程模块分配的一次性 task 标识；Timing 只比较该值，不解释其内容。
-struct TaskId {
-    std::string value;
+class TaskId {
+   public:
+    /**
+     * @brief 从不透明字符串创建 task 标识。
+     * @param value 上游分配的标识。
+     * @return value 非空时返回标识，否则返回 nullopt。
+     */
+    static std::optional<TaskId> Create(std::string value);
+
+    /**
+     * @brief 返回不透明标识原值。
+     * @return 注册上游提供的非空字符串。
+     */
+    [[nodiscard]] const std::string& Value() const;
 
     bool operator==(const TaskId&) const = default;
+
+   private:
+    explicit TaskId(std::string value);
+
+    std::string value_;
 };
 
 /// 绝对墙上时钟时间点；字符串解析和时区换算由 Timing 上游负责。
@@ -20,6 +39,15 @@ using TriggerAt = std::chrono::time_point<std::chrono::system_clock, std::chrono
 
 /// task 到期回调；Runner 传回注册时的标识与绝对到点时刻。
 using TaskCallback = std::function<void(const TaskId&, TriggerAt)>;
+
+/// Runner 应用注册命令后的最终结果。
+enum class RegisterTaskResult {
+    kRegistered,
+    kDuplicate,
+};
+
+/// 单条注册命令的最终结果通知；由 Runner 消费命令时调用。
+using RegisterTaskResultCallback = std::function<void(RegisterTaskResult)>;
 
 /// 一次性 task 的生命周期状态。
 enum class TaskStatus {
@@ -43,6 +71,7 @@ struct RegisterTaskCommand {
     TaskId task_id;
     TriggerAt trigger_at;
     TaskCallback callback;
+    RegisterTaskResultCallback on_result;
 };
 
 /// 异步取消一个已注册 task 的命令。
@@ -89,6 +118,46 @@ class TimingTaskService {
      * @return kAccepted 表示命令已被接收，最终应用结果由 Runner 另行通知。
      */
     virtual CommandAcceptance CancelTask(CancelTaskCommand command) = 0;
+};
+
+/**
+ * @brief Host 可用的异步注册 Runner，独占内存 pending 注册表。
+ *
+ * RegisterTask 只保存命令；注册表仅由 ProcessPendingRegistrations 修改。
+ */
+class InMemoryTimingTaskRunner {
+   public:
+    /**
+     * @brief 异步接收一条注册命令。
+     * @param command 待 Runner 应用的注册命令。
+     * @return 命令接收后固定返回 kAccepted。
+     */
+    CommandAcceptance RegisterTask(RegisterTaskCommand command);
+
+    /**
+     * @brief 应用当前所有待处理注册命令。
+     * @param registered_at 本轮写入 task 创建与更新时间的墙上时钟。
+     * @return 本轮消费的命令数量。
+     */
+    size_t ProcessPendingRegistrations(TriggerAt registered_at);
+
+    /**
+     * @brief 查询 pending 注册表中的最早到点时刻。
+     * @return 注册表为空时返回 nullopt，否则返回最早 trigger_at。
+     */
+    [[nodiscard]] std::optional<TriggerAt> NextWakeAt() const;
+
+   private:
+    /// pending task 及其仅驻留内存的运行时回调。
+    struct PendingTask {
+        Task task;
+        TaskCallback callback;
+    };
+
+    std::deque<RegisterTaskCommand> registration_commands_;
+    std::vector<std::string> used_task_ids_;
+    std::vector<PendingTask> pending_tasks_;
+    bool processing_registrations_ = false;
 };
 
 }  // namespace voicelife::timing
