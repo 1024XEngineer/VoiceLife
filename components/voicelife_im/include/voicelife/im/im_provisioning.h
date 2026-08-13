@@ -11,6 +11,13 @@ namespace voicelife::im {
 
 /// 物理串口 IM provisioning 帧的固定头长度。
 inline constexpr std::size_t kImProvisioningHeaderSize = 12;
+/// 物理 USB 配对触发帧长度；与 provisioning header 等长，便于单一串口分派。
+inline constexpr std::size_t kImPairingTriggerSize = 12;
+
+/// 已校验的显式物理配对触发请求。
+struct ImPairingTriggerRequest {
+    int expires_in_minutes = 10;
+};
 
 /// 已校验的 provisioning 字段长度。
 struct ImProvisioningHeader {
@@ -55,5 +62,12 @@ Result<ImProvisioningHeader> ParseImProvisioningHeader(std::span<const uint8_t> 
  * @return 解析后的配置；magic、长度或内容异常时 fail closed。
  */
 Result<ImProvisioningRequest> ParseImProvisioningRequest(std::span<const uint8_t> bytes);
+
+/**
+ * @brief 解析无凭据的 VLP1 物理配对触发帧。
+ * @param bytes 必须恰好为 12 字节，保留字节必须为零。
+ * @return 1～10 分钟有效期，或类型化协议错误。
+ */
+Result<ImPairingTriggerRequest> ParseImPairingTrigger(std::span<const uint8_t> bytes);
 
 }  // namespace voicelife::im

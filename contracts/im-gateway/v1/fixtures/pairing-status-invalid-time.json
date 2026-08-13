@@ -1,0 +1,9 @@
+{
+  "id": "pairing-1",
+  "userId": "user-fixture",
+  "deviceId": "device-fixture",
+  "allowedPlatforms": ["wechat_official"],
+  "status": "pending",
+  "expiresAt": "not-a-time",
+  "createdAt": "2026-08-03T00:00:00.000Z"
+}

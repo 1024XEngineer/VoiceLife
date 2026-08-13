@@ -11,6 +11,7 @@ import type {
     OutboxEventId,
     PairingSessionId,
     RequestId,
+    UserId,
 } from '../contracts/ids.js';
 import { unsafeId } from '../contracts/ids.js';
 import type { ReminderActionCommand } from '../contracts/device-gateway.js';
@@ -283,12 +284,18 @@ export class InMemoryActionTokenPort implements ActionTokenPort {
 
 /** 始终认证为指定设备的测试认证端口。 */
 export class MockDeviceAuthenticationPort implements DeviceAuthenticationPort {
-    /** @param deviceId 所有认证请求返回的设备标识。 */
-    public constructor(private readonly deviceId: DeviceId) {}
+    /**
+     * @param deviceId 所有认证请求返回的设备标识。
+     * @param userId 与测试设备凭据绑定的用户标识。
+     */
+    public constructor(
+        private readonly deviceId: DeviceId,
+        private readonly userId: UserId = unsafeId<UserId>('user-fixture'),
+    ) {}
 
     /** {@inheritDoc DeviceAuthenticationPort.authenticate} */
     public authenticate(_authorization: string): Promise<DevicePrincipal> {
-        return Promise.resolve({ deviceId: this.deviceId });
+        return Promise.resolve({ deviceId: this.deviceId, userId: this.userId });
     }
 }
 

@@ -46,7 +46,9 @@ CPP_TEST_FILES = [
 TS_TEST_FILE = ROOT / "services/im-gateway/test/run-tests.mjs"
 # 网关下发到设备方向的契约：TS 网关生成、C++ 设备解析。仅这些合同可标记为
 # outbound；新增此类契约必须同步补 TS 生成测试（其有效 fixture 要求 TS 引用）。
-OUTBOUND_CONTRACTS = frozenset({"notification-submission", "reminder-action-command"})
+OUTBOUND_CONTRACTS = frozenset(
+    {"notification-submission", "pairing-created", "pairing-status", "reminder-action-command"}
+)
 
 
 def extract_version(text: str, marker: str) -> str:
