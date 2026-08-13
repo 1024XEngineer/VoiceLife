@@ -1,6 +1,8 @@
 #include "voicelife/mcp/mcp_server.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <unordered_set>
 #include <utility>
 
@@ -66,19 +68,36 @@ std::size_t Utf8Length(const std::string& value) {
 Property::Property(std::string name, PropertyType type) : name_(std::move(name)), type_(type) {}
 
 Property::Property(std::string name, PropertyType type, ToolValue default_value)
-    : name_(std::move(name)), type_(type), default_value_(std::move(default_value)) {}
+    : name_(std::move(name)),
+      type_(type),
+      default_value_(std::move(default_value)),
+      required_(!default_value_.has_value()) {}
 
-Property::Property(std::string name, PropertyType type, int64_t minimum, int64_t maximum)
-    : name_(std::move(name)), type_(type), minimum_(minimum), maximum_(maximum) {}
-
-Property Property::WithStringLength(std::string name, std::size_t minimum, std::size_t maximum,
-                                    std::optional<ToolValue> default_value) {
-    Property property(std::move(name), PropertyType::kString);
-    property.default_value_ = std::move(default_value);
-    property.min_length_ = minimum;
-    property.max_length_ = maximum;
-    property.required_ = !property.default_value_.has_value();
-    return property;
+Property::Property(std::string name, PropertyType type, int64_t minimum, int64_t maximum,
+                   std::optional<ToolValue> default_value)
+    : name_(std::move(name)),
+      type_(type),
+      default_value_(std::move(default_value)),
+      required_(!default_value_.has_value()) {
+    switch (type_) {
+        case PropertyType::kInteger:
+            minimum_ = minimum;
+            maximum_ = maximum;
+            break;
+        case PropertyType::kString:
+            if (minimum < 0 || maximum < 0 ||
+                static_cast<std::uintmax_t>(minimum) > std::numeric_limits<std::size_t>::max() ||
+                static_cast<std::uintmax_t>(maximum) > std::numeric_limits<std::size_t>::max()) {
+                constraint_valid_ = false;
+                break;
+            }
+            min_length_ = static_cast<std::size_t>(minimum);
+            max_length_ = static_cast<std::size_t>(maximum);
+            break;
+        case PropertyType::kBoolean:
+            constraint_valid_ = false;
+            break;
+    }
 }
 
 Property Property::Optional(std::string name, PropertyType type) {
@@ -147,8 +166,15 @@ Status McpServer::add_tool(std::string name, std::string description, PropertyLi
             default_string_length_invalid = (property.min_length().has_value() && length < *property.min_length()) ||
                                             (property.max_length().has_value() && length > *property.max_length());
         }
+        bool default_integer_range_invalid = false;
+        if (property.default_value().has_value() && input_type == ToolInputType::kInteger &&
+            std::holds_alternative<int64_t>(*property.default_value())) {
+            const int64_t value = std::get<int64_t>(*property.default_value());
+            default_integer_range_invalid = (property.minimum().has_value() && value < *property.minimum()) ||
+                                            (property.maximum().has_value() && value > *property.maximum());
+        }
         if ((property.default_value().has_value() && !MatchesType(*property.default_value(), input_type)) ||
-            default_string_length_invalid ||
+            !property.constraint_valid() || default_string_length_invalid || default_integer_range_invalid ||
             ((property.minimum().has_value() || property.maximum().has_value()) &&
              property.type() != PropertyType::kInteger) ||
             ((property.min_length().has_value() || property.max_length().has_value()) &&

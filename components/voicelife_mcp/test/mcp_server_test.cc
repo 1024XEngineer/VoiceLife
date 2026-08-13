@@ -30,7 +30,7 @@ Status RegisterTypedTool(McpServer& server, int64_t& captured_value) {
     return server.add_tool("self.device.configure", "配置设备",
                            PropertyList({Property("enabled", PropertyType::kBoolean, true),
                                          Property("level", PropertyType::kInteger, 0, 100),
-                                         Property::WithStringLength("label", 1, 10, std::string("default"))}),
+                                         Property("label", PropertyType::kString, 1, 10, std::string("default"))}),
                            [&captured_value](const PropertyList& properties) {
                                captured_value = properties.value<int64_t>("level").value_or(-1);
                                return ToolResult{.status = Status::Ok(), .output = {}};
@@ -81,22 +81,35 @@ void TestRegistrationValidation() {
                           PropertyList({Property("enabled", PropertyType::kBoolean, std::string("true"))}), handler)
                   .code == ErrorCode::kInvalidArgument,
           "默认值类型错误时应拒绝注册");
-    Check(server.add_tool("invalid.type_range", "描述", PropertyList({Property("label", PropertyType::kString, 0, 10)}),
-                          handler)
+    Check(server.add_tool("invalid.boolean_range", "描述",
+                          PropertyList({Property("enabled", PropertyType::kBoolean, 0, 1)}), handler)
                   .code == ErrorCode::kInvalidArgument,
-          "非整数参数声明范围时应拒绝注册");
+          "布尔参数声明范围时应拒绝注册");
     Check(server.add_tool("invalid.range", "描述", PropertyList({Property("level", PropertyType::kInteger, 10, 0)}),
                           handler)
                   .code == ErrorCode::kInvalidArgument,
           "整数参数最小值大于最大值时应拒绝注册");
-    Check(server.add_tool("invalid.string_length", "描述", PropertyList({Property::WithStringLength("label", 10, 1)}),
-                          handler)
+    Check(server.add_tool("invalid.integer_default", "描述",
+                          PropertyList({Property("level", PropertyType::kInteger, 0, 100, int64_t{101})}), handler)
+                  .code == ErrorCode::kInvalidArgument,
+          "整数默认值超出范围时应拒绝注册");
+    Check(server.add_tool("invalid.integer_default_low", "描述",
+                          PropertyList({Property("level", PropertyType::kInteger, 0, 100, int64_t{-1})}), handler)
+                  .code == ErrorCode::kInvalidArgument,
+          "整数默认值低于范围时应拒绝注册");
+    Check(server.add_tool("invalid.string_length", "描述",
+                          PropertyList({Property("label", PropertyType::kString, 10, 1)}), handler)
                   .code == ErrorCode::kInvalidArgument,
           "字符串最小长度大于最大长度时应拒绝注册");
     Check(server.add_tool("invalid.string_default", "描述",
-                          PropertyList({Property::WithStringLength("label", 1, 3, std::string("默认值过长"))}), handler)
+                          PropertyList({Property("label", PropertyType::kString, 1, 3, std::string("默认值过长"))}),
+                          handler)
                   .code == ErrorCode::kInvalidArgument,
           "字符串默认值超出长度范围时应拒绝注册");
+    Check(server.add_tool("invalid.string_negative_length", "描述",
+                          PropertyList({Property("label", PropertyType::kString, -1, 3)}), handler)
+                  .code == ErrorCode::kInvalidArgument,
+          "字符串长度不能为负数");
 }
 
 /**

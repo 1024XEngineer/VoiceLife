@@ -69,25 +69,16 @@ class Property {
      */
     Property(std::string name, PropertyType type, ToolValue default_value);
     /**
-     * @brief 创建带整数范围约束的参数声明。
+     * @brief 创建带数值或字符串长度约束的参数声明。
      * @param name 参数名称。
-     * @param type 参数类型，必须为整数。
-     * @param minimum 最小值。
-     * @param maximum 最大值。
+     * @param type 参数类型；整数类型使用数值范围，字符串类型使用字符长度。
+     * @param minimum 最小值或最小字符数。
+     * @param maximum 最大值或最大字符数。
+     * @param default_value 默认值；未设置时该参数为必填。
      * @return 无。
      */
-    Property(std::string name, PropertyType type, int64_t minimum, int64_t maximum);
-
-    /**
-     * @brief 创建带字符串长度约束的参数声明。
-     * @param name 参数名称。
-     * @param minimum 最小字符数。
-     * @param maximum 最大字符数。
-     * @param default_value 默认值；未设置时该参数为必填。
-     * @return 参数声明。
-     */
-    static Property WithStringLength(std::string name, std::size_t minimum, std::size_t maximum,
-                                     std::optional<ToolValue> default_value = std::nullopt);
+    Property(std::string name, PropertyType type, int64_t minimum, int64_t maximum,
+             std::optional<ToolValue> default_value = std::nullopt);
 
     /**
      * @brief 创建一个没有默认值但允许调用方省略的参数声明。
@@ -127,6 +118,11 @@ class Property {
     /** @brief 获取字符串最大长度。 @return 最大长度；未设置时为空。 */
     [[nodiscard]] std::optional<std::size_t> max_length() const { return max_length_; }
     /**
+     * @brief 判断约束参数是否能按声明类型解释。
+     * @return 约束有效时返回 true。
+     */
+    [[nodiscard]] bool constraint_valid() const { return constraint_valid_; }
+    /**
      * @brief 判断参数缺失时是否应拒绝调用。
      * @return 参数必填时返回 true。
      */
@@ -140,6 +136,7 @@ class Property {
     std::optional<int64_t> maximum_;
     std::optional<std::size_t> min_length_;
     std::optional<std::size_t> max_length_;
+    bool constraint_valid_ = true;
     bool required_ = true;
 };
 
