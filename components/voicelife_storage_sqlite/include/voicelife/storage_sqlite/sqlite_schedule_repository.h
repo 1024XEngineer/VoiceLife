@@ -36,7 +36,16 @@ class SqliteScheduleRepository final : public schedule::ScheduleRepository {
      */
     Result<schedule::Schedule> Insert(const schedule::Schedule& schedule) override;
 
+    /** @brief 按稳定创建键查询历史日程。
+     * @param key 外部调用边界生成的创建键。
+     * @return 匹配的日程或查询错误。
+     */
     [[nodiscard]] Result<std::optional<schedule::Schedule>> FindByIdempotencyKey(std::string_view key) const override;
+    /** @brief 原子写入日程或回放同一创建键的历史结果。
+     * @param schedule 待写入日程。
+     * @param key 外部调用边界生成的创建键。
+     * @return 写入或回放的完整日程。
+     */
     Result<schedule::Schedule> InsertOnce(const schedule::Schedule& schedule, std::string_view key) override;
 
     /** @brief 更新一条日程。 @param schedule 待更新日程。 @return 更新状态。 */
@@ -51,7 +60,11 @@ class SqliteScheduleRepository final : public schedule::ScheduleRepository {
      */
     [[nodiscard]] Result<std::vector<schedule::Schedule>> FindAll() const override;
 
-    /** @brief 原子领取到期且未投递的有效日程提醒。 */
+    /** @brief 原子领取到期且未投递的有效日程提醒。
+     * @param now 当前 UTC Unix 秒。
+     * @param limit 单次领取上限。
+     * @return 已领取的提醒日程或数据库错误。
+     */
     Result<std::vector<schedule::DueScheduleReminder>> ClaimDueReminders(schedule::DateTime now,
                                                                          std::size_t limit) override;
 

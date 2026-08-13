@@ -160,8 +160,7 @@ int main() {
     Check(transport.connects == 1 && transport.texts.size() == 1 &&
               transport.texts.front().find("\"type\":\"hello\"") != std::string::npos,
           "连接必须只发送一次 hello");
-    Check(transport.generation == session_config.generation,
-          "首次 Connect 必须将 generation 同步到 Transport");
+    Check(transport.generation == session_config.generation, "首次 Connect 必须将 generation 同步到 Transport");
     Check(!events.empty() && events.back().kind == voicelife::voice::VoiceEventKind::kConnected &&
               events.back().generation == 7,
           "hello 事件必须携带当前 generation");

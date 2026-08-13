@@ -77,6 +77,8 @@ add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_update_helpers.cc")
 target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule PUBLIC contracts Threads::Threads)
+add_voicelife_library(timing voicelife_timing
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task.cc")
 add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_server.cc"
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_json_writer.cc"
@@ -201,6 +203,12 @@ target_link_libraries(schedule_undo_operation_test PRIVATE schedule)
 
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
 target_link_libraries(status_test PRIVATE contracts)
+
+add_voicelife_test(timing_contract_test "unit;timing;contract" timing_contract_test.cc)
+target_link_libraries(timing_contract_test PRIVATE timing)
+
+add_voicelife_test(timing_registration_test "unit;timing" timing_registration_test.cc)
+target_link_libraries(timing_registration_test PRIVATE timing)
 
 add_voicelife_test(fatfs_volume_contract_test "unit;storage;fatfs"
     "${ROOT_DIR}/components/voicelife_storage_fatfs/test/fatfs_volume_contract_test.cc")

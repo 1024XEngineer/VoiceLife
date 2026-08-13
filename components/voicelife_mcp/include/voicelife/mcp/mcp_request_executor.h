@@ -22,20 +22,29 @@ using McpJsonRpcHandler = std::function<Result<std::string>(std::string_view)>;
  */
 class McpRequestExecutor final {
    public:
+    /** @brief 以请求处理函数创建有界执行器。 @param handler 请求处理函数。 */
     explicit McpRequestExecutor(McpJsonRpcHandler handler);
+    /** @brief 停止执行器并释放其工作资源。 */
     ~McpRequestExecutor();
 
+    /** @brief 禁止复制执行器。 @param other 复制源执行器。 */
     McpRequestExecutor(const McpRequestExecutor&) = delete;
+    /** @brief 禁止复制赋值执行器。 @param other 复制源执行器。 @return 本对象引用。 */
     McpRequestExecutor& operator=(const McpRequestExecutor&) = delete;
 
-    /** @brief 创建专属 MCP 工作任务。 */
+    /** @brief 创建专属 MCP 工作任务。 @return 启动结果。 */
     [[nodiscard]] Status Start();
     /** @brief 停止接收新请求，并释放工作任务。 */
     void Stop();
-    /** @brief 将请求投递到有界队列；满时返回 kUnavailable。 */
+    /** @brief 将请求投递到有界队列；满时返回 kUnavailable。
+     * @param request JSON-RPC 请求。
+     * @param response_sink 异步响应回调。
+     * @return 投递结果。
+     */
     [[nodiscard]] Status Submit(std::string_view request, McpJsonRpcResponseSink response_sink);
 
    private:
+    /** @brief 执行器队列和工作任务的私有实现。 */
     class Impl;
     Impl* impl_;
 };

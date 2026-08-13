@@ -32,6 +32,8 @@ class ScheduleRepository {
      *
      * 创建键来自受控调用边界，而不是用户可编辑的日程内容。实现必须跨进程重启保留
      * 该映射，避免重试重复写入日程。
+     * @param key 稳定的外部创建键。
+     * @return 匹配的日程或查询错误。
      */
     [[nodiscard]] virtual Result<std::optional<Schedule>> FindByIdempotencyKey(std::string_view key) const {
         (void)key;

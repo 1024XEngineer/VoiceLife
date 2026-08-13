@@ -11,8 +11,9 @@
 #include "voicelife/schedule/schedule_service.h"
 
 namespace voicelife::schedule {
+/** @brief MCP 日程应用使用的持久化仓储接口。 */
 class ScheduleRepository;
-}
+}  // namespace voicelife::schedule
 
 namespace voicelife::mcp {
 
@@ -26,19 +27,28 @@ class McpScheduleApplication final {
    public:
     using ExecutionObserver = std::function<void(bool started, bool success, std::string_view summary)>;
 
+    /** @brief 以日程仓储创建 MCP 日程应用。 @param repository 日程持久化仓储。 */
     explicit McpScheduleApplication(schedule::ScheduleRepository& repository);
+    /** @brief 销毁 MCP 日程应用及其执行器。 */
     ~McpScheduleApplication();
 
+    /** @brief 禁止复制应用。 @param other 复制源应用。 */
     McpScheduleApplication(const McpScheduleApplication&) = delete;
+    /** @brief 禁止复制赋值应用。 @param other 复制源应用。 @return 本对象引用。 */
     McpScheduleApplication& operator=(const McpScheduleApplication&) = delete;
 
+    /** @brief 注册日程工具并启动请求执行器。 @return 初始化结果。 */
     [[nodiscard]] Status Initialize();
     /**
      * @brief 异步执行 MCP 请求；传输回调只允许调用此入口。
      *
      * 响应保持纯 JSON-RPC，传输信封由调用方所属的协议 Adapter 负责。
+     * @param request JSON-RPC 请求。
+     * @param response_sink 异步响应回调。
+     * @return 投递结果。
      */
     [[nodiscard]] Status SubmitJsonRpc(std::string_view request, McpJsonRpcResponseSink response_sink);
+    /** @brief 设置工具执行状态观察器。 @param observer 状态观察回调。 */
     void SetExecutionObserver(ExecutionObserver observer);
 
    private:
