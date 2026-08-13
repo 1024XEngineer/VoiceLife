@@ -81,6 +81,9 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
     transport_connected_.store(false);
     connected_.store(false);
     generation_.store(config.generation);
+    // The transport drops queued PCM from other generations. Synchronize it
+    // before opening the connection so the first capture turn is accepted.
+    transport_.SetGeneration(config.generation);
     output_sequence_.store(0);
     {
         std::lock_guard<std::mutex> lock(hello_mutex_);

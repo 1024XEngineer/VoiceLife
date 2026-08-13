@@ -38,6 +38,7 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
         ++closes;
         return close_result;
     }
+    void SetGeneration(uint64_t value) override { generation = value; }
 
     void EmitText(std::string message) {
         if (sink_.on_text) {
@@ -64,6 +65,7 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
     voicelife::linx::LinxTransportSink sink_;
     std::vector<std::string> texts;
     std::vector<voicelife::voice::AudioFrame> audio_frames;
+    uint64_t generation = 0;
     Status connect_result = Status::Ok();
     Status send_text_result = Status::Ok();
     Status send_audio_result = Status::Ok();
@@ -158,6 +160,8 @@ int main() {
     Check(transport.connects == 1 && transport.texts.size() == 1 &&
               transport.texts.front().find("\"type\":\"hello\"") != std::string::npos,
           "连接必须只发送一次 hello");
+    Check(transport.generation == session_config.generation,
+          "首次 Connect 必须将 generation 同步到 Transport");
     Check(!events.empty() && events.back().kind == voicelife::voice::VoiceEventKind::kConnected &&
               events.back().generation == 7,
           "hello 事件必须携带当前 generation");
