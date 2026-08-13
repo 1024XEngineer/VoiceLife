@@ -24,24 +24,51 @@ bool CanTransition(TaskStatus from, TaskStatus to) {
 }
 
 CommandAcceptance InMemoryTimingTaskRunner::RegisterTask(RegisterTaskCommand command) {
-    registration_commands_.push_back(std::move(command));
+    commands_.push_back(std::move(command));
     return CommandAcceptance::kAccepted;
 }
 
-size_t InMemoryTimingTaskRunner::ProcessPendingRegistrations(TriggerAt registered_at) {
-    if (processing_registrations_) {
+CommandAcceptance InMemoryTimingTaskRunner::CancelTask(CancelTaskCommand command) {
+    commands_.push_back(std::move(command));
+    return CommandAcceptance::kAccepted;
+}
+
+size_t InMemoryTimingTaskRunner::ProcessPendingCommands(TriggerAt applied_at) {
+    if (processing_commands_) {
         return 0;
     }
-    processing_registrations_ = true;
+    processing_commands_ = true;
     struct ProcessingGuard {
         bool& processing;
         ~ProcessingGuard() { processing = false; }
-    } processing_guard{processing_registrations_};
+    } processing_guard{processing_commands_};
 
-    const auto processed_count = registration_commands_.size();
+    const auto processed_count = commands_.size();
     for (size_t index = 0; index < processed_count; ++index) {
-        auto command = std::move(registration_commands_.front());
-        registration_commands_.pop_front();
+        auto pending_command = std::move(commands_.front());
+        commands_.pop_front();
+        if (auto* cancel = std::get_if<CancelTaskCommand>(&pending_command)) {
+            const auto task =
+                std::find_if(pending_tasks_.begin(), pending_tasks_.end(),
+                             [&cancel](const auto& pending) { return pending.task.id == cancel->task_id; });
+            if (task == pending_tasks_.end()) {
+                if (cancel->on_result) {
+                    cancel->on_result(CancelTaskResult::kNotFound);
+                }
+                continue;
+            }
+            terminal_tasks_.reserve(terminal_tasks_.size() + 1);
+            task->task.status = TaskStatus::kCancelled;
+            task->task.updated_at = applied_at;
+            terminal_tasks_.push_back(std::move(task->task));
+            pending_tasks_.erase(task);
+            if (cancel->on_result) {
+                cancel->on_result(CancelTaskResult::kCancelled);
+            }
+            continue;
+        }
+
+        auto command = std::move(std::get<RegisterTaskCommand>(pending_command));
         if (std::find(used_task_ids_.begin(), used_task_ids_.end(), command.task_id.Value()) != used_task_ids_.end()) {
             if (command.on_result) {
                 command.on_result(RegisterTaskResult::kDuplicate);
@@ -54,8 +81,8 @@ size_t InMemoryTimingTaskRunner::ProcessPendingRegistrations(TriggerAt registere
                     .id = std::move(command.task_id),
                     .trigger_at = command.trigger_at,
                     .status = TaskStatus::kPending,
-                    .created_at = registered_at,
-                    .updated_at = registered_at,
+                    .created_at = applied_at,
+                    .updated_at = applied_at,
                 },
             .callback = std::move(command.callback),
         };

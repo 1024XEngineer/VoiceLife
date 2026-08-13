@@ -47,7 +47,7 @@ void AppliesRegistrationOnlyWhenRunnerConsumesIt() {
     Check(!final_result.has_value(), "registration result should wait for Runner consumption");
     Check(!runner.NextWakeAt().has_value(), "accepted command should not modify the pending registry");
 
-    Check(runner.ProcessPendingRegistrations(registered_at) == 1, "Runner should consume the queued registration");
+    Check(runner.ProcessPendingCommands(registered_at) == 1, "Runner should consume the queued registration");
     Check(final_result == RegisterTaskResult::kRegistered, "Runner should report a new task as registered");
     Check(runner.NextWakeAt() == trigger_at, "registered task should become the next wake time");
 }
@@ -57,7 +57,7 @@ void ReportsDuplicateWithoutOverwritingOriginalTask() {
     const auto original_trigger_at = TriggerAt{24h};
     const auto registered_at = TriggerAt{1h};
     runner.RegisterTask(Registration(RequireTaskId("task-1"), original_trigger_at));
-    runner.ProcessPendingRegistrations(registered_at);
+    runner.ProcessPendingCommands(registered_at);
     std::optional<RegisterTaskResult> duplicate_result;
 
     const auto acceptance = runner.RegisterTask(
@@ -67,7 +67,7 @@ void ReportsDuplicateWithoutOverwritingOriginalTask() {
     Check(acceptance == CommandAcceptance::kAccepted,
           "duplicate registration should still be accepted as an asynchronous command");
     Check(!duplicate_result.has_value(), "duplicate result should wait for Runner consumption");
-    Check(runner.ProcessPendingRegistrations(registered_at) == 1, "Runner should consume the duplicate command");
+    Check(runner.ProcessPendingCommands(registered_at) == 1, "Runner should consume the duplicate command");
     Check(duplicate_result == RegisterTaskResult::kDuplicate, "Runner should report a reused task id as duplicate");
     Check(runner.NextWakeAt() == original_trigger_at, "duplicate registration should not overwrite the pending task");
 }
@@ -78,7 +78,7 @@ void FindsEarliestPendingTrigger() {
     runner.RegisterTask(Registration(RequireTaskId("task-2"), TriggerAt{30h}));
     runner.RegisterTask(Registration(RequireTaskId("task-3"), TriggerAt{3h}));
 
-    Check(runner.ProcessPendingRegistrations(TriggerAt{1h}) == 3,
+    Check(runner.ProcessPendingCommands(TriggerAt{1h}) == 3,
           "Runner should consume all registrations waiting at the start of a cycle");
     Check(runner.NextWakeAt() == TriggerAt{3h}, "next wake time should be the earliest pending trigger");
 }
@@ -93,12 +93,12 @@ void DefersRegistrationsSubmittedByResultCallback() {
                              [&deferred_result](RegisterTaskResult result) { deferred_result = result; }));
         }));
 
-    Check(runner.ProcessPendingRegistrations(TriggerAt{}) == 1,
+    Check(runner.ProcessPendingCommands(TriggerAt{}) == 1,
           "Runner cycle should consume only registrations queued when the cycle began");
     Check(!deferred_result.has_value(), "registration submitted by a result callback should wait for the next cycle");
     Check(runner.NextWakeAt() == TriggerAt{2h}, "deferred registration should not affect the current cycle");
 
-    Check(runner.ProcessPendingRegistrations(TriggerAt{}) == 1,
+    Check(runner.ProcessPendingCommands(TriggerAt{}) == 1,
           "next Runner cycle should consume the registration submitted by the callback");
     Check(deferred_result == RegisterTaskResult::kRegistered,
           "deferred registration should complete on the next cycle");
@@ -111,12 +111,12 @@ void RejectsNestedRunnerConsumption() {
     std::optional<RegisterTaskResult> second_result;
     runner.RegisterTask(
         Registration(RequireTaskId("task-1"), TriggerAt{2h}, [&runner, &nested_processed_count](RegisterTaskResult) {
-            nested_processed_count = runner.ProcessPendingRegistrations(TriggerAt{});
+            nested_processed_count = runner.ProcessPendingCommands(TriggerAt{});
         }));
     runner.RegisterTask(Registration(RequireTaskId("task-2"), TriggerAt{1h},
                                      [&second_result](RegisterTaskResult result) { second_result = result; }));
 
-    Check(runner.ProcessPendingRegistrations(TriggerAt{}) == 2,
+    Check(runner.ProcessPendingCommands(TriggerAt{}) == 2,
           "outer Runner cycle should retain ownership of its queued registrations");
     Check(nested_processed_count == 0, "nested Runner consumption should be rejected");
     Check(second_result == RegisterTaskResult::kRegistered,
