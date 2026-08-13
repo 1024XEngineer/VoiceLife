@@ -8,6 +8,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -189,7 +190,22 @@ Status EspWebSocketTransport::Impl::SendAudio(const voice::AudioFrame& frame) {
     item->payload = frame.payload;
     if (xQueueSend(tx_queue_, &item, 0) != pdTRUE) {
         delete item;
+        const uint64_t dropped = tx_audio_queue_dropped_frames_.fetch_add(1) + 1;
+        if (dropped == 1 || dropped % 25 == 0) {
+            ESP_LOGW(detail::kTag, "LINX_TX_AUDIO_QUEUE_FULL dropped=%llu queued=%llu sent=%llu",
+                     static_cast<unsigned long long>(dropped),
+                     static_cast<unsigned long long>(tx_audio_enqueued_frames_.load()),
+                     static_cast<unsigned long long>(tx_audio_sent_frames_.load()));
+        }
         return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列已满");
+    }
+    const uint64_t enqueued = tx_audio_enqueued_frames_.fetch_add(1) + 1;
+    tx_audio_enqueued_bytes_.fetch_add(frame.payload.size());
+    if (enqueued == 1 || enqueued % 50 == 0) {
+        ESP_LOGI(detail::kTag, "LINX_TX_AUDIO_ENQUEUED frames=%llu bytes=%llu generation=%llu",
+                 static_cast<unsigned long long>(enqueued),
+                 static_cast<unsigned long long>(tx_audio_enqueued_bytes_.load()),
+                 static_cast<unsigned long long>(frame.generation));
     }
     return Status::Ok();
 }

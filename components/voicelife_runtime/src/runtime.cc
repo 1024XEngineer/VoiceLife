@@ -1146,8 +1146,8 @@ class Runtime final {
             (void)EnqueueEvent(voice::VoiceInteractionEvent::kTransportDisconnected);
         } else if (evidence.event == "transport_connected") {
             (void)EnqueueEvent(voice::VoiceInteractionEvent::kTransportConnected);
-        } else if (evidence.event == "provider_error" || evidence.event == "capture_stop_failed" ||
-                   evidence.event == "tts_capture_stop_failed") {
+        } else if (evidence.event == "provider_error" || evidence.event == "uplink_send_failed" ||
+                   evidence.event == "capture_stop_failed" || evidence.event == "tts_capture_stop_failed") {
             CancelListenTimer();
             // 会话已回待机后收到的 provider_error（如服务端有序 FIN/断开）是
             // 正常断线，不当作故障；随后的 transport_disconnected 走自动重连。

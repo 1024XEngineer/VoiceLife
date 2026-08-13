@@ -344,8 +344,10 @@ Status VoiceSession::BeginCapture() {
             // 新回合开始：清零上一轮武装标记与 VAD 状态，只允许本轮有效输入武装回复。
             response_armed_ = false;
             vad_speech_seen_ = false;
+            vad_speech_started_emitted_ = false;
             vad_silence_emitted_ = false;
             vad_silence_pending_ = false;
+            uplink_failure_emitted_ = false;
             last_speech_at_ = {};
             awaiting_final_asr_ = false;
         }
@@ -445,6 +447,8 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
     std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
     uint64_t generation = 0;
     uint64_t sequence = 0;
+    bool speech_started = false;
+    bool silence_detected = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (state_ != VoiceSessionState::kCapturing) {
@@ -467,9 +471,14 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
         // 1200ms 发一次 vad_silence 供上层进入最终 STT 等待。
         const auto* pcm = reinterpret_cast<const int16_t*>(frame.payload.data());
         const std::size_t sample_count = frame.payload.size() / sizeof(int16_t);
+        int64_t sum = 0;
+        for (std::size_t i = 0; i < sample_count; ++i) {
+            sum += pcm[i];
+        }
+        const int64_t mean = sample_count > 0 ? sum / static_cast<int64_t>(sample_count) : 0;
         int64_t energy = 0;
         for (std::size_t i = 0; i < sample_count; ++i) {
-            const int64_t sample = pcm[i];
+            const int64_t sample = static_cast<int64_t>(pcm[i]) - mean;
             energy += sample * sample;
         }
         const int64_t rms = sample_count > 0 ? energy / static_cast<int64_t>(sample_count) : 0;
@@ -477,16 +486,22 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
         constexpr int64_t kSpeechExitThreshold = 180 * 180;   // 迟滞下限约 -44 dBFS
         const auto now = std::chrono::steady_clock::now();
         if (rms >= kSpeechEnterThreshold || (vad_speech_seen_ && rms >= kSpeechExitThreshold)) {
+            speech_started = !vad_speech_seen_ && !vad_speech_started_emitted_;
             vad_speech_seen_ = true;
+            vad_speech_started_emitted_ = true;
             last_speech_at_ = now;
         } else if (vad_speech_seen_ && !vad_silence_emitted_ && last_speech_at_.time_since_epoch().count() > 0 &&
                    now - last_speech_at_ >= std::chrono::milliseconds(1200)) {
             // 只在锁内置标志，锁外再 Emit，避免 Emit 重入 mutex_ 造成自死锁。
             vad_silence_emitted_ = true;
             vad_silence_pending_ = true;
+            silence_detected = true;
         }
     }
-    if (vad_silence_pending_) {
+    if (speech_started) {
+        Emit("vad_speech_started", "");
+    }
+    if (silence_detected) {
         vad_silence_pending_ = false;
         Emit("vad_silence", "");
     }
@@ -495,6 +510,18 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (state_ == VoiceSessionState::kCapturing && generation_ == generation && next_sequence_ == sequence) {
             ++next_sequence_;
+        }
+    } else {
+        bool first_failure = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!uplink_failure_emitted_) {
+                uplink_failure_emitted_ = true;
+                first_failure = true;
+            }
+        }
+        if (first_failure) {
+            Emit("uplink_send_failed", status.message);
         }
     }
     return status;

@@ -80,6 +80,7 @@ class EspWebSocketTransport::Impl final {
     void WorkerLoop();
     static void TxEntry(void* argument);
     void TxLoop();
+    void LogTxAudioStatsIfDue();
     void HandleQueueOverflow();
     void HandleEnvelope(const detail::EventEnvelope& envelope);
     void HandleData(const detail::EventEnvelope& envelope);
@@ -106,6 +107,16 @@ class EspWebSocketTransport::Impl final {
     std::atomic<bool> queue_overflowed_{false};
     std::atomic<bool> connect_waiting_{false};
     std::atomic<uint64_t> generation_{0};
+    // 仅保存计数和代次，不记录音频内容或协议正文。它们用于把“未识别”区分为
+    // 采集、入队、实际网络发送或服务端识别阶段的问题。
+    std::atomic<uint64_t> tx_audio_enqueued_frames_{0};
+    std::atomic<uint64_t> tx_audio_enqueued_bytes_{0};
+    std::atomic<uint64_t> tx_audio_queue_dropped_frames_{0};
+    std::atomic<uint64_t> tx_audio_sent_frames_{0};
+    std::atomic<uint64_t> tx_audio_sent_bytes_{0};
+    std::atomic<uint64_t> tx_audio_stale_dropped_frames_{0};
+    std::atomic<uint64_t> tx_audio_send_failed_frames_{0};
+    int64_t last_tx_audio_stats_us_ = 0;
     std::atomic<TransportState> state_{TransportState::kDisconnected};
     std::recursive_mutex lifecycle_mutex_;
     std::recursive_mutex close_mutex_;

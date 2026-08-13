@@ -1,9 +1,11 @@
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <string_view>
 #include <utility>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_tls_errors.h"
 #include "esp_websocket_client.h"
 #include "esp_websocket_impl.h"
@@ -140,17 +142,31 @@ void EspWebSocketTransport::Impl::TxLoop() {
             delete item;
             continue;
         }
-        const int sent = item->kind == detail::LinxTxItem::Kind::kText
-                             ? esp_websocket_client_send_text(
-                                   client_, reinterpret_cast<const char*>(item->payload.data()),
-                                   static_cast<int>(item->payload.size()), pdMS_TO_TICKS(options_.network_timeout_ms))
-                             : esp_websocket_client_send_bin(
-                                   client_, reinterpret_cast<const char*>(item->payload.data()),
-                                   static_cast<int>(item->payload.size()), pdMS_TO_TICKS(options_.network_timeout_ms));
+        if (item->kind == detail::LinxTxItem::Kind::kAudio && item->generation != generation_.load()) {
+            tx_audio_stale_dropped_frames_.fetch_add(1);
+            delete item;
+            LogTxAudioStatsIfDue();
+            continue;
+        }
+        // 20 ms 音频帧不能共享控制消息的 10 秒网络超时：一次慢写就会
+        // 占满有界队列并使整轮 ASR 失去上行。控制帧保留连接配置的预算，
+        // 音频单帧最多占用 200 ms，失败后交给既有重连收敛路径处理。
+        constexpr uint32_t kAudioSendBudgetMs = 200;
+        const uint32_t timeout_ms = item->kind == detail::LinxTxItem::Kind::kAudio
+                                        ? std::min(options_.network_timeout_ms, kAudioSendBudgetMs)
+                                        : options_.network_timeout_ms;
+        const int sent =
+            item->kind == detail::LinxTxItem::Kind::kText
+                ? esp_websocket_client_send_text(client_, reinterpret_cast<const char*>(item->payload.data()),
+                                                 static_cast<int>(item->payload.size()), pdMS_TO_TICKS(timeout_ms))
+                : esp_websocket_client_send_bin(client_, reinterpret_cast<const char*>(item->payload.data()),
+                                                static_cast<int>(item->payload.size()), pdMS_TO_TICKS(timeout_ms));
         const size_t want = item->payload.size();
+        const bool audio = item->kind == detail::LinxTxItem::Kind::kAudio;
         delete item;
         item = nullptr;
         if (sent < 0 || static_cast<size_t>(sent) != want) {
+            if (audio) tx_audio_send_failed_frames_.fetch_add(1);
             // 发送失败（写阻塞/短写/连接已断）：不能直接 esp_websocket_client_stop
             // ——stop 会停止客户端，ESP 内建自动重连（disable_auto_reconnect=false）
             // 随之失效，Session 永久卡在非 Ready（无法二次唤醒/说话）。
@@ -170,7 +186,31 @@ void EspWebSocketTransport::Impl::TxLoop() {
             }
             continue;
         }
+        if (audio) {
+            tx_audio_sent_frames_.fetch_add(1);
+            tx_audio_sent_bytes_.fetch_add(want);
+        }
+        LogTxAudioStatsIfDue();
     }
+}
+
+void EspWebSocketTransport::Impl::LogTxAudioStatsIfDue() {
+    const int64_t now_us = esp_timer_get_time();
+    if (now_us - last_tx_audio_stats_us_ < 1000000) return;
+    last_tx_audio_stats_us_ = now_us;
+    const uint64_t queued = tx_audio_enqueued_frames_.load();
+    const uint64_t sent = tx_audio_sent_frames_.load();
+    const uint64_t dropped = tx_audio_queue_dropped_frames_.load();
+    const uint64_t stale = tx_audio_stale_dropped_frames_.load();
+    const uint64_t failed = tx_audio_send_failed_frames_.load();
+    if (queued == 0 && sent == 0 && dropped == 0 && stale == 0 && failed == 0) return;
+    ESP_LOGI(detail::kTag,
+             "LINX_TX_AUDIO_STATS queued=%llu queued_bytes=%llu sent=%llu sent_bytes=%llu queue_drop=%llu "
+             "stale_drop=%llu send_fail=%llu generation=%llu",
+             static_cast<unsigned long long>(queued), static_cast<unsigned long long>(tx_audio_enqueued_bytes_.load()),
+             static_cast<unsigned long long>(sent), static_cast<unsigned long long>(tx_audio_sent_bytes_.load()),
+             static_cast<unsigned long long>(dropped), static_cast<unsigned long long>(stale),
+             static_cast<unsigned long long>(failed), static_cast<unsigned long long>(generation_.load()));
 }
 
 void EspWebSocketTransport::Impl::HandleEnvelope(const detail::EventEnvelope& envelope) {

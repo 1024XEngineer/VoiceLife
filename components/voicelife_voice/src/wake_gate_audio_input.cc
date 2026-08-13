@@ -28,10 +28,7 @@ Status WakeGateAudioInput::Open(const AudioFormat& format) {
     if (opened_) return Status::Ok();
     const Status status = physical_input_.Open(format);
     if (!status.ok()) return status;
-    physical_input_.SetAudioSink([this](AudioFrame frame) {
-        HandlePhysicalFrame(std::move(frame));
-        return Status::Ok();
-    });
+    physical_input_.SetAudioSink([this](AudioFrame frame) { return HandlePhysicalFrame(std::move(frame)); });
     opened_ = true;
     return Status::Ok();
 }
@@ -132,7 +129,7 @@ bool WakeGateAudioInput::standby() const {
     return opened_ && physical_running_ && detector_running_ && !forwarding_;
 }
 
-void WakeGateAudioInput::HandlePhysicalFrame(AudioFrame frame) {
+Status WakeGateAudioInput::HandlePhysicalFrame(AudioFrame frame) {
     AudioFrameSink audio_sink;
     LocalWakeDetectorPort* detector = nullptr;
     {
@@ -144,10 +141,11 @@ void WakeGateAudioInput::HandlePhysicalFrame(AudioFrame frame) {
         }
     }
     if (audio_sink) {
-        (void)audio_sink(std::move(frame));
+        return audio_sink(std::move(frame));
     } else if (detector != nullptr) {
-        (void)detector->Submit(frame);
+        return detector->Submit(frame);
     }
+    return Status::Ok();
 }
 
 void WakeGateAudioInput::HandleWakeWord(std::string_view wake_word) {

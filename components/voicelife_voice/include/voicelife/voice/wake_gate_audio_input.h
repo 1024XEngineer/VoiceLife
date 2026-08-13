@@ -90,7 +90,7 @@ class WakeGateAudioInput final : public AudioInputPort {
    private:
     Status StartDetectorLocked();
     Status StopDetectorLocked();
-    void HandlePhysicalFrame(AudioFrame frame);
+    Status HandlePhysicalFrame(AudioFrame frame);
     void HandleWakeWord(std::string_view wake_word);
 
     AudioInputPort& physical_input_;

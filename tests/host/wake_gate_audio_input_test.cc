@@ -104,6 +104,14 @@ int main() {
     Check(physical.starts == 1 && detector.stops == 0, "唤醒命中后检测器已自停，切换上行不应重复停止检测器");
     Check(physical.Emit(Frame()).ok() && detector.frames == 1 && forwarded == 1,
           "上行状态 PCM 必须只转发 VoiceSession");
+    gate.SetAudioSink(
+        [](voicelife::voice::AudioFrame) { return Status::Error(ErrorCode::kUnavailable, "受控上行失败"); });
+    Check(physical.Emit(Frame()).code == ErrorCode::kUnavailable,
+          "上行回调失败必须回传到底层投递统计，不能伪装成采集成功");
+    gate.SetAudioSink([&forwarded](voicelife::voice::AudioFrame) {
+        ++forwarded;
+        return Status::Ok();
+    });
     Check(gate.StopCapture().ok() && !gate.standby(), "停止上行不得在播报或最终识别期间隐式恢复本地唤醒");
     Check(detector.starts == 1 && physical.starts == 1, "停止上行不得重启物理采集或检测器");
     Check(physical.Emit(Frame()).ok() && detector.frames == 1 && forwarded == 1,

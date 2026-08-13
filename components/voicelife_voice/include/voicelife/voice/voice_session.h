@@ -127,10 +127,13 @@ class VoiceSession {
     bool interrupt_fence_pending_ = false;
     std::string pending_interrupt_wake_word_;
     std::string pending_interrupt_text_response_;
-    // VAD 端点：本地静音检测（无 AFE，用 RMS 能量近似）。
+    // VAD 端点：本地静音检测。SparkBot ADC 存在 DC 偏置，使用去直流 RMS
+    // 而非原始幅度，避免常量偏置永久阻止端点检测。
     bool vad_speech_seen_ = false;
+    bool vad_speech_started_emitted_ = false;
     bool vad_silence_emitted_ = false;
     bool vad_silence_pending_ = false;
+    bool uplink_failure_emitted_ = false;
     std::chrono::steady_clock::time_point last_speech_at_{};
     uint64_t generation_ = 0;
     uint64_t next_sequence_ = 0;
