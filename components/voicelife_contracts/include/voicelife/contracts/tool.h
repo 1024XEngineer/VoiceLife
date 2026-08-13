@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -23,6 +24,8 @@ struct ToolCall {
 struct ToolResult {
     Status status;
     std::unordered_map<std::string, std::string> output;
+    /// 面向用户的精确文本；未设置时由边界适配器根据具名输出生成文本。
+    std::optional<std::string> text_output = std::nullopt;
 };
 
 }  // namespace voicelife

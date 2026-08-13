@@ -30,7 +30,11 @@ class ScheduleRepository {
         return Status::Error(ErrorCode::kUnavailable, "当前仓储不支持更新日程");
     }
 
-    /** @brief 删除指定日程。 @param id 日程标识。 @return 删除结果。 */
+    /**
+     * @brief 将指定日程原子地标记为已取消，保留历史数据。
+     * @param id 日程标识。
+     * @return 首次取消成功返回成功；不存在返回 kNotFound；已取消返回 kConflict。
+     */
     virtual Status Delete(ScheduleId id) {
         (void)id;
         return Status::Error(ErrorCode::kUnavailable, "当前仓储不支持删除日程");

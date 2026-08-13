@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "../src/helpers/schedule_operation_query_helpers.h"
+#include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_service.h"
 
@@ -14,6 +15,7 @@ using voicelife::schedule::RecordScheduleOperationCommand;
 using voicelife::schedule::ScheduleOperationType;
 using voicelife::schedule::ScheduleService;
 using voicelife::test::Check;
+using voicelife::test::InMemoryScheduleRepository;
 
 namespace {
 
@@ -90,7 +92,8 @@ void CheckServiceQuery(ScheduleService& service) {
 /** @brief 执行最近日程操作查询测试。 @return 全部断言通过时返回 0。 */
 int main() {
     CheckWindowAndOrdering();
-    ScheduleService service;
+    InMemoryScheduleRepository repository;
+    ScheduleService service(repository, repository);
     CheckServiceQuery(service);
     return 0;
 }

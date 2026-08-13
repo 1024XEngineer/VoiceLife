@@ -1,6 +1,7 @@
 #include "linx_mcp_bridge.h"
 
 #include "schedule_mcp_tools.h"
+#include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/mcp/mcp_server.h"
@@ -9,6 +10,7 @@
 using voicelife::mcp::McpServer;
 using voicelife::schedule::ScheduleService;
 using voicelife::test::Check;
+using voicelife::test::InMemoryScheduleRepository;
 
 namespace {
 
@@ -26,7 +28,8 @@ voicelife::JsonValue ParseMcpEnvelope(const std::string& encoded) {
 
 int main() {
     McpServer server;
-    ScheduleService service;
+    InMemoryScheduleRepository repository;
+    ScheduleService service(repository, repository);
     Check(voicelife::runtime::RegisterScheduleMcpTools(server, service).ok(), "测试前应注册日程工具");
 
     const auto initialize =

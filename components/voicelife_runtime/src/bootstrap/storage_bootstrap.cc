@@ -6,6 +6,7 @@
 
 #include "voicelife/storage_fatfs/fatfs_volume.h"
 #include "voicelife/storage_sqlite/sqlite_database.h"
+#include "voicelife/storage_sqlite/sqlite_schedule_repository.h"
 #include "voicelife/storage_sqlite/sqlite_schema.h"
 #include "voicelife/storage_sqlite/voicelife_schema.h"
 
@@ -50,7 +51,8 @@ class StorageBootstrap::Impl final {
     Impl()
 #if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_STORAGE_FATFS_RUNTIME
         : volume_(MakeVolumeConfig()),
-          database_(DatabaseUri(volume_.config().base_path), "unix-none")
+          database_(DatabaseUri(volume_.config().base_path), "unix-none"),
+          schedule_repository_(database_)
 #endif
     {
     }
@@ -142,6 +144,22 @@ class StorageBootstrap::Impl final {
      */
     [[nodiscard]] bool IsReady() const { return ready_; }
 
+#if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_STORAGE_FATFS_RUNTIME
+    /**
+     * @brief 获取共享当前 SQLite 连接的日程仓储。
+     * @return 生命周期与私有实现一致的日程仓储引用。
+     */
+    [[nodiscard]] schedule::ScheduleRepository& GetScheduleRepository() { return schedule_repository_; }
+
+    /**
+     * @brief 获取共享当前 SQLite 连接的日程操作仓储。
+     * @return 生命周期与私有实现一致的操作仓储引用。
+     */
+    [[nodiscard]] schedule::ScheduleOperationRepository& GetScheduleOperationRepository() {
+        return schedule_repository_;
+    }
+#endif
+
    private:
 #if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_STORAGE_FATFS_RUNTIME
     /**
@@ -157,6 +175,7 @@ class StorageBootstrap::Impl final {
 
     storage_fatfs::FatFsVolume volume_;
     storage_sqlite::SqliteDatabase database_;
+    storage_sqlite::SqliteScheduleRepository schedule_repository_;
 #endif
     bool ready_ = false;
 };
@@ -170,5 +189,13 @@ Status StorageBootstrap::Start() { return impl_->Start(); }
 Status StorageBootstrap::Stop() { return impl_->Stop(); }
 
 bool StorageBootstrap::IsReady() const { return impl_->IsReady(); }
+
+#ifdef ESP_PLATFORM
+schedule::ScheduleRepository& StorageBootstrap::GetScheduleRepository() { return impl_->GetScheduleRepository(); }
+
+schedule::ScheduleOperationRepository& StorageBootstrap::GetScheduleOperationRepository() {
+    return impl_->GetScheduleOperationRepository();
+}
+#endif
 
 }  // namespace voicelife::runtime

@@ -1,5 +1,6 @@
 #include <chrono>
 
+#include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_service.h"
 
@@ -8,6 +9,7 @@ using voicelife::schedule::CreateScheduleCommand;
 using voicelife::schedule::DeleteScheduleCommand;
 using voicelife::schedule::ScheduleService;
 using voicelife::test::Check;
+using voicelife::test::InMemoryScheduleRepository;
 
 namespace {
 
@@ -64,7 +66,8 @@ void CheckCancelledScheduleIsInactive(const ScheduleService& service) {
  * @return 全部断言通过时返回 0。
  */
 int main() {
-    ScheduleService service;
+    InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
+    ScheduleService service(repository, repository);
     CheckInvalidScheduleId(service);
     CheckSoftDelete(service);
     CheckCancelledScheduleIsInactive(service);

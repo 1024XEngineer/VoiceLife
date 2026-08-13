@@ -2,6 +2,7 @@
 #include <optional>
 #include <string>
 
+#include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/contracts/status.h"
 #include "voicelife/schedule/schedule_service.h"
@@ -12,6 +13,7 @@ using voicelife::schedule::ScheduleService;
 using voicelife::schedule::ScheduleStatus;
 using voicelife::schedule::UpdateScheduleCommand;
 using voicelife::test::Check;
+using voicelife::test::InMemoryScheduleRepository;
 
 namespace {
 
@@ -114,10 +116,25 @@ void CheckInvalidInputs(ScheduleService& service) {
 }  // namespace
 
 int main() {
-    ScheduleService service;
-    CheckFieldUpdates(service);
-    CheckTimeUpdates(service);
-    CheckConflicts(service);
-    CheckInvalidInputs(service);
+    {
+        InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
+        ScheduleService service(repository, repository);
+        CheckFieldUpdates(service);
+    }
+    {
+        InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
+        ScheduleService service(repository, repository);
+        CheckTimeUpdates(service);
+    }
+    {
+        InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
+        ScheduleService service(repository, repository);
+        CheckConflicts(service);
+    }
+    {
+        InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
+        ScheduleService service(repository, repository);
+        CheckInvalidInputs(service);
+    }
     return 0;
 }

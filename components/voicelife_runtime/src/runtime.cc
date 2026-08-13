@@ -242,7 +242,12 @@ class ScaffoldSpeechProvider final : public voice::SpeechProviderAdapter {
 
 class Runtime final {
    public:
-    Runtime() {
+    /** @brief 构造运行时并将日程服务绑定到持久化仓储。 */
+    Runtime()
+#ifdef ESP_PLATFORM
+        : schedule_service_(storage_.GetScheduleRepository(), storage_.GetScheduleOperationRepository())
+#endif
+    {
         auto& registry = voice::SpeechProviderRegistry::Instance();
 #ifdef ESP_PLATFORM
         init_status_ = RegisterScheduleMcpTools(mcp_server_, schedule_service_);
@@ -421,6 +426,7 @@ class Runtime final {
     }
 
    private:
+    StorageBootstrap storage_;
 #ifdef ESP_PLATFORM
     void StartImRuntime() {
 #if CONFIG_VOICELIFE_IM_GATEWAY
@@ -1296,7 +1302,6 @@ class Runtime final {
     ScaffoldAudioOutput audio_output_;
 #endif
     voice::VoiceInteractionController interaction_;
-    StorageBootstrap storage_;
     std::unique_ptr<voice::SpeechProviderAdapter> provider_;
     std::unique_ptr<voice::VoiceSession> session_;
 

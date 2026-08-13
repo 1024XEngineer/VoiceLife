@@ -1,5 +1,6 @@
 #include "schedule_mcp_tools.h"
 
+#include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/mcp/mcp_server.h"
 #include "voicelife/schedule/schedule_service.h"
@@ -10,10 +11,12 @@ using voicelife::ToolCall;
 using voicelife::mcp::McpServer;
 using voicelife::schedule::ScheduleService;
 using voicelife::test::Check;
+using voicelife::test::InMemoryScheduleRepository;
 
 int main() {
     McpServer server;
-    ScheduleService service;
+    InMemoryScheduleRepository repository;
+    ScheduleService service(repository, repository);
     Check(voicelife::runtime::RegisterScheduleMcpTools(server, service).ok(), "日程工具应注册成功");
 
     const auto listed = server.list_tools();

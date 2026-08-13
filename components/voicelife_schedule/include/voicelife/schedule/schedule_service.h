@@ -1,6 +1,7 @@
 #pragma once
 
 #include "voicelife/schedule/schedule_commands.h"
+#include "voicelife/schedule/schedule_operation_repository.h"
 #include "voicelife/schedule/schedule_repository.h"
 #include "voicelife/schedule/schedule_results.h"
 
@@ -9,14 +10,12 @@ namespace voicelife::schedule {
 /// 提供日程创建、删除、修改、查询及操作记录业务。
 class ScheduleService {
    public:
-    /** @brief 使用默认的进程内模拟仓储构造服务，供尚未接入外部存储的调用方使用。 */
-    ScheduleService() = default;
-
     /**
      * @brief 使用指定日程仓储构造服务。
      * @param repository 日程持久化仓储；其生命周期必须长于本服务。
+     * @param operation_repository 日程操作持久化仓储；其生命周期必须长于本服务。
      */
-    explicit ScheduleService(ScheduleRepository& repository);
+    ScheduleService(ScheduleRepository& repository, ScheduleOperationRepository& operation_repository);
 
     /**
      * @brief 创建一条日程。
@@ -67,8 +66,10 @@ class ScheduleService {
     UndoScheduleOperationResult undo_schedule_operation(const UndoScheduleOperationCommand& command);
 
    private:
-    /// 非空时创建和查询通过注入仓储执行；其余能力将在后续逐项接入。
-    ScheduleRepository* repository_ = nullptr;
+    /// 日程增删改查使用的持久化仓储。
+    ScheduleRepository& repository_;
+    /// 日程操作记录和原子撤销使用的持久化仓储。
+    ScheduleOperationRepository& operation_repository_;
 };
 
 }  // namespace voicelife::schedule

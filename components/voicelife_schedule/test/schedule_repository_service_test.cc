@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "support/test_support.h"
+#include "voicelife/schedule/schedule_operation_repository.h"
 #include "voicelife/schedule/schedule_repository.h"
 #include "voicelife/schedule/schedule_service.h"
 
@@ -11,12 +12,18 @@ using voicelife::ErrorCode;
 using voicelife::Result;
 using voicelife::schedule::CreateScheduleCommand;
 using voicelife::schedule::DateTime;
+using voicelife::schedule::DeleteScheduleCommand;
+using voicelife::schedule::OperationId;
+using voicelife::schedule::OperationRecord;
 using voicelife::schedule::QueryScheduleCommand;
 using voicelife::schedule::Schedule;
+using voicelife::schedule::ScheduleOperationRepository;
 using voicelife::schedule::ScheduleRepository;
 using voicelife::schedule::ScheduleService;
 using voicelife::schedule::ScheduleStatus;
 using voicelife::schedule::ScheduleStatusFilter;
+using voicelife::schedule::UndoOperationResult;
+using voicelife::schedule::UpdateScheduleCommand;
 using voicelife::test::Check;
 
 namespace {
@@ -53,12 +60,92 @@ class FakeScheduleRepository final : public ScheduleRepository {
         return Result<Schedule>::Success(std::move(stored));
     }
 
+    /**
+     * @brief 更新预设日程或返回写入错误。
+     * @param schedule 待更新日程。
+     * @return 更新状态。
+     */
+    voicelife::Status Update(const Schedule& schedule) override {
+        ++update_calls;
+        if (fail_update) return voicelife::Status::Error(ErrorCode::kInternal, "更新故障");
+        for (Schedule& existing : schedules) {
+            if (existing.id == schedule.id) {
+                existing = schedule;
+                return voicelife::Status::Ok();
+            }
+        }
+        return voicelife::Status::Error(ErrorCode::kNotFound, "日程不存在");
+    }
+
+    /**
+     * @brief 将日程标记为已取消。
+     * @param id 日程标识。
+     * @return 更新状态。
+     */
+    voicelife::Status Delete(int64_t id) override {
+        ++delete_calls;
+        for (Schedule& existing : schedules) {
+            if (existing.id != id) continue;
+            if (existing.status == ScheduleStatus::kCancelled) {
+                return voicelife::Status::Error(ErrorCode::kConflict, "日程已取消，不能重复删除");
+            }
+            existing.status = ScheduleStatus::kCancelled;
+            return voicelife::Status::Ok();
+        }
+        return voicelife::Status::Error(ErrorCode::kNotFound, "未找到指定日程");
+    }
+
     std::vector<Schedule> schedules;
     bool fail_find_all = false;
     bool fail_insert = false;
+    bool fail_update = false;
     int64_t next_id = 9001;
     mutable int find_all_calls = 0;
     int insert_calls = 0;
+    int update_calls = 0;
+    int delete_calls = 0;
+};
+
+/** @brief 为基础仓储注入测试提供独立的操作仓储替身。 */
+class FakeScheduleOperationRepository final : public ScheduleOperationRepository {
+   public:
+    /**
+     * @brief 保存操作记录并补齐标识和时间。
+     * @param operation 待保存操作。
+     * @return 保存后的操作记录。
+     */
+    Result<OperationRecord> InsertOperation(const OperationRecord& operation) override {
+        OperationRecord stored = operation;
+        stored.id = next_id++;
+        stored.operated_at = DateTime{std::chrono::seconds{1'900'000'000}};
+        operations.push_back(stored);
+        return Result<OperationRecord>::Success(std::move(stored));
+    }
+
+    /**
+     * @brief 返回预设的近期操作记录。
+     * @param now 查询时间；该替身不按时间过滤。
+     * @return 操作记录集合。
+     */
+    Result<std::vector<OperationRecord>> FindRecentOperations(DateTime now) const override {
+        (void)now;
+        return Result<std::vector<OperationRecord>>::Success(operations);
+    }
+
+    /**
+     * @brief 返回基础 CRUD 测试未配置撤销能力的错误。
+     * @param operation_id 操作标识。
+     * @param now 撤销时间。
+     * @return 不可用错误。
+     */
+    Result<UndoOperationResult> UndoOperation(OperationId operation_id, DateTime now) override {
+        (void)operation_id;
+        (void)now;
+        return Result<UndoOperationResult>::Failure(ErrorCode::kUnavailable, "未实现");
+    }
+
+    std::vector<OperationRecord> operations;
+    OperationId next_id = 1;
 };
 
 /**
@@ -89,8 +176,9 @@ Schedule ExistingSchedule(int64_t id, int64_t start, int64_t end) {
  */
 void CheckFindAllFailure() {
     FakeScheduleRepository repository;
+    FakeScheduleOperationRepository operation_repository;
     repository.fail_find_all = true;
-    const ScheduleService service(repository);
+    const ScheduleService service(repository, operation_repository);
 
     const auto created = service.create_schedule(CreateScheduleCommand{.event = "读取失败",
                                                                        .start_time = std::nullopt,
@@ -113,8 +201,9 @@ void CheckFindAllFailure() {
  */
 void CheckInsertFailure() {
     FakeScheduleRepository repository;
+    FakeScheduleOperationRepository operation_repository;
     repository.fail_insert = true;
-    const ScheduleService service(repository);
+    const ScheduleService service(repository, operation_repository);
 
     const auto result = service.create_schedule(CreateScheduleCommand{.event = "写入失败",
                                                                       .start_time = std::nullopt,
@@ -132,8 +221,9 @@ void CheckInsertFailure() {
  */
 void CheckConflictOrchestration() {
     FakeScheduleRepository repository;
+    FakeScheduleOperationRepository operation_repository;
     repository.schedules.push_back(ExistingSchedule(1, 2'000, 3'000));
-    ScheduleService service(repository);
+    ScheduleService service(repository, operation_repository);
 
     CreateScheduleCommand command{
         .event = "冲突日程",
@@ -154,8 +244,9 @@ void CheckConflictOrchestration() {
     Check(repository.insert_calls == 1, "忽略冲突应只写入一次");
 
     FakeScheduleRepository nearby_repository;
+    FakeScheduleOperationRepository nearby_operation_repository;
     nearby_repository.schedules.push_back(ExistingSchedule(2, 4'000, 5'000));
-    ScheduleService nearby_service(nearby_repository);
+    ScheduleService nearby_service(nearby_repository, nearby_operation_repository);
     const auto nearby = nearby_service.create_schedule(CreateScheduleCommand{
         .event = "临近日程",
         .start_time = At(5'600),
@@ -190,7 +281,8 @@ void CheckRepositoryQuery() {
             .updated_at = At(5'000),
         },
     };
-    const ScheduleService service(repository);
+    FakeScheduleOperationRepository operation_repository;
+    const ScheduleService service(repository, operation_repository);
     QueryScheduleCommand command;
     command.status = ScheduleStatusFilter::kAll;
     command.limit = 2;
@@ -203,6 +295,58 @@ void CheckRepositoryQuery() {
           "Repository 查询应按时间排序并将无时间日程放在末尾");
 }
 
+/**
+ * @brief 验证修改会读取并写回 Repository，且保留仓储错误。
+ * @return 无。
+ */
+void CheckRepositoryUpdate() {
+    FakeScheduleRepository repository;
+    repository.schedules = {ExistingSchedule(7, 10'000, 11'000)};
+    FakeScheduleOperationRepository operation_repository;
+    ScheduleService service(repository, operation_repository);
+    UpdateScheduleCommand command;
+    command.schedule_id = 7;
+    command.event = " 更新后的日程 ";
+
+    const auto updated = service.update_schedule(command);
+    Check(updated.status.ok() && updated.schedule.has_value() && updated.schedule->event == "更新后的日程",
+          "修改应返回 Repository 保存后的日程");
+    Check(repository.find_all_calls == 1 && repository.update_calls == 1 &&
+              repository.schedules.front().event == "更新后的日程",
+          "修改应读取并写回 Repository");
+
+    repository.fail_update = true;
+    command.event = "失败修改";
+    const auto failed = service.update_schedule(command);
+    Check(failed.status.code == ErrorCode::kInternal && failed.error == "更新故障" && !failed.schedule.has_value(),
+          "修改应保留 Repository 更新错误");
+}
+
+/**
+ * @brief 验证删除会通过 Repository 软取消，并保留读取及更新错误。
+ * @return 无。
+ */
+void CheckRepositoryDelete() {
+    FakeScheduleRepository repository;
+    repository.schedules = {ExistingSchedule(8, 12'000, 13'000)};
+    FakeScheduleOperationRepository operation_repository;
+    ScheduleService service(repository, operation_repository);
+
+    const auto deleted = service.delete_schedule(DeleteScheduleCommand{.schedule_id = 8});
+    Check(deleted.status.ok() && deleted.deleted && repository.delete_calls == 1 &&
+              repository.schedules.front().status == ScheduleStatus::kCancelled,
+          "删除应把 Repository 中的日程标记为已取消");
+
+    const auto repeated = service.delete_schedule(DeleteScheduleCommand{.schedule_id = 8});
+    Check(repeated.status.code == ErrorCode::kConflict && !repeated.deleted &&
+              repeated.error == "日程已取消，不能重复删除",
+          "重复删除已取消日程应返回冲突");
+
+    const auto missing = service.delete_schedule(DeleteScheduleCommand{.schedule_id = 9});
+    Check(missing.status.code == ErrorCode::kNotFound && !missing.deleted && missing.error == "未找到指定日程",
+          "删除不存在的日程应返回未找到");
+}
+
 }  // namespace
 
 /** @brief 执行 ScheduleRepository 注入行为测试。 @return 全部断言通过时返回 0。 */
@@ -211,5 +355,7 @@ int main() {
     CheckInsertFailure();
     CheckConflictOrchestration();
     CheckRepositoryQuery();
+    CheckRepositoryUpdate();
+    CheckRepositoryDelete();
     return 0;
 }

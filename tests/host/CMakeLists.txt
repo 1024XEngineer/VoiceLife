@@ -63,9 +63,7 @@ target_include_directories(im PUBLIC "${ROOT_DIR}/components/voicelife_im/src/tr
 target_link_libraries(im PUBLIC contracts)
 add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_create_helpers.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/mock/schedule_mock_data.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_operation_helpers.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/mock/schedule_operation_mock_data.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_operation_query_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_query_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_service.cc"
@@ -89,7 +87,7 @@ target_link_libraries(timing PUBLIC contracts)
 add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_server.cc"
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_json_writer.cc")
-target_link_libraries(mcp PUBLIC contracts)
+target_link_libraries(mcp PUBLIC contracts schedule)
 target_link_libraries(mcp PRIVATE yyjson)
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/audio_frame_queue.cc"
@@ -108,10 +106,13 @@ add_voicelife_library(linx_esp voicelife_linx_esp
     "${ROOT_DIR}/components/voicelife_linx_esp/src/websocket_fragment_assembler.cc")
 target_link_libraries(linx_esp PUBLIC contracts linx)
 add_voicelife_library(storage_sqlite voicelife_storage_sqlite
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/operation_row_mapper.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_row_mapper.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v001_create_schedule.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v002_create_schedule_operation.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/sqlite_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/voicelife_schema.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/operation_sql.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_sql.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_database.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_repository.cc")
@@ -168,8 +169,6 @@ target_link_libraries(schedule_update_test PRIVATE schedule)
 
 add_voicelife_test(schedule_operation_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_operation_test.cc")
-target_include_directories(schedule_operation_test PRIVATE
-    "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule_operation_test PRIVATE schedule)
 
 add_voicelife_test(schedule_recent_operation_test "unit;schedule"
@@ -180,8 +179,6 @@ target_link_libraries(schedule_recent_operation_test PRIVATE schedule)
 
 add_voicelife_test(schedule_undo_operation_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_undo_operation_test.cc")
-target_include_directories(schedule_undo_operation_test PRIVATE
-    "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule_undo_operation_test PRIVATE schedule)
 
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
@@ -228,6 +225,7 @@ add_voicelife_test(mcp_server_test "unit;mcp"
     "${ROOT_DIR}/components/voicelife_mcp/test/mcp_server_test.cc")
 target_include_directories(mcp_server_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
 target_link_libraries(mcp_server_test PRIVATE mcp)
+
 
 add_voicelife_test(schedule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_mcp_tools_test.cc
     "${ROOT_DIR}/components/voicelife_runtime/src/schedule_mcp_tools.cc")

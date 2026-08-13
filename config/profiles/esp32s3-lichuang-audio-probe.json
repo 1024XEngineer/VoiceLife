@@ -13,8 +13,8 @@
       "capabilities": []
     },
     "storage": {
-      "driver": "memory",
-      "capabilities": ["atomic-calendar-write"]
+      "driver": "fatfs-sqlite",
+      "capabilities": ["persistent-sqlite"]
     },
     "im": {
       "driver": "disabled",
@@ -24,6 +24,10 @@
   "sdkconfig": [
     "CONFIG_LOG_DEFAULT_LEVEL_INFO=y",
     "CONFIG_VOICELIFE_AUDIO_PROBE=y",
-    "CONFIG_VOICELIFE_AUDIO_PROBE_PROFILE_LICHUANG=y"
+    "CONFIG_VOICELIFE_AUDIO_PROBE_PROFILE_LICHUANG=y",
+    "CONFIG_FATFS_SECTOR_4096=y",
+    "CONFIG_WL_SECTOR_SIZE_4096=y",
+    "CONFIG_VOICELIFE_STORAGE_FATFS=y",
+    "CONFIG_VOICELIFE_STORAGE_SQLITE=y"
   ]
 }

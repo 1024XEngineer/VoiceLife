@@ -1,19 +1,19 @@
 #include <optional>
 #include <string>
 
-#include "../src/mock/schedule_operation_mock_data.h"
+#include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_service.h"
 
 using voicelife::ErrorCode;
 using voicelife::schedule::DateTime;
-using voicelife::schedule::LoadMockScheduleOperations;
 using voicelife::schedule::OperationRecord;
 using voicelife::schedule::RecordScheduleOperationCommand;
 using voicelife::schedule::Schedule;
 using voicelife::schedule::ScheduleOperationType;
 using voicelife::schedule::ScheduleService;
 using voicelife::test::Check;
+using voicelife::test::InMemoryScheduleRepository;
 
 namespace {
 
@@ -150,12 +150,13 @@ void CheckInvalidArguments(ScheduleService& service) {
 }
 
 /**
- * @brief 验证模拟存储不会按记录条数裁剪操作。
+ * @brief 验证操作仓储不会按记录条数裁剪操作。
  * @param service 被测试的日程服务。
+ * @param repository 被测试的内存操作仓储。
  * @return 无返回值；断言失败时终止测试。
  */
-void CheckOperationStorageHasNoCountLimit(ScheduleService& service) {
-    const std::size_t original_count = LoadMockScheduleOperations().size();
+void CheckOperationStorageHasNoCountLimit(ScheduleService& service, InMemoryScheduleRepository& repository) {
+    const std::size_t original_count = repository.ActiveOperations().size();
     OperationRecord latest;
     for (int index = 0; index < 11; ++index) {
         RecordScheduleOperationCommand command{
@@ -169,10 +170,10 @@ void CheckOperationStorageHasNoCountLimit(ScheduleService& service) {
         latest = *result.operation;
     }
 
-    const auto operations = LoadMockScheduleOperations();
-    Check(operations.size() == original_count + 11, "模拟操作存储不应限制记录条数");
+    const auto operations = repository.ActiveOperations();
+    Check(operations.size() == original_count + 11, "操作仓储不应限制记录条数");
     Check(operations.back().id == latest.id && operations.back().schedule_id == latest.schedule_id,
-          "模拟操作存储应保留最新记录");
+          "操作仓储应保留最新记录");
     Check(operations[original_count].schedule_id == 4000, "超过十条时不应淘汰最早的操作记录");
 }
 
@@ -183,10 +184,11 @@ void CheckOperationStorageHasNoCountLimit(ScheduleService& service) {
  * @return 全部断言通过时返回 0。
  */
 int main() {
-    ScheduleService service;
+    InMemoryScheduleRepository repository;
+    ScheduleService service(repository, repository);
     CheckSuccessfulRecord(service);
     CheckPreviousStateRules(service);
     CheckInvalidArguments(service);
-    CheckOperationStorageHasNoCountLimit(service);
+    CheckOperationStorageHasNoCountLimit(service, repository);
     return 0;
 }

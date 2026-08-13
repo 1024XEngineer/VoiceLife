@@ -1,6 +1,7 @@
 #include <chrono>
 #include <string>
 
+#include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_service.h"
 
@@ -9,6 +10,7 @@ using voicelife::schedule::CreateScheduleCommand;
 using voicelife::schedule::DateTime;
 using voicelife::schedule::ScheduleService;
 using voicelife::test::Check;
+using voicelife::test::InMemoryScheduleRepository;
 
 namespace {
 
@@ -86,7 +88,7 @@ void CheckIntervalConflicts(const ScheduleService& service) {
 }
 
 /** @brief 验证首尾相接和十五分钟临近日程规则。 */
-void CheckNearbySchedules(const ScheduleService& service) {
+void CheckNearbySchedules(const ScheduleService& service, InMemoryScheduleRepository& repository) {
     CreateScheduleCommand adjacent;
     adjacent.event = "首尾相接";
     adjacent.start_time = At(1'800'003'600);
@@ -95,6 +97,8 @@ void CheckNearbySchedules(const ScheduleService& service) {
     Check(adjacent_result.status.ok() && adjacent_result.conflicts.empty(), "首尾相接不应视为冲突");
     Check(adjacent_result.nearby_schedules.size() == 1, "首尾相接的已有日程应作为临近日程返回");
 
+    // 每个断言场景使用同一份固定初始数据，避免前一个创建结果影响附近数量。
+    repository.Reset(InMemoryScheduleRepository::DefaultSchedules());
     CreateScheduleCommand fifteen_minutes;
     fifteen_minutes.event = "十五分钟边界";
     fifteen_minutes.start_time = At(1'800'004'500);
@@ -103,6 +107,7 @@ void CheckNearbySchedules(const ScheduleService& service) {
     Check(nearby_result.status.ok() && nearby_result.nearby_schedules.size() == 1, "相距十五分钟的不冲突日程应被返回");
     Check(nearby_result.message == "日程创建成功，附近还有其他日程", "临近日程应反映在成功消息中");
 
+    repository.Reset(InMemoryScheduleRepository::DefaultSchedules());
     CreateScheduleCommand outside_window;
     outside_window.event = "临近范围外";
     outside_window.start_time = At(1'800'004'501);
@@ -121,11 +126,30 @@ void CheckPointConflicts(const ScheduleService& service) {
 }  // namespace
 
 int main() {
-    const ScheduleService service;
-    CheckEventValidation(service);
-    CheckTimeValidation(service);
-    CheckIntervalConflicts(service);
-    CheckNearbySchedules(service);
-    CheckPointConflicts(service);
+    {
+        InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
+        const ScheduleService service(repository, repository);
+        CheckEventValidation(service);
+    }
+    {
+        InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
+        const ScheduleService service(repository, repository);
+        CheckTimeValidation(service);
+    }
+    {
+        InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
+        const ScheduleService service(repository, repository);
+        CheckIntervalConflicts(service);
+    }
+    {
+        InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
+        const ScheduleService service(repository, repository);
+        CheckNearbySchedules(service, repository);
+    }
+    {
+        InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
+        const ScheduleService service(repository, repository);
+        CheckPointConflicts(service);
+    }
     return 0;
 }

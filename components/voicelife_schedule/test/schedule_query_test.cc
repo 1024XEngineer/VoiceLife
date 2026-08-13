@@ -1,5 +1,6 @@
 #include <chrono>
 
+#include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_service.h"
 
@@ -9,6 +10,7 @@ using voicelife::schedule::QueryScheduleCommand;
 using voicelife::schedule::ScheduleService;
 using voicelife::schedule::ScheduleStatusFilter;
 using voicelife::test::Check;
+using voicelife::test::InMemoryScheduleRepository;
 
 namespace {
 
@@ -94,7 +96,8 @@ void CheckKeywordNormalization(const ScheduleService& service) {
 }  // namespace
 
 int main() {
-    const ScheduleService service;
+    InMemoryScheduleRepository repository(InMemoryScheduleRepository::QuerySchedules());
+    const ScheduleService service(repository, repository);
     CheckDefaultQuery(service);
     CheckCombinedFilters(service);
     CheckStatusAndPagination(service);

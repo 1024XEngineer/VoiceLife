@@ -7,12 +7,9 @@
 
 #include "../helpers/schedule_create_helpers.h"
 #include "../helpers/schedule_operation_helpers.h"
-#include "../helpers/schedule_operation_query_helpers.h"
 #include "../helpers/schedule_query_helpers.h"
 #include "../helpers/schedule_undo_helpers.h"
 #include "../helpers/schedule_update_helpers.h"
-#include "../mock/schedule_mock_data.h"
-#include "../mock/schedule_operation_mock_data.h"
 #include "../rules/schedule_time_rules.h"
 
 namespace voicelife::schedule {
@@ -22,7 +19,8 @@ constexpr std::size_t kMaximumEventLength = 100;
 
 }  // namespace
 
-ScheduleService::ScheduleService(ScheduleRepository& repository) : repository_(&repository) {}
+ScheduleService::ScheduleService(ScheduleRepository& repository, ScheduleOperationRepository& operation_repository)
+    : repository_(repository), operation_repository_(operation_repository) {}
 
 CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleCommand& command) const {
     // 健壮性校验
@@ -52,25 +50,20 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
         .updated_at = {},
     };
 
-    // 从注入的仓储读取现有日程；无仓储时保留旧单测使用的模拟数据。
-    std::vector<Schedule> existing_schedules;
-    if (repository_ != nullptr) {
-        const Result<std::vector<Schedule>> loaded = repository_->FindAll();
-        if (!loaded.ok()) {
-            const std::string error = "读取现有日程失败：" + loaded.status.message;
-            return {
-                .status = loaded.status,
-                .message = {},
-                .schedule = std::nullopt,
-                .conflicts = {},
-                .nearby_schedules = {},
-                .error = error,
-            };
-        }
-        existing_schedules = *loaded.value;
-    } else {
-        existing_schedules = LoadMockSchedulesForCreate();
+    // 从仓储读取现有日程，保证冲突判断与数据库状态一致。
+    const Result<std::vector<Schedule>> loaded = repository_.FindAll();
+    if (!loaded.ok()) {
+        const std::string error = "读取现有日程失败：" + loaded.status.message;
+        return {
+            .status = loaded.status,
+            .message = {},
+            .schedule = std::nullopt,
+            .conflicts = {},
+            .nearby_schedules = {},
+            .error = error,
+        };
     }
+    const std::vector<Schedule>& existing_schedules = *loaded.value;
 
     // 搜集与当前日程冲突日程和临近日程。
     std::vector<Schedule> conflicts;
@@ -98,21 +91,19 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
         };
     }
 
-    if (repository_ != nullptr) {
-        const Result<Schedule> stored = repository_->Insert(schedule);
-        if (!stored.ok()) {
-            const std::string error = "保存日程失败：" + stored.status.message;
-            return {
-                .status = stored.status,
-                .message = {},
-                .schedule = std::nullopt,
-                .conflicts = std::move(conflicts),
-                .nearby_schedules = std::move(nearby_schedules),
-                .error = error,
-            };
-        }
-        schedule = *stored.value;
+    const Result<Schedule> stored = repository_.Insert(schedule);
+    if (!stored.ok()) {
+        const std::string error = "保存日程失败：" + stored.status.message;
+        return {
+            .status = stored.status,
+            .message = {},
+            .schedule = std::nullopt,
+            .conflicts = std::move(conflicts),
+            .nearby_schedules = std::move(nearby_schedules),
+            .error = error,
+        };
     }
+    schedule = *stored.value;
 
     const std::string message = nearby_schedules.empty() ? "日程创建成功" : "日程创建成功，附近还有其他日程";
     return {
@@ -137,14 +128,14 @@ DeleteScheduleResult ScheduleService::delete_schedule(const DeleteScheduleComman
         };
     }
 
-    // 当前只搭建创建和查询的 SQLite 纵向链路，取消仍使用既有模拟存储。
-    const Result<Schedule> cancelled = CancelMockSchedule(command.schedule_id);
-    if (!cancelled.ok()) {
+    // 由仓储原子执行软取消，保留历史数据和后续撤销能力。
+    const Status deleted = repository_.Delete(command.schedule_id);
+    if (!deleted.ok()) {
         return {
-            .status = cancelled.status,
+            .status = deleted,
             .schedule_id = command.schedule_id,
             .deleted = false,
-            .error = cancelled.status.message,
+            .error = deleted.message,
         };
     }
 
@@ -160,8 +151,24 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
     // 健壮性校验
     if (command.schedule_id <= 0) return InvalidUpdateScheduleResult("日程 ID 必须大于零");
 
-    // 当前只搭建创建和查询的 SQLite 纵向链路，修改仍使用既有模拟存储。
-    std::vector<Schedule> schedules = LoadMockSchedules();
+    // 确认至少提供一个待修改字段，避免无意义的数据库读取和写入。
+    const bool has_update = command.event.has_value() || command.start_time.has_value() ||
+                            command.end_time.has_value() || command.location.has_value() || command.notes.has_value() ||
+                            command.rule_id.has_value() || command.status.has_value();
+    if (!has_update) return InvalidUpdateScheduleResult("至少需要提供一个要修改的字段");
+
+    // 从仓储读取目标和冲突候选，确保修改基于数据库中的最新日程。
+    const Result<std::vector<Schedule>> loaded = repository_.FindAll();
+    if (!loaded.ok()) {
+        return {
+            .status = loaded.status,
+            .message = {},
+            .schedule = std::nullopt,
+            .conflicts = {},
+            .error = loaded.status.message,
+        };
+    }
+    const std::vector<Schedule>& schedules = *loaded.value;
     auto target = schedules.end();
     for (auto current = schedules.begin(); current != schedules.end(); ++current) {
         if (current->id == command.schedule_id) {
@@ -179,12 +186,6 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
             .error = error,
         };
     }
-
-    // 确认至少提供一个待修改字段
-    const bool has_update = command.event.has_value() || command.start_time.has_value() ||
-                            command.end_time.has_value() || command.location.has_value() || command.notes.has_value() ||
-                            command.rule_id.has_value() || command.status.has_value();
-    if (!has_update) return InvalidUpdateScheduleResult("至少需要提供一个要修改的字段");
 
     // 组装修改后的日程，未提供的字段保持不变，显式空值用于清空字段
     Schedule updated = *target;
@@ -235,10 +236,18 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
         };
     }
 
-    // 更新修改时间并准备持久化
+    // 更新时间戳并将完整日程写回仓储。
     updated.updated_at = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
-
-    // TODO：后续由日程仓储实现修改写入，本次只验证 INSERT 和 SELECT 链路。
+    const Status stored = repository_.Update(updated);
+    if (!stored.ok()) {
+        return {
+            .status = stored,
+            .message = {},
+            .schedule = std::nullopt,
+            .conflicts = std::move(conflicts),
+            .error = stored.message,
+        };
+    }
 
     // 忽略冲突时仍返回冲突列表，便于调用方提示潜在影响
     return {
@@ -259,17 +268,11 @@ QueryScheduleResult ScheduleService::query_schedule(const QueryScheduleCommand& 
 
     // 先从仓储读取，再由领域规则完成筛选；SQL 文本不会进入服务层。
     std::vector<Schedule> matches;
-    std::vector<Schedule> stored_schedules;
-    if (repository_ != nullptr) {
-        const Result<std::vector<Schedule>> loaded = repository_->FindAll();
-        if (!loaded.ok()) {
-            return {.status = loaded.status, .schedules = {}, .total = 0, .error = loaded.status.message};
-        }
-        stored_schedules = *loaded.value;
-    } else {
-        stored_schedules = LoadMockSchedulesForQuery();
+    const Result<std::vector<Schedule>> loaded = repository_.FindAll();
+    if (!loaded.ok()) {
+        return {.status = loaded.status, .schedules = {}, .total = 0, .error = loaded.status.message};
     }
-    for (const Schedule& schedule : stored_schedules) {
+    for (const Schedule& schedule : *loaded.value) {
         if (MatchesScheduleQuery(schedule, command)) matches.push_back(schedule);
     }
 
@@ -308,8 +311,8 @@ RecordScheduleOperationResult ScheduleService::record_schedule_operation(
         .previous = command.previous,
     };
 
-    // 写入模拟操作记录
-    const Result<OperationRecord> recorded = AppendMockScheduleOperation(std::move(operation));
+    // 写入操作仓储，由持久化层生成操作标识和时间。
+    const Result<OperationRecord> recorded = operation_repository_.InsertOperation(operation);
     if (!recorded.ok()) {
         return {
             .status = recorded.status,
@@ -329,11 +332,14 @@ QueryRecentScheduleOperationResult ScheduleService::query_recent_schedule_operat
     // 获取当前时间，作为十五分钟窗口的结束边界
     const DateTime now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
 
-    // 查询近期可撤销操作；真实存储接入用户上下文后由存储层完成筛选
-    std::vector<OperationRecord> operations = FilterRecentScheduleOperations(LoadMockScheduleOperations(), now);
+    // 查询近期可撤销操作，窗口筛选和排序由操作仓储负责。
+    const Result<std::vector<OperationRecord>> loaded = operation_repository_.FindRecentOperations(now);
+    if (!loaded.ok()) {
+        return {.status = loaded.status, .operations = {}, .error = loaded.status.message};
+    }
     return {
         .status = Status::Ok(),
-        .operations = std::move(operations),
+        .operations = *loaded.value,
         .error = {},
     };
 }
@@ -343,40 +349,17 @@ UndoScheduleOperationResult ScheduleService::undo_schedule_operation(const UndoS
     const Status validation = ValidateUndoScheduleOperationCommand(command);
     if (!validation.ok()) return FailedUndoScheduleOperationResult(validation);
 
-    // 查找窗口内仍可撤销的目标操作
+    // 由操作仓储在单一事务内查找并撤销目标操作。
     const DateTime now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
-    const Result<OperationRecord> target = FindUndoableMockScheduleOperation(command.operation_id, now);
-    if (!target.ok()) return FailedUndoScheduleOperationResult(target.status);
-
-    // TODO：真实存储接入后，在同一事务内完成日程恢复、目标操作失效（不能再撤销至此）和撤销记录写入
-    const Result<AppliedScheduleUndo> applied_result = ApplyMockScheduleUndo(*target.value);
-    if (!applied_result.ok()) return FailedUndoScheduleOperationResult(applied_result.status);
-    const AppliedScheduleUndo& applied = *applied_result.value;
-
-    const std::string event = applied.before.has_value()
-                                  ? applied.before->event
-                                  : (applied.after.has_value() ? applied.after->event : target.value->schedule_event);
-    // 组装撤销操作记录
-    OperationRecord undo_operation{
-        .id = 0,
-        .type = ScheduleOperationType::kUndo,
-        .schedule_id = target.value->schedule_id,
-        .schedule_event = event,
-        .operated_at = {},
-        .previous = applied.before,
-    };
-
-    // 提交撤销记录并使目标操作失效
-    const Result<OperationRecord> recorded =
-        InvalidateMockScheduleOperationAndAppendUndo(target.value->id, std::move(undo_operation), now);
-    if (!recorded.ok()) return FailedUndoScheduleOperationResult(recorded.status);
+    const Result<UndoOperationResult> undone = operation_repository_.UndoOperation(command.operation_id, now);
+    if (!undone.ok()) return FailedUndoScheduleOperationResult(undone.status);
 
     // 撤销成功，返回原操作和恢复后的日程
     return {
         .status = Status::Ok(),
         .undone = true,
-        .operation = target.value,
-        .schedule = applied.after,
+        .operation = undone.value->operation,
+        .schedule = undone.value->schedule,
         .error = {},
     };
 }

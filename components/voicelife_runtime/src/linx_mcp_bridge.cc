@@ -115,6 +115,22 @@ Result<ToolValue> ToolValueFromJson(const JsonValue& value) {
     return Result<ToolValue>::Failure(ErrorCode::kInvalidArgument, "MCP 工具参数只支持字符串、整数和布尔值");
 }
 
+/**
+ * @brief 获取工具调用面向用户的文本结果。
+ * @param result 已成功执行的工具结果。
+ * @return 工具提供的精确文本，或由具名输出生成的兼容文本。
+ */
+std::string ResolveToolResultText(const ToolResult& result) {
+    if (result.text_output.has_value()) return *result.text_output;
+
+    std::string text;
+    for (const auto& [key, value] : result.output) {
+        if (!text.empty()) text += "\\n";
+        text += key + "=" + value;
+    }
+    return text;
+}
+
 }  // namespace
 
 Result<std::string> HandleLinxMcpPayload(std::string_view payload, const mcp::McpServer& server,
@@ -170,11 +186,7 @@ Result<std::string> HandleLinxMcpPayload(std::string_view payload, const mcp::Mc
         const int code = call.status.code == ErrorCode::kNotFound ? -32601 : -32602;
         return ErrorResponse(*id, code, call.status.message, session_id);
     }
-    std::string text;
-    for (const auto& [key, value] : call.output) {
-        if (!text.empty()) text += "\\n";
-        text += key + "=" + value;
-    }
+    const std::string text = ResolveToolResultText(call);
     const std::string result = "{\"jsonrpc\":\"2.0\",\"id\":" + Serialize(*id) +
                                ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"" + Escape(text) +
                                "\"}],\"isError\":false}}";
