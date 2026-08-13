@@ -19,6 +19,12 @@ namespace voicelife::mcp {
 namespace {
 
 constexpr std::size_t kQueueCapacity = 4;
+#ifdef ESP_PLATFORM
+// JSON-RPC parsing, SQLite transactions and response serialization execute on
+// this task. The default 6 KB task stack overflows on an actual schedule.create
+// request, so keep the execution context aligned with the Runtime task budget.
+constexpr uint32_t kWorkerStackBytes = 12 * 1024;
+#endif
 
 }  // namespace
 
@@ -34,7 +40,7 @@ class McpRequestExecutor::Impl final {
         stopping_ = false;
         running_ = true;
 #ifdef ESP_PLATFORM
-        if (xTaskCreate(&Impl::TaskEntry, "voicelife_mcp", 6144, this, 4, &task_) != pdPASS) {
+        if (xTaskCreate(&Impl::TaskEntry, "voicelife_mcp", kWorkerStackBytes, this, 4, &task_) != pdPASS) {
             running_ = false;
             return Status::Error(ErrorCode::kInternal, "创建 MCP 工作任务失败");
         }
