@@ -176,10 +176,15 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
             disconnected = true;
             response_armed_ = false;
         } else if (event.kind == VoiceEventKind::kAsrText) {
-            // 本轮收到用户语音转写（非唤醒词），武装本轮回复接受条件。
+            // 只接受仍处于本轮采集的 STT。服务器可能在 TTS 已开始后才
+            // 送达上一段识别结果；该事件不得穿透到交互状态机重启“处理”。
             // kToolCall 不武装：启动/重连时的 MCP 发现消息（tools/list）并非
             // 用户本轮输入，不能提前放行服务端 TTS。
-            response_armed_ = true;
+            if (state_ != VoiceSessionState::kCapturing) {
+                stale = true;
+            } else {
+                response_armed_ = true;
+            }
         } else if (event.kind == VoiceEventKind::kConnected && audio_ready_ && state_ == VoiceSessionState::kStarting) {
             state_ = VoiceSessionState::kReady;
         } else if (event.kind == VoiceEventKind::kTtsStarted) {
@@ -453,6 +458,12 @@ Status VoiceSession::HandleAudio(AudioFrame frame) {
     return output_.Push(frame);
 }
 
+void VoiceSession::ReportToolCallStarted() { Emit("mcp_tool_started", ""); }
+
+void VoiceSession::ReportToolResult(std::string_view summary, bool success) {
+    Emit(success ? "mcp_tool_result" : "mcp_tool_failed", summary);
+}
+
 Status VoiceSession::Speak(std::string_view text) {
     std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
     {
@@ -521,9 +532,12 @@ Status VoiceSession::Stop() {
     provider_.SetGeneration(generation);
     provider_.SetAudioSink({});
     Status provider_status = provider_.Disconnect();
-    output_.Close();
     input_.SetAudioSink({});
+    // Stop every capture callback before the output device tears down a shared
+    // duplex codec/I2S pair. Ports remain platform-neutral; the ordering only
+    // expresses the session ownership contract.
     input_.Close();
+    output_.Close();
     if (!provider_status.ok()) {
         {
             std::lock_guard<std::mutex> lock(mutex_);

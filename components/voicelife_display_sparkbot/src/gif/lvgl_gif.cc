@@ -75,6 +75,8 @@ bool LvglGif::Start() {
 
     if (timer_) {
         playing_ = true;
+        frame_count_ = 0;
+        loop_count_observed_ = 0;
         loop_waiting_ = false;  // Reset loop waiting state
         last_call_ = lv_tick_get();
         lv_timer_resume(timer_);
@@ -131,7 +133,8 @@ void LvglGif::Stop() {
         if (gif_->canvas) {
             gd_render_frame(gif_, gif_->canvas);
         }
-        ESP_LOGD(TAG, "GIF animation stopped and rewound");
+        ESP_LOGI(TAG, "SPARKBOT_GIF_STOPPED asset=%s frames=%u loops=%u", telemetry_asset_.c_str(),
+                 static_cast<unsigned>(frame_count_), static_cast<unsigned>(loop_count_observed_));
     }
 }
 
@@ -176,6 +179,8 @@ uint16_t LvglGif::height() const {
 }
 
 void LvglGif::SetFrameCallback(std::function<void()> callback) { frame_callback_ = callback; }
+
+void LvglGif::SetTelemetryAsset(std::string_view asset) { telemetry_asset_ = std::string(asset); }
 
 void LvglGif::NextFrame() {
     if (!loaded_ || !gif_ || !playing_) {
@@ -228,6 +233,11 @@ void LvglGif::NextFrame() {
 
     // Detect loop by checking if file position jumped back (rewound to start)
     // This works for looping GIFs regardless of when loop_count is set
+    if (gif_->f_rw_p < pos_before) {
+        ++loop_count_observed_;
+        ESP_LOGI(TAG, "SPARKBOT_GIF_LOOP asset=%s frames=%u loops=%u", telemetry_asset_.c_str(),
+                 static_cast<unsigned>(frame_count_), static_cast<unsigned>(loop_count_observed_));
+    }
     if (loop_delay_ms_ > 0 && gif_->f_rw_p < pos_before) {
         // File position decreased, meaning GIF looped back to beginning
         // Start waiting before rendering this frame
@@ -240,6 +250,13 @@ void LvglGif::NextFrame() {
     // Render current frame
     if (gif_->canvas) {
         gd_render_frame(gif_, gif_->canvas);
+
+        ++frame_count_;
+        // 约每 30 帧输出一次，证明 idle 等动画持续推进而不刷爆串口。
+        if (frame_count_ % 30U == 0U) {
+            ESP_LOGI(TAG, "SPARKBOT_GIF_FRAME_ADVANCE asset=%s frames=%u loops=%u", telemetry_asset_.c_str(),
+                     static_cast<unsigned>(frame_count_), static_cast<unsigned>(loop_count_observed_));
+        }
 
         // Call frame callback if set
         if (frame_callback_) {

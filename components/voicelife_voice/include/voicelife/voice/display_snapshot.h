@@ -9,12 +9,24 @@ namespace voicelife::voice {
 
 /** @brief 牛头表情键（显示模型层使用，与具体渲染器解耦）。 */
 enum class VoiceMood {
+    /** 开机资源/服务尚未就绪。 */
+    kBooting,
+    /** 等待配网或设备绑定。 */
+    kProvisioning,
+    /** 网络或 Voice Provider 正在建立连接。 */
+    kConnecting,
+    /** 可再次唤醒的稳定待机态。 */
+    kIdle,
+    /** 已打开麦克风，正在接收用户语音。 */
+    kListening,
     kNeutral,
     kHappy,
     kSad,
     kThinking,
     kSurprised,
     kSpeaking,
+    /** 当前回合被用户或服务端取消，随后应恢复待机。 */
+    kCancelled,
     kAngry,
 };
 

@@ -1,35 +1,12 @@
 {
   "schemaVersion": 1,
-  "id": "esp32s3-esp-sparkbot",
+  "id": "esp32s3-esp-sparkbot-state-flow",
   "target": "esp32s3",
   "adapters": {
-    "audio": {
-      "driver": "esp32s3-es8311-duplex",
-      "capabilities": [
-        "es8311-duplex"
-      ],
-      "configRef": "env://VOICELIFE_AUDIO_PROFILE"
-    },
-    "speech": {
-      "driver": "xrobot-websocket",
-      "capabilities": [
-        "streaming-asr",
-        "tts",
-        "cancel-generation",
-        "pcm"
-      ],
-      "configRef": "nvs://linx/websocket_url"
-    },
-    "storage": {
-      "driver": "memory",
-      "capabilities": [
-        "atomic-calendar-write"
-      ]
-    },
-    "im": {
-      "driver": "disabled",
-      "capabilities": []
-    }
+    "audio": { "driver": "esp32s3-es8311-duplex", "capabilities": ["es8311-duplex"], "configRef": "env://VOICELIFE_AUDIO_PROFILE" },
+    "speech": { "driver": "xrobot-websocket", "capabilities": ["streaming-asr", "tts", "cancel-generation", "pcm"], "configRef": "nvs://linx/websocket_url" },
+    "storage": { "driver": "memory", "capabilities": ["atomic-calendar-write"] },
+    "im": { "driver": "disabled", "capabilities": [] }
   },
   "sdkconfig": [
     "CONFIG_LOG_DEFAULT_LEVEL_INFO=y",
@@ -52,6 +29,7 @@
     "CONFIG_LV_FONT_FMT_TXT_LARGE=y",
     "CONFIG_LV_USE_GIF=y",
     "CONFIG_LV_GIF_CACHE_DECODE_DATA=y",
-    "CONFIG_SR_WN_WN9L_NIHAOXIAOZHI_TTS3=y"
+    "CONFIG_SR_WN_WN9L_NIHAOXIAOZHI_TTS3=y",
+    "CONFIG_VOICELIFE_STATE_FLOW_TEST=y"
   ]
 }

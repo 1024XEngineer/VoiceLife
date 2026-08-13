@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "board_id": "esp-sparkbot",
-  "asset_kind": "mascot_gif_and_common_text_font",
+  "asset_kind": "mascot_gif_common_text_font_and_controlled_wakenet",
   "source": {
     "upstream_repository": "78/xiaozhi-esp32",
     "upstream_commit": "37d1aee793f99a9b865957acc3798d06335c3ad0",
@@ -25,13 +25,14 @@
   "budget": {
     "gif_bytes": 142683,
     "common_text_font_bytes": 269580,
-    "total_bytes": 412263,
+    "wakenet_packed_bytes": 292609,
+    "total_bytes": 704872,
     "assets_partition_bytes": 1048576,
     "single_frame_rgb565_bytes": 18432,
     "psram_decode_peak_bytes": null,
     "psram_note": "GIF 解码峰值内存尚未测量；Renderer 移植时以真机 heap 证据补充。",
-    "assets_image_sha256": "555a029ba7a35e5c8232064850f434f227a9f16f91b73846428f7f1531027e3b",
-    "assets_image_bytes": 412781
+    "assets_image_sha256": "7140766307022083d13e67192fce75c0204431bd78ab6468d1d2fe14b53ae7ba",
+    "assets_image_bytes": 705436
   },
   "text_font": {
     "file": "font_noto_sans_common_14_1.bin",
@@ -42,6 +43,14 @@
     "base_line": 2,
     "size_bytes": 269580,
     "sha256": "ccdfa4a7de73f584f0d7519be2d2785c4e9880446edf66c1635e676969c030ee"
+  },
+  "wake_model": {
+    "file": "srmodels.bin",
+    "model_name": "wn9l_nihaoxiaozhi_tts3",
+    "wake_word": "你好小智",
+    "source": "espressif/esp-sr@2.4.7 managed component (commit 2f8c4b0459db5bbb39abd77adae27962d6d94bcb)",
+    "packed_size_bytes": 292609,
+    "sha256": "b3cb0ba38c2443b0a082c37c2ef9b1f990c1bd56a5eac341961e9c0f6df6c373"
   },
   "verification": {
     "verified_on_device": false,

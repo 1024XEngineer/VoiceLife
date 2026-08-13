@@ -205,13 +205,13 @@ int main() {
                        [&mcp_events](const voicelife::voice::VoiceEvent& event) { mcp_events.push_back(event); })
               .ok(),
           "配置 MCP handler 的 Provider 应能重新绑定事件接收器");
+    const auto mcp_events_before_request = mcp_events.size();
     mcp_transport.EmitText(R"({"type":"mcp","payload":{"jsonrpc":"2.0","method":"tools/list","id":1}})");
     Check(mcp_calls == 1 && mcp_transport.texts.back().find("\"type\":\"mcp\"") != std::string::npos &&
               mcp_transport.texts.back().find("\"session_id\":\"remote-linx-session\"") != std::string::npos,
           "MCP payload 应调用 handler 并回发响应");
-    Check(!mcp_events.empty() && mcp_events.back().kind == voicelife::voice::VoiceEventKind::kToolCall &&
-              mcp_events.back().text.empty(),
-          "MCP 调用必须产生不含业务参数的生命周期事件");
+    Check(mcp_events.size() == mcp_events_before_request,
+          "MCP 网络回调只能交给受控 handler，不能直接投递可绕过 Runtime 的工具事件");
 
     voicelife::voice::AudioFrame uplink;
     uplink.generation = 7;

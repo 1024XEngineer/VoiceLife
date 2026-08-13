@@ -392,7 +392,6 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
                 Emit(Event(voice::VoiceEventKind::kError, "Linx 收到 MCP 请求，但设备未配置 MCP handler"));
                 return;
             }
-            Emit(Event(voice::VoiceEventKind::kToolCall));
             const std::string session_id = inbound.session_id.value_or(ActiveSessionConfig().session_id);
             if (const auto response = mcp_handler_(inbound.text, session_id);
                 response.ok() && response.value.has_value()) {

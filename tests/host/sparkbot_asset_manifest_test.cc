@@ -307,8 +307,20 @@ int main() {
     Check(ToHex(font_hasher.Final()) == font_sha, "common 文本字体 SHA-256 必须与清单一致");
     Check(yyjson_get_uint(yyjson_obj_get(budget, "common_text_font_bytes")) == font_data.size(),
           "budget.common_text_font_bytes 必须与字体实际大小一致");
-    Check(yyjson_get_uint(yyjson_obj_get(budget, "total_bytes")) == total_bytes + font_data.size(),
-          "budget.total_bytes 必须等于 GIF 与 common 字体总字节数");
+    yyjson_val* wake_model = yyjson_obj_get(root, "wake_model");
+    Check(wake_model != nullptr && yyjson_is_obj(wake_model), "受控 WakeNet 模型声明必须存在");
+    Check(yyjson_equals_str(yyjson_obj_get(wake_model, "file"), "srmodels.bin"),
+          "WakeNet 资产文件必须固定为 srmodels.bin");
+    Check(yyjson_equals_str(yyjson_obj_get(wake_model, "model_name"), "wn9l_nihaoxiaozhi_tts3"),
+          "WakeNet 模型必须是构建期固定的官方模型");
+    Check(yyjson_equals_str(yyjson_obj_get(wake_model, "wake_word"), "你好小智"),
+          "不得把未训练的唤醒词伪装为可用模型");
+    Check(yyjson_get_uint(yyjson_obj_get(wake_model, "packed_size_bytes")) == 292609,
+          "WakeNet 打包大小必须与受控源模型一致");
+    Check(yyjson_get_uint(yyjson_obj_get(budget, "wakenet_packed_bytes")) == 292609,
+          "WakeNet 预算必须与模型包一致");
+    Check(yyjson_get_uint(yyjson_obj_get(budget, "total_bytes")) == total_bytes + font_data.size() + 292609,
+          "budget.total_bytes 必须等于 GIF、common 字体和受控 WakeNet 模型之和");
 
     // 受控标识集合必须与 SparkBotPresentationAdapter 的 allowlist 完全一致，
     // 防止 manifest 与 Adapter 校验失同步。

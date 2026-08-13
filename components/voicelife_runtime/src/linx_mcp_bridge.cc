@@ -181,4 +181,65 @@ Result<std::string> HandleLinxMcpPayload(std::string_view payload, const mcp::Mc
     return Result<std::string>::Success(Wrap(result, session_id));
 }
 
+Result<std::string> BuildLinxMcpUnavailableResponse(std::string_view payload, std::string_view message,
+                                                    std::string_view session_id) {
+    JsonValue request;
+    const Status parsed = ParseJson(payload, request);
+    if (!parsed.ok() || !request.IsObject()) {
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "MCP JSON-RPC payload 无效");
+    }
+    const JsonValue* id = Get(request, "id");
+    const JsonValue* method = Get(request, "method");
+    if (method == nullptr || !method->IsString()) {
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "MCP 请求缺少 method");
+    }
+    // 通知没有响应帧；它们也不会进入有业务执行的 worker。
+    if (id == nullptr && method->string.rfind("notifications/", 0) == 0) {
+        return Result<std::string>::Success(std::string{});
+    }
+    if (id == nullptr) {
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "MCP 请求缺少 id");
+    }
+    return ErrorResponse(*id, -32001, message, session_id);
+}
+
+LinxMcpToolOutcome InspectLinxMcpToolOutcome(const Result<std::string>& response) {
+    LinxMcpToolOutcome outcome;
+    if (!response.ok() || !response.value.has_value()) return outcome;
+
+    JsonValue envelope;
+    if (!ParseJson(*response.value, envelope).ok() || !envelope.IsObject()) return outcome;
+    const JsonValue* payload = Get(envelope, "payload");
+    if (payload == nullptr || !payload->IsObject()) return outcome;
+
+    if (const JsonValue* error = Get(*payload, "error"); error != nullptr && error->IsObject()) {
+        if (const JsonValue* message = Get(*error, "message"); message != nullptr && message->IsString() &&
+            !message->string.empty()) {
+            outcome.summary = message->string;
+        }
+        return outcome;
+    }
+
+    const JsonValue* result = Get(*payload, "result");
+    if (result == nullptr || !result->IsObject()) return outcome;
+    const JsonValue* is_error = Get(*result, "isError");
+    if (is_error == nullptr || is_error->kind != JsonValue::Kind::kBool || is_error->boolean) {
+        const JsonValue* content = Get(*result, "content");
+        if (content != nullptr && content->IsArray() && !content->array.empty()) {
+            const JsonValue* text = Get(content->array.front(), "text");
+            if (text != nullptr && text->IsString() && !text->string.empty()) outcome.summary = text->string;
+        }
+        return outcome;
+    }
+
+    outcome.success = true;
+    outcome.summary = "日程操作已完成";
+    const JsonValue* content = Get(*result, "content");
+    if (content != nullptr && content->IsArray() && !content->array.empty()) {
+        const JsonValue* text = Get(content->array.front(), "text");
+        if (text != nullptr && text->IsString() && !text->string.empty()) outcome.summary = text->string;
+    }
+    return outcome;
+}
+
 }  // namespace voicelife::runtime

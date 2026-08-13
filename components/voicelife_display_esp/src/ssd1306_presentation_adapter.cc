@@ -56,6 +56,14 @@ std::size_t CountCodepoints(std::string_view text) {
 /** @brief 显示模型表情到旧点阵渲染器 mood 键的映射（与旧行为一致）。 */
 [[maybe_unused]] std::string MoodKey(voicelife::voice::VoiceMood mood) {
     switch (mood) {
+        case voicelife::voice::VoiceMood::kBooting:
+        case voicelife::voice::VoiceMood::kConnecting:
+            return "thinking";
+        case voicelife::voice::VoiceMood::kProvisioning:
+        case voicelife::voice::VoiceMood::kIdle:
+            return "neutral";
+        case voicelife::voice::VoiceMood::kListening:
+            return "surprised";
         case voicelife::voice::VoiceMood::kHappy:
             return "happy";
         case voicelife::voice::VoiceMood::kSad:
@@ -66,6 +74,8 @@ std::size_t CountCodepoints(std::string_view text) {
             return "surprised";
         case voicelife::voice::VoiceMood::kSpeaking:
             return "speaking";
+        case voicelife::voice::VoiceMood::kCancelled:
+            return "happy";
         case voicelife::voice::VoiceMood::kAngry:
             return "angry";
         default:

@@ -6,6 +6,9 @@
 #ifdef ESP_PLATFORM
 #include <driver/gpio.h>
 #include <esp_log.h>
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <led_strip.h>
 
 namespace {
@@ -41,12 +44,88 @@ voicelife::display_sparkbot::SparkBotLcdConfig MakeSparkBotLcdConfig() {
 
 }  // namespace
 
-VoiceLifePcbAssembly::VoiceLifePcbAssembly() : audio_ports_(audio_esp::VoiceLifePcbEsp32s3Profile()) {}
+VoiceLifePcbAssembly::VoiceLifePcbAssembly() : audio_ports_(audio_esp::VoiceLifePcbEsp32s3Profile()) {
+    wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
+    wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_.input(), *wake_detector_, true);
+}
 
 voicelife::voice::PresentationPort& VoiceLifePcbAssembly::presentation() { return ssd1306_adapter_; }
 
-audio_esp::AudioBoardProfile VoiceLifePcbAssembly::audio_profile() const {
-    return audio_esp::VoiceLifePcbEsp32s3Profile();
+void VoiceLifePcbAssembly::BoardInputTaskEntry(void* context) {
+    static_cast<VoiceLifePcbAssembly*>(context)->BoardInputTask();
+}
+
+voicelife::Status VoiceLifePcbAssembly::StartGpioInput(std::array<int, 4> gpios, BoardInputSink sink,
+                                                        const char* task_name) {
+    board_input_sink_ = std::move(sink);
+#ifdef ESP_PLATFORM
+    uint64_t pin_mask = 0;
+    for (const int gpio : gpios) {
+        if (gpio >= 0) pin_mask |= 1ULL << static_cast<unsigned>(gpio);
+    }
+    const gpio_config_t config = {
+        .pin_bit_mask = pin_mask,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    if (gpio_config(&config) != ESP_OK) {
+        return Status::Error(ErrorCode::kUnavailable, "初始化 PCB 按键 GPIO 失败");
+    }
+    button_count_ = gpios.size();
+    for (std::size_t index = 0; index < button_count_; ++index) {
+        buttons_[index].gpio = gpios[index];
+        buttons_[index].previous_pressed = false;
+        buttons_[index].long_fired = false;
+        buttons_[index].pressed_at_us = 0;
+    }
+    if (xTaskCreate(&VoiceLifePcbAssembly::BoardInputTaskEntry, task_name, 3072, this, 5, nullptr) != pdPASS) {
+        return Status::Error(ErrorCode::kInternal, "创建 PCB 按键任务失败");
+    }
+#else
+    (void)gpios;
+    (void)task_name;
+#endif
+    return Status::Ok();
+}
+
+voicelife::Status VoiceLifePcbAssembly::StartBoardInput(BoardInputSink sink) {
+    return StartGpioInput({0, 47, 40, 39}, std::move(sink), "voicelife_buttons");
+}
+
+void VoiceLifePcbAssembly::BoardInputTask() {
+#ifdef ESP_PLATFORM
+    constexpr int64_t kLongPressUs = 2 * 1000 * 1000;
+    while (true) {
+        const int64_t now = esp_timer_get_time();
+        for (std::size_t index = 0; index < button_count_; ++index) {
+            auto& button = buttons_[index];
+            const bool pressed = gpio_get_level(static_cast<gpio_num_t>(button.gpio)) == 0;
+            if (pressed && !button.previous_pressed) {
+                button.pressed_at_us = now;
+                button.long_fired = false;
+                if (index == 1 && board_input_sink_) board_input_sink_(BoardInputAction::kPressDown);
+            } else if (pressed && !button.long_fired && now - button.pressed_at_us >= kLongPressUs) {
+                button.long_fired = true;
+                if (board_input_sink_) {
+                    if (index == 2) board_input_sink_(BoardInputAction::kVolumeMaximum);
+                    if (index == 3) board_input_sink_(BoardInputAction::kVolumeMute);
+                }
+            } else if (!pressed && button.previous_pressed) {
+                if (board_input_sink_) {
+                    if (index == 0 && !button.long_fired) board_input_sink_(BoardInputAction::kToggleChat);
+                    if (index == 1) board_input_sink_(BoardInputAction::kPressUp);
+                    if (index == 2 && !button.long_fired) board_input_sink_(BoardInputAction::kVolumeUp);
+                    if (index == 3 && !button.long_fired) board_input_sink_(BoardInputAction::kVolumeDown);
+                }
+                button.pressed_at_us = 0;
+            }
+            button.previous_pressed = pressed;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+#endif
 }
 
 voicelife::voice::AudioInputPort& VoiceLifePcbAssembly::audio_input() { return audio_ports_.input(); }
@@ -87,9 +166,22 @@ void VoiceLifePcbAssembly::InitializeBoardLeds() {
 void VoiceLifePcbAssembly::LogAudioStats() {
 #ifdef ESP_PLATFORM
     const auto stats = audio_ports_.stats();
-    ESP_LOGI("voicelife_pcb_audio", "AUDIO_STATS input=%llu output=%llu short_write=%llu",
+    ESP_LOGI("voicelife_pcb_audio",
+             "AUDIO_STATS in_frames=%llu in_bytes=%llu in_samples=%llu in_peak=%u in_energy=%llu in_zero=%llu "
+             "out_frames=%llu out_bytes=%llu out_samples=%llu out_peak=%u out_energy=%llu out_zero=%llu "
+             "volume=%u clipped=%llu short_read=%llu short_write=%llu in_i2s_err=%llu out_i2s_err=%llu",
              static_cast<unsigned long long>(stats.captured_frames),
-             static_cast<unsigned long long>(stats.played_frames), static_cast<unsigned long long>(stats.short_writes));
+             static_cast<unsigned long long>(stats.input_pcm_bytes), static_cast<unsigned long long>(stats.input_samples),
+             static_cast<unsigned>(stats.input_peak), static_cast<unsigned long long>(stats.input_sum_squares),
+             static_cast<unsigned long long>(stats.input_zero_periods),
+             static_cast<unsigned long long>(stats.played_frames),
+             static_cast<unsigned long long>(stats.output_pcm_bytes), static_cast<unsigned long long>(stats.output_samples),
+             static_cast<unsigned>(stats.output_peak), static_cast<unsigned long long>(stats.output_sum_squares),
+             static_cast<unsigned long long>(stats.output_zero_periods), static_cast<unsigned>(stats.output_volume),
+             static_cast<unsigned long long>(stats.output_clipped_samples),
+             static_cast<unsigned long long>(stats.short_reads), static_cast<unsigned long long>(stats.short_writes),
+             static_cast<unsigned long long>(stats.input_i2s_errors),
+             static_cast<unsigned long long>(stats.output_i2s_errors));
 #endif
 }
 
@@ -97,15 +189,47 @@ SparkBotAssembly::SparkBotAssembly()
     : audio_ports_(audio_esp::SparkBotEsp32s3AudioProfile(), {},
                    [this](bool enabled) { (void)SetAudioOutputEnabled(enabled); }),
       arbiter_(voicelife::board_esp::SparkBotProfile().shared_power),
-      adapter_(MakeSparkBotLcdConfig(), [this](bool enabled) { ApplyBacklight(enabled); }) {
-    wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
-    wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_.input(), *wake_detector_, false);
-}
+      adapter_(MakeSparkBotLcdConfig(), [this](bool enabled) { ApplyBacklight(enabled); }) {}
 
 voicelife::voice::PresentationPort& SparkBotAssembly::presentation() { return adapter_; }
 
-audio_esp::AudioBoardProfile SparkBotAssembly::audio_profile() const {
-    return audio_esp::SparkBotEsp32s3AudioProfile();
+void SparkBotAssembly::BoardInputTaskEntry(void* context) {
+    static_cast<SparkBotAssembly*>(context)->BoardInputTask();
+}
+
+voicelife::Status SparkBotAssembly::StartBoardInput(BoardInputSink sink) {
+    board_input_sink_ = std::move(sink);
+#ifdef ESP_PLATFORM
+    // 官方 SparkBot 只将 BOOT GPIO0 作为用户输入；SPI/I2S 复用引脚不参与配置。
+    const gpio_config_t config = {
+        .pin_bit_mask = 1ULL << 0,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    if (gpio_config(&config) != ESP_OK) {
+        return Status::Error(ErrorCode::kUnavailable, "初始化 SparkBot BOOT GPIO 失败");
+    }
+    boot_button_ = {.gpio = 0};
+    if (xTaskCreate(&SparkBotAssembly::BoardInputTaskEntry, "sparkbot_button", 3072, this, 5, nullptr) != pdPASS) {
+        return Status::Error(ErrorCode::kInternal, "创建 SparkBot BOOT 按键任务失败");
+    }
+#endif
+    return Status::Ok();
+}
+
+void SparkBotAssembly::BoardInputTask() {
+#ifdef ESP_PLATFORM
+    while (true) {
+        const bool pressed = gpio_get_level(static_cast<gpio_num_t>(boot_button_.gpio)) == 0;
+        if (!pressed && boot_button_.previous_pressed && board_input_sink_) {
+            board_input_sink_(BoardInputAction::kToggleChat);
+        }
+        boot_button_.previous_pressed = pressed;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+#endif
 }
 
 voicelife::voice::AudioInputPort& SparkBotAssembly::audio_input() { return audio_ports_.input(); }
@@ -116,9 +240,22 @@ voicelife::voice::WakeGateAudioInput& SparkBotAssembly::wake_gate() { return *wa
 void SparkBotAssembly::LogAudioStats() {
 #ifdef ESP_PLATFORM
     const auto stats = audio_ports_.stats();
-    ESP_LOGI(kPowerTag, "AUDIO_STATS input=%llu output=%llu short_write=%llu",
+    ESP_LOGI(kPowerTag,
+             "AUDIO_STATS in_frames=%llu in_bytes=%llu in_samples=%llu in_peak=%u in_energy=%llu in_zero=%llu "
+             "out_frames=%llu out_bytes=%llu out_samples=%llu out_peak=%u out_energy=%llu out_zero=%llu "
+             "volume=%u clipped=%llu short_read=%llu short_write=%llu in_i2s_err=%llu out_i2s_err=%llu",
              static_cast<unsigned long long>(stats.captured_frames),
-             static_cast<unsigned long long>(stats.played_frames), static_cast<unsigned long long>(stats.short_writes));
+             static_cast<unsigned long long>(stats.input_pcm_bytes), static_cast<unsigned long long>(stats.input_samples),
+             static_cast<unsigned>(stats.input_peak), static_cast<unsigned long long>(stats.input_sum_squares),
+             static_cast<unsigned long long>(stats.input_zero_periods),
+             static_cast<unsigned long long>(stats.played_frames),
+             static_cast<unsigned long long>(stats.output_pcm_bytes), static_cast<unsigned long long>(stats.output_samples),
+             static_cast<unsigned>(stats.output_peak), static_cast<unsigned long long>(stats.output_sum_squares),
+             static_cast<unsigned long long>(stats.output_zero_periods), static_cast<unsigned>(stats.output_volume),
+             static_cast<unsigned long long>(stats.output_clipped_samples),
+             static_cast<unsigned long long>(stats.short_reads), static_cast<unsigned long long>(stats.short_writes),
+             static_cast<unsigned long long>(stats.input_i2s_errors),
+             static_cast<unsigned long long>(stats.output_i2s_errors));
 #endif
 }
 
@@ -126,7 +263,17 @@ voicelife::Status SparkBotAssembly::Start() {
     ConfigureSharedPowerGpio();
     // 显示启动：经统一仲裁启用背光。
     ApplyBacklight(true);
-    return adapter_.Start();
+    const Status display = adapter_.Start();
+    if (!display.ok()) return display;
+    const Status assets = wake_model_assets_.Initialize();
+    if (!assets.ok()) return assets;
+    wake_detector_ = std::make_unique<audio_esp::EspWakeNetDetector>(wake_model_assets_.model_root());
+    wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_.input(), *wake_detector_, true);
+    wake_ready_ = true;
+#ifdef ESP_PLATFORM
+    ESP_LOGI(kPowerTag, "SPARKBOT_ASSEMBLY_READY display=1 wake=1");
+#endif
+    return Status::Ok();
 }
 
 voicelife::Status SparkBotAssembly::SetAudioOutputEnabled(bool enabled) {

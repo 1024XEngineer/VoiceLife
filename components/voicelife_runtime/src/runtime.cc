@@ -1,7 +1,6 @@
 #include "voicelife/runtime/runtime.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdio>
 #include <ctime>
@@ -12,12 +11,14 @@
 #ifdef ESP_PLATFORM
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <mutex>
+#include <optional>
 #include <string_view>
 
-#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -25,15 +26,12 @@
 #include "generated/farewell_pcm.h"
 #include "generated/wake_ack_pcm.h"
 #include "nvs.h"
-#include "voicelife/audio_esp/audio_board_profile.h"
-#include "voicelife/audio_esp/esp32s3_audio_probe.h"
-#include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
-#include "voicelife/audio_esp/esp_multinet_wake_detector.h"
 #include "nvs_flash.h"
 #include "voicelife/im/esp_http_transport_factory.h"
 #include "voicelife/im/im_config_store.h"
 #include "voicelife/im/im_retry_policy.h"
 #include "voicelife/im/im_runtime.h"
+#include "voicelife/contracts/json.h"
 #include "voicelife/linx/linx_speech_provider.h"
 #include "voicelife/linx/linx_types.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
@@ -115,91 +113,6 @@ class NvsSecretResolver final : public linx_esp::SecretResolverPort {
     }
 };
 
-#if CONFIG_VOICELIFE_AUDIO_PORT_SMOKE
-Status RunAudioPortSmoke() {
-    const auto profile = audio_esp::VoiceLifePcbEsp32s3Profile();
-    audio_esp::Esp32s3PcmAudioPorts ports(profile);
-    std::atomic<std::size_t> captured_frames{0};
-    std::atomic<std::size_t> nonzero_samples{0};
-    ports.input().SetAudioSink([&](voice::AudioFrame frame) {
-        captured_frames.fetch_add(1);
-        for (std::size_t offset = 0; offset + 1 < frame.payload.size(); offset += 2) {
-            if (frame.payload[offset] != 0 || frame.payload[offset + 1] != 0) {
-                nonzero_samples.fetch_add(1);
-            }
-        }
-        return Status::Ok();
-    });
-
-    auto capture_format = profile.capture_i2s.format;
-    capture_format.frame_duration_ms = 60;
-    auto playback_format = profile.playback_i2s.format;
-    playback_format.frame_duration_ms = 60;
-
-    Status status = ports.input().Open(capture_format);
-    if (!status.ok()) {
-        return status;
-    }
-    status = ports.output().Open(playback_format);
-    if (!status.ok()) {
-        ports.input().Close();
-        return status;
-    }
-    status = ports.input().StartCapture(voice::VoiceMode::kManual);
-    if (!status.ok()) {
-        ports.output().Close();
-        ports.input().Close();
-        return status;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(300));
-    status = ports.input().StopCapture();
-    if (!status.ok()) {
-        ports.output().Close();
-        ports.input().Close();
-        return status;
-    }
-
-    voice::AudioFrame tone;
-    tone.format = playback_format;
-    const std::size_t tone_samples =
-        static_cast<std::size_t>(playback_format.sample_rate_hz) * playback_format.frame_duration_ms / 1000U;
-    tone.payload.resize(tone_samples * sizeof(int16_t));
-    for (std::size_t i = 0; i < tone_samples; ++i) {
-        const int16_t sample = (i / 24U) % 2U == 0U ? 1200 : -1200;
-        std::memcpy(tone.payload.data() + i * sizeof(sample), &sample, sizeof(sample));
-    }
-    status = ports.output().Push(tone);
-    if (status.ok()) {
-        vTaskDelay(pdMS_TO_TICKS(150));
-    }
-
-    const auto stats = ports.stats();
-    ESP_LOGI(kTag,
-             "AUDIO_PORT_READY=1 AUDIO_PORT_CAPTURE_FRAMES=%u AUDIO_PORT_PLAYED_FRAMES=%u "
-             "AUDIO_PORT_DROPPED_INPUT=%u AUDIO_PORT_REJECTED_OUTPUT=%u "
-             "AUDIO_PORT_SHORT_READS=%u AUDIO_PORT_SHORT_WRITES=%u "
-             "AUDIO_PORT_MIN_HEAP=%u AUDIO_PORT_SIGNAL=%d",
-             static_cast<unsigned>(captured_frames.load()), static_cast<unsigned>(stats.played_frames),
-             static_cast<unsigned>(stats.dropped_input_frames), static_cast<unsigned>(stats.rejected_output_frames),
-             static_cast<unsigned>(stats.short_reads), static_cast<unsigned>(stats.short_writes),
-             static_cast<unsigned>(stats.minimum_free_heap_bytes), nonzero_samples.load() > 0);
-
-    ports.output().Close();
-    ports.input().Close();
-    if (!status.ok()) {
-        return status;
-    }
-    if (captured_frames.load() == 0 || nonzero_samples.load() == 0) {
-        return Status::Error(ErrorCode::kUnavailable, "PCM Audio Port 未检测到可变化的总线输入");
-    }
-    if (stats.played_frames == 0) {
-        return Status::Error(ErrorCode::kUnavailable, "PCM Audio Port 未完成总线回放帧");
-    }
-    return Status::Ok();
-}
-#endif
-
 #endif
 
 class ScaffoldAudioInput final : public voice::AudioInputPort {
@@ -255,7 +168,7 @@ class Runtime final {
             return std::make_unique<linx::LinxSpeechProviderAdapter>(
                 *linx_transport_, linx_codec_, linx_config_, linx::LinxSpeechProviderAdapter::DefaultCapabilities(),
                 [this](std::string_view payload, std::string_view session_id) {
-                    return HandleLinxMcpPayload(payload, mcp_server_, session_id);
+                    return HandleMcpRequest(payload, session_id);
                 });
         });
 #endif
@@ -265,6 +178,13 @@ class Runtime final {
 
     Status Start(PlatformAssembly& assembly) {
         assembly_ = &assembly;
+        const auto fail_startup = [this](Status status) {
+#ifdef ESP_PLATFORM
+            StopMcpWorker();
+            StopEventLoop();
+#endif
+            return status;
+        };
         auto& registry = voice::SpeechProviderRegistry::Instance();
         if (!init_status_.ok()) return init_status_;
 #ifdef ESP_PLATFORM
@@ -288,23 +208,37 @@ class Runtime final {
                      display_status.message.c_str());
             return display_status;
         }
-        ShowDisplay(voice::VoiceMood::kThinking, "联网", "");
+        // 显示启动后立即启动唯一的交互/显示语义写者。此后的启动、网络、音量
+        // 和会话事件均只投递到该循环，不允许 Runtime 直接 Render。
+        {
+            std::lock_guard<std::mutex> lock(event_mutex_);
+            event_queue_.clear();
+            event_loop_stop_ = false;
+            event_loop_stopped_ = false;
+        }
+        if (xTaskCreate(&Runtime::EventLoopTaskEntry, "voicelife_interaction", 8192, this, 5, &event_task_) != pdPASS) {
+            return Status::Error(ErrorCode::kInternal, "创建交互事件循环任务失败");
+        }
+        if (const Status mcp_worker = StartMcpWorker(); !mcp_worker.ok()) {
+            return fail_startup(mcp_worker);
+        }
+        ShowDisplay(voice::VoiceMood::kConnecting, "联网", "");
         if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=secret_store code=%d", static_cast<int>(secret_store.code));
             ShowDisplay(voice::VoiceMood::kSad, "错误", "");
-            return secret_store;
+            return fail_startup(secret_store);
         }
         auto connection = BootstrapLinxOtaConfig(assembly_->board_identity());
         // Bootstrap 无论是下发连接配置还是返回“待控制台激活”，均可能已经
         // 完成 STA 关联。由 Runtime 把受控网络事实写入快照，Renderer 只显示
         // 语义而不触碰 ESP Wi-Fi API。
-        snapshot_.network_connected = LinxWifiStaConnected();
+        EnqueueNetworkState(LinxWifiStaConnected());
         if (!connection.ok() || !connection.value.has_value()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=linx_bootstrap code=%d", static_cast<int>(connection.status.code));
             ShowDisplay(voice::VoiceMood::kSad, "错误", "");
-            return connection.status;
+            return fail_startup(connection.status);
         }
-        ShowDisplay(voice::VoiceMood::kNeutral, "连接", "");
+        ShowDisplay(voice::VoiceMood::kConnecting, "连接", "");
         linx_config_ = std::move(*connection.value);
         // IM 的 SNTP、Gateway 探针和退避全部在独立任务中完成，语音启动路径不等待网络。
         StartImRuntime();
@@ -314,7 +248,7 @@ class Runtime final {
 #endif
         if (!result.ok() || !result.value.has_value()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=provider_create code=%d", static_cast<int>(result.status.code));
-            return Status::Error(ErrorCode::kInternal, "无法创建语音 Provider: " + result.status.message);
+            return fail_startup(Status::Error(ErrorCode::kInternal, "无法创建语音 Provider: " + result.status.message));
         }
         provider_ = std::move(*result.value);
 
@@ -346,76 +280,164 @@ class Runtime final {
         if (!session_status.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=session_start code=%d", static_cast<int>(session_status.code));
             ShowDisplay(voice::VoiceMood::kSad, "错误", "");
-            return session_status;
+            return fail_startup(session_status);
         }
 
-#if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_AUDIO_PROBE
-        audio_esp::Esp32s3AudioProbe probe;
-        const auto profile =
-#if CONFIG_VOICELIFE_AUDIO_PROBE_PROFILE_VOICELIFE_PCB
-            audio_esp::VoiceLifePcbEsp32s3Profile();
-#else
-            audio_esp::LichuangEsp32s3Profile();
-#endif
-        audio_esp::AudioProbeOptions options;
-#if CONFIG_VOICELIFE_AUDIO_PROBE_REPLAY
-        options.replay_capture = true;
-#endif
-        const auto probe_result = probe.Run(profile, options);
-        if (!probe_result.ok() || !probe_result.value.has_value()) {
-            return probe_result.status;
-        }
-        const auto& report = *probe_result.value;
-        ESP_LOGI(kTag,
-                 "音频探针：profile=%s codec_required=%d I2C=%d ES8311=%d ES7210=%d "
-                 "PCA9557=%d I2S_READY=%d I2S_STARTED=%d bus_write=%u bus_read=%u "
-                 "pcm_samples=%u nonzero=%u changed=%u saturated=%u saturation_ppm=%llu "
-                 "peak=%u mean_square=%llu signal=%d replay=%u tone_written=%u tone_ok=%d min_heap=%u",
-                 profile.id.c_str(), report.codec_control_required, report.i2c_bus_ready, report.es8311_ack,
-                 report.es7210_ack, report.pca9557_ack, report.i2s_channels_ready, report.i2s_channels_started,
-                 static_cast<unsigned>(report.bytes_written), static_cast<unsigned>(report.bytes_read),
-                 static_cast<unsigned>(report.capture_samples), static_cast<unsigned>(report.nonzero_samples),
-                 static_cast<unsigned>(report.changed_samples), static_cast<unsigned>(report.saturated_samples),
-                 static_cast<unsigned long long>(report.saturation_ratio_ppm()), static_cast<unsigned>(report.peak_abs),
-                 static_cast<unsigned long long>(report.mean_square()), report.capture_signal_detected(),
-                 static_cast<unsigned>(report.replay_bytes_written), static_cast<unsigned>(report.probe_tone_written),
-                 report.probe_tone_ok ? 1 : 0, static_cast<unsigned>(report.minimum_free_heap_bytes));
-        if (!report.hardware_ready()) {
-            return Status::Error(ErrorCode::kUnavailable, "音频探针硬件未就绪，Codec ACK 或 I2S 状态不完整");
-        }
-        if (!report.capture_signal_detected()) {
-            return Status::Error(ErrorCode::kUnavailable, "音频探针未检测到可变化的 PCM 输入");
-        }
-#endif
-#if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_AUDIO_PORT_SMOKE
-        const Status audio_port_status = RunAudioPortSmoke();
-        if (!audio_port_status.ok()) {
-            return audio_port_status;
-        }
-#endif
 #ifdef ESP_PLATFORM
         if (wake_queue_ == nullptr) {
             wake_queue_ = xQueueCreate(4, sizeof(BoardRequest));
-            if (wake_queue_ == nullptr) return Status::Error(ErrorCode::kInternal, "创建唤醒队列失败");
+            if (wake_queue_ == nullptr) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒队列失败"));
             const BaseType_t task_status =
                 xTaskCreate(&Runtime::WakeTaskEntry, "voicelife_wake", 4096, this, 5, &wake_task_);
-            if (task_status != pdPASS) return Status::Error(ErrorCode::kInternal, "创建唤醒控制任务失败");
+            if (task_status != pdPASS) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒控制任务失败"));
         }
-        const Status interaction_status = HandleInteractionEvent(voice::VoiceInteractionEvent::kBootCompleted);
-        if (!interaction_status.ok()) {
-            ESP_LOGW(kTag, "STARTUP_ERROR stage=interaction_boot code=%d", static_cast<int>(interaction_status.code));
-            return interaction_status;
+        EnqueueEvent(voice::VoiceInteractionEvent::kBootCompleted);
+        const Status input_status = assembly_->StartBoardInput([this](BoardInputAction action) {
+            EnqueueBoardInput(action);
+        });
+        if (!input_status.ok()) return fail_startup(input_status);
+#if CONFIG_VOICELIFE_STATE_FLOW_TEST
+        if (const Status state_flow_status = StartStateFlowDiagnostic(); !state_flow_status.ok()) {
+            return fail_startup(state_flow_status);
         }
-        StartBoardControls();
-        if (xTaskCreate(&Runtime::EventLoopTaskEntry, "voicelife_interaction", 8192, this, 5, &event_task_) != pdPASS) {
-            ESP_LOGW(kTag, "创建交互事件循环任务失败");
-        }
+#endif
 #endif
         return Status::Ok();
     }
 
    private:
 #ifdef ESP_PLATFORM
+    void StopEventLoop() {
+        if (event_task_ == nullptr) return;
+        {
+            std::lock_guard<std::mutex> lock(event_mutex_);
+            event_queue_.clear();
+            event_loop_stop_ = true;
+        }
+        event_cv_.notify_one();
+        for (int attempt = 0; attempt < 20 && !event_loop_stopped_; ++attempt) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        event_task_ = nullptr;
+    }
+
+    struct McpRequest {
+        std::string payload;
+        std::string session_id;
+        std::mutex mutex;
+        std::condition_variable completed_cv;
+        std::optional<Result<std::string>> response;
+        bool completed = false;
+        std::atomic_bool abandoned{false};
+    };
+
+    static constexpr std::size_t kMcpWorkerQueueCapacity = 4;
+    static constexpr uint32_t kMcpResponseTimeoutMs = 3000;
+
+    Status StartMcpWorker() {
+        std::lock_guard<std::mutex> lock(mcp_mutex_);
+        if (mcp_task_ != nullptr) return Status::Ok();
+        mcp_stop_ = false;
+        mcp_stopped_.store(false);
+        if (xTaskCreate(&Runtime::McpWorkerTaskEntry, "voicelife_mcp", 6144, this, 4, &mcp_task_) != pdPASS) {
+            return Status::Error(ErrorCode::kInternal, "创建 MCP 工作任务失败");
+        }
+        ESP_LOGI(kTag, "MCP_WORKER_READY capacity=%u", static_cast<unsigned>(kMcpWorkerQueueCapacity));
+        return Status::Ok();
+    }
+
+    void StopMcpWorker() {
+        {
+            std::lock_guard<std::mutex> lock(mcp_mutex_);
+            if (mcp_task_ == nullptr) return;
+            mcp_stop_ = true;
+            for (const auto& request : mcp_queue_) request->abandoned.store(true);
+            mcp_queue_.clear();
+        }
+        mcp_cv_.notify_all();
+        for (int attempt = 0; attempt < 20 && !mcp_stopped_.load(); ++attempt) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        mcp_task_ = nullptr;
+    }
+
+    static std::string TruncateUtf8(std::string_view value, std::size_t max_bytes) {
+        if (value.size() <= max_bytes) return std::string(value);
+        std::size_t end = max_bytes;
+        while (end > 0 && (static_cast<unsigned char>(value[end]) & 0xC0U) == 0x80U) --end;
+        return std::string(value.substr(0, end)) + "...";
+    }
+
+    static bool IsMcpToolCall(std::string_view payload) {
+        JsonValue request;
+        if (!ParseJson(payload, request).ok() || !request.IsObject()) return false;
+        const JsonValue* method = request.Get("method");
+        return method != nullptr && method->IsString() && method->string == "tools/call";
+    }
+
+    Result<std::string> HandleMcpRequest(std::string_view payload, std::string_view session_id) {
+        auto request = std::make_shared<McpRequest>();
+        request->payload.assign(payload);
+        request->session_id.assign(session_id);
+        {
+            std::lock_guard<std::mutex> lock(mcp_mutex_);
+            if (mcp_stop_ || mcp_task_ == nullptr || mcp_queue_.size() >= kMcpWorkerQueueCapacity) {
+                ESP_LOGW(kTag, "MCP_REQUEST_REJECTED reason=queue_full");
+                return BuildLinxMcpUnavailableResponse(payload, "设备 MCP 正忙，请稍后重试", session_id);
+            }
+            mcp_queue_.push_back(request);
+        }
+        ESP_LOGI(kTag, "MCP_REQUEST_QUEUED bytes=%u", static_cast<unsigned>(payload.size()));
+        mcp_cv_.notify_one();
+
+        std::unique_lock<std::mutex> lock(request->mutex);
+        if (!request->completed_cv.wait_for(lock, std::chrono::milliseconds(kMcpResponseTimeoutMs), [&] {
+                return request->completed;
+            })) {
+            request->abandoned.store(true);
+            ESP_LOGW(kTag, "MCP_REQUEST_REJECTED reason=timeout");
+            return BuildLinxMcpUnavailableResponse(payload, "设备 MCP 响应超时", session_id);
+        }
+        return std::move(*request->response);
+    }
+
+    static void McpWorkerTaskEntry(void* arg) { static_cast<Runtime*>(arg)->McpWorkerLoop(); }
+
+    void McpWorkerLoop() {
+        while (true) {
+            std::shared_ptr<McpRequest> request;
+            {
+                std::unique_lock<std::mutex> lock(mcp_mutex_);
+                mcp_cv_.wait(lock, [this] { return mcp_stop_ || !mcp_queue_.empty(); });
+                if (mcp_stop_ && mcp_queue_.empty()) break;
+                request = std::move(mcp_queue_.front());
+                mcp_queue_.pop_front();
+            }
+            if (request->abandoned.load()) continue;
+            const bool tool_call = IsMcpToolCall(request->payload);
+            if (tool_call && session_) session_->ReportToolCallStarted();
+            auto response = HandleLinxMcpPayload(request->payload, mcp_server_, request->session_id);
+            if (!response.ok()) {
+                response = BuildLinxMcpUnavailableResponse(request->payload, "设备 MCP 执行失败", request->session_id);
+            }
+            if (tool_call && !request->abandoned.load() && session_) {
+                const LinxMcpToolOutcome outcome = InspectLinxMcpToolOutcome(response);
+                session_->ReportToolResult(TruncateUtf8(outcome.summary, 96), outcome.success);
+            }
+            ESP_LOGI(kTag, "MCP_TOOL_EXECUTED tool_call=%d result=%d", tool_call ? 1 : 0, response.ok() ? 1 : 0);
+            {
+                std::lock_guard<std::mutex> lock(request->mutex);
+                if (!request->abandoned.load()) {
+                    request->response = std::move(response);
+                    request->completed = true;
+                }
+            }
+            request->completed_cv.notify_one();
+        }
+        mcp_stopped_.store(true);
+        vTaskDelete(nullptr);
+    }
+
     void StartImRuntime() {
 #if CONFIG_VOICELIFE_IM_GATEWAY
         // 物理 USB 窗口也用于显式轮换 Quick Tunnel URL 与设备 Token，因此即使已有配置也启动。
@@ -493,86 +515,22 @@ class Runtime final {
     struct BoardRequest {
         BoardRequestKind kind = BoardRequestKind::kRestoreStandby;
         char wake_word[32];
+        /** 仅真实用户告别完成后才显示/播放本地告别反馈。 */
+        bool show_farewell = false;
+        /** 物理唤醒门已就绪后是否需将 Controller 收口为 standby。 */
+        bool settle_controller = true;
     };
 
-    struct ButtonSample {
-        gpio_num_t gpio = GPIO_NUM_NC;
-        bool previous_pressed = false;
-        bool long_fired = false;
-        int64_t pressed_at_us = 0;
-    };
-
-    static constexpr int64_t kLongPressUs = 2000000;
-
-    static void BoardTaskEntry(void* context) { static_cast<Runtime*>(context)->BoardTask(); }
-
-    void StartBoardControls() {
-        const std::vector<int> gpios = assembly_->button_gpios();
-        if (gpios.empty()) {
-            ESP_LOGI(kTag, "板型无按键，跳过按键任务");
-            return;
+    void EnqueueBoardInput(BoardInputAction action) {
+        InteractionEventItem item{};
+        item.board_input = true;
+        item.board_action = action;
+        {
+            std::lock_guard<std::mutex> lock(event_mutex_);
+            if (event_queue_.size() >= kEventQueueCapacity) event_queue_.pop_front();
+            event_queue_.push_back(std::move(item));
         }
-        uint64_t pin_mask = 0;
-        for (int gpio : gpios) {
-            pin_mask |= 1ULL << static_cast<unsigned>(gpio);
-        }
-        const gpio_config_t config = {
-            .pin_bit_mask = pin_mask,
-            .mode = GPIO_MODE_INPUT,
-            .pull_up_en = GPIO_PULLUP_ENABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE,
-        };
-        ESP_ERROR_CHECK(gpio_config(&config));
-        // 只启用注入的按键；SPI/音频复用引脚（SparkBot GPIO47/40/39）不得重配。
-        button_count_ = std::min(gpios.size(), buttons_.size());
-        for (std::size_t index = 0; index < button_count_; ++index) {
-            buttons_[index].gpio = static_cast<gpio_num_t>(gpios[index]);
-        }
-        if (xTaskCreate(&BoardTaskEntry, "voicelife_buttons", 3072, this, 5, &button_task_) != pdPASS) {
-            ESP_LOGW(kTag, "创建板级按键任务失败");
-        }
-    }
-
-    void BoardTask() {
-        while (true) {
-            const int64_t now = esp_timer_get_time();
-            for (std::size_t index = 0; index < button_count_; ++index) {
-                auto& button = buttons_[index];
-                const bool pressed = gpio_get_level(button.gpio) == 0;
-                if (pressed && !button.previous_pressed) {
-                    button.pressed_at_us = now;
-                    button.long_fired = false;
-                    ESP_LOGI(kTag, "BUTTON_EVENT gpio=%d action=down", static_cast<int>(button.gpio));
-                    if (index == 1) {
-                        (void)EnqueueEvent(voice::VoiceInteractionEvent::kPressDown);
-                    }
-                } else if (pressed && !button.long_fired && now - button.pressed_at_us >= kLongPressUs) {
-                    button.long_fired = true;
-                    ESP_LOGI(kTag, "BUTTON_EVENT gpio=%d action=long", static_cast<int>(button.gpio));
-                    if (index == 2) {
-                        SetVolume(100);
-                    } else if (index == 3) {
-                        SetVolume(0);
-                    }
-                } else if (!pressed && button.previous_pressed) {
-                    ESP_LOGI(kTag, "BUTTON_EVENT gpio=%d action=up duration_ms=%lld", static_cast<int>(button.gpio),
-                             static_cast<long long>((now - button.pressed_at_us) / 1000));
-                    if (index == 0 && !button.long_fired) {
-                        (void)EnqueueEvent(voice::VoiceInteractionEvent::kToggleChat);
-                    } else if (index == 1) {
-                        (void)EnqueueEvent(voice::VoiceInteractionEvent::kPressUp);
-                    } else if (index == 2 && !button.long_fired) {
-                        SetVolume(std::min(volume_ + 10, 100));
-                    } else if (index == 3 && !button.long_fired) {
-                        SetVolume(std::max(volume_ - 10, 0));
-                    }
-                    button.pressed_at_us = 0;
-                }
-                button.previous_pressed = pressed;
-            }
-            vTaskDelay(pdMS_TO_TICKS(20));
-        }
+        event_cv_.notify_one();
     }
 
     void SetVolume(int volume) {
@@ -582,7 +540,7 @@ class Runtime final {
         // 连续调音量只重置同一个计时器。
         char text[16] = {};
         std::snprintf(text, sizeof(text), "VOL:%d", volume_);
-        ShowOverlay(voice::VoiceMood::kNeutral, "音量", text);
+        ShowOverlay(voice::VoiceMood::kIdle, "音量", text);
         volume_overlay_until_us_ = esp_timer_get_time() + kVolumeOverlayUs;
         if (volume_overlay_timer_ == nullptr) {
             esp_timer_create_args_t args = {};
@@ -627,10 +585,7 @@ class Runtime final {
                           .generation = session_ ? session_->generation() : 0,
                           .event = "wake_detected",
                           .detail = {}});
-        // 记录唤醒词与时间，用于抑制服务端把唤醒词回传为 STT。
-        last_wake_word_ = wake_word;
-        last_wake_at_ = esp_timer_get_time();
-        // 只投递事件：WakeAck 租约、提示音与拒绝重启由事件循环唯一处理。
+        // 只投递事件：唤醒词时间、提示音和状态迁移都由事件循环唯一处理。
         EnqueueEvent(voice::VoiceInteractionEvent::kWakeDetected, wake_word);
     }
 
@@ -645,9 +600,11 @@ class Runtime final {
         (void)xQueueSend(wake_queue_, &request, 0);
     }
 
-    void QueueStandbyRecovery() {
+    void QueueStandbyRecovery(bool show_farewell = false, bool settle_controller = true) {
         if (wake_queue_ == nullptr) return;
-        const BoardRequest recovery{};
+        BoardRequest recovery{};
+        recovery.show_farewell = show_farewell;
+        recovery.settle_controller = settle_controller;
         (void)xQueueSend(wake_queue_, &recovery, 0);
     }
 
@@ -664,21 +621,8 @@ class Runtime final {
     // - kFinalizing 超时（listen.stop 后 5s 无最终 STT）：abort 结束服务端回合回待机
     static void ListenTimeoutEntry(void* context) {
         auto* self = static_cast<Runtime*>(context);
-        if (self->interaction_.state() == voice::VoiceInteractionState::kListening) {
-            // 单一收尾路径：kPressUp → kStopVoiceTurn → EndCapture（发 listen.stop
-            // 结束服务端回合并回待机）。不得先 Interrupt() 再 kPressUp：Interrupt
-            // 已把 Session 置回 Ready，随后 EndCapture 会返回“当前没有采集”并进
-            // Error，造成双重收尾竞态。
-            self->EnqueueEvent(voice::VoiceInteractionEvent::kPressUp);
-        } else if (self->interaction_.state() == voice::VoiceInteractionState::kFinalizing) {
-            // 最终 STT 超时：先 abort 清理服务端残留回合，再走状态机
-            // kFinalizationTimedOut（kFinalizing→kStandby）恢复待机。
-            ESP_LOGI(kTag, "FINALIZE_TIMEOUT transition=finalizing->standby");
-            if (self->session_) {
-                (void)self->session_->Interrupt();
-            }
-            (void)self->EnqueueEvent(voice::VoiceInteractionEvent::kFinalizationTimedOut);
-        }
+        // Timer 回调不能读取或迁移交互状态；由事件循环串行决定超时路径。
+        self->EnqueueListenTimeout();
     }
 
     void StartListenTimer(uint32_t timeout_ms) {
@@ -730,7 +674,95 @@ class Runtime final {
         (void)xQueueSend(wake_queue_, &request, 0);
     }
 
-    void RestoreStandby() {
+#if CONFIG_VOICELIFE_STATE_FLOW_TEST
+    Status StartStateFlowDiagnostic() {
+        if (state_flow_task_ != nullptr) return Status::Ok();
+        if (xTaskCreate(&Runtime::StateFlowTaskEntry, "voicelife_state_flow", 4096, this, 1, &state_flow_task_) != pdPASS) {
+            return Status::Error(ErrorCode::kInternal, "创建状态流诊断任务失败");
+        }
+        ESP_LOGI(kTag, "STATE_FLOW_TEST_STARTED production_default=0");
+        return Status::Ok();
+    }
+
+    static void StateFlowTaskEntry(void* context) { static_cast<Runtime*>(context)->StateFlowTask(); }
+
+    void StateFlowEvent(uint32_t step, voice::VoiceInteractionEvent event) {
+        ESP_LOGI(kTag, "STATE_FLOW_ENQUEUE step=%u kind=interaction event=%d", static_cast<unsigned>(step),
+                 static_cast<int>(event));
+        EnqueueEvent(event);
+    }
+
+    void StateFlowEvidence(uint32_t step, std::string_view event, std::string_view detail = {}) {
+        ESP_LOGI(kTag, "STATE_FLOW_ENQUEUE step=%u kind=evidence event=%.*s detail_bytes=%u", static_cast<unsigned>(step),
+                 static_cast<int>(event.size()), event.data(), static_cast<unsigned>(detail.size()));
+        voice::VoiceEvidence evidence;
+        evidence.session_id = session_ ? session_->config().session_id : "state-flow";
+        evidence.generation = session_ ? session_->generation() : 0;
+        evidence.event = std::string(event);
+        evidence.detail = std::string(detail);
+        EnqueueVoiceEvidence(evidence);
+    }
+
+    void StateFlowTask() {
+        // Test-only diagnostic. It submits normal semantic inputs/evidence and
+        // never calls a renderer, PresentationPort, GPIO, or audio output.
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        uint32_t step = 1;
+        StateFlowEvent(step++, voice::VoiceInteractionEvent::kTransportDisconnected);
+        vTaskDelay(pdMS_TO_TICKS(350));
+        StateFlowEvent(step++, voice::VoiceInteractionEvent::kTransportConnected);
+        vTaskDelay(pdMS_TO_TICKS(350));
+        StateFlowEvent(step++, voice::VoiceInteractionEvent::kPressDown);
+        vTaskDelay(pdMS_TO_TICKS(150));
+        StateFlowEvidence(step++, "capture_started");
+        vTaskDelay(pdMS_TO_TICKS(150));
+        StateFlowEvidence(step++, "stt_text_received", "请在明天 09:30 创建日程: Review #42, room A-3.");
+        vTaskDelay(pdMS_TO_TICKS(150));
+        StateFlowEvidence(step++, "mcp_tool_started");
+        vTaskDelay(pdMS_TO_TICKS(150));
+        StateFlowEvidence(step++, "mcp_tool_result", "event=Review #42; status=created");
+        vTaskDelay(pdMS_TO_TICKS(150));
+        StateFlowEvidence(step++, "tts_started");
+        vTaskDelay(pdMS_TO_TICKS(150));
+        StateFlowEvidence(step++, "tts_sentence_started", "已创建日程。明天 09:30 在 A-3 开会。");
+        vTaskDelay(pdMS_TO_TICKS(150));
+        // A state-flow build must not invent a local TTS completion when no
+        // real PCM turn was opened. Exercise the production cancellation path
+        // instead: Runtime asks VoiceSession to interrupt and only its real
+        // completion restores standby.
+        StateFlowEvent(step++, voice::VoiceInteractionEvent::kInterruptRequested);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        for (uint32_t cycle = 0; cycle < 20; ++cycle) {
+            StateFlowEvent(step++, voice::VoiceInteractionEvent::kTransportDisconnected);
+            vTaskDelay(pdMS_TO_TICKS(90));
+            StateFlowEvent(step++, voice::VoiceInteractionEvent::kTransportConnected);
+            vTaskDelay(pdMS_TO_TICKS(90));
+        }
+        StateFlowEvent(step++, voice::VoiceInteractionEvent::kPressDown);
+        vTaskDelay(pdMS_TO_TICKS(150));
+        StateFlowEvidence(step++, "capture_started");
+        vTaskDelay(pdMS_TO_TICKS(150));
+        StateFlowEvent(step++, voice::VoiceInteractionEvent::kFailure);
+        vTaskDelay(pdMS_TO_TICKS(300));
+        StateFlowEvent(step++, voice::VoiceInteractionEvent::kStandbyReady);
+        vTaskDelay(pdMS_TO_TICKS(300));
+        StateFlowEvent(step++, voice::VoiceInteractionEvent::kPressDown);
+        vTaskDelay(pdMS_TO_TICKS(150));
+        StateFlowEvidence(step++, "capture_started");
+        vTaskDelay(pdMS_TO_TICKS(150));
+        StateFlowEvent(step++, voice::VoiceInteractionEvent::kInterruptRequested);
+        vTaskDelay(pdMS_TO_TICKS(150));
+        // kInterruptRequested reaches VoiceSession, whose real interrupted
+        // evidence restores standby through the event loop. Do not inject a
+        // second completion after that recovery: it is necessarily stale and
+        // would make this diagnostic report a false ordering rejection.
+        ESP_LOGI(kTag, "STATE_FLOW_TEST_FINISHED steps=%u", static_cast<unsigned>(step - 1));
+        state_flow_task_ = nullptr;
+        vTaskDelete(nullptr);
+    }
+#endif
+
+    void RestoreStandby(const BoardRequest& request) {
         if (assembly_ == nullptr) return;
         const Status stop_status = assembly_->wake_gate().StopCapture();
         if (!stop_status.ok()) {
@@ -748,16 +780,14 @@ class Runtime final {
                           .generation = session_ ? session_->generation() : 0,
                           .event = "standby_ready",
                           .detail = {}});
-        // 会话结束反馈：先等播放排空（避免 TTS 还在播就显示“牛牛走了！”），
-        // 仅非首次待机显示反馈，短暂停留后回到空闲。
-        if (assembly_ != nullptr) {
+        // “牛牛走了！”只属于用户明确结束的回合。网络断开、Provider 错误、
+        // 启动与一般待机恢复只重启本地唤醒，绝不能伪造告别或播放本地音频。
+        if (request.show_farewell && assembly_ != nullptr) {
             for (int i = 0; i < 30 && !assembly_->audio_output().IsIdle(); ++i) {
                 vTaskDelay(pdMS_TO_TICKS(50));
             }
         }
-        if (first_standby_) {
-            first_standby_ = false;
-        } else {
+        if (request.show_farewell) {
             ShowOverlay(voice::VoiceMood::kHappy, "牛牛走了！", "");
             PlayFarewell();
             vTaskDelay(pdMS_TO_TICKS(kWakeFeedbackMs));
@@ -767,20 +797,8 @@ class Runtime final {
         // （WAKE_REARM atomic=0）。Controller 回 Standby 后由状态机动作
         // 统一提交时间快照。
         // 事件化：状态迁移由事件循环唯一执行，拒绝日志在事件循环统一输出。
-        EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
-        // 待机原子条件校验：控制器/会话/唤醒门三态一致。
-        // 仅全部满足才显示 Standby 时间快照；不满足则为假待机，保留告警文案并记录。
-        const bool controller_ok = interaction_.state() == voice::VoiceInteractionState::kStandby;
-        const bool session_ok = session_ && session_->state() == voice::VoiceSessionState::kReady;
-        const bool gate_ok = assembly_ != nullptr &&
-                             (!assembly_->uses_local_wake_detector() || assembly_->wake_gate().standby());
-        const bool atomic_ok = controller_ok && session_ok && gate_ok;
-        ESP_LOGI(kTag, "WAKE_REARM controller=%d session=%d gate=%d atomic=%d", controller_ok ? 1 : 0,
-                 session_ok ? 1 : 0, gate_ok ? 1 : 0, atomic_ok ? 1 : 0);
-        // 事件化：Standby 时间快照由事件循环在 kStandbyReady 处理时统一提交，
-        // 本函数（按键任务线程）不再直接改快照或渲染。
-        if (!atomic_ok) {
-            ESP_LOGI(kTag, "WAKE_STANDBY_READY=0");
+        if (request.settle_controller) {
+            EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
         }
     }
 
@@ -791,7 +809,7 @@ class Runtime final {
         while (true) {
             if (xQueueReceive(wake_queue_, &request, portMAX_DELAY) != pdTRUE) continue;
             if (request.kind == BoardRequestKind::kRestoreStandby) {
-                RestoreStandby();
+                RestoreStandby(request);
                 continue;
             }
             if (request.kind == BoardRequestKind::kInterrupt) {
@@ -896,20 +914,26 @@ class Runtime final {
 
     static voice::VoiceMood PhaseMood(voice::VoiceInteractionState state) {
         switch (state) {
+            case voice::VoiceInteractionState::kBooting:
+                return voice::VoiceMood::kBooting;
+            case voice::VoiceInteractionState::kStandby:
+                return voice::VoiceMood::kIdle;
+            case voice::VoiceInteractionState::kOpeningCapture:
             case voice::VoiceInteractionState::kListening:
             case voice::VoiceInteractionState::kFinalizing:
+                return voice::VoiceMood::kListening;
             case voice::VoiceInteractionState::kThinking:
-            case voice::VoiceInteractionState::kReconnecting:
                 return voice::VoiceMood::kThinking;
             case voice::VoiceInteractionState::kSpeaking:
                 return voice::VoiceMood::kSpeaking;
             case voice::VoiceInteractionState::kInterrupting:
-                return voice::VoiceMood::kSurprised;
+                return voice::VoiceMood::kCancelled;
+            case voice::VoiceInteractionState::kReconnecting:
+                return voice::VoiceMood::kConnecting;
             case voice::VoiceInteractionState::kError:
                 return voice::VoiceMood::kSad;
-            default:
-                return voice::VoiceMood::kNeutral;
         }
+        return voice::VoiceMood::kSad;
     }
 
     void CommitSnapshot() {
@@ -921,28 +945,37 @@ class Runtime final {
         if (assembly_ != nullptr) {
             (void)assembly_->presentation().Render(snapshot_);
         }
+        ESP_LOGI(kTag,
+                 "INTERACTION_SNAPSHOT phase=%d generation=%llu revision=%llu mood=%d status_bytes=%u role=%d content_bytes=%u",
+                 static_cast<int>(snapshot_.phase), static_cast<unsigned long long>(snapshot_.generation),
+                 static_cast<unsigned long long>(snapshot_.revision), static_cast<int>(snapshot_.mood),
+                 static_cast<unsigned>(snapshot_.status_text.size()), static_cast<int>(snapshot_.role),
+                 static_cast<unsigned>(snapshot_.content_text.size()));
     }
 
-    // 显示语义提交：更新业务快照并提交（启动状态/阶段变化）。
+    // 显示语义提交：只投递给 InteractionEventLoop，禁止在调用线程直接 Render。
     void ShowDisplay(voice::VoiceMood mood, std::string_view status, std::string_view content) {
-        snapshot_.mood = mood;
-        if (!status.empty()) snapshot_.status_text = std::string(status);
-        if (!content.empty()) snapshot_.content_text = std::string(content);
-        ++snapshot_.revision;
-        CommitSnapshot();
+        EnqueueDisplayUpdate(mood, status, content, false);
     }
 
-    // 临时 overlay 快照：不改业务快照，过期后由业务快照覆盖（音量/告别提示）。
+    // 临时 overlay 快照：由事件循环统一写入，revision 与业务快照保持严格单调。
     void ShowOverlay(voice::VoiceMood mood, std::string_view status, std::string_view content) {
-        if (assembly_ == nullptr) {
-            return;
+        EnqueueDisplayUpdate(mood, status, content, true);
+    }
+
+    void StartOverlayTimer(uint32_t duration_ms) {
+        volume_overlay_until_us_ = esp_timer_get_time() + static_cast<int64_t>(duration_ms) * 1000;
+        if (volume_overlay_timer_ == nullptr) {
+            esp_timer_create_args_t args = {};
+            args.callback = &VolumeOverlayEntry;
+            args.arg = this;
+            args.name = "voicelife_overlay";
+            (void)esp_timer_create(&args, &volume_overlay_timer_);
         }
-        voice::DisplaySnapshot overlay = snapshot_;
-        overlay.mood = mood;
-        overlay.status_text = std::string(status);
-        overlay.content_text = std::string(content);
-        ++overlay.revision;
-        (void)assembly_->presentation().Render(overlay);
+        if (volume_overlay_timer_ != nullptr) {
+            (void)esp_timer_stop(volume_overlay_timer_);
+            (void)esp_timer_start_once(volume_overlay_timer_, static_cast<uint64_t>(duration_ms) * 1000ULL);
+        }
     }
 
     Status HandleInteractionEvent(voice::VoiceInteractionEvent event, std::string_view wake_word = {}) {
@@ -957,6 +990,16 @@ class Runtime final {
             case voice::VoiceInteractionEvent::kPressDown:
             case voice::VoiceInteractionEvent::kWakeDetected:
                 ++snapshot_.generation;
+                // A fresh user turn must never inherit a farewell decision
+                // from a disconnected or cancelled preceding turn.
+                terminal_turn_ = false;
+                break;
+            case voice::VoiceInteractionEvent::kInterruptRequested:
+            case voice::VoiceInteractionEvent::kTransportDisconnected:
+            case voice::VoiceInteractionEvent::kFailure:
+                // These paths invalidate the current remote turn before its
+                // normal TTS completion can safely decide the next UI state.
+                terminal_turn_ = false;
                 break;
             default:
                 break;
@@ -1002,6 +1045,8 @@ class Runtime final {
             snapshot_.role = voice::VoiceContentRole::kNone;
         }
         ++snapshot_.revision;
+        // 真实状态迁移优先于临时 overlay，过期信号不能恢复旧回合的 UI。
+        overlay_active_ = false;
         CommitSnapshot();
         switch (transition.value->action) {
             case voice::VoiceInteractionAction::kNone:
@@ -1022,7 +1067,10 @@ class Runtime final {
                 QueueInterruptAndCapture();
                 return Status::Ok();
             case voice::VoiceInteractionAction::kRestoreStandby:
-                QueueStandbyRecovery();
+                // transport_disconnected 必须停在 kReconnecting；物理唤醒门可恢复，
+                // 但不可用 kStandbyReady 把可见状态提前伪装为空闲。
+                QueueStandbyRecovery(event == voice::VoiceInteractionEvent::kFarewellCompleted,
+                                     interaction_.state() != voice::VoiceInteractionState::kReconnecting);
                 return Status::Ok();
             case voice::VoiceInteractionAction::kInterruptSession:
                 QueueInterrupt();
@@ -1031,7 +1079,9 @@ class Runtime final {
         return Status::Error(ErrorCode::kInternal, "未知板端交互动作");
     }
 
-    void LogVoiceEvidence(const voice::VoiceEvidence& evidence) {
+    void LogVoiceEvidence(const voice::VoiceEvidence& evidence) { EnqueueVoiceEvidence(evidence); }
+
+    void ProcessVoiceEvidence(const voice::VoiceEvidence& evidence) {
         // Evidence detail can contain STT text or service diagnostics. Emit
         // only lifecycle names and numeric counters needed for board review.
         if (evidence.event == "capture_started") {
@@ -1086,6 +1136,22 @@ class Runtime final {
             // MCP 工具调用（服务端发现/工具执行）不是用户语音意图：
             // 仅取消聆听超时，不武装回复、不触发 kIntentReceived。
             CancelListenTimer();
+        } else if (evidence.event == "mcp_tool_started") {
+            // MCP worker 只经 VoiceSession evidence 投递；状态机决定是否允许
+            // 从当前交互态进入“处理中”，不得由 worker 自己写快照。
+            CancelListenTimer();
+            const auto phase = interaction_.state();
+            if (phase == voice::VoiceInteractionState::kListening || phase == voice::VoiceInteractionState::kFinalizing ||
+                phase == voice::VoiceInteractionState::kThinking) {
+                (void)EnqueueEvent(voice::VoiceInteractionEvent::kIntentReceived);
+            }
+        } else if (evidence.event == "mcp_tool_result" || evidence.event == "mcp_tool_failed") {
+            const bool success = evidence.event == "mcp_tool_result";
+            const std::string summary = evidence.detail.empty() ? (success ? "日程操作已完成" : "日程操作失败")
+                                                                : TruncateUtf8(evidence.detail, 96);
+            ShowOverlay(success ? voice::VoiceMood::kHappy : voice::VoiceMood::kSad,
+                        success ? "日程结果" : "日程错误", summary);
+            StartOverlayTimer(2500);
         } else if (evidence.event == "tts_started") {
             CancelListenTimer();
             (void)EnqueueEvent(voice::VoiceInteractionEvent::kTtsStarted);
@@ -1107,6 +1173,16 @@ class Runtime final {
             }
         } else if (evidence.event == "tts_stopped" || evidence.event == "tts_aborted") {
             CancelListenTimer();
+            // Provider disconnect/reconnect may deliver the completion of an
+            // already-aborted remote TTS turn. It has no visible meaning once
+            // the interaction loop has restored standby (or entered another
+            // terminal state), so it must not re-enter the controller and
+            // produce a false ordering error.
+            if (interaction_.state() != voice::VoiceInteractionState::kSpeaking) {
+                ESP_LOGI(kTag, "TTS_STOPPED_STALE state=%d 丢弃迟到结束事件",
+                         static_cast<int>(interaction_.state()));
+                return;
+            }
             if (terminal_turn_) {
                 // 终止回合（再见/拜拜）：告别播报完成走状态机 kFarewellCompleted
                 // （kSpeaking→kStandby）恢复待机，不直接 QueueStandbyRecovery。
@@ -1166,7 +1242,9 @@ class Runtime final {
         std::make_unique<linx_esp::EspWebSocketTransport>(linx_secrets_);
     QueueHandle_t wake_queue_ = nullptr;
     TaskHandle_t wake_task_ = nullptr;
-    TaskHandle_t button_task_ = nullptr;
+#if CONFIG_VOICELIFE_STATE_FLOW_TEST
+    TaskHandle_t state_flow_task_ = nullptr;
+#endif
     // 交互事件单写者（InteractionEventLoop）：外部线程只投递事件。
     struct InteractionEventItem {
         voice::VoiceInteractionEvent event = voice::VoiceInteractionEvent::kBootCompleted;
@@ -1175,6 +1253,24 @@ class Runtime final {
         std::string display_text;
         /** @brief 是否为纯显示刷新（跳过 HandleInteractionEvent）。 */
         bool display_only = false;
+        /** 受控系统显示更新；只由事件循环转换为 DisplaySnapshot。 */
+        bool display_update = false;
+        /** 是否为临时 overlay（音量/告别）。 */
+        bool display_overlay = false;
+        voice::VoiceMood display_mood = voice::VoiceMood::kIdle;
+        std::string display_status;
+        std::string display_content;
+        /** VoiceSession/Provider 回调携带的业务事实，由事件循环处理。 */
+        bool voice_evidence = false;
+        voice::VoiceEvidence evidence;
+        /** esp_timer 只投递，事件循环根据当前状态决定超时收尾。 */
+        bool listen_timeout = false;
+        /** 启动/网络回调携带的受控连接事实。 */
+        bool network_update = false;
+        bool network_connected = false;
+        /** 板级输入适配器的纯语义事件；由事件循环转换为状态或音量变更。 */
+        bool board_input = false;
+        BoardInputAction board_action = BoardInputAction::kToggleChat;
     };
     static constexpr std::size_t kEventQueueCapacity = 16;
     std::deque<InteractionEventItem> event_queue_;
@@ -1185,10 +1281,18 @@ class Runtime final {
     bool event_loop_stopped_ = false;
     /** @brief 音量 overlay 到期标志（timer 置位，事件循环消费）。 */
     std::atomic<bool> overlay_expired_{false};
+    std::mutex mcp_mutex_;
+    std::condition_variable mcp_cv_;
+    std::deque<std::shared_ptr<McpRequest>> mcp_queue_;
+    TaskHandle_t mcp_task_ = nullptr;
+    bool mcp_stop_ = false;
+    std::atomic_bool mcp_stopped_{true};
 
     /** @brief 投递交互事件（有界队列，满丢最旧；任何线程可调用）。 */
     void EnqueueEvent(voice::VoiceInteractionEvent event, std::string_view wake_word = {}) {
-        InteractionEventItem item{event, std::string(wake_word), {}, false};
+        InteractionEventItem item{};
+        item.event = event;
+        item.wake_word = std::string(wake_word);
         {
             std::lock_guard<std::mutex> lock(event_mutex_);
             if (event_queue_.size() >= kEventQueueCapacity) {
@@ -1214,6 +1318,57 @@ class Runtime final {
         event_cv_.notify_one();
     }
 
+    /** @brief 投递启动/错误/overlay 等系统语义；不携带硬件资源或原始数据。 */
+    void EnqueueDisplayUpdate(voice::VoiceMood mood, std::string_view status, std::string_view content, bool overlay) {
+        InteractionEventItem item{};
+        item.display_update = true;
+        item.display_overlay = overlay;
+        item.display_mood = mood;
+        item.display_status = std::string(status);
+        item.display_content = std::string(content);
+        {
+            std::lock_guard<std::mutex> lock(event_mutex_);
+            if (event_queue_.size() >= kEventQueueCapacity) event_queue_.pop_front();
+            event_queue_.push_back(std::move(item));
+        }
+        event_cv_.notify_one();
+    }
+
+    void EnqueueVoiceEvidence(const voice::VoiceEvidence& evidence) {
+        InteractionEventItem item{};
+        item.voice_evidence = true;
+        item.evidence = evidence;
+        {
+            std::lock_guard<std::mutex> lock(event_mutex_);
+            if (event_queue_.size() >= kEventQueueCapacity) event_queue_.pop_front();
+            event_queue_.push_back(std::move(item));
+        }
+        event_cv_.notify_one();
+    }
+
+    void EnqueueListenTimeout() {
+        InteractionEventItem item{};
+        item.listen_timeout = true;
+        {
+            std::lock_guard<std::mutex> lock(event_mutex_);
+            if (event_queue_.size() >= kEventQueueCapacity) event_queue_.pop_front();
+            event_queue_.push_back(std::move(item));
+        }
+        event_cv_.notify_one();
+    }
+
+    void EnqueueNetworkState(bool connected) {
+        InteractionEventItem item{};
+        item.network_update = true;
+        item.network_connected = connected;
+        {
+            std::lock_guard<std::mutex> lock(event_mutex_);
+            if (event_queue_.size() >= kEventQueueCapacity) event_queue_.pop_front();
+            event_queue_.push_back(std::move(item));
+        }
+        event_cv_.notify_one();
+    }
+
     /** @brief 事件循环任务入口（唯一调用 HandleInteractionEvent 的线程）。 */
     static void EventLoopTaskEntry(void* arg) { static_cast<Runtime*>(arg)->EventLoopLoop(); }
 
@@ -1232,8 +1387,12 @@ class Runtime final {
                 if (event_queue_.empty()) {
                     // 超时轮询：处理音量 overlay 到期恢复（不依赖 timer 直接提交）。
                     if (overlay_expired_.exchange(false)) {
-                        ++snapshot_.revision;
-                        CommitSnapshot();
+                        if (overlay_active_) {
+                            snapshot_ = overlay_base_snapshot_;
+                            ++snapshot_.revision;
+                            overlay_active_ = false;
+                            CommitSnapshot();
+                        }
                     }
                     continue;
                 }
@@ -1252,8 +1411,74 @@ class Runtime final {
                 }
                 continue;
             }
+            if (item.network_update) {
+                snapshot_.network_connected = item.network_connected;
+                continue;
+            }
+            if (item.board_input) {
+                switch (item.board_action) {
+                    case BoardInputAction::kToggleChat:
+                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kToggleChat);
+                        break;
+                    case BoardInputAction::kPressDown:
+                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kPressDown);
+                        break;
+                    case BoardInputAction::kPressUp:
+                        (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kPressUp);
+                        break;
+                    case BoardInputAction::kVolumeUp:
+                        SetVolume(std::min(volume_ + 10, 100));
+                        break;
+                    case BoardInputAction::kVolumeDown:
+                        SetVolume(std::max(volume_ - 10, 0));
+                        break;
+                    case BoardInputAction::kVolumeMaximum:
+                        SetVolume(100);
+                        break;
+                    case BoardInputAction::kVolumeMute:
+                        SetVolume(0);
+                        break;
+                }
+                continue;
+            }
+            if (item.voice_evidence) {
+                ProcessVoiceEvidence(item.evidence);
+                continue;
+            }
+            if (item.listen_timeout) {
+                if (interaction_.state() == voice::VoiceInteractionState::kListening) {
+                    // 单一收尾路径：停止采集并等待最终 STT。
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kPressUp);
+                } else if (interaction_.state() == voice::VoiceInteractionState::kFinalizing) {
+                    ESP_LOGI(kTag, "FINALIZE_TIMEOUT transition=finalizing->standby");
+                    if (session_) (void)session_->Interrupt();
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kFinalizationTimedOut);
+                }
+                continue;
+            }
+            if (item.display_update) {
+                if (item.display_overlay) {
+                    overlay_base_snapshot_ = snapshot_;
+                    overlay_active_ = true;
+                } else {
+                    overlay_active_ = false;
+                }
+                snapshot_.mood = item.display_mood;
+                snapshot_.status_text = std::move(item.display_status);
+                snapshot_.content_text = std::move(item.display_content);
+                snapshot_.role = voice::VoiceContentRole::kSystem;
+                ++snapshot_.revision;
+                CommitSnapshot();
+                ESP_LOGI(kTag, "DISPLAY_SEMANTIC_UPDATE overlay=%d mood=%d generation=%llu revision=%llu",
+                         item.display_overlay ? 1 : 0, static_cast<int>(snapshot_.mood),
+                         static_cast<unsigned long long>(snapshot_.generation),
+                         static_cast<unsigned long long>(snapshot_.revision));
+                continue;
+            }
             if (item.event == voice::VoiceInteractionEvent::kWakeDetected) {
                 // 唤醒前置（唯一状态写者内）：显示租约 + 提示音。
+                last_wake_word_ = item.wake_word;
+                last_wake_at_ = esp_timer_get_time();
                 wake_ack_until_us_ = esp_timer_get_time() + kWakeAckDisplayUs;
                 PlayWakeAck();
             }
@@ -1275,11 +1500,8 @@ class Runtime final {
         vTaskDelete(nullptr);
 #endif
     }
-    std::array<ButtonSample, 4> buttons_{};
-    std::size_t button_count_ = 0;
     int volume_ = 70;
     std::atomic<int64_t> capture_started_us_{0};
-    bool first_standby_ = true;
     std::string stt_display_text_;
     // 下行内容滚动窗口起始字符（0=从头）；滚动迁移至 Ssd1306PresentationAdapter。
     // 本轮是否为终止回合（用户说“再见/拜拜”等）：播报结束后不进入 follow-up。
@@ -1294,6 +1516,9 @@ class Runtime final {
     esp_timer_handle_t volume_overlay_timer_ = nullptr;
     // 显示模型快照：会话阶段 → 可见状态的推导结果；revision 驱动增量重绘。
     voice::DisplaySnapshot snapshot_;
+    /** 临时 overlay 覆盖前的业务快照；到期后由事件循环恢复。 */
+    voice::DisplaySnapshot overlay_base_snapshot_;
+    bool overlay_active_ = false;
     uint64_t last_rendered_revision_ = 0;
     // 构建期选定的平台装配（显示语义提交目标）。
     PlatformAssembly* assembly_ = nullptr;

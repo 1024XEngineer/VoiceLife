@@ -44,6 +44,19 @@ class VoiceSession {
      */
     Status HandleAudio(AudioFrame frame);
     /**
+     * @brief 上报已受控 MCP 工具开始执行的会话语义。
+     *
+     * Runtime 的 MCP worker 调用此入口；它不会访问 Provider、音频或显示，
+     * 只经 EvidenceSink 投递给交互事件循环。
+     */
+    void ReportToolCallStarted();
+    /**
+     * @brief 上报已受控 MCP 工具结果的会话语义。
+     * @param summary 已截断的用户可见结果摘要。
+     * @param success 工具是否成功。
+     */
+    void ReportToolResult(std::string_view summary, bool success);
+    /**
      * @brief 请求 Provider 合成文本。
      * @param text 待合成文本。
      * @return 请求结果。

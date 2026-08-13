@@ -39,6 +39,16 @@ config VOICELIFE_AUDIO_PORT_SMOKE
         playback tasks. This proves digital I2S and bounded queue behavior;
         it does not prove acoustic playback or a cloud voice session.
 
+config VOICELIFE_STATE_FLOW_TEST
+    bool "Enable SparkBot interaction state-flow diagnostic"
+    default n
+    depends on VOICELIFE_BOARD_ESP_SPARKBOT
+    help
+        Run a finite, low-priority diagnostic sequence through Runtime's
+        InteractionEventLoop and VoiceSession evidence inlet. It never calls
+        a renderer, presentation port, GPIO, or audio output directly. This
+        is a test-only build option and must remain disabled in production.
+
 if VOICELIFE_AUDIO_PROBE
 
 choice VOICELIFE_AUDIO_PROBE_PROFILE

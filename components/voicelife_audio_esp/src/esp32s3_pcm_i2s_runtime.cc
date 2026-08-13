@@ -1,5 +1,7 @@
 #include "esp32s3_pcm_audio_port_internal.h"
 
+#include "es8311_codec_control.h"
+
 #ifdef ESP_PLATFORM
 
 #include <algorithm>
@@ -13,6 +15,21 @@
 #include "esp_log.h"
 
 namespace voicelife::audio_esp {
+
+namespace {
+
+uint16_t AbsolutePcm16(int16_t sample) {
+    const int32_t value = sample;
+    return static_cast<uint16_t>(value < 0 ? -value : value);
+}
+
+void RaisePeak(std::atomic<uint16_t>& peak, uint16_t observed) {
+    uint16_t current = peak.load();
+    while (observed > current && !peak.compare_exchange_weak(current, observed)) {
+    }
+}
+
+}  // namespace
 
 namespace detail {
 
@@ -209,12 +226,13 @@ void Esp32s3PcmAudioPorts::Impl::CaptureLoop() {
     const auto& endpoint = profile_.capture_i2s;
     const std::size_t pcm_samples_per_period = static_cast<std::size_t>(endpoint.format.sample_rate_hz) *
                                                endpoint.format.frame_duration_ms / 1000U * endpoint.format.channels;
+    std::vector<int16_t> pcm(pcm_samples_per_period);
+    const bool codec_owned_io = profile_.topology == AudioBoardTopology::kExternalCodecDuplex;
     const std::size_t wire_samples_per_period = static_cast<std::size_t>(endpoint.format.sample_rate_hz) *
                                                 endpoint.format.frame_duration_ms / 1000U *
                                                 detail::WireSlotCount(endpoint);
     const std::size_t wire_size = wire_samples_per_period * detail::WireBytes(endpoint);
-    std::vector<uint8_t> wire(wire_size);
-    std::vector<int16_t> pcm(pcm_samples_per_period);
+    std::vector<uint8_t> wire(codec_owned_io ? 0 : wire_size);
     while (true) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -222,26 +240,52 @@ void Esp32s3PcmAudioPorts::Impl::CaptureLoop() {
                 break;
             }
         }
-        size_t bytes_read = 0;
-        const esp_err_t error =
-            i2s_channel_read(rx_channel_, wire.data(), wire.size(), &bytes_read, options_.io_timeout_ms);
-        if (error != ESP_OK || bytes_read != wire.size()) {
-            if (input_running_) {
+        if (codec_owned_io) {
+            // esp_codec_dev owns the ES8311's post-open mono slot format. Its
+            // API matches XiaoZhi: a contiguous int16 mono buffer, no manual
+            // interleaving based on the pre-open physical stereo config.
+            if (!ReadEs8311Pcm(codec_dev_, pcm.data(), pcm.size()).ok()) {
                 ++short_reads_;
-            }
-            continue;
-        }
-        if (endpoint.wire_bits_per_sample == 32) {
-            const auto* raw = reinterpret_cast<const int32_t*>(wire.data());
-            for (std::size_t i = 0; i < pcm_samples_per_period; ++i) {
-                pcm[i] = detail::ToPcm16(raw[i * detail::WireSlotCount(endpoint)], endpoint);
+                ++input_i2s_errors_;
+                continue;
             }
         } else {
-            const auto* raw = reinterpret_cast<const int16_t*>(wire.data());
-            for (std::size_t i = 0; i < pcm_samples_per_period; ++i) {
-                pcm[i] = raw[i * detail::WireSlotCount(endpoint)];
+            size_t bytes_read = 0;
+            const esp_err_t error =
+                i2s_channel_read(rx_channel_, wire.data(), wire.size(), &bytes_read, options_.io_timeout_ms);
+            if (error != ESP_OK || bytes_read != wire.size()) {
+                if (input_running_) {
+                    ++short_reads_;
+                    if (error != ESP_OK) ++input_i2s_errors_;
+                }
+                continue;
+            }
+            if (endpoint.wire_bits_per_sample == 32) {
+                const auto* raw = reinterpret_cast<const int32_t*>(wire.data());
+                for (std::size_t i = 0; i < pcm_samples_per_period; ++i) {
+                    pcm[i] = detail::ToPcm16(raw[i * detail::WireSlotCount(endpoint)], endpoint);
+                }
+            } else {
+                const auto* raw = reinterpret_cast<const int16_t*>(wire.data());
+                for (std::size_t i = 0; i < pcm_samples_per_period; ++i) {
+                    pcm[i] = raw[i * detail::WireSlotCount(endpoint)];
+                }
             }
         }
+        uint64_t sum_squares = 0;
+        uint16_t peak = 0;
+        bool all_zero = true;
+        for (const int16_t sample : pcm) {
+            const uint16_t absolute = AbsolutePcm16(sample);
+            peak = std::max(peak, absolute);
+            sum_squares += static_cast<uint64_t>(static_cast<int32_t>(sample) * static_cast<int32_t>(sample));
+            all_zero = all_zero && sample == 0;
+        }
+        input_pcm_bytes_ += pcm.size() * sizeof(int16_t);
+        input_samples_ += pcm.size();
+        input_sum_squares_ += sum_squares;
+        if (all_zero) ++input_zero_periods_;
+        RaisePeak(input_peak_, peak);
         const Status status = assembler_->Push(pcm.data(), pcm.size(), [this](voice::AudioFrame frame) {
             EnqueueInput(std::move(frame));
             return Status::Ok();
@@ -283,15 +327,40 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
     }
     const std::size_t sample_count = frame.payload.size() / (sizeof(int16_t) * endpoint.format.channels);
     const auto* pcm = reinterpret_cast<const int16_t*>(frame.payload.data());
+    if (profile_.topology == AudioBoardTopology::kExternalCodecDuplex) {
+        // The ES8311 owns the I2S format after esp_codec_dev_open(). Feed its
+        // single-channel PCM API directly, matching the official SparkBot
+        // codec; do not recreate the stale physical slot layout here.
+        std::vector<int16_t> codec_pcm(pcm, pcm + sample_count);
+        if (!WriteEs8311Pcm(codec_dev_, codec_pcm.data(), codec_pcm.size()).ok()) {
+            ++short_writes_;
+            ++output_i2s_errors_;
+            return detail::Unavailable("ES8311 播放 PCM 失败");
+        }
+        uint64_t sum_squares = 0;
+        uint16_t peak = 0;
+        bool all_zero = true;
+        for (const int16_t sample : codec_pcm) {
+            const uint16_t absolute = AbsolutePcm16(sample);
+            peak = std::max(peak, absolute);
+            sum_squares += static_cast<uint64_t>(static_cast<int32_t>(sample) * static_cast<int32_t>(sample));
+            all_zero = all_zero && sample == 0;
+        }
+        output_pcm_bytes_ += codec_pcm.size() * sizeof(int16_t);
+        output_samples_ += codec_pcm.size();
+        output_sum_squares_ += sum_squares;
+        if (all_zero) ++output_zero_periods_;
+        RaisePeak(output_peak_, peak);
+        return Status::Ok();
+    }
     static bool s_first_write_logged = false;
     if (!s_first_write_logged) {
         s_first_write_logged = true;
         const int vol = output_volume_.load();
         ESP_LOGI(voicelife::audio_esp::detail::kAudioRuntimeTag,
-                 "I2S_WRITE first_frame bytes=%u samples=%u volume=%d sr=%u wire=%u shift=%u first_pcm=%d",
+                 "I2S_WRITE first_frame bytes=%u samples=%u volume=%d sr=%u wire=%u shift=%u",
                  static_cast<unsigned>(frame.payload.size()), static_cast<unsigned>(sample_count), vol,
-                 endpoint.format.sample_rate_hz, endpoint.wire_bits_per_sample, endpoint.pcm_shift_bits,
-                 sample_count > 0 ? pcm[0] : 0);
+                 endpoint.format.sample_rate_hz, endpoint.wire_bits_per_sample, endpoint.pcm_shift_bits);
     }
     const std::size_t period_samples = static_cast<std::size_t>(endpoint.format.sample_rate_hz) *
                                        endpoint.format.frame_duration_ms / 1000U * endpoint.format.channels;
@@ -308,8 +377,9 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
                 // volume=100 时补 4 倍（+12dB）数字增益，clamp 防削波。
                 const int32_t gain = 4;
                 const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume * gain / 100;
-                const int32_t value =
-                    detail::ToWire(static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767)), endpoint);
+                if (scaled > 32767 || scaled < -32768) ++output_clipped_samples_;
+                const int16_t clamped = static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767));
+                const int32_t value = detail::ToWire(clamped, endpoint);
                 for (uint8_t slot = 0; slot < detail::WireSlotCount(endpoint); ++slot) {
                     out[i * detail::WireSlotCount(endpoint) + slot] = value;
                 }
@@ -319,6 +389,7 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
             auto* out = reinterpret_cast<int16_t*>(wire.data());
             for (std::size_t i = 0; i < count; ++i) {
                 const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume / 100;
+                if (scaled > 32767 || scaled < -32768) ++output_clipped_samples_;
                 const int16_t value = static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767));
                 for (uint8_t slot = 0; slot < detail::WireSlotCount(endpoint); ++slot) {
                     out[i * detail::WireSlotCount(endpoint) + slot] = value;
@@ -326,12 +397,30 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
             }
         }
         size_t bytes_written = 0;
+        uint64_t sum_squares = 0;
+        uint16_t peak = 0;
+        bool all_zero = true;
+        for (std::size_t i = 0; i < count; ++i) {
+            const int32_t gain = endpoint.wire_bits_per_sample == 32 ? 4 : 1;
+            const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * output_volume_.load() * gain / 100;
+            const int16_t clamped = static_cast<int16_t>(std::clamp<int32_t>(scaled, -32768, 32767));
+            const uint16_t absolute = AbsolutePcm16(clamped);
+            peak = std::max(peak, absolute);
+            sum_squares += static_cast<uint64_t>(static_cast<int32_t>(clamped) * static_cast<int32_t>(clamped));
+            all_zero = all_zero && clamped == 0;
+        }
         const esp_err_t error =
             i2s_channel_write(tx_channel_, wire.data(), wire.size(), &bytes_written, options_.io_timeout_ms);
         if (error != ESP_OK || bytes_written != wire.size()) {
             ++short_writes_;
+            if (error != ESP_OK) ++output_i2s_errors_;
             return detail::Unavailable("I2S 播放返回短写或超时");
         }
+        output_pcm_bytes_ += count * sizeof(int16_t);
+        output_samples_ += count;
+        output_sum_squares_ += sum_squares;
+        if (all_zero) ++output_zero_periods_;
+        RaisePeak(output_peak_, peak);
     }
     return Status::Ok();
 }

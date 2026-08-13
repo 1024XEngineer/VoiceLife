@@ -1,10 +1,13 @@
 #pragma once
 
+#include <array>
 #include <mutex>
 
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #include "voicelife/audio_esp/esp_multinet_wake_detector.h"
+#include "voicelife/audio_esp/esp_wakenet_detector.h"
 #include "voicelife/board_esp/gpio46_power_arbiter.h"
+#include "voicelife/board_esp/sparkbot_wake_model_assets.h"
 #include "voicelife/display_esp/ssd1306_presentation_adapter.h"
 #include "voicelife/display_sparkbot/sparkbot_presentation_adapter.h"
 #include "voicelife/runtime/platform_assembly.h"
@@ -29,11 +32,8 @@ class VoiceLifePcbAssembly : public PlatformAssembly {
     /** @brief 返回点阵显示端口。 @return Ssd1306PresentationAdapter。 */
     voicelife::voice::PresentationPort& presentation() override;
 
-    /** @brief 返回 VoiceLife PCB 音频 Profile。 @return PCM direct I2S simplex Profile。 */
-    audio_esp::AudioBoardProfile audio_profile() const override;
-
-    /** @brief 返回 VoiceLife PCB 按键 GPIO（boot/touch/volume_up/volume_down）。 @return 按键列表。 */
-    std::vector<int> button_gpios() const override { return {0, 47, 40, 39}; }
+    /** @brief 启动 PCB 物理输入到语义事件的映射。 */
+    voicelife::Status StartBoardInput(BoardInputSink sink) override;
 
     /** @brief 返回板级音频采集端口。 @return PCM 输入端口。 */
     voicelife::voice::AudioInputPort& audio_input() override;
@@ -51,6 +51,20 @@ class VoiceLifePcbAssembly : public PlatformAssembly {
     void InitializeBoardLeds() override;
 
    private:
+    struct ButtonSample {
+        int gpio = -1;
+        bool previous_pressed = false;
+        bool long_fired = false;
+        int64_t pressed_at_us = 0;
+    };
+
+    static void BoardInputTaskEntry(void* context);
+    void BoardInputTask();
+    voicelife::Status StartGpioInput(std::array<int, 4> gpios, BoardInputSink sink, const char* task_name);
+
+    [[maybe_unused]] std::array<ButtonSample, 4> buttons_{};
+    [[maybe_unused]] std::size_t button_count_ = 0;
+    BoardInputSink board_input_sink_;
     std::unique_ptr<voicelife::audio_esp::EspMultiNetWakeDetector> wake_detector_;
     std::unique_ptr<voicelife::voice::WakeGateAudioInput> wake_gate_;
     voicelife::audio_esp::Esp32s3PcmAudioPorts audio_ports_;
@@ -78,11 +92,8 @@ class SparkBotAssembly : public PlatformAssembly {
     /** @brief 初始化 ST7789/LVGL 并启动专属显示任务。 @return 启动结果。 */
     voicelife::Status Start() override;
 
-    /** @brief 返回 SparkBot ES8311 双工音频 Profile。 @return ES8311 duplex Profile。 */
-    audio_esp::AudioBoardProfile audio_profile() const override;
-
-    /** @brief 返回 SparkBot 按键 GPIO（仅 BOOT）。 @return 按键列表。 */
-    std::vector<int> button_gpios() const override { return {0}; }
+    /** @brief 启动 SparkBot BOOT 键到语义事件的映射。 */
+    voicelife::Status StartBoardInput(BoardInputSink sink) override;
 
     /** @brief 音频功放请求（经统一仲裁）。 @param enabled 是否启用功放。 @return 仲裁结果。 */
     voicelife::Status SetAudioOutputEnabled(bool enabled) override;
@@ -99,12 +110,22 @@ class SparkBotAssembly : public PlatformAssembly {
     voicelife::voice::WakeGateAudioInput& wake_gate() override;
     /** @brief 返回 SparkBot 板型身份。 @return esp-sparkbot。 */
     std::string_view board_identity() const override { return "esp-sparkbot"; }
-    /** @brief SparkBot 使用 BOOT 键进入云端采集，不要求 ESP-SR 本地模型分区。 */
-    bool uses_local_wake_detector() const override { return false; }
+    /** @brief SparkBot 使用 assets 中受控 WakeNet 模型待机监听。 */
+    bool uses_local_wake_detector() const override { return wake_ready_; }
     /** @brief SparkBot 无 LED（GPIO48 为底盘 UART RX，不写入）。 */
     void InitializeBoardLeds() override {}
 
    private:
+    struct ButtonSample {
+        int gpio = -1;
+        bool previous_pressed = false;
+        bool long_fired = false;
+        int64_t pressed_at_us = 0;
+    };
+
+    static void BoardInputTaskEntry(void* context);
+    void BoardInputTask();
+
     /** @brief 经板级仲裁更新 GPIO46 背光（ESP 构建写 GPIO）。 */
     void ApplyBacklight(bool enabled);
 
@@ -116,8 +137,12 @@ class SparkBotAssembly : public PlatformAssembly {
 
     /** @brief GPIO46 仲裁与写入互斥（显示回调与音频任务并发保护）。 */
     mutable std::mutex power_mutex_;
-    std::unique_ptr<voicelife::audio_esp::EspMultiNetWakeDetector> wake_detector_;
+    ButtonSample boot_button_{};
+    BoardInputSink board_input_sink_;
+    voicelife::board_esp::SparkBotWakeModelAssets wake_model_assets_;
+    std::unique_ptr<voicelife::audio_esp::EspWakeNetDetector> wake_detector_;
     std::unique_ptr<voicelife::voice::WakeGateAudioInput> wake_gate_;
+    bool wake_ready_ = false;
     voicelife::audio_esp::Esp32s3PcmAudioPorts audio_ports_;
     voicelife::board_esp::Gpio46PowerArbiter arbiter_;
     voicelife::display_sparkbot::SparkBotPresentationAdapter adapter_;

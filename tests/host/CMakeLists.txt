@@ -115,12 +115,14 @@ add_voicelife_library(audio_esp voicelife_audio_esp
     "${ROOT_DIR}/components/voicelife_audio_esp/src/pcm_frame_assembler.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_pcm_audio_port.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_pcm_i2s_runtime.cc"
-    "${ROOT_DIR}/components/voicelife_audio_esp/src/esp_multinet_wake_detector.cc")
+    "${ROOT_DIR}/components/voicelife_audio_esp/src/esp_multinet_wake_detector.cc"
+    "${ROOT_DIR}/components/voicelife_audio_esp/src/esp_wakenet_detector.cc")
 target_link_libraries(audio_esp PUBLIC contracts voice)
 add_voicelife_library(board_esp voicelife_board_esp
     "${ROOT_DIR}/components/voicelife_board_esp/src/sparkbot_profile.cc"
     "${ROOT_DIR}/components/voicelife_board_esp/src/gpio46_power_arbiter.cc"
-    "${ROOT_DIR}/components/voicelife_board_esp/src/esp32s3_board_probe.cc")
+    "${ROOT_DIR}/components/voicelife_board_esp/src/esp32s3_board_probe.cc"
+    "${ROOT_DIR}/components/voicelife_board_esp/src/sparkbot_wake_model_assets.cc")
 target_link_libraries(board_esp PUBLIC contracts)
 add_voicelife_library(display_esp voicelife_display_esp
     "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_presentation_adapter.cc")

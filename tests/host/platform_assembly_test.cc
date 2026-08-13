@@ -44,18 +44,22 @@ int main() {
     Check(sparkbot_start.code == voicelife::ErrorCode::kUnavailable,
           "SparkBot Assembly Start 在 host 构建必须返回 kUnavailable（不触碰硬件）");
 
-    // 板级注入：音频 Profile 与按键 GPIO 由各 Assembly 构建期提供，
-    // Runtime 不固定板型（SparkBot 不得重配 LCD/音频复用引脚）。
-    Check(pcb_as_interface.audio_profile().id == "esp32s3-voicelife-pcb-pcm",
-          "VoiceLife PCB 必须注入 PCM 音频 Profile");
-    const auto pcb_buttons = pcb_as_interface.button_gpios();
-    Check(pcb_buttons == std::vector<int>({0, 47, 40, 39}), "VoiceLife PCB 必须注入 boot/touch/volume 按键 GPIO");
+    // 板级输入：Assembly 持有 GPIO 与物理映射，Runtime 只能接收语义事件。
+    bool pcb_input_started = false;
+    Check(pcb_as_interface.StartBoardInput([&](voicelife::runtime::BoardInputAction) { pcb_input_started = true; }).ok(),
+          "VoiceLife PCB 输入适配器必须可由 Assembly 启动");
+    Check(!pcb_input_started, "host 构建不得伪造 PCB 物理按键事件");
     Check(pcb_as_interface.uses_local_wake_detector(), "VoiceLife PCB 必须保留本地唤醒模型待机能力");
-    Check(sparkbot_as_interface.audio_profile().id == "esp32s3-esp-sparkbot",
-          "SparkBot 必须注入 ES8311 双工音频 Profile");
-    const auto sparkbot_buttons = sparkbot_as_interface.button_gpios();
-    Check(sparkbot_buttons == std::vector<int>({0}), "SparkBot 只能注入 BOOT 按键，不得包含 LCD/音频复用引脚");
-    Check(!sparkbot_as_interface.uses_local_wake_detector(), "SparkBot 必须声明 BOOT 键云端采集，不依赖 ESP-SR model 分区");
+    Check(pcb_as_interface.wake_gate().Open(voicelife::voice::AudioFormat{}).code == voicelife::ErrorCode::kUnavailable,
+          "VoiceLife PCB 必须实际装配 WakeGate；host 下应到达受控硬件不可用路径而非空指针");
+    bool sparkbot_input_started = false;
+    Check(sparkbot_as_interface
+              .StartBoardInput([&](voicelife::runtime::BoardInputAction) { sparkbot_input_started = true; })
+              .ok(),
+          "SparkBot 输入适配器必须可由 Assembly 启动");
+    Check(!sparkbot_input_started, "host 构建不得伪造 SparkBot BOOT 事件");
+    Check(!sparkbot_as_interface.uses_local_wake_detector(),
+          "SparkBot 在真实 assets/WakeNet 未启动前不得错误声明本地唤醒就绪");
     Check(sparkbot_as_interface.SetAudioOutputEnabled(true).ok(), "SparkBot 音频功放请求必须经仲裁接口接受");
 
     return 0;

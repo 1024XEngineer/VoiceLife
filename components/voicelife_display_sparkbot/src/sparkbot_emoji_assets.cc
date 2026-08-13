@@ -115,8 +115,8 @@ voicelife::Status SparkBotEmojiAssets::Initialize() {
         esp_partition_munmap(mmap_handle);
         return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "assets 分区数据长度非法");
     }
-    // 文件表边界：10 个 GIF 加固定 common 14px 字体。
-    constexpr std::size_t kMaxControlledFiles = 11;
+    // 文件表边界：10 个 GIF、固定 common 14px 字体和固定 WakeNet 模型包。
+    constexpr std::size_t kMaxControlledFiles = 12;
     const std::size_t table_bytes = static_cast<std::size_t>(stored_files) * sizeof(MmappedAssetEntry);
     if (stored_files > kMaxControlledFiles || table_bytes > stored_len) {
         esp_partition_munmap(mmap_handle);

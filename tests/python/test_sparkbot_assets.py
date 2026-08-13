@@ -12,6 +12,9 @@ ASSET_DIR = ROOT / "components" / "voicelife_display_esp" / "assets" / "esp-spar
 MANIFEST = ASSET_DIR / "manifest.json"
 GIF_DIR = ASSET_DIR / "mascot" / "gifs"
 COMMON_FONT = ASSET_DIR / "fonts" / "font_noto_sans_common_14_1.bin"
+WAKE_MODEL_DIR = (
+    ROOT / "managed_components" / "espressif__esp-sr" / "model" / "wakenet_model" / "wn9l_nihaoxiaozhi_tts3"
+)
 
 ALLOWED_ASSET_KEYS = {
     "asset_id",
@@ -111,7 +114,13 @@ class SparkBotAssetManifestTest(unittest.TestCase):
         self.assertEqual(len(self.assets), 10)
         self.assertEqual(self.manifest["budget"]["gif_bytes"], 142683)
         self.assertEqual(self.manifest["budget"]["common_text_font_bytes"], 269580)
-        self.assertEqual(self.manifest["budget"]["total_bytes"], 412263)
+        wake = self.manifest["wake_model"]
+        self.assertEqual(wake["file"], "srmodels.bin")
+        self.assertEqual(wake["model_name"], WAKE_MODEL_DIR.name)
+        self.assertEqual(wake["wake_word"], "你好小智")
+        self.assertEqual(wake["packed_size_bytes"], 292609)
+        self.assertEqual(wake["sha256"], "b3cb0ba38c2443b0a082c37c2ef9b1f990c1bd56a5eac341961e9c0f6df6c373")
+        self.assertEqual(self.manifest["budget"]["total_bytes"], 704872)
 
     def test_common_font_matches_official_14px_spec(self) -> None:
         font = self.manifest["text_font"]
@@ -174,7 +183,7 @@ class SparkBotAssetManifestTest(unittest.TestCase):
                 return "过短"
             total, _chk, ln = struct.unpack("<III", image[:HEADER])
             table_bytes = total * ENTRY
-            if total > 11 or table_bytes > ln:
+            if total > 12 or table_bytes > ln:
                 return "表越界"
             if ln > len(image) - HEADER:
                 return "长度非法"
@@ -196,6 +205,8 @@ class SparkBotAssetManifestTest(unittest.TestCase):
                     str(GIF_DIR),
                     "--common-font",
                     str(COMMON_FONT),
+                    "--wake-model-dir",
+                    str(WAKE_MODEL_DIR),
                     "--output",
                     str(out),
                 ],
@@ -204,7 +215,7 @@ class SparkBotAssetManifestTest(unittest.TestCase):
             )
             good = out.read_bytes()
         self.assertIsNone(validate_image(good), "合法镜像必须通过边界校验")
-        # 伪造 file_count（>10）。
+        # 伪造 file_count（超出受控文件上限）。
         fake_count = bytearray(good)
         fake_count[0:4] = struct.pack("<I", 99)
         self.assertEqual(validate_image(bytes(fake_count)), "表越界", "伪造 file_count 必须拒绝")
@@ -257,6 +268,21 @@ class SparkBotAssetManifestTest(unittest.TestCase):
             infos.append((COMMON_FONT.name, len(merged), len(font_data), 0, 0))
             merged.extend(b"\x5a" * 2)
             merged.extend(font_data)
+            model_files = sorted(path for path in WAKE_MODEL_DIR.iterdir() if path.is_file())
+            model_header_size = 4 + 32 + 4 + len(model_files) * 40
+            model = bytearray(struct.pack("<I", 1))
+            model.extend(WAKE_MODEL_DIR.name.encode("ascii").ljust(32, b"\0"))
+            model.extend(struct.pack("<I", len(model_files)))
+            model_payload = bytearray()
+            for path in model_files:
+                data = path.read_bytes()
+                model.extend(path.name.encode("ascii").ljust(32, b"\0"))
+                model.extend(struct.pack("<II", model_header_size + len(model_payload), len(data)))
+                model_payload.extend(data)
+            model.extend(model_payload)
+            infos.append(("srmodels.bin", len(merged), len(model), 0, 0))
+            merged.extend(b"\x5a" * 2)
+            merged.extend(model)
             table = bytearray()
             for name, offset, size, width, height in infos:
                 fixed = name.encode("utf-8")[:32].ljust(32, b"\x00")
@@ -276,6 +302,8 @@ class SparkBotAssetManifestTest(unittest.TestCase):
                     str(GIF_DIR),
                     "--common-font",
                     str(COMMON_FONT),
+                    "--wake-model-dir",
+                    str(WAKE_MODEL_DIR),
                     "--output",
                     str(out),
                 ],

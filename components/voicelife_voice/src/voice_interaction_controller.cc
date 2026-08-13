@@ -150,6 +150,10 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             transition.action = VoiceInteractionAction::kRestoreStandby;
             break;
         case VoiceInteractionEvent::kTransportConnected:
+            // The provider hello may complete before the runtime posts
+            // kBootCompleted. It confirms transport readiness but must not
+            // bypass the boot -> standby transition or emit a false rejection.
+            if (state_ == VoiceInteractionState::kBooting) break;
             if (state_ != VoiceInteractionState::kReconnecting) return InvalidTransition(state_, event);
             state_ = VoiceInteractionState::kStandby;
             transition.action = VoiceInteractionAction::kRestoreStandby;

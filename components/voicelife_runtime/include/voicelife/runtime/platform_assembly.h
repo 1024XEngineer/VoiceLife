@@ -1,18 +1,33 @@
 #pragma once
 
-#include <vector>
+#include <cstdint>
+#include <functional>
+#include <string_view>
 
-#include "voicelife/audio_esp/audio_board_profile.h"
 #include "voicelife/voice/voice_ports.h"
 #include "voicelife/voice/wake_gate_audio_input.h"
 
 namespace voicelife::runtime {
 
+/** @brief 板级输入适配器向 Runtime 投递的纯交互语义。 */
+enum class BoardInputAction : uint8_t {
+    kToggleChat,
+    kPressDown,
+    kPressUp,
+    kVolumeUp,
+    kVolumeDown,
+    kVolumeMaximum,
+    kVolumeMute,
+};
+
+/** @brief Runtime 提供给板级输入适配器的非阻塞语义事件入口。 */
+using BoardInputSink = std::function<void(BoardInputAction)>;
+
 /**
  * @brief 构建期选定的平台装配组合根。
  *
  * 每个受支持板型（VoiceLife PCB / ESP-SparkBot）通过各自的 Assembly 暴露
- * 稳定的平台 Port 与板级事实（显示、音频 Profile、按键 GPIO、共享电源）。
+ * 稳定的平台 Port 与板级事实（显示、音频、语义输入、共享电源）。
  * Runtime 只依赖本接口：不判断板型、不引用具体 Adapter 或图形框架对象；
  * 显示快照的生产（Domain/交互事件循环）与消费（显示 Adapter 专属上下文）
  * 据此解耦。
@@ -42,12 +57,6 @@ class PlatformAssembly {
      * @return 启动结果。
      */
     virtual voicelife::Status Start() { return voicelife::Status::Ok(); }
-
-    /**
-     * @brief 返回构建期选定的音频板 Profile（I2S 端点与 Codec 控制）。
-     * @return 音频 Profile（按值，Assembly 内持有来源）。
-     */
-    virtual audio_esp::AudioBoardProfile audio_profile() const = 0;
 
     /**
      * @brief 返回板级音频采集端口（业务 PCM 语义，不暴露 I2S/Codec）。
@@ -98,13 +107,13 @@ class PlatformAssembly {
     virtual void LogAudioStats() {}
 
     /**
-     * @brief 返回板级按键 GPIO 列表。
+     * @brief 启动板级输入适配器。
      *
-     * 顺序语义：boot / touch / volume_up / volume_down；无按键的板型返回
-     * 空列表（Runtime 不启动按键任务）。SPI/音频复用引脚不得出现在列表。
-     * @return 按键 GPIO 列表。
+     * Assembly 负责 GPIO、触摸、去抖和物理按键到 BoardInputAction 的映射；
+     * Runtime 只接收语义事件并投递到 InteractionEventLoop。无输入设备的板型
+     * 保持默认成功，不能把 GPIO 或板型分支泄漏到 Runtime。
      */
-    virtual std::vector<int> button_gpios() const { return {}; }
+    virtual voicelife::Status StartBoardInput(BoardInputSink /*sink*/) { return voicelife::Status::Ok(); }
 
     /**
      * @brief 请求更新音频输出（功放）使能，经板级统一仲裁。

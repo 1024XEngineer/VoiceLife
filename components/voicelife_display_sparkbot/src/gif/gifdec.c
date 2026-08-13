@@ -144,7 +144,8 @@ static gd_GIF* gif_open(gd_GIF* gif_base) {
         ESP_LOGW(TAG, "Image dimensions are too large");
         goto fail;
     }
-    gif = lv_malloc(sizeof(gd_GIF) + 5 * width * height);
+    const size_t allocation_size = sizeof(gd_GIF) + 5 * width * height;
+    gif = lv_malloc(allocation_size);
 #endif
     if (!gif) {
         ESP_LOGE(TAG, "GIF_ALLOC_FAILED bytes=%u", (unsigned)allocation_size);

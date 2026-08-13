@@ -25,6 +25,8 @@ void CheckTransition(VoiceInteractionController& controller, VoiceInteractionEve
 int main() {
     VoiceInteractionController controller;
     Check(controller.state() == VoiceInteractionState::kBooting, "控制器应以 BOOT 状态启动");
+    CheckTransition(controller, VoiceInteractionEvent::kTransportConnected, VoiceInteractionState::kBooting,
+                    VoiceInteractionAction::kNone, "启动前 Provider 已连接只能确认网络，不能跳过 boot 转场");
     CheckTransition(controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "启动后应进入待机并启动本地唤醒");
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,

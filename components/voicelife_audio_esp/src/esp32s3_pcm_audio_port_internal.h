@@ -93,7 +93,7 @@ class Esp32s3PcmAudioPorts::Impl final {
     OutputPort& output() { return output_port_; }
 
     AudioPortStats stats() const;
-    void SetOutputVolume(uint8_t volume) { output_volume_.store(volume > 100 ? 100 : volume); }
+    void SetOutputVolume(uint8_t volume);
     uint8_t output_volume() const { return output_volume_.load(); }
 
    private:
@@ -165,6 +165,19 @@ class Esp32s3PcmAudioPorts::Impl final {
     std::atomic<std::size_t> input_high_watermark_{0};
     std::atomic<std::size_t> output_high_watermark_{0};
     std::atomic<uint8_t> output_volume_{70};
+    std::atomic<uint64_t> input_pcm_bytes_{0};
+    std::atomic<uint64_t> output_pcm_bytes_{0};
+    std::atomic<uint64_t> input_samples_{0};
+    std::atomic<uint64_t> input_sum_squares_{0};
+    std::atomic<uint64_t> output_samples_{0};
+    std::atomic<uint64_t> output_sum_squares_{0};
+    std::atomic<uint16_t> input_peak_{0};
+    std::atomic<uint16_t> output_peak_{0};
+    std::atomic<uint64_t> input_zero_periods_{0};
+    std::atomic<uint64_t> output_zero_periods_{0};
+    std::atomic<uint64_t> output_clipped_samples_{0};
+    std::atomic<uint64_t> input_i2s_errors_{0};
+    std::atomic<uint64_t> output_i2s_errors_{0};
 
 #ifdef ESP_PLATFORM
     i2s_chan_handle_t tx_channel_ = nullptr;

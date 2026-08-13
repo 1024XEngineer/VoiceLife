@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import struct
+import tempfile
 import sys
 from pathlib import Path
 
@@ -30,8 +32,36 @@ def compute_checksum(data: bytes) -> int:
     return sum(data) & 0xFFFF
 
 
-def pack_assets(gif_dir: Path, common_font: Path) -> tuple[int, bytes]:
-    """按官方格式打包 GIF 目录与固定 common 字体为 assets 镜像。
+def _pack_wake_model(model_dir: Path) -> bytes:
+    """按 ESP-SR 官方 pack_model.py 格式打包一个受控 WakeNet 模型目录。"""
+    expected = {"_MODEL_INFO_", "wn9_index", "wn9_data"}
+    files = sorted(path for path in model_dir.iterdir() if path.is_file())
+    names = {path.name for path in files}
+    if names != expected:
+        raise AssetPackError(f"WakeNet 模型文件必须恰好是 {sorted(expected)}，实际 {sorted(names)}")
+    model_name = model_dir.name.encode("ascii")
+    if len(model_name) > MAX_NAME:
+        raise AssetPackError("WakeNet 模型名称过长")
+    header_size = 4 + MAX_NAME + 4 + len(files) * (MAX_NAME + 4 + 4)
+    header = bytearray(struct.pack("<I", 1))
+    header.extend(model_name.ljust(MAX_NAME, b"\0"))
+    header.extend(struct.pack("<I", len(files)))
+    data = bytearray()
+    for path in files:
+        payload = path.read_bytes()
+        if not payload:
+            raise AssetPackError(f"WakeNet 模型文件为空: {path.name}")
+        name = path.name.encode("ascii")
+        header.extend(name.ljust(MAX_NAME, b"\0"))
+        header.extend(struct.pack("<II", header_size + len(data), len(payload)))
+        data.extend(payload)
+    if len(header) != header_size:
+        raise AssetPackError("WakeNet 模型包头长度错误")
+    return bytes(header + data)
+
+
+def pack_assets(gif_dir: Path, common_font: Path, wake_model_dir: Path) -> tuple[int, bytes]:
+    """按官方格式打包 GIF、common 字体和受控 WakeNet 模型为 assets 镜像。
 
     返回 (文件数, 完整镜像字节)。镜像布局：
       [0..4)   total_files  uint32 LE
@@ -65,6 +95,11 @@ def pack_assets(gif_dir: Path, common_font: Path) -> tuple[int, bytes]:
     merged.extend(MAGIC)
     merged.extend(font_data)
 
+    model_data = _pack_wake_model(wake_model_dir)
+    table.append(("srmodels.bin", len(merged), len(model_data), 0, 0))
+    merged.extend(MAGIC)
+    merged.extend(model_data)
+
     mmap_table = bytearray()
     for name, offset, size, width, height in table:
         fixed = name.encode("utf-8")[:MAX_NAME].ljust(MAX_NAME, b"\x00")
@@ -84,7 +119,7 @@ def pack_assets(gif_dir: Path, common_font: Path) -> tuple[int, bytes]:
     return len(table), image
 
 
-def verify_image(image: bytes, expected_files: int, gif_dir: Path, common_font: Path) -> None:
+def verify_image(image: bytes, expected_files: int, gif_dir: Path, common_font: Path, wake_model_dir: Path) -> None:
     """回读校验镜像（与 SparkBotEmojiAssets 解析一致）。"""
     if len(image) < HEADER_BYTES:
         raise AssetPackError("镜像过短")
@@ -112,10 +147,15 @@ def verify_image(image: bytes, expected_files: int, gif_dir: Path, common_font: 
             raise AssetPackError(f"{name} 数据越界")
         if combined[data_start : data_start + 2] != MAGIC:
             raise AssetPackError(f"{name} 缺少 ZZ magic")
-        disk_path = common_font if name == common_font.name else gif_dir / name
-        if not disk_path.is_file():
-            raise AssetPackError(f"{name} 不在受控 GIF 或字体资源集合中")
-        disk = disk_path.read_bytes()
+        if name == common_font.name:
+            disk = common_font.read_bytes()
+        elif name == "srmodels.bin":
+            disk = _pack_wake_model(wake_model_dir)
+        else:
+            disk_path = gif_dir / name
+            if not disk_path.is_file():
+                raise AssetPackError(f"{name} 不在受控 GIF、字体或 WakeNet 模型集合中")
+            disk = disk_path.read_bytes()
         if disk != combined[data_start + 2 : data_start + 2 + size]:
             raise AssetPackError(f"{name} 内容与磁盘不一致")
     if len(seen) != expected_files:
@@ -126,13 +166,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gif-dir", required=True, type=Path, help="牛头 emoji GIF 目录")
     parser.add_argument("--common-font", required=True, type=Path, help="官方 Noto Sans common 14px CBIN")
+    parser.add_argument("--wake-model-dir", required=True, type=Path, help="固定 ESP-SR WakeNet 模型目录")
     parser.add_argument("--output", required=True, type=Path, help="生成的 assets 镜像路径")
     parser.add_argument("--manifest", type=Path, help="可选的 manifest.json（用于记录资源包 SHA-256）")
     args = parser.parse_args()
 
     try:
-        count, image = pack_assets(args.gif_dir, args.common_font)
-        verify_image(image, count, args.gif_dir, args.common_font)
+        count, image = pack_assets(args.gif_dir, args.common_font, args.wake_model_dir)
+        verify_image(image, count, args.gif_dir, args.common_font, args.wake_model_dir)
     except AssetPackError as error:
         print(f"FAIL {error}", file=sys.stderr)
         return 1
@@ -140,7 +181,7 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(image)
     sha = hashlib.sha256(image).hexdigest()
-    print(f"PASS {count - 1} 个 GIF + common 14px 字体 -> {args.output} sha256={sha}")
+    print(f"PASS {count - 2} 个 GIF + common 14px 字体 + 官方 WakeNet -> {args.output} sha256={sha}")
 
     if args.manifest is not None:
         manifest = json.loads(args.manifest.read_text(encoding="utf-8"))

@@ -19,8 +19,10 @@ int main() {
         "boot", "connecting", "error", "happy", "idle", "listening", "provisioning", "sleepy", "speaking", "thinking",
     };
     const VoiceMood kMoods[] = {
-        VoiceMood::kNeutral,   VoiceMood::kHappy,    VoiceMood::kSad,   VoiceMood::kThinking,
-        VoiceMood::kSurprised, VoiceMood::kSpeaking, VoiceMood::kAngry,
+        VoiceMood::kBooting, VoiceMood::kProvisioning, VoiceMood::kConnecting, VoiceMood::kIdle,
+        VoiceMood::kListening, VoiceMood::kNeutral, VoiceMood::kHappy, VoiceMood::kSad,
+        VoiceMood::kThinking, VoiceMood::kSurprised, VoiceMood::kSpeaking, VoiceMood::kCancelled,
+        VoiceMood::kAngry,
     };
     for (VoiceMood mood : kMoods) {
         const std::string_view key = EmotionKeyForMood(mood);
@@ -38,6 +40,11 @@ int main() {
     Check(
         EmotionKeyForMood(VoiceMood::kSpeaking) == "speaking" && EmotionKeyForMood(VoiceMood::kThinking) == "thinking",
         "speaking/thinking 必须直映官方同名表情");
+    Check(EmotionKeyForMood(VoiceMood::kListening) == "listening" &&
+              EmotionKeyForMood(VoiceMood::kConnecting) == "connecting" &&
+              EmotionKeyForMood(VoiceMood::kBooting) == "boot",
+          "会话可见语义必须映射到对应官方 SparkBot 动画，而非压成 thinking");
+
 
     // SPI 逻辑序号：1/2/3 合法（映射到 SDK 的 SPI1/2/3_HOST 符号在 Adapter
     // 内完成，禁止跨 SDK 版本硬编码枚举整数值，防裸值回归）。

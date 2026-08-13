@@ -4,6 +4,8 @@
 
 #include <functional>
 #include <memory>
+#include <string>
+#include <string_view>
 
 #include "gifdec.h"
 
@@ -91,6 +93,9 @@ class LvglGif {
      */
     void SetFrameCallback(std::function<void()> callback);
 
+    /** 设置仅用于低频运行证据的受控 emotion key。 */
+    void SetTelemetryAsset(std::string_view asset);
+
    private:
     // GIF decoder instance
     gd_GIF* gif_;
@@ -115,6 +120,9 @@ class LvglGif {
 
     // Frame update callback
     std::function<void()> frame_callback_;
+    std::string telemetry_asset_;
+    uint32_t frame_count_ = 0;
+    uint32_t loop_count_observed_ = 0;
 
     /**
      * Update to next frame

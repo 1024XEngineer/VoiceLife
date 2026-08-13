@@ -58,6 +58,16 @@ std::string_view EmotionKeyForMood(voicelife::voice::VoiceMood mood) {
     // 官方无 sad/surprised/angry 表情，VoiceLife manifest 无 neutral.gif，
     // 按视觉语义就近映射；资源均来自受控资源清单。
     switch (mood) {
+        case voicelife::voice::VoiceMood::kBooting:
+            return "boot";
+        case voicelife::voice::VoiceMood::kProvisioning:
+            return "provisioning";
+        case voicelife::voice::VoiceMood::kConnecting:
+            return "connecting";
+        case voicelife::voice::VoiceMood::kIdle:
+            return "idle";
+        case voicelife::voice::VoiceMood::kListening:
+            return "listening";
         case voicelife::voice::VoiceMood::kHappy:
             return "happy";
         case voicelife::voice::VoiceMood::kSad:
@@ -68,6 +78,8 @@ std::string_view EmotionKeyForMood(voicelife::voice::VoiceMood mood) {
             return "happy";
         case voicelife::voice::VoiceMood::kSpeaking:
             return "speaking";
+        case voicelife::voice::VoiceMood::kCancelled:
+            return "sleepy";
         case voicelife::voice::VoiceMood::kAngry:
             return "error";
         case voicelife::voice::VoiceMood::kNeutral:
@@ -335,6 +347,7 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
             // 资源视图显式传给 LvglGif（数据所有权仍属 assets mmap）。
             auto* gif = new LvglGif(static_cast<const uint8_t*>(asset.value->data), asset.value->size);
             if (gif->IsLoaded()) {
+                gif->SetTelemetryAsset(emotion);
                 gif->SetFrameCallback(
                     [this, gif]() { lv_image_set_src(static_cast<lv_obj_t*>(emoji_image_), gif->image_dsc()); });
                 // 只有首帧真正解码成功才替换回退 glyph；此前 IsLoaded 只代表
