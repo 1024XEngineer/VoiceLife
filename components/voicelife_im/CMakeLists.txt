@@ -9,6 +9,7 @@ idf_component_register(
         "src/im_provisioning.cc"
         "src/im_pairing_client.cc"
         "src/im_pairing_controller.cc"
+        "src/im_binding_use_case.cc"
         "src/im_wire.cc"
         "src/im_endpoint.cc"
         "src/transport/esp_http_transport.cc"

@@ -7,9 +7,16 @@
 #include "voicelife/contracts/status.h"
 #include "voicelife/im/im_config_store.h"
 #include "voicelife/im/im_pairing_client.h"
+#include "voicelife/im/im_pairing_controller.h"
 #include "voicelife/im/im_runtime.h"
 
 namespace voicelife::runtime {
+
+class EspPairingClock final : public im::ImPairingClock {
+   public:
+    uint64_t MonotonicMillis() const override;
+    uint64_t UnixMillis() const override;
+};
 
 /// 从已初始化的 HMAC 加密 NVS 分区读取 IM 配置与凭据。
 class NvsImSecretStore final : public im::ImSecretStorePort {

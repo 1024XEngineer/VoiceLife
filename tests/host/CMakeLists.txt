@@ -59,6 +59,7 @@ add_voicelife_library(im voicelife_im
     "${ROOT_DIR}/components/voicelife_im/src/im_provisioning.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_pairing_client.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_pairing_controller.cc"
+    "${ROOT_DIR}/components/voicelife_im/src/im_binding_use_case.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_wire.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_endpoint.cc"
     "${ROOT_DIR}/components/voicelife_im/src/transport/im_response_reader.cc")
@@ -334,6 +335,14 @@ target_link_libraries(im_response_reader_test PRIVATE im contracts)
 add_voicelife_test(im_pairing_client_test "unit;im;pairing" im_pairing_client_test.cc)
 target_link_libraries(im_pairing_client_test PRIVATE im contracts)
 target_compile_definitions(im_pairing_client_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
+
+add_voicelife_test(binding_use_case_test "unit;im;binding" binding_use_case_test.cc)
+target_link_libraries(binding_use_case_test PRIVATE im contracts)
+
+add_voicelife_test(im_binding_mcp_tools_test "unit;mcp;im;runtime" im_binding_mcp_tools_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime/src/im_binding_mcp_tools.cc")
+target_include_directories(im_binding_mcp_tools_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_link_libraries(im_binding_mcp_tools_test PRIVATE mcp im)
 
 add_voicelife_test(im_runtime_test "unit;im;runtime" im_runtime_test.cc)
 target_link_libraries(im_runtime_test PRIVATE im contracts)

@@ -27,6 +27,7 @@
 #include "nvs_flash.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/im/esp_http_transport_factory.h"
+#include "voicelife/im/im_binding_use_case.h"
 #include "voicelife/im/im_config_store.h"
 #include "voicelife/im/im_retry_policy.h"
 #include "voicelife/im/im_runtime.h"
@@ -38,6 +39,7 @@
 #endif
 
 #include "bootstrap/storage_bootstrap.h"
+#include "im_binding_mcp_tools.h"
 #include "im_runtime_bootstrap.h"
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
@@ -161,8 +163,9 @@ class Runtime final {
         auto& registry = voice::SpeechProviderRegistry::Instance();
 #ifdef ESP_PLATFORM
         init_status_ = RegisterScheduleMcpTools(mcp_server_, schedule_service_);
+        if (init_status_.ok()) init_status_ = RegisterImBindingMcpTools(mcp_server_, binding_use_case_);
         if (init_status_.ok()) {
-            ESP_LOGI(kTag, "MCP_TOOLS_READY count=2 names=schedule.create,schedule.query");
+            ESP_LOGI(kTag, "MCP_TOOLS_READY count=3 names=schedule.create,schedule.query,im.binding.start");
         }
         registry.Register("xrobot-websocket", linx::LinxSpeechProviderAdapter::DefaultCapabilities(), [this]() {
             return std::make_unique<linx::LinxSpeechProviderAdapter>(
@@ -340,7 +343,7 @@ class Runtime final {
         if (mcp_task_ != nullptr) return Status::Ok();
         mcp_stop_ = false;
         mcp_stopped_.store(false);
-        if (xTaskCreate(&Runtime::McpWorkerTaskEntry, "voicelife_mcp", 6144, this, 4, &mcp_task_) != pdPASS) {
+        if (xTaskCreate(&Runtime::McpWorkerTaskEntry, "voicelife_mcp", 32768, this, 4, &mcp_task_) != pdPASS) {
             return Status::Error(ErrorCode::kInternal, "创建 MCP 工作任务失败");
         }
         ESP_LOGI(kTag, "MCP_WORKER_READY capacity=%u", static_cast<unsigned>(kMcpWorkerQueueCapacity));
@@ -479,6 +482,7 @@ class Runtime final {
             }
 
             if (im_runtime_.state() == im::ImRuntimeState::kReady) {
+                binding_use_case_.Bind(*im_runtime_.pairing_client(), im_pairing_clock_, im_runtime_.user_id());
                 RegisterImPairingAcceptance(im_runtime_.pairing_client(), im_runtime_.user_id());
                 ESP_LOGI(kTag, "IM_RUNTIME_READY=1");
                 break;
@@ -1288,6 +1292,8 @@ class Runtime final {
     EspImRuntimeReadiness im_readiness_;
     im::ImRuntime im_runtime_{im_config_, im_config_, im_readiness_,
                               [](const std::string& origin) { return im::CreateEspHttpTransport(origin); }};
+    EspPairingClock im_pairing_clock_;
+    im::BindingUseCase binding_use_case_;
     std::atomic_bool im_lifecycle_started_{false};
     TaskHandle_t im_lifecycle_task_ = nullptr;
     mcp::McpServer mcp_server_;
