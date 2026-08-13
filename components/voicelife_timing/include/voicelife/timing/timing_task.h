@@ -6,6 +6,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace voicelife::timing {
@@ -49,6 +50,15 @@ enum class RegisterTaskResult {
 /// 单条注册命令的最终结果通知；由 Runner 消费命令时调用。
 using RegisterTaskResultCallback = std::function<void(RegisterTaskResult)>;
 
+/// Runner 应用取消命令后的最终结果。
+enum class CancelTaskResult {
+    kCancelled,
+    kNotFound,
+};
+
+/// 单条取消命令的最终结果通知；由 Runner 消费命令时调用。
+using CancelTaskResultCallback = std::function<void(CancelTaskResult)>;
+
 /// 一次性 task 的生命周期状态。
 enum class TaskStatus {
     kPending,
@@ -77,6 +87,7 @@ struct RegisterTaskCommand {
 /// 异步取消一个已注册 task 的命令。
 struct CancelTaskCommand {
     TaskId task_id;
+    CancelTaskResultCallback on_result;
 };
 
 /// 公开命令入口的同步接收结果；不表示命令已经被 Runner 应用。
@@ -114,32 +125,39 @@ class TimingTaskService {
 
     /**
      * @brief 异步提交一个 task 取消请求。
-     * @param command 仅包含待取消的不透明 task_id。
-     * @return kAccepted 表示命令已被接收，最终应用结果由 Runner 另行通知。
+     * @param command 包含待取消的不透明 task_id 和可选的最终结果回调。
+     * @return kAccepted 表示命令已被接收；Runner 消费后通过 on_result 通知 cancelled 或 not found。
      */
     virtual CommandAcceptance CancelTask(CancelTaskCommand command) = 0;
 };
 
 /**
- * @brief Host 可用的异步注册 Runner，独占内存 pending 注册表。
+ * @brief Host 可用的异步命令 Runner，独占内存 task 注册表。
  *
- * RegisterTask 只保存命令；注册表仅由 ProcessPendingRegistrations 修改。
+ * 公开入口只保存命令；注册表仅由 ProcessPendingCommands 修改。
  */
-class InMemoryTimingTaskRunner {
+class InMemoryTimingTaskRunner final : public TimingTaskService {
    public:
     /**
      * @brief 异步接收一条注册命令。
      * @param command 待 Runner 应用的注册命令。
      * @return 命令接收后固定返回 kAccepted。
      */
-    CommandAcceptance RegisterTask(RegisterTaskCommand command);
+    CommandAcceptance RegisterTask(RegisterTaskCommand command) override;
 
     /**
-     * @brief 应用当前所有待处理注册命令。
-     * @param registered_at 本轮写入 task 创建与更新时间的墙上时钟。
+     * @brief 异步接收一条取消命令。
+     * @param command 待 Runner 应用的取消命令。
+     * @return 命令接收后固定返回 kAccepted。
+     */
+    CommandAcceptance CancelTask(CancelTaskCommand command) override;
+
+    /**
+     * @brief 按接收顺序应用本轮开始时已有的注册和取消命令。
+     * @param applied_at 本轮写入 task 创建与更新时间的墙上时钟。
      * @return 本轮消费的命令数量。
      */
-    size_t ProcessPendingRegistrations(TriggerAt registered_at);
+    size_t ProcessPendingCommands(TriggerAt applied_at);
 
     /**
      * @brief 查询 pending 注册表中的最早到点时刻。
@@ -154,10 +172,14 @@ class InMemoryTimingTaskRunner {
         TaskCallback callback;
     };
 
-    std::deque<RegisterTaskCommand> registration_commands_;
+    /// 按公开入口接收顺序保存的 Runner 命令。
+    using PendingCommand = std::variant<RegisterTaskCommand, CancelTaskCommand>;
+
+    std::deque<PendingCommand> commands_;
     std::vector<std::string> used_task_ids_;
     std::vector<PendingTask> pending_tasks_;
-    bool processing_registrations_ = false;
+    std::vector<Task> terminal_tasks_;
+    bool processing_commands_ = false;
 };
 
 }  // namespace voicelife::timing
