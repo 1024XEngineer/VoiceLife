@@ -111,12 +111,63 @@ void TestMapsCreateAndQueryFailures() {
 void TestRequiresReadyRuntimeAndUser() {
     BindingUseCase unavailable;
     Check(unavailable.Start().state == BindingState::kUnavailable, "未注入配对端口时绑定功能应明确不可用");
+    Check(unavailable.Poll().state == BindingState::kUnavailable, "未就绪时 Poll 必须保持 unavailable 且不重查");
 
     FakePairingPort port;
     FakeClock clock;
     Prepare(port);
     BindingUseCase missing_user(port, clock);
     Check(missing_user.Start().state == BindingState::kUnavailable, "缺少 user_id 时不得创建配对会话");
+}
+
+void TestObservesWaitingNotFoundAndTimedOut() {
+    {
+        FakePairingPort port;
+        FakeClock clock;
+        Prepare(port);
+        BindingUseCase use_case(port, clock);
+        use_case.set_user_id("user-fixture");
+        Check(use_case.Start().state == BindingState::kPending, "waiting 测试必须先建立会话");
+        Check(use_case.Poll().state == BindingState::kWaiting && use_case.active(),
+              "轮询间隔未到必须返回 waiting 且保持 active");
+    }
+    {
+        FakePairingPort port;
+        FakeClock clock;
+        Prepare(port);
+        port.queried = {{.status = PairingClientStatus::kNotFound, .value = std::nullopt, .message = "not found"}};
+        BindingUseCase use_case(port, clock);
+        use_case.set_user_id("user-fixture");
+        Check(use_case.Start().state == BindingState::kPending, "not_found 测试必须先建立会话");
+        clock.Advance(3000);
+        Check(use_case.Poll().state == BindingState::kNotFound && !use_case.active(),
+              "查询 404 必须收敛为 not_found 终态");
+    }
+    {
+        FakePairingPort port;
+        FakeClock clock;
+        Prepare(port);
+        port.queried = {Query("pending")};
+        BindingUseCase use_case(port, clock);
+        use_case.set_user_id("user-fixture");
+        Check(use_case.Start().state == BindingState::kPending, "timed_out 测试必须先建立会话");
+        clock.Advance(300000);
+        Check(use_case.Poll().state == BindingState::kTimedOut && !use_case.active(),
+              "到达本地截止时间必须收敛为 timed_out 终态");
+    }
+}
+
+void TestPollAfterTerminalStaysIdle() {
+    FakePairingPort port;
+    FakeClock clock;
+    Prepare(port);
+    port.queried = {Query("confirmed")};
+    BindingUseCase use_case(port, clock);
+    use_case.set_user_id("user-fixture");
+    Check(use_case.Start().state == BindingState::kPending, "终态后 Poll 测试必须先建立会话");
+    clock.Advance(3000);
+    Check(use_case.Poll().state == BindingState::kConfirmed && !use_case.active(), "必须先进入 confirmed 终态");
+    Check(use_case.Poll().state == BindingState::kConfirmed, "终态后再 Poll 必须保持终态而不重查");
 }
 
 void TestRebindClearsSessionAndTerminalAllowsRestart() {
@@ -147,6 +198,8 @@ int main() {
     TestObservesTerminalStates();
     TestMapsCreateAndQueryFailures();
     TestRequiresReadyRuntimeAndUser();
+    TestObservesWaitingNotFoundAndTimedOut();
+    TestPollAfterTerminalStaysIdle();
     TestRebindClearsSessionAndTerminalAllowsRestart();
     return 0;
 }
