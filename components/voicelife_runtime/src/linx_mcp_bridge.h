@@ -11,7 +11,7 @@ class McpServer;
 
 namespace voicelife::runtime {
 
-/** @brief 已解析的 MCP tools/call 用户语义结果。 */
+/** @brief 已解析的 MCP tools/call 用户可见语义结果。 */
 struct LinxMcpToolOutcome {
     bool success = false;
     std::string summary = "日程操作失败";
@@ -31,11 +31,14 @@ Result<std::string> BuildLinxMcpUnavailableResponse(std::string_view payload, st
                                                     std::string_view session_id = {});
 
 /**
- * @brief 从 Linx MCP 响应信封提取 tools/call 的成功语义与显示摘要。
+ * @brief 从受控 tools/call 请求和 Linx 响应提取用户可见业务语义。
  *
  * JSON-RPC 业务错误也是合法的响应帧，不能仅凭 Result::ok() 判断成功。
- * 此函数只解析受控信封，不调用工具、Provider 或显示端口。
+ * 仅根据已注册工具名映射稳定业务文案，例如“日程已创建”或“日程查询
+ * 失败”。不得携带 MCP 的机器结果、服务端错误原文或参数校验细节；此函数
+ * 只解析受控信封，不调用工具、Provider 或显示端口。
  */
-LinxMcpToolOutcome InspectLinxMcpToolOutcome(const Result<std::string>& response);
+LinxMcpToolOutcome InspectLinxMcpToolOutcome(std::string_view request_payload,
+                                              const Result<std::string>& response);
 
 }  // namespace voicelife::runtime

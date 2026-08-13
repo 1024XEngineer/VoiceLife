@@ -78,7 +78,7 @@ class SparkBotEmojiAssets {
     [[nodiscard]] voicelife::Result<GifAssetView> Load(std::string_view asset_id);
 
     /**
-     * @brief 加载固定的官方 Noto Sans common 14px/1bpp 字库。
+     * @brief 加载固定的官方 Noto Sans common 16px/4bpp 字库。
      *
      * 不接受调用方路径或名称，确保 Runtime 不能扩展资源访问边界。
      */

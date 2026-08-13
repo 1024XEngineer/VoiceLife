@@ -143,7 +143,8 @@ class LinxProtocolCodecPort {
      * @return 已编码消息或错误。
      */
     virtual Result<std::string> EncodeListenDetect(const voice::VoiceSessionConfig& config,
-                                                   std::string_view text) const = 0;
+                                                   std::string_view text,
+                                                   std::string_view text_response = {}) const = 0;
     /**
      * @brief 编码中止消息。
      * @param config 语音会话配置。
@@ -188,8 +189,8 @@ class LinxJsonCodec final : public LinxProtocolCodecPort {
      * @param text 要发送的文本。
      * @return 已编码消息或错误。
      */
-    Result<std::string> EncodeListenDetect(const voice::VoiceSessionConfig& config,
-                                           std::string_view text) const override;
+    Result<std::string> EncodeListenDetect(const voice::VoiceSessionConfig& config, std::string_view text,
+                                           std::string_view text_response = {}) const override;
     /**
      * @brief 编码 Linx 中止消息。
      * @param config 语音会话配置。

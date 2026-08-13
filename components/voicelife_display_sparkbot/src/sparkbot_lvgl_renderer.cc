@@ -15,7 +15,7 @@
 // 字体符号由 xiaozhi-fonts 组件提供（全局链接）；LV_FONT_DECLARE 必须位于
 // 全局作用域，否则匿名命名空间会把引用变成内部链接导致 undefined reference。
 #ifdef ESP_PLATFORM
-LV_FONT_DECLARE(font_noto_sans_basic_14_1);
+LV_FONT_DECLARE(font_noto_sans_basic_16_4);
 LV_FONT_DECLARE(font_material_symbols_14_1);
 LV_FONT_DECLARE(font_material_symbols_20_4);
 LV_FONT_DECLARE(font_material_symbols_30_4);
@@ -115,28 +115,28 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
 
     // 官方简单模式布局（lcd_display.cc SetupUI，CONFIG_USE_WECHAT_MESSAGE_STYLE=n）：
     // 黑底白字 dark 主题；中央 96x96 emoji 舞台（y=60..156）、顶部状态栏
-    // 192x28（y=24）、底部消息栏 224x56。布局数值不得自行修改。
-    // 小智 SparkBot 使用 14px/1bpp 文本字体。common CBIN 覆盖常见文字，
-    // basic 仅作 fallback；字号、行高和布局保持官方原值。
+    // 192x30（y=24）、底部消息栏 224x60。中央 GIF 仍维持官方 96x96。
+    // common CBIN 使用同源 16px/4bpp 字体，提升状态和消息可读性；basic
+    // 仅作 fallback，顶部 Material Symbols 图标不受影响。
     emoji_assets_ = new SparkBotEmojiAssets();
     assets_ready_ = emoji_assets_->Initialize().ok();
-    const lv_font_t* text_font = &font_noto_sans_basic_14_1;
+    const lv_font_t* text_font = &font_noto_sans_basic_16_4;
     if (assets_ready_) {
         const auto common_font_asset = emoji_assets_->LoadCommonTextFont();
         if (common_font_asset.ok() && common_font_asset.value.has_value()) {
             auto* common_font = cbin_font_create(
                 const_cast<uint8_t*>(static_cast<const uint8_t*>(common_font_asset.value->data)));
-            if (common_font != nullptr && common_font->line_height == 16 && common_font->base_line == 2 &&
-                common_font->dsc != nullptr && static_cast<const lv_font_fmt_txt_dsc_t*>(common_font->dsc)->bpp == 1) {
-                common_font->fallback = &font_noto_sans_basic_14_1;
+            if (common_font != nullptr && common_font->line_height == 25 && common_font->base_line == 9 &&
+                common_font->dsc != nullptr && static_cast<const lv_font_fmt_txt_dsc_t*>(common_font->dsc)->bpp == 4) {
+                common_font->fallback = &font_noto_sans_basic_16_4;
                 common_text_font_ = common_font;
                 text_font = common_font;
-                ESP_LOGI(kTag, "SPARKBOT_COMMON_FONT_READY size=14 bpp=1 line_height=16");
+                ESP_LOGI(kTag, "SPARKBOT_COMMON_FONT_READY size=16 bpp=4 line_height=25");
             } else {
                 if (common_font != nullptr) {
                     cbin_font_delete(common_font);
                 }
-                ESP_LOGW(kTag, "common 14px 字体元数据不符合官方规格，回退 basic");
+                ESP_LOGW(kTag, "common 16px 字体元数据不符合预期规格，回退 basic");
             }
         }
     }
@@ -249,17 +249,16 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_obj_set_style_margin_left(camera_label, 4, 0);
     capability_label_ = camera_label;
 
-    // 状态栏：192x28 @ TOP_MID y=24，官方状态标签（居中、CLIP 滚动）。
+    // 状态栏：192x30 @ TOP_MID y=24，文字扩大后仍保留上下留白。
     auto* status_bar = lv_obj_create(screen);
-    lv_obj_set_size(status_bar, 192, 28);
+    lv_obj_set_size(status_bar, 192, 30);
     lv_obj_set_style_radius(status_bar, 0, 0);
     lv_obj_set_style_bg_opa(status_bar, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(status_bar, 0, 0);
     lv_obj_set_style_pad_all(status_bar, 0, 0);
-    // 与小智 lcd_display.cc 一致：状态栏采用绝对布局和上下 2px 留白。
-    // 空文本创建后的 label 不依赖内容尺寸，固定使用 16px 官方行框。
-    lv_obj_set_style_pad_top(status_bar, 2, 0);
-    lv_obj_set_style_pad_bottom(status_bar, 2, 0);
+    // 状态栏采用绝对布局；空文本 label 固定使用 16px 字体的 25px 行框。
+    lv_obj_set_style_pad_top(status_bar, 1, 0);
+    lv_obj_set_style_pad_bottom(status_bar, 1, 0);
     lv_obj_set_style_layout(status_bar, LV_LAYOUT_NONE, 0);
     // CBIN 字体来自 assets mmap，不能依赖跨层对象的样式继承。状态/消息
     // label 都显式绑定同一个字体，保证常用中文在 SparkBot 上可见。
@@ -281,9 +280,9 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_obj_align(status_label, LV_ALIGN_CENTER, 0, 0);
     status_label_ = status_label;
 
-    // 底部消息栏：224x56 @ BOTTOM_MID，官方 chat_message_label_（WRAP 居中）。
+    // 底部消息栏：224x60 @ BOTTOM_MID，16px 文本可完整容纳两行（WRAP 居中）。
     auto* bottom_bar = lv_obj_create(screen);
-    lv_obj_set_size(bottom_bar, 224, 56);
+    lv_obj_set_size(bottom_bar, 224, 60);
     lv_obj_set_style_radius(bottom_bar, 0, 0);
     lv_obj_set_style_bg_color(bottom_bar, kBackgroundColor, 0);
     lv_obj_set_style_bg_opa(bottom_bar, LV_OPA_TRANSP, 0);
@@ -299,7 +298,7 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_label_set_text(chat_message_label, "");
     lv_obj_set_width(chat_message_label, LV_HOR_RES - 32);  // spacing(8) = 8*4
     lv_label_set_long_mode(chat_message_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_height(chat_message_label, 56);
+    lv_obj_set_height(chat_message_label, 60);
     lv_obj_set_style_text_align(chat_message_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(chat_message_label, text_font, 0);
     lv_obj_set_style_text_color(chat_message_label, kTextColor, 0);

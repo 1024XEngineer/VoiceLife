@@ -91,6 +91,19 @@ std::string IdText(const JsonValue& id) {
     return Serialize(id);
 }
 
+std::string ToolOutcomeSummary(std::string_view request_payload, bool success) {
+    JsonValue request;
+    if (!ParseJson(request_payload, request).ok() || !request.IsObject()) {
+        return success ? "操作已完成" : "操作失败";
+    }
+    const JsonValue* params = Get(request, "params");
+    const JsonValue* name = params == nullptr ? nullptr : Get(*params, "name");
+    if (name == nullptr || !name->IsString()) return success ? "操作已完成" : "操作失败";
+    if (name->string == "schedule.create") return success ? "日程已创建" : "日程创建失败";
+    if (name->string == "schedule.query") return success ? "日程查询完成" : "日程查询失败";
+    return success ? "操作已完成" : "操作失败";
+}
+
 std::string Wrap(std::string payload, std::string_view session_id) {
     std::string result = "{\"type\":\"mcp\"";
     if (!session_id.empty()) result += ",\"session_id\":\"" + Escape(session_id) + "\"";
@@ -203,8 +216,9 @@ Result<std::string> BuildLinxMcpUnavailableResponse(std::string_view payload, st
     return ErrorResponse(*id, -32001, message, session_id);
 }
 
-LinxMcpToolOutcome InspectLinxMcpToolOutcome(const Result<std::string>& response) {
+LinxMcpToolOutcome InspectLinxMcpToolOutcome(std::string_view request_payload, const Result<std::string>& response) {
     LinxMcpToolOutcome outcome;
+    outcome.summary = ToolOutcomeSummary(request_payload, false);
     if (!response.ok() || !response.value.has_value()) return outcome;
 
     JsonValue envelope;
@@ -213,10 +227,8 @@ LinxMcpToolOutcome InspectLinxMcpToolOutcome(const Result<std::string>& response
     if (payload == nullptr || !payload->IsObject()) return outcome;
 
     if (const JsonValue* error = Get(*payload, "error"); error != nullptr && error->IsObject()) {
-        if (const JsonValue* message = Get(*error, "message"); message != nullptr && message->IsString() &&
-            !message->string.empty()) {
-            outcome.summary = message->string;
-        }
+        // JSON-RPC/MCP 错误字段属于诊断信息，可能包含参数名、校验规则或
+        // Provider 实现细节。它不能成为设备屏幕上的用户可见文本。
         return outcome;
     }
 
@@ -224,21 +236,14 @@ LinxMcpToolOutcome InspectLinxMcpToolOutcome(const Result<std::string>& response
     if (result == nullptr || !result->IsObject()) return outcome;
     const JsonValue* is_error = Get(*result, "isError");
     if (is_error == nullptr || is_error->kind != JsonValue::Kind::kBool || is_error->boolean) {
-        const JsonValue* content = Get(*result, "content");
-        if (content != nullptr && content->IsArray() && !content->array.empty()) {
-            const JsonValue* text = Get(content->array.front(), "text");
-            if (text != nullptr && text->IsString() && !text->string.empty()) outcome.summary = text->string;
-        }
+        // MCP 的 isError 内容同样是服务端诊断，不向 PresentationPort 透传。
         return outcome;
     }
 
     outcome.success = true;
-    outcome.summary = "日程操作已完成";
-    const JsonValue* content = Get(*result, "content");
-    if (content != nullptr && content->IsArray() && !content->array.empty()) {
-        const JsonValue* text = Get(content->array.front(), "text");
-        if (text != nullptr && text->IsString() && !text->string.empty()) outcome.summary = text->string;
-    }
+    outcome.summary = ToolOutcomeSummary(request_payload, true);
+    // 成功内容同样是 MCP 的机器可读回包（例如 event=、status=、count=）。
+    // 它只随 JSON-RPC 响应回传给 Linx，不能成为设备底部用户文案。
     return outcome;
 }
 

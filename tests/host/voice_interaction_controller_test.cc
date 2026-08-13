@@ -76,6 +76,11 @@ int main() {
                     VoiceInteractionAction::kStopVoiceTurn, "触摸松开应进入等待最终 STT");
     CheckTransition(controller, VoiceInteractionEvent::kFinalizationTimedOut, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "触摸松开后最终 STT 超时应恢复待机");
+    CheckTransition(controller, VoiceInteractionEvent::kTransportDisconnected, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby,
+                    "空闲后的服务端有序关闭必须保持本地可唤醒，不显示重连中");
+    CheckTransition(controller, VoiceInteractionEvent::kTransportConnected, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kNone, "后台重连完成不得扰动空闲显示");
 
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
                     VoiceInteractionAction::kStartVoiceTurn, "待机唤醒仍应开始云端语音");

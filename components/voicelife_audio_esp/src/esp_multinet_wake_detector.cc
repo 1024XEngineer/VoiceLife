@@ -20,8 +20,19 @@ namespace {
 constexpr char kTag[] = "VoiceLifeWake";
 constexpr char kModelPartition[] = "model";
 constexpr char kModelLanguage[] = "cn";
-constexpr char kWakeCommand[] = "ni hao niu niu";
-constexpr char kWakeDisplay[] = "你好牛牛";
+struct LocalCommand {
+    int id;
+    const char* grammar;
+    const char* display;
+};
+
+// MultiNet's command grammar is a pinyin token sequence. These commands are
+// registered once per active board assembly, not from Runtime.
+constexpr LocalCommand kCommands[] = {
+    {1, "ni hao niu niu", "你好牛牛"},
+    {2, "niu niu", "牛牛"},
+    {3, "bie shuo le", "别说了"},
+};
 
 Status DetectorError(ErrorCode code, const char* message) { return Status::Error(code, message); }
 
@@ -70,14 +81,22 @@ class EspMultiNetWakeDetector::Impl final {
                 const esp_mn_results_t* result = multinet_->get_results(model_data_);
                 if (result != nullptr) {
                     for (int i = 0; i < result->num; ++i) {
-                        if (result->command_id[i] == 1) {
+                        const int command_id = result->command_id[i];
+                        const LocalCommand* matched = nullptr;
+                        for (const auto& command : kCommands) {
+                            if (command.id == command_id) {
+                                matched = &command;
+                                break;
+                            }
+                        }
+                        if (matched != nullptr) {
                             running_ = false;
                             WakeSink sink = sink_;
                             input_.clear();
                             multinet_->clean(model_data_);
                             sink_ = {};
                             lock.unlock();
-                            if (sink) sink(kWakeDisplay);
+                            if (sink) sink(matched->display);
                             return Status::Ok();
                         }
                     }
@@ -120,20 +139,32 @@ class EspMultiNetWakeDetector::Impl final {
             model_status_ = DetectorError(ErrorCode::kUnavailable, "MultiNet 模型实例创建失败");
             return model_status_;
         }
-        const int threshold_status = multinet_->set_det_threshold(model_data_, 0.5f);
+        // 对齐小智 CustomWakeWord 的默认阈值。MultiNet 命令词并非 WakeNet
+        // 唤醒模型；0.5 会让短词“牛牛”在实际近讲场景明显漏检。
+        const int threshold_status = multinet_->set_det_threshold(model_data_, 0.2f);
         const esp_err_t alloc_status = esp_mn_commands_alloc(multinet_, model_data_);
         const esp_err_t clear_status = esp_mn_commands_clear();
-        const esp_err_t add_status = esp_mn_commands_add(1, kWakeCommand);
+        esp_err_t add_status = ESP_OK;
+        for (const auto& command : kCommands) {
+            if (add_status != ESP_OK) break;
+            add_status = esp_mn_commands_add(command.id, command.grammar);
+        }
         esp_mn_error_t* update_error = esp_mn_commands_update();
         ESP_LOGI(kTag, "WAKE_COMMAND_STATUS threshold=%d alloc=%d clear=%d add=%d update_errors=%d", threshold_status,
                  static_cast<int>(alloc_status), static_cast<int>(clear_status), static_cast<int>(add_status),
                  update_error == nullptr ? 0 : static_cast<int>(update_error->num));
-        if (threshold_status < 0 || alloc_status != ESP_OK || clear_status != ESP_OK || add_status != ESP_OK ||
-            update_error != nullptr) {
+        // ESP-SR's MultiNet implementation returns -1 after applying this
+        // setting on ESP32-S3. Xiaozhi's CustomWakeWord uses the same API as
+        // a setter and intentionally does not treat its return value as an
+        // esp_err_t. On this SDK, commands_update also returns a non-null
+        // report with num == 0 on success; only entries in that report are
+        // command compilation failures.
+        const bool command_update_failed = update_error != nullptr && update_error->num > 0;
+        if (alloc_status != ESP_OK || clear_status != ESP_OK || add_status != ESP_OK || command_update_failed) {
             model_status_ = DetectorError(ErrorCode::kUnavailable, "MultiNet 唤醒命令注册失败");
             return model_status_;
         }
-        ESP_LOGI(kTag, "本地唤醒检测器已就绪：MultiNet=%s command=%s", model_name, kWakeDisplay);
+        ESP_LOGI(kTag, "本地命令检测器已就绪：MultiNet=%s commands=你好牛牛,牛牛,别说了", model_name);
         model_status_ = Status::Ok();
         return model_status_;
     }

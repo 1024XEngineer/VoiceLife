@@ -265,9 +265,10 @@ voicelife::Status SparkBotAssembly::Start() {
     ApplyBacklight(true);
     const Status display = adapter_.Start();
     if (!display.ok()) return display;
-    const Status assets = wake_model_assets_.Initialize();
-    if (!assets.ok()) return assets;
-    wake_detector_ = std::make_unique<audio_esp::EspWakeNetDetector>(wake_model_assets_.model_root());
+    // Keep the board profiles equal at the voice boundary: both boards use
+    // the existing MultiNet7 command grammar for "你好牛牛". ESP-SR emits the
+    // model partition image from the selected profile at build time.
+    wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
     wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_.input(), *wake_detector_, true);
     wake_ready_ = true;
 #ifdef ESP_PLATFORM

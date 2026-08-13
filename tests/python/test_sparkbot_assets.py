@@ -11,10 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ASSET_DIR = ROOT / "components" / "voicelife_display_esp" / "assets" / "esp-sparkbot"
 MANIFEST = ASSET_DIR / "manifest.json"
 GIF_DIR = ASSET_DIR / "mascot" / "gifs"
-COMMON_FONT = ASSET_DIR / "fonts" / "font_noto_sans_common_14_1.bin"
-WAKE_MODEL_DIR = (
-    ROOT / "managed_components" / "espressif__esp-sr" / "model" / "wakenet_model" / "wn9l_nihaoxiaozhi_tts3"
-)
+COMMON_FONT = ASSET_DIR / "fonts" / "font_noto_sans_common_16_4.bin"
 
 ALLOWED_ASSET_KEYS = {
     "asset_id",
@@ -113,22 +110,18 @@ class SparkBotAssetManifestTest(unittest.TestCase):
         self.assertTrue(self.manifest["source"]["upstream_commit"])
         self.assertEqual(len(self.assets), 10)
         self.assertEqual(self.manifest["budget"]["gif_bytes"], 142683)
-        self.assertEqual(self.manifest["budget"]["common_text_font_bytes"], 269580)
-        wake = self.manifest["wake_model"]
-        self.assertEqual(wake["file"], "srmodels.bin")
-        self.assertEqual(wake["model_name"], WAKE_MODEL_DIR.name)
-        self.assertEqual(wake["wake_word"], "你好小智")
-        self.assertEqual(wake["packed_size_bytes"], 292609)
-        self.assertEqual(wake["sha256"], "b3cb0ba38c2443b0a082c37c2ef9b1f990c1bd56a5eac341961e9c0f6df6c373")
-        self.assertEqual(self.manifest["budget"]["total_bytes"], 704872)
+        self.assertEqual(self.manifest["budget"]["common_text_font_bytes"], 885948)
+        self.assertNotIn("wake_model", self.manifest)
+        self.assertNotIn("wakenet_packed_bytes", self.manifest["budget"])
+        self.assertEqual(self.manifest["budget"]["total_bytes"], 1028631)
 
-    def test_common_font_matches_official_14px_spec(self) -> None:
+    def test_common_font_matches_official_16px_spec(self) -> None:
         font = self.manifest["text_font"]
         self.assertEqual(font["file"], COMMON_FONT.name)
-        self.assertEqual(font["size_px"], 14)
-        self.assertEqual(font["bpp"], 1)
-        self.assertEqual(font["line_height"], 16)
-        self.assertEqual(font["base_line"], 2)
+        self.assertEqual(font["size_px"], 16)
+        self.assertEqual(font["bpp"], 4)
+        self.assertEqual(font["line_height"], 25)
+        self.assertEqual(font["base_line"], 9)
         data = COMMON_FONT.read_bytes()
         self.assertEqual(len(data), font["size_bytes"])
         self.assertEqual(hashlib.sha256(data).hexdigest(), font["sha256"])
@@ -205,8 +198,6 @@ class SparkBotAssetManifestTest(unittest.TestCase):
                     str(GIF_DIR),
                     "--common-font",
                     str(COMMON_FONT),
-                    "--wake-model-dir",
-                    str(WAKE_MODEL_DIR),
                     "--output",
                     str(out),
                 ],
@@ -268,21 +259,6 @@ class SparkBotAssetManifestTest(unittest.TestCase):
             infos.append((COMMON_FONT.name, len(merged), len(font_data), 0, 0))
             merged.extend(b"\x5a" * 2)
             merged.extend(font_data)
-            model_files = sorted(path for path in WAKE_MODEL_DIR.iterdir() if path.is_file())
-            model_header_size = 4 + 32 + 4 + len(model_files) * 40
-            model = bytearray(struct.pack("<I", 1))
-            model.extend(WAKE_MODEL_DIR.name.encode("ascii").ljust(32, b"\0"))
-            model.extend(struct.pack("<I", len(model_files)))
-            model_payload = bytearray()
-            for path in model_files:
-                data = path.read_bytes()
-                model.extend(path.name.encode("ascii").ljust(32, b"\0"))
-                model.extend(struct.pack("<II", model_header_size + len(model_payload), len(data)))
-                model_payload.extend(data)
-            model.extend(model_payload)
-            infos.append(("srmodels.bin", len(merged), len(model), 0, 0))
-            merged.extend(b"\x5a" * 2)
-            merged.extend(model)
             table = bytearray()
             for name, offset, size, width, height in infos:
                 fixed = name.encode("utf-8")[:32].ljust(32, b"\x00")
@@ -302,8 +278,6 @@ class SparkBotAssetManifestTest(unittest.TestCase):
                     str(GIF_DIR),
                     "--common-font",
                     str(COMMON_FONT),
-                    "--wake-model-dir",
-                    str(WAKE_MODEL_DIR),
                     "--output",
                     str(out),
                 ],

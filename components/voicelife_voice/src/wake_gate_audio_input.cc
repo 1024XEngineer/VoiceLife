@@ -103,7 +103,12 @@ Status WakeGateAudioInput::StopCapture() {
         if (status.ok()) physical_running_ = false;
         return status;
     }
-    return StartDetectorLocked();
+    // Do not re-arm MultiNet here. VoiceSession calls StopCapture before TTS
+    // and while awaiting final ASR; this board has no AEC, so feeding speaker
+    // output to the detector in either state can create a false local wake and
+    // abort the active response. Runtime owns the state transition and calls
+    // StartStandby only once the interaction is truly idle.
+    return StopDetectorLocked();
 }
 
 void WakeGateAudioInput::Close() {

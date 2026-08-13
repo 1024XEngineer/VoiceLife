@@ -117,6 +117,12 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
         ++speaks;
         return speak_result;
     }
+    Status NotifyLocalWakeWord(std::string_view wake_word, std::string_view text_response = {}) override {
+        ++wake_notifications;
+        last_wake_word = std::string(wake_word);
+        last_wake_response = std::string(text_response);
+        return wake_notification_result;
+    }
     Status Disconnect() override {
         ++disconnects;
         return disconnect_result;
@@ -148,6 +154,7 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
     Status send_result = Status::Ok();
     Status abort_result = Status::Ok();
     Status speak_result = Status::Ok();
+    Status wake_notification_result = Status::Ok();
     Status disconnect_result = Status::Ok();
     int connects = 0;
     int starts = 0;
@@ -155,7 +162,10 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
     int audio_frames = 0;
     int aborts = 0;
     int speaks = 0;
+    int wake_notifications = 0;
     int disconnects = 0;
+    std::string last_wake_word;
+    std::string last_wake_response;
 };
 
 voicelife::voice::VoiceSessionConfig Config() {
@@ -202,6 +212,21 @@ int main() {
 
     Check(session.Start(Config()).ok(), "合法配置应启动语音会话");
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady, "启动后应进入 ready");
+    Check(session.NotifyLocalWakeWord("你好牛牛", "收到！").ok() && provider.wake_notifications == 1 &&
+              provider.last_wake_word == "你好牛牛" && provider.last_wake_response == "收到！",
+          "本地唤醒确认必须只通过 Provider 请求受控 TTS");
+    provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
+                                                .generation = session.generation(),
+                                                .text = {},
+                                                .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kSpeaking,
+          "本地唤醒确认的真实 TTS start 才能进入 speaking");
+    provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStopped,
+                                                .generation = session.generation(),
+                                                .text = {},
+                                                .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
+          "本地唤醒确认 TTS 结束后会话必须允许开始真实聆听");
     session.ReportToolCallStarted();
     session.ReportToolResult("event=创建会议", true);
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady && provider.audio_frames == 0 && output.pushes == 0,
@@ -228,6 +253,8 @@ int main() {
           "收到有效 STT 后 TTS start 应进入播报状态");
     Check(provider.EmitAudio(Frame(generation, 0)).ok() && output.pushes == 1,
           "TTS start 后的下行音频应通过会话输出端口");
+    Check(!evidence.empty() && evidence.back().event == "tts_first_audio",
+          "每段 TTS 首个成功播放帧必须提供无内容的时延证据");
     const std::size_t evidence_before_late_asr = evidence.size();
     provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kAsrText,
                                                .generation = generation,
@@ -286,6 +313,12 @@ int main() {
           "打断应刷新播放并让 Provider 切换到新 generation");
     Check(provider.EmitAudio(Frame(generation, 1)).code == ErrorCode::kUnavailable && output.pushes == 2,
           "打断后迟到的旧 generation 音频不得重新进入播放队列");
+    provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
+                                                .generation = session.generation(),
+                                                .text = {},
+                                                .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
+          "打断后即使迟到 TTS 被归入新 generation 也不得复活旧播报");
     provider.Emit(voicelife::voice::VoiceEvent{});
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
           "缺少 generation 的迟到 Provider 事件不能改变新会话状态");

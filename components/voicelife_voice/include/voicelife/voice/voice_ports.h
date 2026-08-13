@@ -286,7 +286,7 @@ class SpeechProviderAdapter {
      *  @param wake_word 已由本地检测器确认的唤醒词。
      *  @return 通知发送结果。
      */
-    virtual Status NotifyLocalWakeWord(std::string_view /*wake_word*/) {
+    virtual Status NotifyLocalWakeWord(std::string_view /*wake_word*/, std::string_view /*text_response*/ = {}) {
         return Status::Error(ErrorCode::kUnavailable, "本地唤醒未实现");
     }
 

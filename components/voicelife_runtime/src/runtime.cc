@@ -23,8 +23,6 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "generated/farewell_pcm.h"
-#include "generated/wake_ack_pcm.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "voicelife/im/esp_http_transport_factory.h"
@@ -53,10 +51,11 @@ namespace {
 
 #ifdef ESP_PLATFORM
 constexpr char kTag[] = "VoiceLifeRuntime";
-constexpr uint32_t kWakeFeedbackMs = 800;
 constexpr int64_t kWakeAckDisplayUs = 400 * 1000;
 constexpr int64_t kVolumeOverlayUs = 1500 * 1000;
-constexpr uint32_t kListenTimeoutMs = 15000;
+// 唤醒或 follow-up 后的首次开口等待：6 秒足以让用户听清提示并开口，
+// 又不会让无输入回合长时间占住 UI。说话后的端点与最终 STT 分别处理。
+constexpr uint32_t kListenStartTimeoutMs = 6000;
 constexpr uint32_t kFinalSttTimeoutMs = 5000;
 #if CONFIG_VOICELIFE_IM_GATEWAY
 constexpr bool kImGatewayEnabled = true;
@@ -141,7 +140,7 @@ class ScaffoldSpeechProvider final : public voice::SpeechProviderAdapter {
     Status SendAudio(const voice::AudioFrame&) override { return Status::Ok(); }
     Status Abort(std::string_view) override { return Status::Ok(); }
     Status Speak(std::string_view) override { return Status::Ok(); }
-    Status NotifyLocalWakeWord(std::string_view) override { return Status::Ok(); }
+    Status NotifyLocalWakeWord(std::string_view, std::string_view = {}) override { return Status::Ok(); }
     Status Disconnect() override { return Status::Ok(); }
     Result<voice::VoiceAudioFormats> audio_formats() const override {
         voice::VoiceAudioFormats fmt;
@@ -421,7 +420,7 @@ class Runtime final {
                 response = BuildLinxMcpUnavailableResponse(request->payload, "设备 MCP 执行失败", request->session_id);
             }
             if (tool_call && !request->abandoned.load() && session_) {
-                const LinxMcpToolOutcome outcome = InspectLinxMcpToolOutcome(response);
+                const LinxMcpToolOutcome outcome = InspectLinxMcpToolOutcome(request->payload, response);
                 session_->ReportToolResult(TruncateUtf8(outcome.summary, 96), outcome.success);
             }
             ESP_LOGI(kTag, "MCP_TOOL_EXECUTED tool_call=%d result=%d", tool_call ? 1 : 0, response.ok() ? 1 : 0);
@@ -505,6 +504,7 @@ class Runtime final {
 
     enum class BoardRequestKind : uint8_t {
         kWakeWord,
+        kInterruptAndWakeWord,
         kRestoreStandby,
         kInterrupt,
         kStartCapture,
@@ -515,10 +515,10 @@ class Runtime final {
     struct BoardRequest {
         BoardRequestKind kind = BoardRequestKind::kRestoreStandby;
         char wake_word[32];
-        /** 仅真实用户告别完成后才显示/播放本地告别反馈。 */
-        bool show_farewell = false;
         /** 物理唤醒门已就绪后是否需将 Controller 收口为 standby。 */
         bool settle_controller = true;
+        /** 当存在时，以 Provider 的正式 TTS 请求播报这段系统话术。 */
+        char system_speech[48];
     };
 
     void EnqueueBoardInput(BoardInputAction action) {
@@ -555,38 +555,16 @@ class Runtime final {
         }
     }
 
-    // 本地提示音：播放 popup.ogg 解码的 PCM（16kHz S16LE），按协商播放格式重采样。
-    // 播放本地提示音（裸 PCM 16kHz mono）：直接入队，播放端口统一重采样到 24kHz。
-    void PlayPrompt(const int16_t* pcm, size_t sample_count) {
-        if (assembly_ == nullptr || pcm == nullptr || sample_count == 0) return;
-        voice::AudioFrame frame;
-        frame.format = {.codec = voice::AudioCodec::kPcmS16Le,
-                        .sample_rate_hz = 16000,
-                        .channels = 1,
-                        .bits_per_sample = 16,
-                        .frame_duration_ms = 0};
-        frame.generation = 0;
-        frame.sequence = 0;
-        frame.payload.resize(sample_count * sizeof(int16_t));
-        std::memcpy(frame.payload.data(), pcm, sample_count * sizeof(int16_t));
-        const Status push_status = assembly_->audio_output().Push(frame);
-        ESP_LOGI(kTag, "PROMPT_PUSH result=%d bytes=%u", push_status.ok() ? 1 : 0,
-                 static_cast<unsigned>(frame.payload.size()));
-    }
-
-    // 唤醒“收到”提示音。
-    void PlayWakeAck() { PlayPrompt(wake_ack::kPcm, wake_ack::kSampleCount); }
-
-    // 告别“牛牛走了”提示音。
-    void PlayFarewell() { PlayPrompt(farewell::kPcm, farewell::kSampleCount); }
-
     void QueueWakeWord(std::string_view wake_word) {
         LogVoiceEvidence({.session_id = session_ ? session_->config().session_id : "",
                           .generation = session_ ? session_->generation() : 0,
                           .event = "wake_detected",
                           .detail = {}});
-        // 只投递事件：唤醒词时间、提示音和状态迁移都由事件循环唯一处理。
-        EnqueueEvent(voice::VoiceInteractionEvent::kWakeDetected, wake_word);
+        // “别说了”要中止旧播报后只回复一次“收到！”，随即转入聆听；它不是
+        // 静默中止，也不能被当作普通唤醒后让旧 TTS 继续播放。
+        const auto event = wake_word == "别说了" ? voice::VoiceInteractionEvent::kInterruptAndAcknowledge
+                                                 : voice::VoiceInteractionEvent::kWakeDetected;
+        EnqueueEvent(event, wake_word);
     }
 
     void QueueVoiceTurn(std::string_view wake_word) {
@@ -600,12 +578,33 @@ class Runtime final {
         (void)xQueueSend(wake_queue_, &request, 0);
     }
 
-    void QueueStandbyRecovery(bool show_farewell = false, bool settle_controller = true) {
+    void QueueInterruptAndVoiceTurn(std::string_view wake_word) {
+        if (wake_queue_ == nullptr) return;
+        BoardRequest request{};
+        request.kind = BoardRequestKind::kInterruptAndWakeWord;
+        const std::size_t size =
+            wake_word.size() < sizeof(request.wake_word) - 1 ? wake_word.size() : sizeof(request.wake_word) - 1;
+        std::memcpy(request.wake_word, wake_word.data(), size);
+        request.wake_word[size] = '\0';
+        (void)xQueueSend(wake_queue_, &request, 0);
+    }
+
+    void QueueStandbyRecovery(bool settle_controller = true) {
         if (wake_queue_ == nullptr) return;
         BoardRequest recovery{};
-        recovery.show_farewell = show_farewell;
         recovery.settle_controller = settle_controller;
         (void)xQueueSend(wake_queue_, &recovery, 0);
+    }
+
+    void QueueSystemSpeech(std::string_view text) {
+        if (wake_queue_ == nullptr || text.empty()) return;
+        BoardRequest request{};
+        request.kind = BoardRequestKind::kInterrupt;
+        const std::size_t size = text.size() < sizeof(request.system_speech) - 1 ? text.size()
+                                                                                   : sizeof(request.system_speech) - 1;
+        std::memcpy(request.system_speech, text.data(), size);
+        request.system_speech[size] = '\0';
+        (void)xQueueSend(wake_queue_, &request, 0);
     }
 
     // 下行长文本滚动由显示 Adapter 负责（Ssd1306PresentationAdapter）。
@@ -622,6 +621,7 @@ class Runtime final {
     static void ListenTimeoutEntry(void* context) {
         auto* self = static_cast<Runtime*>(context);
         // Timer 回调不能读取或迁移交互状态；由事件循环串行决定超时路径。
+        ESP_LOGI(kTag, "LISTEN_TIMEOUT_FIRED");
         self->EnqueueListenTimeout();
     }
 
@@ -637,7 +637,13 @@ class Runtime final {
             }
         }
         (void)esp_timer_stop(listen_timer_);
-        (void)esp_timer_start_once(listen_timer_, timeout_ms * 1000ULL);
+        const esp_err_t start = esp_timer_start_once(listen_timer_, timeout_ms * 1000ULL);
+        if (start != ESP_OK) {
+            ESP_LOGW(kTag, "LISTEN_TIMEOUT_ARM_FAILED ms=%u err=%d", static_cast<unsigned>(timeout_ms),
+                     static_cast<int>(start));
+            return;
+        }
+        ESP_LOGI(kTag, "LISTEN_TIMEOUT_ARMED ms=%u", static_cast<unsigned>(timeout_ms));
     }
 
     void CancelListenTimer() {
@@ -780,18 +786,6 @@ class Runtime final {
                           .generation = session_ ? session_->generation() : 0,
                           .event = "standby_ready",
                           .detail = {}});
-        // “牛牛走了！”只属于用户明确结束的回合。网络断开、Provider 错误、
-        // 启动与一般待机恢复只重启本地唤醒，绝不能伪造告别或播放本地音频。
-        if (request.show_farewell && assembly_ != nullptr) {
-            for (int i = 0; i < 30 && !assembly_->audio_output().IsIdle(); ++i) {
-                vTaskDelay(pdMS_TO_TICKS(50));
-            }
-        }
-        if (request.show_farewell) {
-            ShowOverlay(voice::VoiceMood::kHappy, "牛牛走了！", "");
-            PlayFarewell();
-            vTaskDelay(pdMS_TO_TICKS(kWakeFeedbackMs));
-        }
         // 显式派发 kStandbyReady：Controller 从 Error/kFinalizing 回 Standby，
         // 避免 RestoreStandby 直接写快照造成控制器仍停 Error 的假待机
         // （WAKE_REARM atomic=0）。Controller 回 Standby 后由状态机动作
@@ -812,9 +806,26 @@ class Runtime final {
                 RestoreStandby(request);
                 continue;
             }
+            if (request.kind == BoardRequestKind::kInterruptAndWakeWord) {
+                if (!session_ || !provider_) continue;
+                const Status acknowledge = session_->InterruptAndNotifyLocalWakeWord(request.wake_word, "收到！");
+                if (!acknowledge.ok()) {
+                    ESP_LOGW(kTag, "打断确认请求失败: %s", acknowledge.message.c_str());
+                    QueueStandbyRecovery();
+                }
+                continue;
+            }
             if (request.kind == BoardRequestKind::kInterrupt) {
                 if (!session_) continue;
                 const Status interrupt = session_->Interrupt();
+                if (request.system_speech[0] != '\0') {
+                    const Status speak = interrupt.ok() ? session_->Speak(request.system_speech) : interrupt;
+                    if (!speak.ok()) {
+                        ESP_LOGW(kTag, "系统播报请求失败: %s", speak.message.c_str());
+                        QueueStandbyRecovery();
+                    }
+                    continue;
+                }
                 if (interrupt.ok()) {
                     if (interaction_.state() == voice::VoiceInteractionState::kInterrupting) {
                         (void)EnqueueEvent(voice::VoiceInteractionEvent::kInterruptCompleted);
@@ -872,12 +883,11 @@ class Runtime final {
                 continue;
             }
             if (!session_ || !provider_) continue;
-            // 本板不发送唤醒音频，故不发 listen.detect（否则服务端会把唤醒词
-            // 当 STT 转写并生成一条问候回复）。对齐小智：直接 listen.start
-            // 进入聆听，服务端只会把 start 之后的用户语音当输入。
-            const Status capture = session_->BeginCapture();
-            if (!capture.ok()) {
-                ESP_LOGW(kTag, "唤醒后开始采集失败: %s", capture.message.c_str());
+            // Linx 官方协议支持 listen.detect.text_response：服务端真实合成
+            // “收到！”并下发协商 PCM，tts.stop 后 Controller 才开始聆听。
+            const Status acknowledge = session_->NotifyLocalWakeWord(request.wake_word, "收到！");
+            if (!acknowledge.ok()) {
+                ESP_LOGW(kTag, "唤醒确认请求失败: %s", acknowledge.message.c_str());
                 // 唤醒启动失败：回待机，不显示"出错了/牛牛走了"。
                 (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
             }
@@ -989,6 +999,7 @@ class Runtime final {
             case voice::VoiceInteractionEvent::kToggleChat:
             case voice::VoiceInteractionEvent::kPressDown:
             case voice::VoiceInteractionEvent::kWakeDetected:
+            case voice::VoiceInteractionEvent::kInterruptAndAcknowledge:
                 ++snapshot_.generation;
                 // A fresh user turn must never inherit a farewell decision
                 // from a disconnected or cancelled preceding turn.
@@ -1024,7 +1035,8 @@ class Runtime final {
         // - kTtsStarted：内容栏保持/显示助手文本，角色 assistant
         // - 会话结束/回待机：清空内容栏
         // WakeAck 租约：唤醒后短窗（400ms）内显示“收到！”，不阻塞开麦。
-        if (event == voice::VoiceInteractionEvent::kWakeDetected &&
+        if ((event == voice::VoiceInteractionEvent::kWakeDetected ||
+             event == voice::VoiceInteractionEvent::kInterruptAndAcknowledge) &&
             snapshot_.phase == voice::VoiceInteractionState::kListening && wake_ack_until_us_ > 0 &&
             esp_timer_get_time() < wake_ack_until_us_) {
             snapshot_.content_text = "收到！";
@@ -1066,11 +1078,16 @@ class Runtime final {
             case voice::VoiceInteractionAction::kInterruptAndStartCapture:
                 QueueInterruptAndCapture();
                 return Status::Ok();
+            case voice::VoiceInteractionAction::kInterruptAndStartVoiceTurn:
+                if (wake_word.empty()) {
+                    return Status::Error(ErrorCode::kInvalidArgument, "本地打断词不能为空");
+                }
+                QueueInterruptAndVoiceTurn(wake_word);
+                return Status::Ok();
             case voice::VoiceInteractionAction::kRestoreStandby:
                 // transport_disconnected 必须停在 kReconnecting；物理唤醒门可恢复，
                 // 但不可用 kStandbyReady 把可见状态提前伪装为空闲。
-                QueueStandbyRecovery(event == voice::VoiceInteractionEvent::kFarewellCompleted,
-                                     interaction_.state() != voice::VoiceInteractionState::kReconnecting);
+                QueueStandbyRecovery(interaction_.state() != voice::VoiceInteractionState::kReconnecting);
                 return Status::Ok();
             case voice::VoiceInteractionAction::kInterruptSession:
                 QueueInterrupt();
@@ -1086,7 +1103,7 @@ class Runtime final {
         // only lifecycle names and numeric counters needed for board review.
         if (evidence.event == "capture_started") {
             capture_started_us_.store(esp_timer_get_time());
-            StartListenTimer(kListenTimeoutMs);
+            StartListenTimer(kListenStartTimeoutMs);
         }
         const int64_t started_at = capture_started_us_.load();
         const int64_t now = esp_timer_get_time();
@@ -1099,6 +1116,21 @@ class Runtime final {
         if (evidence.event == "provider_error") {
             // 板端诊断：只输出本地错误消息（不包含 STT 文本、凭据或原始响应）。
             ESP_LOGW(kTag, "PROVIDER_ERROR_DETAIL=%.160s", evidence.detail.c_str());
+        }
+        if (evidence.event == "tts_started" && wake_ack_requested_at_us_ > 0) {
+            const int64_t wake_latency_ms = (esp_timer_get_time() - wake_ack_requested_at_us_) / 1000;
+            if (wake_latency_ms >= 0 && wake_latency_ms <= 10000) {
+                wake_ack_tts_started_at_us_ = esp_timer_get_time();
+                ESP_LOGI(kTag, "WAKE_ACK_LATENCY stage=tts_started ms=%lld", static_cast<long long>(wake_latency_ms));
+            }
+        } else if (evidence.event == "tts_first_audio" && wake_ack_tts_started_at_us_ > 0) {
+            const int64_t audio_latency_ms = (esp_timer_get_time() - wake_ack_requested_at_us_) / 1000;
+            ESP_LOGI(kTag, "WAKE_ACK_LATENCY stage=first_audio ms=%lld", static_cast<long long>(audio_latency_ms));
+        } else if (evidence.event == "tts_stopped" && wake_ack_tts_started_at_us_ > 0) {
+            // 只关闭已经确认属于本次唤醒提示的计时窗口；后续回答的 TTS
+            // 不得被误归类为首次确认时延。
+            wake_ack_requested_at_us_ = 0;
+            wake_ack_tts_started_at_us_ = 0;
         }
         if (evidence.event == "tts_stopped" || evidence.event == "tts_aborted" || evidence.event == "provider_error" ||
             evidence.event == "capture_stop_failed" || evidence.event == "tts_capture_stop_failed") {
@@ -1132,6 +1164,11 @@ class Runtime final {
                                   evidence.detail.find("走了") != std::string::npos);
             }
             (void)EnqueueEvent(voice::VoiceInteractionEvent::kIntentReceived);
+            if (terminal_turn_) {
+                // 不等待服务端针对“再见”的自由回复。先取消旧回合，再以 Linx
+                // text_response 请求固定告别语，因此只会播放“牛牛走了～”。
+                QueueSystemSpeech("牛牛走了～");
+            }
         } else if (evidence.event == "tool_call_received") {
             // MCP 工具调用（服务端发现/工具执行）不是用户语音意图：
             // 仅取消聆听超时，不武装回复、不触发 kIntentReceived。
@@ -1147,14 +1184,29 @@ class Runtime final {
             }
         } else if (evidence.event == "mcp_tool_result" || evidence.event == "mcp_tool_failed") {
             const bool success = evidence.event == "mcp_tool_result";
-            const std::string summary = evidence.detail.empty() ? (success ? "日程操作已完成" : "日程操作失败")
-                                                                : TruncateUtf8(evidence.detail, 96);
+            // evidence.detail 不是可信的用户文本。仅接受 MCP worker 产生的
+            // 固定业务短句；任何原始 JSON-RPC/MCP 内容都降级为通用文案。
+            std::string_view summary = success ? "日程操作已完成" : "日程操作失败";
+            if (success && evidence.detail == "日程已创建") {
+                summary = "日程已创建";
+            } else if (success && evidence.detail == "日程查询完成") {
+                summary = "日程查询完成";
+            } else if (!success && evidence.detail == "日程创建失败") {
+                summary = "日程创建失败";
+            } else if (!success && evidence.detail == "日程查询失败") {
+                summary = "日程查询失败";
+            }
             ShowOverlay(success ? voice::VoiceMood::kHappy : voice::VoiceMood::kSad,
                         success ? "日程结果" : "日程错误", summary);
             StartOverlayTimer(2500);
         } else if (evidence.event == "tts_started") {
             CancelListenTimer();
             (void)EnqueueEvent(voice::VoiceInteractionEvent::kTtsStarted);
+        } else if (evidence.event == "local_wake_ack_requested" || evidence.event == "interrupt_ack_requested") {
+            // 本地唤醒/打断确认已经成功提交给 Provider，但真正的 tts.start
+            // 可能永远不到达（断线或服务端无响应）。此时 UI 已处于
+            // kListening，必须有边界地回到待机，不能无限显示“聆听中”。
+            StartListenTimer(kListenStartTimeoutMs);
         } else if (evidence.event == "tts_sentence_started") {
             // 回写服务端回复句子到屏幕（detail 为 TTS 文本），并立即提交快照
             // 让“说话中 + 助手文本”可见（不再停留显示用户 STT）。
@@ -1447,8 +1499,10 @@ class Runtime final {
             }
             if (item.listen_timeout) {
                 if (interaction_.state() == voice::VoiceInteractionState::kListening) {
-                    // 单一收尾路径：停止采集并等待最终 STT。
-                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kPressUp);
+                    // 聆听总时限表示没有有效端点/回复，不应再伪造 PressUp
+                    // 进入最终 STT 等待；中止本轮即可确保本地唤醒门重新可用。
+                    ESP_LOGI(kTag, "LISTEN_TIMEOUT transition=listening->interrupting");
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kInterruptRequested);
                 } else if (interaction_.state() == voice::VoiceInteractionState::kFinalizing) {
                     ESP_LOGI(kTag, "FINALIZE_TIMEOUT transition=finalizing->standby");
                     if (session_) (void)session_->Interrupt();
@@ -1475,21 +1529,27 @@ class Runtime final {
                          static_cast<unsigned long long>(snapshot_.revision));
                 continue;
             }
-            if (item.event == voice::VoiceInteractionEvent::kWakeDetected) {
-                // 唤醒前置（唯一状态写者内）：显示租约 + 提示音。
+            if (item.event == voice::VoiceInteractionEvent::kWakeDetected ||
+                item.event == voice::VoiceInteractionEvent::kInterruptAndAcknowledge) {
+                // 唤醒前置（唯一状态写者内）：显示租约；声音由 Linx TTS 的
+                // text_response 产生，绝不在 Runtime 直接推裸 PCM。
                 last_wake_word_ = item.wake_word;
                 last_wake_at_ = esp_timer_get_time();
+                wake_ack_requested_at_us_ = last_wake_at_;
+                wake_ack_tts_started_at_us_ = 0;
                 wake_ack_until_us_ = esp_timer_get_time() + kWakeAckDisplayUs;
-                PlayWakeAck();
             }
             const Status wake_status = HandleInteractionEvent(item.event, item.wake_word);
             if (item.event != voice::VoiceInteractionEvent::kWakeDetected && !wake_status.ok()) {
                 ESP_LOGW(kTag, "INTERACTION_REJECTED event=%d state=%d err=%s", static_cast<int>(item.event),
                          static_cast<int>(interaction_.state()), wake_status.message.c_str());
             }
-            if (item.event == voice::VoiceInteractionEvent::kWakeDetected && !wake_status.ok()) {
-                // 唤醒被拒（如控制器不在 kStandby）：重启检测器，否则后续永远叫不醒。
-                ESP_LOGW(kTag, "WAKE_REJECTED state=%d err=%s", static_cast<int>(interaction_.state()),
+            if ((item.event == voice::VoiceInteractionEvent::kWakeDetected ||
+                 item.event == voice::VoiceInteractionEvent::kInterruptAndAcknowledge ||
+                 item.event == voice::VoiceInteractionEvent::kInterruptRequested) &&
+                !wake_status.ok()) {
+                // 非法本地命令（例如待机时“别说了”）不得让检测器停死。
+                ESP_LOGW(kTag, "LOCAL_COMMAND_REJECTED state=%d err=%s", static_cast<int>(interaction_.state()),
                          wake_status.message.c_str());
                 if (assembly_->uses_local_wake_detector()) {
                     (void)assembly_->wake_gate().StartStandby();
@@ -1509,6 +1569,8 @@ class Runtime final {
     // 最近唤醒词与其发生时刻（抑制唤醒词被服务端回传为 STT）。
     std::string last_wake_word_;
     int64_t last_wake_at_ = 0;
+    int64_t wake_ack_requested_at_us_ = 0;
+    int64_t wake_ack_tts_started_at_us_ = 0;
     // WakeAck 显示租约截止时刻（esp_timer_us）：到期前下行栏显示“收到！”。
     int64_t wake_ack_until_us_ = 0;
     // 音量 overlay 截止时刻（esp_timer_us）：到期后恢复最新快照。

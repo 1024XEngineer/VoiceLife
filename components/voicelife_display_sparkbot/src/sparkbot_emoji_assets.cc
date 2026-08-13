@@ -24,7 +24,7 @@ constexpr std::array<std::string_view, 10> kControlledAssetIds = {
 #ifdef ESP_PLATFORM
 constexpr const char* kTag = "sparkbot_emoji";
 constexpr const char* kPartitionLabel = "assets";
-constexpr std::string_view kCommonTextFontFilename = "font_noto_sans_common_14_1.bin";
+constexpr std::string_view kCommonTextFontFilename = "font_noto_sans_common_16_4.bin";
 
 /** @brief 官方 assets 分区文件表项（xiaozhi-esp32@37d1aee main/assets.cc）。 */
 struct MmappedAssetEntry {
@@ -115,7 +115,8 @@ voicelife::Status SparkBotEmojiAssets::Initialize() {
         esp_partition_munmap(mmap_handle);
         return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "assets 分区数据长度非法");
     }
-    // 文件表边界：10 个 GIF、固定 common 14px 字体和固定 WakeNet 模型包。
+    // 文件表边界：10 个 GIF 和固定 common 16px 字体。ESP-SR 模型从独立
+    // model 分区加载，不属于显示 assets 容器。
     constexpr std::size_t kMaxControlledFiles = 12;
     const std::size_t table_bytes = static_cast<std::size_t>(stored_files) * sizeof(MmappedAssetEntry);
     if (stored_files > kMaxControlledFiles || table_bytes > stored_len) {

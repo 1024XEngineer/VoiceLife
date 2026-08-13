@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "board_id": "esp-sparkbot",
-  "asset_kind": "mascot_gif_common_text_font_and_controlled_wakenet",
+  "asset_kind": "mascot_gif_common_text_font",
   "source": {
     "upstream_repository": "78/xiaozhi-esp32",
     "upstream_commit": "37d1aee793f99a9b865957acc3798d06335c3ad0",
@@ -24,33 +24,24 @@
   },
   "budget": {
     "gif_bytes": 142683,
-    "common_text_font_bytes": 269580,
-    "wakenet_packed_bytes": 292609,
-    "total_bytes": 704872,
+    "common_text_font_bytes": 885948,
+    "total_bytes": 1028631,
     "assets_partition_bytes": 1048576,
     "single_frame_rgb565_bytes": 18432,
     "psram_decode_peak_bytes": null,
     "psram_note": "GIF 解码峰值内存尚未测量；Renderer 移植时以真机 heap 证据补充。",
-    "assets_image_sha256": "7140766307022083d13e67192fce75c0204431bd78ab6468d1d2fe14b53ae7ba",
-    "assets_image_bytes": 705436
+    "assets_image_sha256": "bbb9c25b3812b60b74837176e267c147132ae0ff17185da123ad4514deb832af",
+    "assets_image_bytes": 1029149
   },
   "text_font": {
-    "file": "font_noto_sans_common_14_1.bin",
+    "file": "font_noto_sans_common_16_4.bin",
     "source": "78/xiaozhi-fonts@2.0.0",
-    "size_px": 14,
-    "bpp": 1,
-    "line_height": 16,
-    "base_line": 2,
-    "size_bytes": 269580,
-    "sha256": "ccdfa4a7de73f584f0d7519be2d2785c4e9880446edf66c1635e676969c030ee"
-  },
-  "wake_model": {
-    "file": "srmodels.bin",
-    "model_name": "wn9l_nihaoxiaozhi_tts3",
-    "wake_word": "你好小智",
-    "source": "espressif/esp-sr@2.4.7 managed component (commit 2f8c4b0459db5bbb39abd77adae27962d6d94bcb)",
-    "packed_size_bytes": 292609,
-    "sha256": "b3cb0ba38c2443b0a082c37c2ef9b1f990c1bd56a5eac341961e9c0f6df6c373"
+    "size_px": 16,
+    "bpp": 4,
+    "line_height": 25,
+    "base_line": 9,
+    "size_bytes": 885948,
+    "sha256": "6c801b34ec686e6e31223eceedea2efe5b0cf294b3556d91087a683c86a54384"
   },
   "verification": {
     "verified_on_device": false,

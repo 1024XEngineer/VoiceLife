@@ -87,7 +87,7 @@ class SparkBotLvglRenderer {
     [[maybe_unused]] void* chat_message_label_ = nullptr;
     /** @brief emoji GIF 资源加载器（官方 assets 分区格式）。 */
     [[maybe_unused]] class SparkBotEmojiAssets* emoji_assets_ = nullptr;
-    /** @brief mmap common 14px 字体经 cbin_font_create 创建的 LVGL 字体。 */
+    /** @brief mmap common 16px 字体经 cbin_font_create 创建的 LVGL 字体。 */
     [[maybe_unused]] void* common_text_font_ = nullptr;
     /** @brief 当前 GIF 播放控制器（LvglGif*）。 */
     [[maybe_unused]] void* gif_controller_ = nullptr;

@@ -167,17 +167,20 @@ Status LinxSpeechProviderAdapter::Speak(std::string_view text) {
     if (!connected_.load()) {
         return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
     }
-    return Send(codec_.EncodeListenDetect(ActiveSessionConfig(), text));
+    // Linx formally defines text_response on listen.detect as the device's
+    // requested server-side TTS. Keep the protocol field in this adapter;
+    // Runtime and VoiceSession only express semantic system speech.
+    return Send(codec_.EncodeListenDetect(ActiveSessionConfig(), "system_prompt", text));
 }
 
-Status LinxSpeechProviderAdapter::NotifyLocalWakeWord(std::string_view wake_word) {
+Status LinxSpeechProviderAdapter::NotifyLocalWakeWord(std::string_view wake_word, std::string_view text_response) {
     if (!connected_.load()) {
         return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
     }
     if (wake_word.empty()) {
         return Status::Error(ErrorCode::kInvalidArgument, "本地唤醒词为空");
     }
-    return Send(codec_.EncodeListenDetect(ActiveSessionConfig(), wake_word));
+    return Send(codec_.EncodeListenDetect(ActiveSessionConfig(), wake_word, text_response));
 }
 
 Status LinxSpeechProviderAdapter::Disconnect() {

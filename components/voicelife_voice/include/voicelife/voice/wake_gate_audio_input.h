@@ -76,8 +76,12 @@ class WakeGateAudioInput final : public AudioInputPort {
      * @return 切换成功时返回成功。
      */
     Status StartCapture(VoiceMode mode) override;
-    /** @brief 停止向会话上行并恢复本地待机检测。
-     * @return 检测器恢复运行时返回成功。
+    /** @brief 停止向会话上行，但不隐式恢复本地待机检测。
+     *
+     * 播报开始和最终 STT 等待都需要停止云端上行；在这些中间状态重新打开
+     * 本地命令检测会把扬声器回声识别为唤醒词。只有 Runtime 在交互状态
+     * 明确回到 Standby 后才调用 StartStandby() 恢复检测器。
+     * @return 上行已停止时返回成功。
      */
     Status StopCapture() override;
     /** @brief 停止检测和物理采集，并释放输入端口。 */

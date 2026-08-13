@@ -103,8 +103,10 @@ int main() {
     Check(hello.value->find("\"transport\":\"websocket\"") != std::string::npos, "hello 必须声明 websocket transport");
     Check(hello.value->find("\"mcp\":true") != std::string::npos, "hello 必须声明 MCP 能力");
     Check(hello.value->find("\"sample_rate\":16000") != std::string::npos, "hello 必须声明采样率");
-    auto detect = codec.EncodeListenDetect(config, "请播报\\测试");
-    Check(detect.ok() && detect.value->find("\\\\测试") != std::string::npos, "detect 必须正确转义文本并携带请求");
+    auto detect = codec.EncodeListenDetect(config, "请播报\\测试", "收到！");
+    Check(detect.ok() && detect.value->find("\\\\测试") != std::string::npos &&
+              detect.value->find("\"text_response\":\"收到！\"") != std::string::npos,
+          "detect 必须正确转义文本并携带受控 TTS 请求");
     Check(codec.EncodeListenDetect(config, "").status.code == ErrorCode::kInvalidArgument, "空 detect 文本必须拒绝");
 
     auto parsed_hello = codec.DecodeText(
@@ -160,15 +162,20 @@ int main() {
           "Provider 应分别暴露请求的上行格式和 hello 协商的下行格式");
     transport.EmitConnected();
     Check(transport.texts.size() == 1, "重复 connected 事件不得重复发送 hello");
-    Check(provider.NotifyLocalWakeWord("你好牛牛").ok() && provider.StartCapture(config.mode).ok() &&
+    Check(provider.NotifyLocalWakeWord("你好牛牛", "收到！").ok() && provider.StartCapture(config.mode).ok() &&
               provider.StopCapture().ok(),
-          "本地唤醒必须先 detect，再发送 listen start/stop");
+          "本地唤醒确认必须先 detect，再发送 listen start/stop");
     Check(provider.Speak("测试播报").ok() && provider.Abort("user_interrupt").ok(), "detect/abort 应通过传输发送");
     Check(transport.texts.size() == 6, "hello、本地 detect、listen、listen、detect、abort 应各发送一帧");
     Check(transport.texts[1].find("\"type\":\"listen\"") != std::string::npos &&
               transport.texts[1].find("\"state\":\"detect\"") != std::string::npos &&
+              transport.texts[1].find("\"text\":\"你好牛牛\"") != std::string::npos &&
+              transport.texts[1].find("\"text_response\":\"收到！\"") != std::string::npos &&
               transport.texts[2].find("\"state\":\"start\"") != std::string::npos,
-          "本地唤醒链路必须保持 listen.detect 在 listen.start 之前");
+          "本地唤醒链路必须保持带收到播报的 listen.detect 在 listen.start 之前");
+    Check(transport.texts[4].find("\"text\":\"system_prompt\"") != std::string::npos &&
+              transport.texts[4].find("\"text_response\":\"测试播报\"") != std::string::npos,
+          "系统播报必须使用 Linx 定义的 text_response，不能伪装为用户 STT");
     Check(transport.texts[1].find("\"session_id\":\"remote-linx-session\"") != std::string::npos &&
               transport.texts[5].find("\"session_id\":\"remote-linx-session\"") != std::string::npos,
           "服务端 hello 分配的 session_id 必须用于后续控制消息");

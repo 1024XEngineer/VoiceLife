@@ -30,6 +30,8 @@ enum class VoiceInteractionEvent {
     kIntentReceived,
     kTtsStarted,
     kTtsStopped,
+    /** 本地“别说了”：取消旧播报后播放一次确认，并在确认结束后直接聆听。 */
+    kInterruptAndAcknowledge,
     kInterruptRequested,
     kInterruptCompleted,
     kStandbyReady,
@@ -46,6 +48,8 @@ enum class VoiceInteractionAction {
     kStopVoiceTurn,
     /** 打断当前会话后开始手动采集，不发送本地唤醒事件。 */
     kInterruptAndStartCapture,
+    /** 先取消旧回合，再发送本地确认 TTS；确认结束时进入 follow-up 聆听。 */
+    kInterruptAndStartVoiceTurn,
     kRestoreStandby,
     kInterruptSession,
 };

@@ -67,9 +67,11 @@ int main() {
                   std::string::npos,
           "tools/call 必须返回 MCP text content");
     Check(called.Get("result")->Get("isError")->boolean == false, "成功 tools/call 必须明确声明 isError=false");
-    const auto successful_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(call);
-    Check(successful_outcome.success && successful_outcome.summary.find("event=创建会议") != std::string::npos,
-          "成功 tools/call 才能进入成功的会话/屏幕语义");
+    const auto successful_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"创建会议","start_time":1900000000}},"id":3})",
+        call);
+    Check(successful_outcome.success && successful_outcome.summary == "日程已创建",
+          "成功 MCP 机器结果不得进入用户可见会话/屏幕语义");
 
     const auto initialized_notification = voicelife::runtime::HandleLinxMcpPayload(
         R"({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})", server, "remote-session");
@@ -82,17 +84,20 @@ int main() {
     Check(missing.ok(), "未知工具必须返回 JSON-RPC 错误响应");
     const auto& missing_result = ParseMcpEnvelope(*missing.value);
     Check(missing_result.Get("error")->Get("code")->number == -32601, "未知工具应回传 JSON-RPC method-not-found");
-    const auto missing_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(missing);
-    Check(!missing_outcome.success && missing_outcome.summary.find("工具不存在") != std::string::npos,
-          "合法 JSON-RPC 未知工具错误不能被错误显示为日程成功");
+    const auto missing_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"unknown.tool","arguments":{}},"id":4})", missing);
+    Check(!missing_outcome.success && missing_outcome.summary == "操作失败",
+          "合法 JSON-RPC 未知工具错误不得向用户泄露诊断信息");
 
     const auto invalid_arguments = voicelife::runtime::HandleLinxMcpPayload(
         R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":42}},"id":5})",
         server);
     Check(invalid_arguments.ok(), "非法工具参数必须回传 JSON-RPC 错误帧");
-    const auto invalid_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(invalid_arguments);
-    Check(!invalid_outcome.success && invalid_outcome.summary.find("参数") != std::string::npos,
-          "非法参数不能被错误显示为日程成功");
+    const auto invalid_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":42}},"id":5})",
+        invalid_arguments);
+    Check(!invalid_outcome.success && invalid_outcome.summary == "日程创建失败",
+          "非法参数错误不得进入用户可见 MCP 摘要");
 
     const auto schedules_before_unavailable = service.query_schedule({.status = voicelife::schedule::ScheduleStatusFilter::kAll});
     const auto unavailable = voicelife::runtime::BuildLinxMcpUnavailableResponse(

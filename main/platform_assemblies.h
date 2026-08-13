@@ -5,9 +5,7 @@
 
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #include "voicelife/audio_esp/esp_multinet_wake_detector.h"
-#include "voicelife/audio_esp/esp_wakenet_detector.h"
 #include "voicelife/board_esp/gpio46_power_arbiter.h"
-#include "voicelife/board_esp/sparkbot_wake_model_assets.h"
 #include "voicelife/display_esp/ssd1306_presentation_adapter.h"
 #include "voicelife/display_sparkbot/sparkbot_presentation_adapter.h"
 #include "voicelife/runtime/platform_assembly.h"
@@ -110,7 +108,7 @@ class SparkBotAssembly : public PlatformAssembly {
     voicelife::voice::WakeGateAudioInput& wake_gate() override;
     /** @brief 返回 SparkBot 板型身份。 @return esp-sparkbot。 */
     std::string_view board_identity() const override { return "esp-sparkbot"; }
-    /** @brief SparkBot 使用 assets 中受控 WakeNet 模型待机监听。 */
+    /** @brief SparkBot 使用与 PCB 相同的 MultiNet 本地命令词待机监听。 */
     bool uses_local_wake_detector() const override { return wake_ready_; }
     /** @brief SparkBot 无 LED（GPIO48 为底盘 UART RX，不写入）。 */
     void InitializeBoardLeds() override {}
@@ -139,8 +137,7 @@ class SparkBotAssembly : public PlatformAssembly {
     mutable std::mutex power_mutex_;
     ButtonSample boot_button_{};
     BoardInputSink board_input_sink_;
-    voicelife::board_esp::SparkBotWakeModelAssets wake_model_assets_;
-    std::unique_ptr<voicelife::audio_esp::EspWakeNetDetector> wake_detector_;
+    std::unique_ptr<voicelife::audio_esp::EspMultiNetWakeDetector> wake_detector_;
     std::unique_ptr<voicelife::voice::WakeGateAudioInput> wake_gate_;
     bool wake_ready_ = false;
     voicelife::audio_esp::Esp32s3PcmAudioPorts audio_ports_;
