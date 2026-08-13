@@ -58,16 +58,18 @@ PROBE_RESULT: FAIL step=explicit rollback leaked row
 
 ## 准备和构建探针
 
-生成目录中的 SQLite 源码不入库。脚本固定下载地址、归档摘要和补丁后文件摘要，任一不匹配都会失败。
+生成目录中的 SQLite 源码不入库。仓库根目录脚本固定下载地址、归档摘要和补丁后文件摘要；正式固件和板级探针共享 `third_party/sqlite3`，任一摘要不匹配都会失败。
 
 ```bash
-python3 tests/board/sqlite_storage_probe/prepare_sqlite.py
+python3 scripts/prepare_sqlite.py
 
 source /path/to/esp-idf-v6.0.2/export.sh
 cd tests/board/sqlite_storage_probe
 idf.py build
 cd ../../..
 ```
+
+旧路径 `tests/board/sqlite_storage_probe/prepare_sqlite.py` 仍保留为兼容入口，新的自动化和文档统一使用根目录脚本。
 
 探针构建必须显示 ESP-IDF `v6.0.2`，生成的应用镜像必须小于目标 OTA 槽。固件默认挂载并允许初始化已备份的 `voicelife` 测试分区；`source export.sh` 还会设置 `IDF_PATH`，不要在另一个未加载环境的 shell 中执行 `write-probe`。
 
@@ -144,7 +146,7 @@ python3 scripts/sqlite_board_probe.py restore \
 
 ## 当前仍未通过的验收
 
-四轮 EN 复位只够确定当前技术路线，不构成完整生产认证。合入真实 SQLite Adapter 前仍要补齐：
+四轮 EN 复位只够确定当前技术路线，不构成完整生产认证。进入生产验收和发布前仍要补齐：
 
 - 至少 10 轮连续实板回归；
 - 可控电源轨断电和棕断测试；

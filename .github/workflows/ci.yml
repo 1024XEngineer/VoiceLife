@@ -119,6 +119,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes libsqlite3-dev
           python -m pip install --disable-pip-version-check "gcovr==8.5"
       - name: 生成 C++ 覆盖率报告
         shell: bash
@@ -168,6 +170,8 @@ jobs:
           echo "runner=${RUNNER_NAME} os=${RUNNER_OS} arch=${RUNNER_ARCH}"
           cmake --version | head -n 1
           python3 --version
+      - name: 安装 SQLite 开发库
+        run: sudo apt-get update && sudo apt-get install --yes libsqlite3-dev
       - name: 检查提交描述
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
         run: python3 scripts/check_commit_message.py --range "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
@@ -184,9 +188,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: 构建固件骨架
+      - name: 准备固定版本 SQLite 源码
+        run: python3 scripts/prepare_sqlite.py
+      - name: 构建默认固件骨架
         uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5 # v1.2.0
         with:
           esp_idf_version: v6.0.2
           target: esp32s3
           path: .
+      - name: 构建 FATFS/WL + SQLite 存储 Profile
+        uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5 # v1.2.0
+        with:
+          esp_idf_version: v6.0.2
+          target: esp32s3
+          path: .
+          command: python3 scripts/firmware.py build esp32s3-storage-dev

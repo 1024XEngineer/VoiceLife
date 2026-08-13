@@ -152,7 +152,7 @@ Audio Port 内部保持三条执行路径：I2S capture 只采样和转换，del
 
 ### 3.6 SQLite 与实时音频的边界
 
-SQLite 不作为 `AudioInputPort` 或 `AudioOutputPort` 的同步依赖。MCP/Calendar Application 通过控制面 `StorageTransactionPort` 提交业务命令，Storage Adapter 独占连接并返回 `transaction_id`、提交状态、影响行数、完整性摘要和错误；音频任务只发布异步事件。
+SQLite 不作为 `AudioInputPort` 或 `AudioOutputPort` 的同步依赖。日程应用通过控制面的 `ScheduleRepository` 访问 SQLite Adapter，音频任务只发布异步事件，不直接打开连接或执行 SQL。
 
 Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质、`journal_mode`、`synchronous` 和掉电类型。`commit` 成功只代表该 Profile 的 VFS/同步语义已返回成功，不能替代真实板断电与恢复证据。当前边界见 [SQLite 存储子架构](./storage-subarchitecture.md)；原始研究过程归档在 [Issue #150](https://github.com/1024XEngineer/VoiceLife/issues/150)。
 

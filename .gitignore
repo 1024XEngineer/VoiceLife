@@ -29,5 +29,10 @@ __pycache__/
 *.bin
 audio-debug*.wav
 
+# SQLite 固定版本脚本生成的 amalgamation 与 ESP-IDF 组件清单
+/third_party/sqlite3/CMakeLists.txt
+/third_party/sqlite3/sqlite3.c
+/third_party/sqlite3/sqlite3.h
+
 # Claude Code worktrees and session artifacts
 .claude/

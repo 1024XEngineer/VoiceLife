@@ -22,6 +22,8 @@ constexpr std::size_t kMaximumEventLength = 100;
 
 }  // namespace
 
+ScheduleService::ScheduleService(ScheduleRepository& repository) : repository_(&repository) {}
+
 CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleCommand& command) const {
     // 健壮性校验
     const std::string event = TrimScheduleText(command.event);
@@ -44,17 +46,37 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
         .end_time = command.end_time,
         .location = command.location,
         .notes = command.notes,
-        .reminder_id = std::nullopt,
+        .rule_id = std::nullopt,
         .status = ScheduleStatus::kActive,
         .created_at = {},
         .updated_at = {},
     };
 
-    // 搜集与当前日程冲突日程+临近日程
+    // 从注入的仓储读取现有日程；无仓储时保留旧单测使用的模拟数据。
+    std::vector<Schedule> existing_schedules;
+    if (repository_ != nullptr) {
+        const Result<std::vector<Schedule>> loaded = repository_->FindAll();
+        if (!loaded.ok()) {
+            const std::string error = "读取现有日程失败：" + loaded.status.message;
+            return {
+                .status = loaded.status,
+                .message = {},
+                .schedule = std::nullopt,
+                .conflicts = {},
+                .nearby_schedules = {},
+                .error = error,
+            };
+        }
+        existing_schedules = *loaded.value;
+    } else {
+        existing_schedules = LoadMockSchedulesForCreate();
+    }
+
+    // 搜集与当前日程冲突日程和临近日程。
     std::vector<Schedule> conflicts;
     std::vector<Schedule> nearby_schedules;
     if (schedule.start_time.has_value()) {
-        for (const Schedule& existing : LoadMockSchedulesForCreate()) {
+        for (const Schedule& existing : existing_schedules) {
             if (existing.status != ScheduleStatus::kActive || !existing.start_time.has_value()) continue;
             if (SchedulesConflict(schedule, existing)) {
                 conflicts.push_back(existing);
@@ -76,7 +98,21 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
         };
     }
 
-    // TODO：落库
+    if (repository_ != nullptr) {
+        const Result<Schedule> stored = repository_->Insert(schedule);
+        if (!stored.ok()) {
+            const std::string error = "保存日程失败：" + stored.status.message;
+            return {
+                .status = stored.status,
+                .message = {},
+                .schedule = std::nullopt,
+                .conflicts = std::move(conflicts),
+                .nearby_schedules = std::move(nearby_schedules),
+                .error = error,
+            };
+        }
+        schedule = *stored.value;
+    }
 
     const std::string message = nearby_schedules.empty() ? "日程创建成功" : "日程创建成功，附近还有其他日程";
     return {
@@ -101,7 +137,7 @@ DeleteScheduleResult ScheduleService::delete_schedule(const DeleteScheduleComman
         };
     }
 
-    // 查找并取消模拟日程
+    // 当前只搭建创建和查询的 SQLite 纵向链路，取消仍使用既有模拟存储。
     const Result<Schedule> cancelled = CancelMockSchedule(command.schedule_id);
     if (!cancelled.ok()) {
         return {
@@ -124,7 +160,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
     // 健壮性校验
     if (command.schedule_id <= 0) return InvalidUpdateScheduleResult("日程 ID 必须大于零");
 
-    // 查询待修改日程；数据库接入前暂由固定模拟数据提供
+    // 当前只搭建创建和查询的 SQLite 纵向链路，修改仍使用既有模拟存储。
     std::vector<Schedule> schedules = LoadMockSchedules();
     auto target = schedules.end();
     for (auto current = schedules.begin(); current != schedules.end(); ++current) {
@@ -147,7 +183,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
     // 确认至少提供一个待修改字段
     const bool has_update = command.event.has_value() || command.start_time.has_value() ||
                             command.end_time.has_value() || command.location.has_value() || command.notes.has_value() ||
-                            command.reminder_id.has_value() || command.status.has_value();
+                            command.rule_id.has_value() || command.status.has_value();
     if (!has_update) return InvalidUpdateScheduleResult("至少需要提供一个要修改的字段");
 
     // 组装修改后的日程，未提供的字段保持不变，显式空值用于清空字段
@@ -163,7 +199,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
     ApplyNullableUpdate(command.end_time, updated.end_time);
     ApplyNullableUpdate(command.location, updated.location);
     ApplyNullableUpdate(command.notes, updated.notes);
-    ApplyNullableUpdate(command.reminder_id, updated.reminder_id);
+    ApplyNullableUpdate(command.rule_id, updated.rule_id);
     if (command.status.has_value()) {
         if (!IsSupportedScheduleStatus(*command.status)) return InvalidUpdateScheduleResult("不支持的日程状态");
         updated.status = *command.status;
@@ -202,7 +238,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
     // 更新修改时间并准备持久化
     updated.updated_at = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
 
-    // TODO(#134): 在数据库适配器中以原子操作持久化日程变更；冲突返回分支不得执行写入。
+    // TODO：后续由日程仓储实现修改写入，本次只验证 INSERT 和 SELECT 链路。
 
     // 忽略冲突时仍返回冲突列表，便于调用方提示潜在影响
     return {
@@ -221,9 +257,19 @@ QueryScheduleResult ScheduleService::query_schedule(const QueryScheduleCommand& 
         return {.status = validation, .schedules = {}, .total = 0, .error = validation.message};
     }
 
-    // 筛选匹配日程；存储接口就绪后将筛选、排序和分页下推到数据库
+    // 先从仓储读取，再由领域规则完成筛选；SQL 文本不会进入服务层。
     std::vector<Schedule> matches;
-    for (const Schedule& schedule : LoadMockSchedulesForQuery()) {
+    std::vector<Schedule> stored_schedules;
+    if (repository_ != nullptr) {
+        const Result<std::vector<Schedule>> loaded = repository_->FindAll();
+        if (!loaded.ok()) {
+            return {.status = loaded.status, .schedules = {}, .total = 0, .error = loaded.status.message};
+        }
+        stored_schedules = *loaded.value;
+    } else {
+        stored_schedules = LoadMockSchedulesForQuery();
+    }
+    for (const Schedule& schedule : stored_schedules) {
         if (MatchesScheduleQuery(schedule, command)) matches.push_back(schedule);
     }
 

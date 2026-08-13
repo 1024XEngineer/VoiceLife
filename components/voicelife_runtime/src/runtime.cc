@@ -40,6 +40,7 @@
 #include "voicelife/schedule/schedule_service.h"
 #endif
 
+#include "bootstrap/storage_bootstrap.h"
 #include "im_runtime_bootstrap.h"
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
@@ -263,6 +264,8 @@ class Runtime final {
     Status Start() {
         auto& registry = voice::SpeechProviderRegistry::Instance();
         if (!init_status_.ok()) return init_status_;
+        const Status storage_status = storage_.Start();
+        if (!storage_status.ok()) return storage_status;
 #ifdef ESP_PLATFORM
         // 立创实战派 ESP32-S3 板载 WS2812 灯珠接 GPIO48（小智 BUILTIN_LED_GPIO）。
         // 上电未驱动时灯珠可能随机亮；用 RMT led_strip 初始化后立即 clear（GRB 全零）
@@ -1293,6 +1296,7 @@ class Runtime final {
     ScaffoldAudioOutput audio_output_;
 #endif
     voice::VoiceInteractionController interaction_;
+    StorageBootstrap storage_;
     std::unique_ptr<voice::SpeechProviderAdapter> provider_;
     std::unique_ptr<voice::VoiceSession> session_;
 

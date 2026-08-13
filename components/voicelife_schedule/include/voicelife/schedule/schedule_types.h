@@ -10,7 +10,6 @@ namespace voicelife::schedule {
 /// 日程、操作记录和提醒使用数据库兼容的 64 位整数标识。
 using ScheduleId = int64_t;
 using OperationId = int64_t;
-using ReminderId = int64_t;
 /// 模块内部的日期时间精确到秒；模型字符串与该类型的转换由边界适配器负责。
 using DateTime = std::chrono::time_point<std::chrono::system_clock, std::chrono::seconds>;
 
@@ -35,7 +34,8 @@ struct Schedule {
     std::optional<DateTime> end_time;
     std::optional<std::string> location;
     std::optional<std::string> notes;
-    std::optional<ReminderId> reminder_id;
+    /// 周期规则来源标识；当前数据库不建立外键。
+    std::optional<ScheduleId> rule_id;
     ScheduleStatus status = ScheduleStatus::kActive;
     DateTime created_at;
     DateTime updated_at;

@@ -50,7 +50,7 @@ void CheckPreviousStateRules(ScheduleService& service) {
         .end_time = std::nullopt,
         .location = "会议室 A",
         .notes = std::nullopt,
-        .reminder_id = std::nullopt,
+        .rule_id = std::nullopt,
         .status = voicelife::schedule::ScheduleStatus::kActive,
         .created_at = DateTime{},
         .updated_at = DateTime{},
