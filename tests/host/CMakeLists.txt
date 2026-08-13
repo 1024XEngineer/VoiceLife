@@ -201,6 +201,9 @@ target_link_libraries(status_test PRIVATE contracts)
 add_voicelife_test(timing_contract_test "unit;timing;contract" timing_contract_test.cc)
 target_link_libraries(timing_contract_test PRIVATE timing)
 
+add_voicelife_test(timing_registration_test "unit;timing" timing_registration_test.cc)
+target_link_libraries(timing_registration_test PRIVATE timing)
+
 add_voicelife_test(fatfs_volume_contract_test "unit;storage;fatfs"
     "${ROOT_DIR}/components/voicelife_storage_fatfs/test/fatfs_volume_contract_test.cc")
 target_link_libraries(fatfs_volume_contract_test PRIVATE storage_fatfs)
