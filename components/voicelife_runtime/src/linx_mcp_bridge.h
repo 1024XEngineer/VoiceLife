@@ -38,7 +38,6 @@ Result<std::string> BuildLinxMcpUnavailableResponse(std::string_view payload, st
  * 失败”。不得携带 MCP 的机器结果、服务端错误原文或参数校验细节；此函数
  * 只解析受控信封，不调用工具、Provider 或显示端口。
  */
-LinxMcpToolOutcome InspectLinxMcpToolOutcome(std::string_view request_payload,
-                                              const Result<std::string>& response);
+LinxMcpToolOutcome InspectLinxMcpToolOutcome(std::string_view request_payload, const Result<std::string>& response);
 
 }  // namespace voicelife::runtime

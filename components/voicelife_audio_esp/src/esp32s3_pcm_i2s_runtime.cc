@@ -1,6 +1,5 @@
-#include "esp32s3_pcm_audio_port_internal.h"
-
 #include "es8311_codec_control.h"
+#include "esp32s3_pcm_audio_port_internal.h"
 
 #ifdef ESP_PLATFORM
 

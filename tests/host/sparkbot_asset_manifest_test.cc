@@ -309,8 +309,7 @@ int main() {
           "budget.common_text_font_bytes 必须与字体实际大小一致");
     Check(yyjson_obj_get(root, "wake_model") == nullptr,
           "显示 assets 不得携带旧 WakeNet 模型；MultiNet 只从独立 model 分区加载");
-    Check(yyjson_obj_get(budget, "wakenet_packed_bytes") == nullptr,
-          "显示 assets 预算不得混入语音模型体积");
+    Check(yyjson_obj_get(budget, "wakenet_packed_bytes") == nullptr, "显示 assets 预算不得混入语音模型体积");
     Check(yyjson_get_uint(yyjson_obj_get(budget, "total_bytes")) == total_bytes + font_data.size(),
           "budget.total_bytes 必须等于 GIF 和 common 字体之和");
 

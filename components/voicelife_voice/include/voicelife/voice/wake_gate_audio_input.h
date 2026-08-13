@@ -45,9 +45,9 @@ class WakeGateAudioInput final : public AudioInputPort {
     /** @brief 使用同一个物理输入创建本地待机和上行采集门控。
      * @param physical_input 唯一的板载物理输入端口。
      * @param detector 本地唤醒检测器。
+     * @param local_wake_enabled 是否启用本地待机唤醒检测。
      */
-    WakeGateAudioInput(AudioInputPort& physical_input, LocalWakeDetectorPort& detector,
-                       bool local_wake_enabled = true);
+    WakeGateAudioInput(AudioInputPort& physical_input, LocalWakeDetectorPort& detector, bool local_wake_enabled = true);
 
     /** @brief 设置唤醒命中后由控制层处理的回调。
      * @param sink 由控制任务消费的唤醒回调。

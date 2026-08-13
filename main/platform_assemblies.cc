@@ -56,7 +56,7 @@ void VoiceLifePcbAssembly::BoardInputTaskEntry(void* context) {
 }
 
 voicelife::Status VoiceLifePcbAssembly::StartGpioInput(std::array<int, 4> gpios, BoardInputSink sink,
-                                                        const char* task_name) {
+                                                       const char* task_name) {
     board_input_sink_ = std::move(sink);
 #ifdef ESP_PLATFORM
     uint64_t pin_mask = 0;
@@ -166,22 +166,22 @@ void VoiceLifePcbAssembly::InitializeBoardLeds() {
 void VoiceLifePcbAssembly::LogAudioStats() {
 #ifdef ESP_PLATFORM
     const auto stats = audio_ports_.stats();
-    ESP_LOGI("voicelife_pcb_audio",
-             "AUDIO_STATS in_frames=%llu in_bytes=%llu in_samples=%llu in_peak=%u in_energy=%llu in_zero=%llu "
-             "out_frames=%llu out_bytes=%llu out_samples=%llu out_peak=%u out_energy=%llu out_zero=%llu "
-             "volume=%u clipped=%llu short_read=%llu short_write=%llu in_i2s_err=%llu out_i2s_err=%llu",
-             static_cast<unsigned long long>(stats.captured_frames),
-             static_cast<unsigned long long>(stats.input_pcm_bytes), static_cast<unsigned long long>(stats.input_samples),
-             static_cast<unsigned>(stats.input_peak), static_cast<unsigned long long>(stats.input_sum_squares),
-             static_cast<unsigned long long>(stats.input_zero_periods),
-             static_cast<unsigned long long>(stats.played_frames),
-             static_cast<unsigned long long>(stats.output_pcm_bytes), static_cast<unsigned long long>(stats.output_samples),
-             static_cast<unsigned>(stats.output_peak), static_cast<unsigned long long>(stats.output_sum_squares),
-             static_cast<unsigned long long>(stats.output_zero_periods), static_cast<unsigned>(stats.output_volume),
-             static_cast<unsigned long long>(stats.output_clipped_samples),
-             static_cast<unsigned long long>(stats.short_reads), static_cast<unsigned long long>(stats.short_writes),
-             static_cast<unsigned long long>(stats.input_i2s_errors),
-             static_cast<unsigned long long>(stats.output_i2s_errors));
+    ESP_LOGI(
+        "voicelife_pcb_audio",
+        "AUDIO_STATS in_frames=%llu in_bytes=%llu in_samples=%llu in_peak=%u in_energy=%llu in_zero=%llu "
+        "out_frames=%llu out_bytes=%llu out_samples=%llu out_peak=%u out_energy=%llu out_zero=%llu "
+        "volume=%u clipped=%llu short_read=%llu short_write=%llu in_i2s_err=%llu out_i2s_err=%llu",
+        static_cast<unsigned long long>(stats.captured_frames), static_cast<unsigned long long>(stats.input_pcm_bytes),
+        static_cast<unsigned long long>(stats.input_samples), static_cast<unsigned>(stats.input_peak),
+        static_cast<unsigned long long>(stats.input_sum_squares),
+        static_cast<unsigned long long>(stats.input_zero_periods), static_cast<unsigned long long>(stats.played_frames),
+        static_cast<unsigned long long>(stats.output_pcm_bytes), static_cast<unsigned long long>(stats.output_samples),
+        static_cast<unsigned>(stats.output_peak), static_cast<unsigned long long>(stats.output_sum_squares),
+        static_cast<unsigned long long>(stats.output_zero_periods), static_cast<unsigned>(stats.output_volume),
+        static_cast<unsigned long long>(stats.output_clipped_samples),
+        static_cast<unsigned long long>(stats.short_reads), static_cast<unsigned long long>(stats.short_writes),
+        static_cast<unsigned long long>(stats.input_i2s_errors),
+        static_cast<unsigned long long>(stats.output_i2s_errors));
 #endif
 }
 
@@ -193,9 +193,7 @@ SparkBotAssembly::SparkBotAssembly()
 
 voicelife::voice::PresentationPort& SparkBotAssembly::presentation() { return adapter_; }
 
-void SparkBotAssembly::BoardInputTaskEntry(void* context) {
-    static_cast<SparkBotAssembly*>(context)->BoardInputTask();
-}
+void SparkBotAssembly::BoardInputTaskEntry(void* context) { static_cast<SparkBotAssembly*>(context)->BoardInputTask(); }
 
 voicelife::Status SparkBotAssembly::StartBoardInput(BoardInputSink sink) {
     board_input_sink_ = std::move(sink);
@@ -240,22 +238,22 @@ voicelife::voice::WakeGateAudioInput& SparkBotAssembly::wake_gate() { return *wa
 void SparkBotAssembly::LogAudioStats() {
 #ifdef ESP_PLATFORM
     const auto stats = audio_ports_.stats();
-    ESP_LOGI(kPowerTag,
-             "AUDIO_STATS in_frames=%llu in_bytes=%llu in_samples=%llu in_peak=%u in_energy=%llu in_zero=%llu "
-             "out_frames=%llu out_bytes=%llu out_samples=%llu out_peak=%u out_energy=%llu out_zero=%llu "
-             "volume=%u clipped=%llu short_read=%llu short_write=%llu in_i2s_err=%llu out_i2s_err=%llu",
-             static_cast<unsigned long long>(stats.captured_frames),
-             static_cast<unsigned long long>(stats.input_pcm_bytes), static_cast<unsigned long long>(stats.input_samples),
-             static_cast<unsigned>(stats.input_peak), static_cast<unsigned long long>(stats.input_sum_squares),
-             static_cast<unsigned long long>(stats.input_zero_periods),
-             static_cast<unsigned long long>(stats.played_frames),
-             static_cast<unsigned long long>(stats.output_pcm_bytes), static_cast<unsigned long long>(stats.output_samples),
-             static_cast<unsigned>(stats.output_peak), static_cast<unsigned long long>(stats.output_sum_squares),
-             static_cast<unsigned long long>(stats.output_zero_periods), static_cast<unsigned>(stats.output_volume),
-             static_cast<unsigned long long>(stats.output_clipped_samples),
-             static_cast<unsigned long long>(stats.short_reads), static_cast<unsigned long long>(stats.short_writes),
-             static_cast<unsigned long long>(stats.input_i2s_errors),
-             static_cast<unsigned long long>(stats.output_i2s_errors));
+    ESP_LOGI(
+        kPowerTag,
+        "AUDIO_STATS in_frames=%llu in_bytes=%llu in_samples=%llu in_peak=%u in_energy=%llu in_zero=%llu "
+        "out_frames=%llu out_bytes=%llu out_samples=%llu out_peak=%u out_energy=%llu out_zero=%llu "
+        "volume=%u clipped=%llu short_read=%llu short_write=%llu in_i2s_err=%llu out_i2s_err=%llu",
+        static_cast<unsigned long long>(stats.captured_frames), static_cast<unsigned long long>(stats.input_pcm_bytes),
+        static_cast<unsigned long long>(stats.input_samples), static_cast<unsigned>(stats.input_peak),
+        static_cast<unsigned long long>(stats.input_sum_squares),
+        static_cast<unsigned long long>(stats.input_zero_periods), static_cast<unsigned long long>(stats.played_frames),
+        static_cast<unsigned long long>(stats.output_pcm_bytes), static_cast<unsigned long long>(stats.output_samples),
+        static_cast<unsigned>(stats.output_peak), static_cast<unsigned long long>(stats.output_sum_squares),
+        static_cast<unsigned long long>(stats.output_zero_periods), static_cast<unsigned>(stats.output_volume),
+        static_cast<unsigned long long>(stats.output_clipped_samples),
+        static_cast<unsigned long long>(stats.short_reads), static_cast<unsigned long long>(stats.short_writes),
+        static_cast<unsigned long long>(stats.input_i2s_errors),
+        static_cast<unsigned long long>(stats.output_i2s_errors));
 #endif
 }
 

@@ -49,10 +49,13 @@ pnpm --dir services/im-gateway test
 `/wechat` 和 `/healthz`。生产进程不使用 `createMockImGateway()`。
 
 复制 [`.env.example`](../../.env.example) 后填入部署值；其中的 `replace-me` 会被生产配置故意拒绝，不能直接启动。
-`DEVICE_TOKEN` 至少 24 字节，
+`DEVICE_USER_ID` 必须与该设备安全存储中的 `userId` 一致，`DEVICE_TOKEN` 至少 24 字节，
 `ACTION_TOKEN_SECRET` 至少 32 字节；建议额外提供独立的 `IDENTITY_SECRET`，未提供时会从
 `ACTION_TOKEN_SECRET` 按用途派生不同密钥。凭据只从环境变量注入，结构化日志不会记录 Authorization、
 请求体、Action token、动态 URL 或 Secret。
+
+配对 DTO 的隐私收紧必须先部署 Gateway，再发布依赖该 DTO 的固件；回滚时也应先停止固件放量。发布探针应确认
+`POST /v1/im/pairing-sessions` 的 `session` 只含公开字段且没有 `displayCodeHash`/外部身份，再开放 USB 配对验证。
 
 本机先启动 PostgreSQL，再启动进程：
 

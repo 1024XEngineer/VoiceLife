@@ -30,7 +30,7 @@
 </p>
 
 > [!IMPORTANT]
-> 当前仓库是可编译、可测试的设备端架构主干，不是已经完成所有外部接入的成品。日程和定时任务可以用内存适配器串联；真实设备存储、语音服务和 IM 平台仍按各自 Issue 验收。
+> 当前仓库是可编译、可测试的设备端架构主干，不是已经完成所有外部接入的成品。日程和定时任务可以用内存适配器串联；设备存储基础链路已经接入 Runtime，实板恢复验证、语音服务和 IM 平台仍按各自 Issue 验收。
 
 ## 项目在解决什么问题
 
@@ -73,8 +73,9 @@ pnpm --dir services/im-gateway test
 
 ```bash
 source /path/to/esp-idf-v6.0.2/export.sh
-python3 scripts/firmware.py build esp32s3-dev
-python3 scripts/firmware.py package esp32s3-dev
+python3 scripts/prepare_sqlite.py
+python3 scripts/firmware.py build esp32s3-storage-dev
+python3 scripts/firmware.py package esp32s3-storage-dev
 ```
 
 ## 模块边界
@@ -86,7 +87,8 @@ VoiceLife 使用 ESP-IDF 组件化模块单体。核心代码使用 C++，外部
 | `voicelife_contracts` | Status、Result、事件和跨模块公共契约 | 无 |
 | `voicelife_schedule` | 日程实体、命令、结果和服务接口 | contracts |
 | `voicelife_timing` | 定时任务、实例和提醒规则 | contracts |
-| `voicelife_storage_sqlite` | SQLite 生命周期、事务和健康指标 | contracts |
+| `voicelife_storage_fatfs` | Flash 分区校验、Wear Levelling、FATFS 挂载生命周期和容量 | contracts；ESP 端依赖 fatfs、esp_partition |
+| `voicelife_storage_sqlite` | SQLite 连接、Schema/迁移、完整性检查、业务 SQL 与 Repository | contracts、schedule；设备 Profile 启用时需要 sqlite3、FATFS/WL |
 | `voicelife_im` | 平台无关的 IM 事件、上报和传输契约 | contracts |
 | `voicelife_voice` | 语音会话、音频/传输 Port 和 Provider Registry | contracts |
 | `voicelife_linx` | Linx/XRobot 协议和 Provider Adapter | contracts、voice |
@@ -94,7 +96,7 @@ VoiceLife 使用 ESP-IDF 组件化模块单体。核心代码使用 C++，外部
 | `voicelife_audio_esp` | ESP32-S3 音频 Profile、探针和设备端 Port | contracts、voice |
 | `voicelife_board_esp` | ESP-SparkBot 板级 Profile、能力矩阵、共享电源仲裁和身份探针 | contracts |
 | `voicelife_mcp` | 工具 Schema、注册中心和调用路由 | contracts |
-| `voicelife_runtime` | 唯一组装入口 | contracts、mcp、voice、linx |
+| `voicelife_runtime` | 唯一组装入口，按生命周期启动和回滚基础设施 | contracts、mcp、voice、linx、storage adapters |
 
 依赖方向只有一条：适配器依赖用例，用例依赖领域，领域不认识 ESP-IDF、HTTP 或平台 SDK。CI 会运行 `scripts/check_architecture.sh` 检查组件清单、命名空间和依赖图。
 
@@ -124,12 +126,12 @@ Profile 描述一次固件选择哪些实现，不保存凭据：
 | 方向 | 状态 | 说明 |
 | --- | --- | --- |
 | 组件边界和依赖检查 | 已完成 | 主机与 CI 可验证 |
-| 日程模块 | 主机契约已覆盖 | 已支持创建、查询、修改、取消和撤销，持久化接入仍在推进 |
+| 日程模块 | 主机契约已覆盖 | 主机集成测试已跑通 SQLite 创建与查询最小链路；设备 Runtime 暂不装配日程业务，修改、取消和撤销仍待接入 |
 | 定时任务模块 | 主机契约已覆盖 | 已支持创建、更新、取消和提醒规则，注册与唯一性语义已固定 |
 | SQLite 存储资格测试 | 已完成基线 | FATFS/WL 路线通过，断电和长期磨损仍待补测 |
 | IM Gateway | 开发中 | 已接入 PostgreSQL 持久化与重启恢复，平台渠道仍在补齐 |
 | 语音、音频和 Linx 适配器 | 开发中 | WSS Transport 可构建并有主机契约，真实云端与声学闭环未完成 |
-| Profile 驱动 Runtime | 开发中 | Schema 和构建选择已有，完整运行时切换继续补齐 |
+| Profile 驱动 Runtime | 基础存储已接入 | storage profile 可组装 FATFS/WL、SQLite、Schema 检查；其他适配器切换继续补齐 |
 | 真机闭环与用户试用 | 未开始 | 进入对应功能 Issue 后再验收 |
 
 ## 仓库结构

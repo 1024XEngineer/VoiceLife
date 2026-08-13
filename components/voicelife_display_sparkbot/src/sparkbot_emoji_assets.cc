@@ -194,8 +194,7 @@ voicelife::Result<GifAssetView> SparkBotEmojiAssets::Load(std::string_view asset
 voicelife::Result<FontAssetView> SparkBotEmojiAssets::LoadCommonTextFont() {
 #ifdef ESP_PLATFORM
     if (!initialized_) {
-        return voicelife::Result<FontAssetView>::Failure(voicelife::ErrorCode::kUnavailable,
-                                                         "assets 分区尚未初始化");
+        return voicelife::Result<FontAssetView>::Failure(voicelife::ErrorCode::kUnavailable, "assets 分区尚未初始化");
     }
     const auto* root = static_cast<const uint8_t*>(mmap_root_);
     const uint32_t stored_files = *reinterpret_cast<const uint32_t*>(root + 0);

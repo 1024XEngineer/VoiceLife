@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(voicelife_host_tests LANGUAGES C CXX)
 
 find_package(Threads REQUIRED)
+find_package(SQLite3 REQUIRED)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -45,7 +46,8 @@ add_voicelife_library(contracts voicelife_contracts
     "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_receipt.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_result.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_command.cc"
-    "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_submission.cc")
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_submission.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/pairing_session.cc")
 target_link_libraries(contracts PRIVATE yyjson)
 add_voicelife_library(im voicelife_im
     "${ROOT_DIR}/components/voicelife_im/src/im_reporting_channel.cc"
@@ -55,6 +57,8 @@ add_voicelife_library(im voicelife_im
     "${ROOT_DIR}/components/voicelife_im/src/im_config_store.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_retry_policy.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_provisioning.cc"
+    "${ROOT_DIR}/components/voicelife_im/src/im_pairing_client.cc"
+    "${ROOT_DIR}/components/voicelife_im/src/im_pairing_controller.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_wire.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_endpoint.cc"
     "${ROOT_DIR}/components/voicelife_im/src/transport/im_response_reader.cc")
@@ -73,18 +77,6 @@ add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_update_helpers.cc")
 target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule PUBLIC contracts Threads::Threads)
-add_voicelife_library(timing voicelife_timing
-    "${ROOT_DIR}/components/voicelife_timing/src/occurrence_planner.cc"
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_policy.cc"
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service.cc"
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_calendar.cc"
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_delete_reminder_rule.cc"
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_reminder_triggers.cc"
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_reminder_rules.cc"
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_dismiss_reminder_trigger.cc"
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_service_snooze_reminder_trigger.cc"
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_task_state.cc")
-target_link_libraries(timing PUBLIC contracts)
 add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_server.cc"
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_json_writer.cc")
@@ -107,8 +99,23 @@ add_voicelife_library(linx_esp voicelife_linx_esp
     "${ROOT_DIR}/components/voicelife_linx_esp/src/websocket_fragment_assembler.cc")
 target_link_libraries(linx_esp PUBLIC contracts linx)
 add_voicelife_library(storage_sqlite voicelife_storage_sqlite
-    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/storage_protocol.cc")
-target_link_libraries(storage_sqlite PUBLIC contracts)
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_row_mapper.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v001_create_schedule.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/sqlite_schema.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/voicelife_schema.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_sql.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_database.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_repository.cc")
+target_include_directories(storage_sqlite PRIVATE "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
+target_link_libraries(storage_sqlite PUBLIC contracts schedule)
+if(TARGET SQLite3::SQLite3)
+    target_link_libraries(storage_sqlite PRIVATE SQLite3::SQLite3)
+else()
+    target_link_libraries(storage_sqlite PRIVATE SQLite::SQLite3)
+endif()
+add_voicelife_library(storage_fatfs voicelife_storage_fatfs
+    "${ROOT_DIR}/components/voicelife_storage_fatfs/src/fatfs_volume.cc")
+target_link_libraries(storage_fatfs PUBLIC contracts)
 add_voicelife_library(audio_esp voicelife_audio_esp
     "${ROOT_DIR}/components/voicelife_audio_esp/src/audio_board_profile.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_audio_probe.cc"
@@ -156,6 +163,10 @@ add_voicelife_test(schedule_query_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_query_test.cc")
 target_link_libraries(schedule_query_test PRIVATE schedule)
 
+add_voicelife_test(schedule_repository_service_test "unit;schedule;repository"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_repository_service_test.cc")
+target_link_libraries(schedule_repository_service_test PRIVATE schedule)
+
 add_voicelife_test(schedule_delete_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_delete_test.cc")
 target_link_libraries(schedule_delete_test PRIVATE schedule)
@@ -185,38 +196,9 @@ target_link_libraries(schedule_undo_operation_test PRIVATE schedule)
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
 target_link_libraries(status_test PRIVATE contracts)
 
-add_voicelife_test(timing_policy_test "unit;timing" timing_policy_test.cc)
-target_link_libraries(timing_policy_test PRIVATE timing)
-
-add_voicelife_test(timing_task_types_test "unit;timing" timing_task_types_test.cc)
-target_include_directories(timing_task_types_test PRIVATE "${ROOT_DIR}/components/voicelife_timing/include")
-
-add_voicelife_test(timing_task_state_test "unit;timing" timing_task_state_test.cc)
-target_link_libraries(timing_task_state_test PRIVATE timing)
-
-add_voicelife_test(timing_task_service_test "unit;timing" timing_task_service_test.cc)
-target_link_libraries(timing_task_service_test PRIVATE timing)
-
-add_voicelife_test(timing_task_calendar_test "unit;timing" timing_task_calendar_test.cc)
-target_link_libraries(timing_task_calendar_test PRIVATE timing)
-
-add_voicelife_test(timing_occurrence_planner_test "unit;timing" timing_occurrence_planner_test.cc)
-target_link_libraries(timing_occurrence_planner_test PRIVATE timing)
-
-add_voicelife_test(timing_task_service_reminder_triggers_test "unit;timing" timing_task_service_reminder_triggers_test.cc)
-target_link_libraries(timing_task_service_reminder_triggers_test PRIVATE timing)
-
-add_voicelife_test(timing_task_service_snooze_test "unit;timing" timing_task_service_snooze_test.cc)
-target_link_libraries(timing_task_service_snooze_test PRIVATE timing)
-
-add_voicelife_test(timing_task_service_dismiss_test "unit;timing" timing_task_service_dismiss_test.cc)
-target_link_libraries(timing_task_service_dismiss_test PRIVATE timing)
-
-add_voicelife_test(timing_task_store_test "unit;timing" timing_task_store_test.cc)
-target_link_libraries(timing_task_store_test PRIVATE timing)
-
-add_voicelife_test(timing_task_service_contract_test "unit;timing" timing_task_service_contract_test.cc)
-target_link_libraries(timing_task_service_contract_test PRIVATE timing)
+add_voicelife_test(fatfs_volume_contract_test "unit;storage;fatfs"
+    "${ROOT_DIR}/components/voicelife_storage_fatfs/test/fatfs_volume_contract_test.cc")
+target_link_libraries(fatfs_volume_contract_test PRIVATE storage_fatfs)
 
 add_voicelife_test(mcp_server_test "unit;mcp"
     "${ROOT_DIR}/components/voicelife_mcp/test/mcp_server_test.cc")
@@ -335,12 +317,34 @@ target_compile_definitions(im_sse_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}
 add_voicelife_test(im_response_reader_test "unit;im" im_response_reader_test.cc)
 target_link_libraries(im_response_reader_test PRIVATE im contracts)
 
+add_voicelife_test(im_pairing_client_test "unit;im;pairing" im_pairing_client_test.cc)
+target_link_libraries(im_pairing_client_test PRIVATE im contracts)
+target_compile_definitions(im_pairing_client_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
+
 add_voicelife_test(im_runtime_test "unit;im;runtime" im_runtime_test.cc)
 target_link_libraries(im_runtime_test PRIVATE im contracts)
 
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
 
-add_voicelife_test(storage_protocol_contract_test "unit;storage;contract"
-    storage_protocol_contract_test.cc)
-target_link_libraries(storage_protocol_contract_test PRIVATE storage_sqlite)
+add_voicelife_test(sqlite_schedule_repository_test "integration;storage;sqlite;schedule"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_repository_test.cc")
+target_link_libraries(sqlite_schedule_repository_test PRIVATE storage_sqlite schedule)
+
+add_voicelife_test(sqlite_database_test "unit;storage;sqlite;database"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_database_test.cc")
+target_link_libraries(sqlite_database_test PRIVATE storage_sqlite)
+
+add_voicelife_test(sqlite_schema_test "unit;storage;sqlite;schema"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schema_test.cc")
+target_link_libraries(sqlite_schema_test PRIVATE storage_sqlite)
+
+add_voicelife_test(voicelife_schema_test "integration;storage;sqlite;schema"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/voicelife_schema_test.cc")
+target_link_libraries(voicelife_schema_test PRIVATE storage_sqlite)
+
+add_voicelife_test(sqlite_schedule_repository_unit_test "unit;storage;sqlite;schedule;repository"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_repository_unit_test.cc")
+target_include_directories(sqlite_schedule_repository_unit_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
+target_link_libraries(sqlite_schedule_repository_unit_test PRIVATE storage_sqlite schedule)

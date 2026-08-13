@@ -140,10 +140,10 @@ class LinxProtocolCodecPort {
      * @brief 编码检测文本消息。
      * @param config 语音会话配置。
      * @param text 要发送的文本。
+     * @param text_response 可选的服务端 TTS 确认文本。
      * @return 已编码消息或错误。
      */
-    virtual Result<std::string> EncodeListenDetect(const voice::VoiceSessionConfig& config,
-                                                   std::string_view text,
+    virtual Result<std::string> EncodeListenDetect(const voice::VoiceSessionConfig& config, std::string_view text,
                                                    std::string_view text_response = {}) const = 0;
     /**
      * @brief 编码中止消息。
@@ -187,6 +187,7 @@ class LinxJsonCodec final : public LinxProtocolCodecPort {
      * @brief 编码 Linx 文本检测消息。
      * @param config 语音会话配置。
      * @param text 要发送的文本。
+     * @param text_response 可选的服务端 TTS 确认文本。
      * @return 已编码消息或错误。
      */
     Result<std::string> EncodeListenDetect(const voice::VoiceSessionConfig& config, std::string_view text,

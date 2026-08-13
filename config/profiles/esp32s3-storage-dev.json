@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "esp32s3-storage-dev",
+  "target": "esp32s3",
+  "adapters": {
+    "audio": {
+      "driver": "scaffold",
+      "capabilities": []
+    },
+    "speech": {
+      "driver": "scaffold",
+      "capabilities": []
+    },
+    "storage": {
+      "driver": "fatfs-sqlite",
+      "capabilities": ["persistent-sqlite"]
+    },
+    "im": {
+      "driver": "disabled",
+      "capabilities": []
+    }
+  },
+  "sdkconfig": [
+    "CONFIG_LOG_DEFAULT_LEVEL_INFO=y",
+    "CONFIG_FATFS_SECTOR_4096=y",
+    "CONFIG_WL_SECTOR_SIZE_4096=y",
+    "CONFIG_VOICELIFE_STORAGE_FATFS=y",
+    "CONFIG_VOICELIFE_STORAGE_SQLITE=y"
+  ]
+}

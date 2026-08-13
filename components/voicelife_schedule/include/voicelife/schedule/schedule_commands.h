@@ -37,7 +37,7 @@ struct UpdateScheduleCommand {
     NullableScheduleUpdate<DateTime> end_time;
     NullableScheduleUpdate<std::string> location;
     NullableScheduleUpdate<std::string> notes;
-    NullableScheduleUpdate<ReminderId> reminder_id;
+    NullableScheduleUpdate<ScheduleId> rule_id;
     std::optional<ScheduleStatus> status;
     bool ignore_conflict = false;
 };

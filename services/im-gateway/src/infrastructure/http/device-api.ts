@@ -1,17 +1,18 @@
 import type { ActionId, DeviceId, PairingSessionId, ReminderTriggerId } from '../../contracts/ids.js';
-import type { NotificationSubmission, ReminderActionCommand, ReminderType } from '../../contracts/device-gateway.js';
+import type {
+    CreatedPairingSessionResponse,
+    NotificationSubmission,
+    PairingSessionStatus,
+    ReminderActionCommand,
+    ReminderType,
+} from '../../contracts/device-gateway.js';
 import {
     parseCreatePairingSessionRequest,
     parseNotificationIntent,
     parseReminderActionResult,
     parseScheduleReceiptIntent,
 } from '../../contracts/device-gateway-parser.js';
-import type {
-    ActionApplication,
-    CreatedPairingSession,
-    NotificationApplication,
-    PairingApplication,
-} from '../../application/api.js';
+import type { ActionApplication, NotificationApplication, PairingApplication } from '../../application/api.js';
 import type { ImAction, PairingSession } from '../../domain/models.js';
 import type { ActionCommandStreamPort, DeviceAuthenticationPort } from '../../ports/external.js';
 import { ImGatewayError } from '../../shared/errors.js';
@@ -57,6 +58,19 @@ export interface AuthenticatedIntentRequest {
     readonly body: unknown;
 }
 
+function publicPairingSession(session: PairingSession): PairingSessionStatus {
+    return {
+        id: session.id,
+        ...(session.userId === undefined ? {} : { userId: session.userId }),
+        deviceId: session.deviceId,
+        ...(session.allowedPlatforms === undefined ? {} : { allowedPlatforms: session.allowedPlatforms }),
+        status: session.status,
+        expiresAt: session.expiresAt,
+        createdAt: session.createdAt,
+        ...(session.confirmedAt === undefined ? {} : { confirmedAt: session.confirmedAt }),
+    };
+}
+
 /** 面向设备接口的框架无关 HTTP 控制器。 */
 export class DeviceIntentController {
     /**
@@ -81,10 +95,17 @@ export class DeviceIntentController {
     public async postPairingSession(input: {
         readonly authorization: string;
         readonly body: unknown;
-    }): Promise<CreatedPairingSession> {
+    }): Promise<CreatedPairingSessionResponse> {
         const body = parseCreatePairingSessionRequest(input.body);
-        await this.authenticateDevice(input.authorization, body.deviceId);
-        return this.pairing.create(body);
+        const principal = await this.authentication.authenticate(input.authorization);
+        if (principal.deviceId !== body.deviceId) {
+            throw new ImGatewayError('invalid_transition', 'Device token is not bound to the requested deviceId');
+        }
+        if (body.userId !== undefined && body.userId !== principal.userId) {
+            throw new ImGatewayError('invalid_transition', 'Device token is not bound to the requested userId');
+        }
+        const created = await this.pairing.create({ ...body, userId: principal.userId });
+        return { session: publicPairingSession(created.session), displayCode: created.displayCode };
     }
 
     /**
@@ -95,13 +116,13 @@ export class DeviceIntentController {
     public async getPairingSession(input: {
         readonly authorization: string;
         readonly pairingSessionId: PairingSessionId;
-    }): Promise<PairingSession | undefined> {
+    }): Promise<PairingSessionStatus | undefined> {
         const principal = await this.authentication.authenticate(input.authorization);
         const session = await this.pairing.find(input.pairingSessionId);
         if (session === undefined || session.deviceId !== principal.deviceId) {
             return undefined;
         }
-        return session;
+        return publicPairingSession(session);
     }
 
     /**

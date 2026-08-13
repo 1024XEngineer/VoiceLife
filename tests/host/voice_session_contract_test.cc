@@ -204,11 +204,11 @@ int main() {
     FakeProvider provider;
     int evidence_count = 0;
     std::vector<voicelife::voice::VoiceEvidence> evidence;
-    voicelife::voice::VoiceSession session(
-        input, output, provider, [&evidence_count, &evidence](const voicelife::voice::VoiceEvidence& item) {
-            ++evidence_count;
-            evidence.push_back(item);
-        });
+    voicelife::voice::VoiceSession session(input, output, provider,
+                                           [&evidence_count, &evidence](const voicelife::voice::VoiceEvidence& item) {
+                                               ++evidence_count;
+                                               evidence.push_back(item);
+                                           });
 
     Check(session.Start(Config()).ok(), "合法配置应启动语音会话");
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady, "启动后应进入 ready");
@@ -216,20 +216,21 @@ int main() {
               provider.last_wake_word == "你好牛牛" && provider.last_wake_response == "收到！",
           "本地唤醒确认必须只通过 Provider 请求受控 TTS");
     provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
-                                                .generation = session.generation(),
-                                                .text = {},
-                                                .aborted = false});
+                                               .generation = session.generation(),
+                                               .text = {},
+                                               .aborted = false});
     Check(session.state() == voicelife::voice::VoiceSessionState::kSpeaking,
           "本地唤醒确认的真实 TTS start 才能进入 speaking");
     provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStopped,
-                                                .generation = session.generation(),
-                                                .text = {},
-                                                .aborted = false});
+                                               .generation = session.generation(),
+                                               .text = {},
+                                               .aborted = false});
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
           "本地唤醒确认 TTS 结束后会话必须允许开始真实聆听");
     session.ReportToolCallStarted();
     session.ReportToolResult("event=创建会议", true);
-    Check(session.state() == voicelife::voice::VoiceSessionState::kReady && provider.audio_frames == 0 && output.pushes == 0,
+    Check(session.state() == voicelife::voice::VoiceSessionState::kReady && provider.audio_frames == 0 &&
+              output.pushes == 0,
           "MCP 语义证据不得伪造音频、改变会话状态或绕过 VoiceSession");
     Check(evidence.size() >= 3 && evidence[evidence.size() - 2].event == "mcp_tool_started" &&
               evidence.back().event == "mcp_tool_result" && evidence.back().detail == "event=创建会议",
@@ -314,9 +315,9 @@ int main() {
     Check(provider.EmitAudio(Frame(generation, 1)).code == ErrorCode::kUnavailable && output.pushes == 2,
           "打断后迟到的旧 generation 音频不得重新进入播放队列");
     provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
-                                                .generation = session.generation(),
-                                                .text = {},
-                                                .aborted = false});
+                                               .generation = session.generation(),
+                                               .text = {},
+                                               .aborted = false});
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
           "打断后即使迟到 TTS 被归入新 generation 也不得复活旧播报");
     provider.Emit(voicelife::voice::VoiceEvent{});

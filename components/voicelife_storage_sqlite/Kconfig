@@ -1,0 +1,12 @@
+menu "VoiceLife SQLite 存储"
+
+config VOICELIFE_STORAGE_SQLITE
+    bool "构建 SQLite 存储基础设施"
+    default n
+    help
+        启用 SQLite 连接、Schema 迁移、完整性检查和日程仓储。
+        当前设备 Runtime 固定以 FATFS/Wear Levelling 承载 SQLite 文件；
+        只有两个适配器同时启用时，Runtime 才会启动持久化链路。
+        构建前必须先准备固定版本的 sqlite3 组件。
+
+endmenu

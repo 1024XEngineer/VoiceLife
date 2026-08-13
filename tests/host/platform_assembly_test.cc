@@ -46,8 +46,9 @@ int main() {
 
     // 板级输入：Assembly 持有 GPIO 与物理映射，Runtime 只能接收语义事件。
     bool pcb_input_started = false;
-    Check(pcb_as_interface.StartBoardInput([&](voicelife::runtime::BoardInputAction) { pcb_input_started = true; }).ok(),
-          "VoiceLife PCB 输入适配器必须可由 Assembly 启动");
+    Check(
+        pcb_as_interface.StartBoardInput([&](voicelife::runtime::BoardInputAction) { pcb_input_started = true; }).ok(),
+        "VoiceLife PCB 输入适配器必须可由 Assembly 启动");
     Check(!pcb_input_started, "host 构建不得伪造 PCB 物理按键事件");
     Check(pcb_as_interface.uses_local_wake_detector(), "VoiceLife PCB 必须保留本地唤醒模型待机能力");
     Check(pcb_as_interface.wake_gate().Open(voicelife::voice::AudioFormat{}).code == voicelife::ErrorCode::kUnavailable,

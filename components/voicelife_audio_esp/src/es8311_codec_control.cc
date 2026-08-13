@@ -1,11 +1,11 @@
 #include "es8311_codec_control.h"
 
 #ifdef ESP_PLATFORM
-#include <driver/i2c_master.h>
 #include <audio_codec_ctrl_if.h>
 #include <audio_codec_data_if.h>
 #include <audio_codec_gpio_if.h>
 #include <audio_codec_if.h>
+#include <driver/i2c_master.h>
 #include <es8311_codec.h>
 #include <esp_check.h>
 #include <esp_codec_dev.h>
@@ -181,11 +181,11 @@ voicelife::Result<void*> InitializeEs8311(const Es8311ControlConfig& config) {
     ESP_LOGI(kTag, "ES8311_OUTPUT_VOLUME_SET value=%u", static_cast<unsigned>(kSparkBotDefaultOutputVolume));
     LogKeyRegisters(ctrl_if);
     auto* handle = new Es8311ControlHandle{.device = dev,
-                                            .codec_if = codec_if,
-                                            .ctrl_if = ctrl_if,
-                                            .gpio_if = gpio_if,
-                                            .data_if = data_if,
-                                            .i2c_bus = bus};
+                                           .codec_if = codec_if,
+                                           .ctrl_if = ctrl_if,
+                                           .gpio_if = gpio_if,
+                                           .data_if = data_if,
+                                           .i2c_bus = bus};
     return voicelife::Result<void*>::Success(handle);
 #else
     (void)config;

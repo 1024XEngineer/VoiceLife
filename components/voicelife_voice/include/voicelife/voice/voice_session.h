@@ -74,6 +74,9 @@ class VoiceSession {
      *
      * 若正在播报，旧流的 tts.stop 是确认消息的顺序栅栏；旧 PCM 清空且终止
      * 标记到达后才发送确认，避免旧文本在“收到！”之后继续播放。
+     * @param wake_word 已由本地检测器确认的唤醒词。
+     * @param text_response 可选的服务端 TTS 确认文本。
+     * @return 请求结果。
      */
     Status InterruptAndNotifyLocalWakeWord(std::string_view wake_word, std::string_view text_response);
     /** @brief 中断当前会话并推进会话代次。 @return 中断结果。 */

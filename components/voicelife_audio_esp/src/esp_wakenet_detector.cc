@@ -17,7 +17,7 @@ namespace {
 constexpr char kTag[] = "VoiceLifeWake";
 
 Status Failure(ErrorCode code, const char* message) { return Status::Error(code, message); }
-}
+}  // namespace
 
 class EspWakeNetDetector::Impl final {
    public:

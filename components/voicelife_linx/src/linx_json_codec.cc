@@ -178,8 +178,8 @@ Result<std::string> LinxJsonCodec::EncodeListenStop(const voice::VoiceSessionCon
                        : Result<std::string>::Failure(status.code, status.message);
 }
 
-Result<std::string> LinxJsonCodec::EncodeListenDetect(const voice::VoiceSessionConfig& config,
-                                                      std::string_view text, std::string_view text_response) const {
+Result<std::string> LinxJsonCodec::EncodeListenDetect(const voice::VoiceSessionConfig& config, std::string_view text,
+                                                      std::string_view text_response) const {
     if (text.empty()) {
         return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx detect 文本不能为空");
     }

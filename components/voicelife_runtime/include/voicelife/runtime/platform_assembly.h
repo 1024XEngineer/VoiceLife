@@ -81,6 +81,7 @@ class PlatformAssembly {
      *
      * 没有 ESP-SR model 分区的板型仍可经 BOOT 键进入云端采集；Runtime 依赖
      * 此能力而非板型名称决定是否重启本地检测器。
+     * @return 启用本地唤醒检测时返回 true。
      */
     virtual bool uses_local_wake_detector() const { return true; }
 
@@ -112,6 +113,8 @@ class PlatformAssembly {
      * Assembly 负责 GPIO、触摸、去抖和物理按键到 BoardInputAction 的映射；
      * Runtime 只接收语义事件并投递到 InteractionEventLoop。无输入设备的板型
      * 保持默认成功，不能把 GPIO 或板型分支泄漏到 Runtime。
+     * @param sink 非阻塞的板级输入语义事件入口。
+     * @return 启动结果。
      */
     virtual voicelife::Status StartBoardInput(BoardInputSink /*sink*/) { return voicelife::Status::Ok(); }
 

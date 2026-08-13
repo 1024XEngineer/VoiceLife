@@ -25,11 +25,11 @@
 #include "freertos/task.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "voicelife/contracts/json.h"
 #include "voicelife/im/esp_http_transport_factory.h"
 #include "voicelife/im/im_config_store.h"
 #include "voicelife/im/im_retry_policy.h"
 #include "voicelife/im/im_runtime.h"
-#include "voicelife/contracts/json.h"
 #include "voicelife/linx/linx_speech_provider.h"
 #include "voicelife/linx/linx_types.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
@@ -37,6 +37,7 @@
 #include "voicelife/schedule/schedule_service.h"
 #endif
 
+#include "bootstrap/storage_bootstrap.h"
 #include "im_runtime_bootstrap.h"
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
@@ -186,6 +187,8 @@ class Runtime final {
         };
         auto& registry = voice::SpeechProviderRegistry::Instance();
         if (!init_status_.ok()) return init_status_;
+        const Status storage_status = storage_.Start();
+        if (!storage_status.ok()) return storage_status;
 #ifdef ESP_PLATFORM
         // 立创实战派 ESP32-S3 板载 WS2812 灯珠接 GPIO48（小智 BUILTIN_LED_GPIO）。
         // 主 NVS 分区初始化（Wi-Fi 驱动/凭据等依赖；linx_secrets 为加密分区另行初始化）。
@@ -291,9 +294,8 @@ class Runtime final {
             if (task_status != pdPASS) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒控制任务失败"));
         }
         EnqueueEvent(voice::VoiceInteractionEvent::kBootCompleted);
-        const Status input_status = assembly_->StartBoardInput([this](BoardInputAction action) {
-            EnqueueBoardInput(action);
-        });
+        const Status input_status =
+            assembly_->StartBoardInput([this](BoardInputAction action) { EnqueueBoardInput(action); });
         if (!input_status.ok()) return fail_startup(input_status);
 #if CONFIG_VOICELIFE_STATE_FLOW_TEST
         if (const Status state_flow_status = StartStateFlowDiagnostic(); !state_flow_status.ok()) {
@@ -390,9 +392,8 @@ class Runtime final {
         mcp_cv_.notify_one();
 
         std::unique_lock<std::mutex> lock(request->mutex);
-        if (!request->completed_cv.wait_for(lock, std::chrono::milliseconds(kMcpResponseTimeoutMs), [&] {
-                return request->completed;
-            })) {
+        if (!request->completed_cv.wait_for(lock, std::chrono::milliseconds(kMcpResponseTimeoutMs),
+                                            [&] { return request->completed; })) {
             request->abandoned.store(true);
             ESP_LOGW(kTag, "MCP_REQUEST_REJECTED reason=timeout");
             return BuildLinxMcpUnavailableResponse(payload, "设备 MCP 响应超时", session_id);
@@ -478,6 +479,7 @@ class Runtime final {
             }
 
             if (im_runtime_.state() == im::ImRuntimeState::kReady) {
+                RegisterImPairingAcceptance(im_runtime_.pairing_client(), im_runtime_.user_id());
                 ESP_LOGI(kTag, "IM_RUNTIME_READY=1");
                 break;
             }
@@ -600,8 +602,8 @@ class Runtime final {
         if (wake_queue_ == nullptr || text.empty()) return;
         BoardRequest request{};
         request.kind = BoardRequestKind::kInterrupt;
-        const std::size_t size = text.size() < sizeof(request.system_speech) - 1 ? text.size()
-                                                                                   : sizeof(request.system_speech) - 1;
+        const std::size_t size =
+            text.size() < sizeof(request.system_speech) - 1 ? text.size() : sizeof(request.system_speech) - 1;
         std::memcpy(request.system_speech, text.data(), size);
         request.system_speech[size] = '\0';
         (void)xQueueSend(wake_queue_, &request, 0);
@@ -683,7 +685,8 @@ class Runtime final {
 #if CONFIG_VOICELIFE_STATE_FLOW_TEST
     Status StartStateFlowDiagnostic() {
         if (state_flow_task_ != nullptr) return Status::Ok();
-        if (xTaskCreate(&Runtime::StateFlowTaskEntry, "voicelife_state_flow", 4096, this, 1, &state_flow_task_) != pdPASS) {
+        if (xTaskCreate(&Runtime::StateFlowTaskEntry, "voicelife_state_flow", 4096, this, 1, &state_flow_task_) !=
+            pdPASS) {
             return Status::Error(ErrorCode::kInternal, "创建状态流诊断任务失败");
         }
         ESP_LOGI(kTag, "STATE_FLOW_TEST_STARTED production_default=0");
@@ -699,8 +702,9 @@ class Runtime final {
     }
 
     void StateFlowEvidence(uint32_t step, std::string_view event, std::string_view detail = {}) {
-        ESP_LOGI(kTag, "STATE_FLOW_ENQUEUE step=%u kind=evidence event=%.*s detail_bytes=%u", static_cast<unsigned>(step),
-                 static_cast<int>(event.size()), event.data(), static_cast<unsigned>(detail.size()));
+        ESP_LOGI(kTag, "STATE_FLOW_ENQUEUE step=%u kind=evidence event=%.*s detail_bytes=%u",
+                 static_cast<unsigned>(step), static_cast<int>(event.size()), event.data(),
+                 static_cast<unsigned>(detail.size()));
         voice::VoiceEvidence evidence;
         evidence.session_id = session_ ? session_->config().session_id : "state-flow";
         evidence.generation = session_ ? session_->generation() : 0;
@@ -956,7 +960,8 @@ class Runtime final {
             (void)assembly_->presentation().Render(snapshot_);
         }
         ESP_LOGI(kTag,
-                 "INTERACTION_SNAPSHOT phase=%d generation=%llu revision=%llu mood=%d status_bytes=%u role=%d content_bytes=%u",
+                 "INTERACTION_SNAPSHOT phase=%d generation=%llu revision=%llu mood=%d status_bytes=%u role=%d "
+                 "content_bytes=%u",
                  static_cast<int>(snapshot_.phase), static_cast<unsigned long long>(snapshot_.generation),
                  static_cast<unsigned long long>(snapshot_.revision), static_cast<int>(snapshot_.mood),
                  static_cast<unsigned>(snapshot_.status_text.size()), static_cast<int>(snapshot_.role),
@@ -1178,7 +1183,8 @@ class Runtime final {
             // 从当前交互态进入“处理中”，不得由 worker 自己写快照。
             CancelListenTimer();
             const auto phase = interaction_.state();
-            if (phase == voice::VoiceInteractionState::kListening || phase == voice::VoiceInteractionState::kFinalizing ||
+            if (phase == voice::VoiceInteractionState::kListening ||
+                phase == voice::VoiceInteractionState::kFinalizing ||
                 phase == voice::VoiceInteractionState::kThinking) {
                 (void)EnqueueEvent(voice::VoiceInteractionEvent::kIntentReceived);
             }
@@ -1196,8 +1202,8 @@ class Runtime final {
             } else if (!success && evidence.detail == "日程查询失败") {
                 summary = "日程查询失败";
             }
-            ShowOverlay(success ? voice::VoiceMood::kHappy : voice::VoiceMood::kSad,
-                        success ? "日程结果" : "日程错误", summary);
+            ShowOverlay(success ? voice::VoiceMood::kHappy : voice::VoiceMood::kSad, success ? "日程结果" : "日程错误",
+                        summary);
             StartOverlayTimer(2500);
         } else if (evidence.event == "tts_started") {
             CancelListenTimer();
@@ -1231,8 +1237,7 @@ class Runtime final {
             // terminal state), so it must not re-enter the controller and
             // produce a false ordering error.
             if (interaction_.state() != voice::VoiceInteractionState::kSpeaking) {
-                ESP_LOGI(kTag, "TTS_STOPPED_STALE state=%d 丢弃迟到结束事件",
-                         static_cast<int>(interaction_.state()));
+                ESP_LOGI(kTag, "TTS_STOPPED_STALE state=%d 丢弃迟到结束事件", static_cast<int>(interaction_.state()));
                 return;
             }
             if (terminal_turn_) {
@@ -1590,6 +1595,7 @@ class Runtime final {
     ScaffoldAudioOutput audio_output_;
 #endif
     voice::VoiceInteractionController interaction_;
+    StorageBootstrap storage_;
     std::unique_ptr<voice::SpeechProviderAdapter> provider_;
     std::unique_ptr<voice::VoiceSession> session_;
 

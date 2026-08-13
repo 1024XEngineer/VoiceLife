@@ -124,8 +124,8 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     if (assets_ready_) {
         const auto common_font_asset = emoji_assets_->LoadCommonTextFont();
         if (common_font_asset.ok() && common_font_asset.value.has_value()) {
-            auto* common_font = cbin_font_create(
-                const_cast<uint8_t*>(static_cast<const uint8_t*>(common_font_asset.value->data)));
+            auto* common_font =
+                cbin_font_create(const_cast<uint8_t*>(static_cast<const uint8_t*>(common_font_asset.value->data)));
             if (common_font != nullptr && common_font->line_height == 25 && common_font->base_line == 9 &&
                 common_font->dsc != nullptr && static_cast<const lv_font_fmt_txt_dsc_t*>(common_font->dsc)->bpp == 4) {
                 common_font->fallback = &font_noto_sans_basic_16_4;
@@ -145,8 +145,8 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     }
     uint16_t kai_advance = 0;
     uint16_t xian_advance = 0;
-    const bool kai_ok = HasRenderableGlyph(text_font, 0x5F00, &kai_advance);   // 开
-    const bool xian_ok = HasRenderableGlyph(text_font, 0x95F2, &xian_advance); // 闲
+    const bool kai_ok = HasRenderableGlyph(text_font, 0x5F00, &kai_advance);    // 开
+    const bool xian_ok = HasRenderableGlyph(text_font, 0x95F2, &xian_advance);  // 闲
     ESP_LOGI(kTag, "SPARKBOT_TEXT_GLYPH_CHECK kai=%d kai_adv=%u xian=%d xian_adv=%u common_font=%d", kai_ok,
              static_cast<unsigned>(kai_advance), xian_ok, static_cast<unsigned>(xian_advance),
              common_text_font_ != nullptr);
@@ -410,11 +410,14 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
     } else {
         lv_obj_add_flag(bottom_bar, LV_OBJ_FLAG_HIDDEN);
     }
-    ESP_LOGI(kTag, "SPARKBOT_TEXT_RENDER status_bytes=%u content_bytes=%u status_visible=%d status_xywh=%d,%d,%d,%d content_visible=%d common_font=%d",
+    ESP_LOGI(kTag,
+             "SPARKBOT_TEXT_RENDER status_bytes=%u content_bytes=%u status_visible=%d status_xywh=%d,%d,%d,%d "
+             "content_visible=%d common_font=%d",
              static_cast<unsigned>(snapshot.status_text.size()), static_cast<unsigned>(snapshot.content_text.size()),
              !snapshot.status_text.empty(), static_cast<int>(lv_obj_get_x(status_label)),
              static_cast<int>(lv_obj_get_y(status_label)), static_cast<int>(lv_obj_get_width(status_label)),
-             static_cast<int>(lv_obj_get_height(status_label)), !snapshot.content_text.empty(), common_text_font_ != nullptr);
+             static_cast<int>(lv_obj_get_height(status_label)), !snapshot.content_text.empty(),
+             common_text_font_ != nullptr);
     return voicelife::Status::Ok();
 #else
     (void)snapshot;

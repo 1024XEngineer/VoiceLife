@@ -190,7 +190,8 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
             // 送达上一段识别结果；该事件不得穿透到交互状态机重启“处理”。
             // kToolCall 不武装：启动/重连时的 MCP 发现消息（tools/list）并非
             // 用户本轮输入，不能提前放行服务端 TTS。
-            if (state_ != VoiceSessionState::kCapturing && !(state_ == VoiceSessionState::kReady && awaiting_final_asr_)) {
+            if (state_ != VoiceSessionState::kCapturing &&
+                !(state_ == VoiceSessionState::kReady && awaiting_final_asr_)) {
                 stale = true;
             } else {
                 response_armed_ = true;
@@ -204,8 +205,8 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
             // kCapturing、kThinking、kSpeaking。空闲且无本轮输入（未 armed）的残留 TTS
             // 一律忽略，避免设备在没有用户输入时擅自播报。
             const bool armed = response_armed_ || state_ == VoiceSessionState::kSpeaking;
-            if (interrupt_fence_pending_ || !armed || state_ == VoiceSessionState::kStopped || state_ == VoiceSessionState::kStarting ||
-                state_ == VoiceSessionState::kFailed) {
+            if (interrupt_fence_pending_ || !armed || state_ == VoiceSessionState::kStopped ||
+                state_ == VoiceSessionState::kStarting || state_ == VoiceSessionState::kFailed) {
                 stale = true;
             } else {
                 // This board has no AEC path. Stop capture before accepting the

@@ -81,6 +81,7 @@ class SparkBotEmojiAssets {
      * @brief 加载固定的官方 Noto Sans common 16px/4bpp 字库。
      *
      * 不接受调用方路径或名称，确保 Runtime 不能扩展资源访问边界。
+     * @return 字库资源视图。
      */
     [[nodiscard]] voicelife::Result<FontAssetView> LoadCommonTextFont();
 
