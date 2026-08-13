@@ -184,4 +184,6 @@ std::optional<TriggerAt> InMemoryTimingTaskRunner::NextWakeAt() const {
     return pending_tasks_.front().task.trigger_at;
 }
 
+bool InMemoryTimingTaskRunner::IsInCallbackContext() const { return active_callback_runner == this; }
+
 }  // namespace voicelife::timing

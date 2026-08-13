@@ -92,9 +92,12 @@ struct CancelTaskCommand {
     CancelTaskResultCallback on_result;
 };
 
-/// 公开命令入口的同步接收结果；不表示命令已经被 Runner 应用。
+/// 公开命令入口的同步接收结果；accepted 不表示命令已经被 Runner 应用。
 enum class CommandAcceptance {
+    /// 命令已进入 Runner 队列，或已在 callback 上下文中立即应用。
     kAccepted,
+    /// 命令未进入 Runner 队列，调用方可以稍后重试。
+    kUnavailable,
 };
 
 /// Runner 推进一个已确定到期批次后的可观察结果。
@@ -122,14 +125,14 @@ class TimingTaskService {
     /**
      * @brief 提交一个一次性 task；外部调用异步排队，Runner callback 内调用立即应用。
      * @param command 包含不透明 task_id、绝对到点时刻和运行时 callback 的命令。
-     * @return kAccepted 表示命令已被接收；外部调用稍后通知结果，callback 内调用可在返回前通知。
+     * @return kAccepted 表示命令已接收；kUnavailable 表示未接收且可以重试。
      */
     virtual CommandAcceptance RegisterTask(RegisterTaskCommand command) = 0;
 
     /**
      * @brief 提交一个 task 取消请求；外部调用异步排队，Runner callback 内调用立即应用。
      * @param command 包含待取消的不透明 task_id 和可选的最终结果回调。
-     * @return kAccepted 表示命令已被接收；外部调用稍后通知结果，callback 内调用可在返回前通知。
+     * @return kAccepted 表示命令已接收；kUnavailable 表示未接收且可以重试。
      */
     virtual CommandAcceptance CancelTask(CancelTaskCommand command) = 0;
 };
@@ -174,6 +177,12 @@ class InMemoryTimingTaskRunner final : public TimingTaskService {
      * @return 注册表为空时返回 nullopt，否则返回最早 trigger_at。
      */
     [[nodiscard]] std::optional<TriggerAt> NextWakeAt() const;
+
+    /**
+     * @brief 判断调用线程当前是否正在执行本 Runner 的 task callback。
+     * @return 仅在本 Runner 调用 task callback 的动态范围内返回 true。
+     */
+    [[nodiscard]] bool IsInCallbackContext() const;
 
    private:
     /// pending task 及其仅驻留内存的运行时回调。
