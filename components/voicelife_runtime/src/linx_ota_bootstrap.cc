@@ -42,7 +42,6 @@ constexpr char kSecretPartition[] = "linx_secrets";
 constexpr char kTokenKey[] = "token";
 constexpr char kTokenReference[] = "nvs://linx/token";
 constexpr char kClientIdKey[] = "client_id";
-constexpr char kBoardName[] = "voicelife-pcb";
 constexpr char kWifiNamespace[] = "wifi";
 constexpr char kWifiSsidKey[] = "ssid";
 constexpr char kWifiPasswordKey[] = "password";
@@ -81,20 +80,24 @@ esp_err_t OpenSecretNamespace(const char* name, nvs_open_mode_t mode, nvs_handle
 bool ReadConsoleBytes(uint8_t* destination, size_t size, int timeout_ms) {
     size_t received = 0;
     const int64_t deadline_us = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 1000;
-    const int original_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-    if (original_flags < 0 || fcntl(STDIN_FILENO, F_SETFL, original_flags | O_NONBLOCK) < 0) return false;
+    // 非阻塞读取：fcntl(O_NONBLOCK)/poll 在 USB-Serial-JTAG console 的 stdin 下
+    // 不可用；USB-JTAG vfs read 无数据时返回 0（非阻塞），UART 在超时后返回 0。
+    // 因此直接 read + 轮询，兼容两种 console。
     while (received < size) {
+        if (esp_timer_get_time() >= deadline_us) {
+            return false;
+        }
         const ssize_t count = read(STDIN_FILENO, destination + received, size - received);
         if (count > 0) {
             received += static_cast<size_t>(count);
             continue;
         }
-        if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK) break;
-        if (esp_timer_get_time() >= deadline_us) return false;
+        if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+            return false;
+        }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    fcntl(STDIN_FILENO, F_SETFL, original_flags);
-    return true;
+    return received == size;
 }
 
 Status StoreWifiCredentials(std::string_view ssid, std::string_view password) {
@@ -200,8 +203,13 @@ Status EnsureWifiStaConnected() {
     if (const esp_err_t error = esp_event_loop_create_default(); error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
         return EspError("初始化 ESP 事件循环", error);
     }
-    if (esp_netif_create_default_wifi_sta() == nullptr) {
-        return Status::Error(ErrorCode::kUnavailable, "创建 Wi-Fi STA netif 失败");
+    // 软复位（panic reboot）保留 RAM：esp_netif 列表可能已有 WIFI_STA_DEF，
+    // 重复 create 会 assert。先复用已有 handle，避免崩溃循环。
+    esp_netif_t* station = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (station == nullptr) {
+        if (esp_netif_create_default_wifi_sta() == nullptr) {
+            return Status::Error(ErrorCode::kUnavailable, "创建 Wi-Fi STA netif 失败");
+        }
     }
     wifi_init_config_t init_config = WIFI_INIT_CONFIG_DEFAULT();
     if (const esp_err_t error = esp_wifi_init(&init_config); error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
@@ -436,6 +444,15 @@ void LogOtaResponseShape(const linx::LinxOtaResponse& response) {
 
 const char* LinxSecretPartitionLabel() { return kSecretPartition; }
 
+bool LinxWifiStaConnected() {
+#ifdef ESP_PLATFORM
+    wifi_ap_record_t access_point{};
+    return esp_wifi_sta_get_ap_info(&access_point) == ESP_OK;
+#else
+    return false;
+#endif
+}
+
 Status InitializeLinxSecretStore() {
 #if !CONFIG_NVS_ENCRYPTION || !CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC
     return Status::Error(ErrorCode::kUnavailable, "Linx 凭据存储需要 HMAC NVS encryption");
@@ -452,11 +469,11 @@ Status InitializeLinxSecretStore() {
 #endif
 }
 
-Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig() {
+Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig(std::string_view board_identity) {
     Result<linx::LinxConnectionConfig> last_failure =
         Result<linx::LinxConnectionConfig>::Failure(ErrorCode::kUnavailable, "Linx OTA 初始化失败");
     for (int attempt = 1; attempt <= kOtaAttempts; ++attempt) {
-        auto device = ReadOtaDeviceInfo();
+        auto device = ReadOtaDeviceInfo(board_identity);
         if (!device.ok() || !device.value.has_value()) {
             last_failure = Result<linx::LinxConnectionConfig>::Failure(device.status.code, device.status.message);
         } else {
@@ -489,6 +506,19 @@ Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig() {
                         }
                     }
                     if (response.value->activation.has_value()) {
+                        // 激活码是服务端明确下发、供操作者在 Linx 控制台绑定本机
+                        // 设备的一次性公开信息。仅接受 6 位数字，绝不记录 challenge、
+                        // WSS 地址、token、Wi-Fi 配置或 NVS 内容。
+                        const std::string& code = response.value->activation->code;
+                        const bool six_digit_code =
+                            code.size() == 6 && std::all_of(code.begin(), code.end(), [](unsigned char value) {
+                                return std::isdigit(value) != 0;
+                            });
+                        if (six_digit_code) {
+                            ESP_LOGW(kTag, "LINX_ACTIVATION_CODE=%s", code.c_str());
+                        } else {
+                            ESP_LOGW(kTag, "LINX_ACTIVATION_CODE_INVALID=1");
+                        }
                         ESP_LOGW(kTag, "LINX_ACTIVATION_REQUIRED=1");
                         return Result<linx::LinxConnectionConfig>::Failure(ErrorCode::kUnavailable,
                                                                            "Linx 设备需要控制台激活");

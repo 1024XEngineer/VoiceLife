@@ -27,6 +27,7 @@ __pycache__/
 # Local secrets and generated binaries
 .env
 *.bin
+!components/voicelife_display_esp/assets/esp-sparkbot/fonts/font_noto_sans_common_16_4.bin
 audio-debug*.wav
 
 # SQLite 固定版本脚本生成的 amalgamation 与 ESP-IDF 组件清单

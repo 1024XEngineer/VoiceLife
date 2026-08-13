@@ -44,11 +44,41 @@ class VoiceSession {
      */
     Status HandleAudio(AudioFrame frame);
     /**
+     * @brief 上报已受控 MCP 工具开始执行的会话语义。
+     *
+     * Runtime 的 MCP worker 调用此入口；它不会访问 Provider、音频或显示，
+     * 只经 EvidenceSink 投递给交互事件循环。
+     */
+    void ReportToolCallStarted();
+    /**
+     * @brief 上报已受控 MCP 工具结果的会话语义。
+     * @param summary 已截断的用户可见结果摘要。
+     * @param success 工具是否成功。
+     */
+    void ReportToolResult(std::string_view summary, bool success);
+    /**
      * @brief 请求 Provider 合成文本。
      * @param text 待合成文本。
      * @return 请求结果。
      */
     Status Speak(std::string_view text);
+    /**
+     * @brief 通知 Provider 本地已检测到唤醒词，并可请求一段确认播报。
+     * @param wake_word 已由本地检测器确认的唤醒词。
+     * @param text_response 可选的服务端 TTS 确认文本。
+     * @return 请求结果。
+     */
+    Status NotifyLocalWakeWord(std::string_view wake_word, std::string_view text_response = {});
+    /**
+     * @brief 取消当前回合后，以新代次发送本地确认播报。
+     *
+     * 若正在播报，旧流的 tts.stop 是确认消息的顺序栅栏；旧 PCM 清空且终止
+     * 标记到达后才发送确认，避免旧文本在“收到！”之后继续播放。
+     * @param wake_word 已由本地检测器确认的唤醒词。
+     * @param text_response 可选的服务端 TTS 确认文本。
+     * @return 请求结果。
+     */
+    Status InterruptAndNotifyLocalWakeWord(std::string_view wake_word, std::string_view text_response);
     /** @brief 中断当前会话并推进会话代次。 @return 中断结果。 */
     Status Interrupt();
     /** @brief 停止会话并关闭所有音频资源。 @return 停止结果。 */
@@ -85,6 +115,18 @@ class VoiceSession {
     // 本轮是否已收到有效输入（STT/工具调用），仅在其为 true 时接受服务端 TTS，
     // 避免空闲态误收上一轮残留回复。
     bool response_armed_ = false;
+    // 每段远端 TTS 仅上报一次首个成功入播放队列的音频帧，供 Runtime
+    // 记录唤醒确认的端到端时延；不携带 PCM 或文本。
+    bool first_tts_audio_pending_ = false;
+    // EndCapture 仅停止本地 PCM；服务端最终 STT 会在随后到达。该标记允许
+    // 同一 generation 的最终识别结果在 kReady 中被接收一次，避免 VAD 端点
+    // 把“再见”等最终语义丢失。
+    bool awaiting_final_asr_ = false;
+    // 打断播报后，必须等待旧 TTS 的终止标记才能发送下一条确认播报。否则
+    // 旧回合已经在传输中的 PCM 会被错误归入新 generation 而继续出声。
+    bool interrupt_fence_pending_ = false;
+    std::string pending_interrupt_wake_word_;
+    std::string pending_interrupt_text_response_;
     // VAD 端点：本地静音检测（无 AFE，用 RMS 能量近似）。
     bool vad_speech_seen_ = false;
     bool vad_silence_emitted_ = false;

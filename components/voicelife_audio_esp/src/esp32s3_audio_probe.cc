@@ -134,10 +134,15 @@ class Esp32s3AudioProbe::Impl final {
             report.i2c_bus_ready = true;
             report.es8311_ack = i2c_master_probe(i2c_bus_, control.addresses.es8311_8bit >> 1,
                                                  static_cast<int>(options.timeout_ms)) == ESP_OK;
-            report.es7210_ack = i2c_master_probe(i2c_bus_, control.addresses.es7210_8bit >> 1,
-                                                 static_cast<int>(options.timeout_ms)) == ESP_OK;
-            report.pca9557_ack = i2c_master_probe(i2c_bus_, control.addresses.pca9557_7bit,
-                                                  static_cast<int>(options.timeout_ms)) == ESP_OK;
+            // ES7210/PCA9557 地址为 0 表示未接线，跳过探测（ES8311-only 板型）。
+            report.es7210_present = control.addresses.es7210_8bit != 0;
+            report.es7210_ack =
+                !report.es7210_present || i2c_master_probe(i2c_bus_, control.addresses.es7210_8bit >> 1,
+                                                           static_cast<int>(options.timeout_ms)) == ESP_OK;
+            report.pca9557_present = control.addresses.pca9557_7bit != 0;
+            report.pca9557_ack =
+                !report.pca9557_present || i2c_master_probe(i2c_bus_, control.addresses.pca9557_7bit,
+                                                            static_cast<int>(options.timeout_ms)) == ESP_OK;
         }
 
         esp_err_t error = ESP_OK;

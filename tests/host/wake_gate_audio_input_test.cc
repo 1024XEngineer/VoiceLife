@@ -104,13 +104,19 @@ int main() {
     Check(physical.starts == 1 && detector.stops == 0, "唤醒命中后检测器已自停，切换上行不应重复停止检测器");
     Check(physical.Emit(Frame()).ok() && detector.frames == 1 && forwarded == 1,
           "上行状态 PCM 必须只转发 VoiceSession");
-    Check(gate.StopCapture().ok() && gate.standby(), "停止上行后必须恢复本地待机");
+    Check(gate.StopCapture().ok() && !gate.standby(), "停止上行不得在播报或最终识别期间隐式恢复本地唤醒");
+    Check(detector.starts == 1 && physical.starts == 1, "停止上行不得重启物理采集或检测器");
+    Check(physical.Emit(Frame()).ok() && detector.frames == 1 && forwarded == 1,
+          "非待机阶段 PCM 必须既不继续上行也不送本地检测器");
+    Check(gate.StartStandby().ok() && gate.standby(), "只有明确回待机时才恢复本地检测");
     Check(detector.starts == 2 && physical.starts == 1, "恢复待机不得重启物理采集任务");
     Check(physical.Emit(Frame()).ok() && detector.frames == 2 && forwarded == 1, "恢复待机后 PCM 不得继续上行");
-    Check(gate.StopCapture().ok() && gate.standby(), "重复恢复待机不得使输入门控失去本地检测");
-    Check(detector.starts == 2 && physical.starts == 1, "已在待机时恢复不得创建重复检测或采集任务");
+    Check(gate.StopCapture().ok() && !gate.standby(), "停止待机检测应使后续中间阶段保持静音门控");
+    Check(gate.StartStandby().ok() && gate.standby(), "重复回待机必须恢复检测");
+    Check(detector.starts == 3 && physical.starts == 1, "重复待机切换不得创建重复物理采集任务");
 
     gate.Close();
-    Check(physical.stops == 1 && physical.closes == 1 && detector.stops == 1, "关闭必须停止检测、采集并释放物理端口");
+    Check(physical.stops == 1 && physical.closes == 1 && detector.stops == 2,
+          "关闭必须停止当前检测、采集并释放物理端口");
     return 0;
 }

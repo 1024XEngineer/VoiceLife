@@ -25,6 +25,8 @@ void CheckTransition(VoiceInteractionController& controller, VoiceInteractionEve
 int main() {
     VoiceInteractionController controller;
     Check(controller.state() == VoiceInteractionState::kBooting, "控制器应以 BOOT 状态启动");
+    CheckTransition(controller, VoiceInteractionEvent::kTransportConnected, VoiceInteractionState::kBooting,
+                    VoiceInteractionAction::kNone, "启动前 Provider 已连接只能确认网络，不能跳过 boot 转场");
     CheckTransition(controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "启动后应进入待机并启动本地唤醒");
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
@@ -74,6 +76,10 @@ int main() {
                     VoiceInteractionAction::kStopVoiceTurn, "触摸松开应进入等待最终 STT");
     CheckTransition(controller, VoiceInteractionEvent::kFinalizationTimedOut, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "触摸松开后最终 STT 超时应恢复待机");
+    CheckTransition(controller, VoiceInteractionEvent::kTransportDisconnected, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "空闲后的服务端有序关闭必须保持本地可唤醒，不显示重连中");
+    CheckTransition(controller, VoiceInteractionEvent::kTransportConnected, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kNone, "后台重连完成不得扰动空闲显示");
 
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
                     VoiceInteractionAction::kStartVoiceTurn, "待机唤醒仍应开始云端语音");
