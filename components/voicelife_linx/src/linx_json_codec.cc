@@ -122,7 +122,7 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
     cJSON_AddStringToObject(root.get(), "type", "hello");
     cJSON_AddNumberToObject(root.get(), "version", 1);
     cJSON* features = cJSON_AddObjectToObject(root.get(), "features");
-    cJSON_AddBoolToObject(features, "mcp", true);
+    cJSON_AddBoolToObject(features, "mcp", config.enable_mcp);
     cJSON_AddStringToObject(root.get(), "transport", "websocket");
 
     cJSON* audio = cJSON_AddObjectToObject(root.get(), "audio_params");

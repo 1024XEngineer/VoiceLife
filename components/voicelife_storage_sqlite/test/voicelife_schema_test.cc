@@ -71,6 +71,14 @@ void CheckVersionOneSchema(const std::filesystem::path& path) {
           "版本一应创建日程实例表");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule')") == 10,
           "日程实例表应包含约定的十个字段");
+    Check(
+        ScalarInt64(database,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schedule_reminder_delivery'") == 1,
+        "版本二应创建提醒投递事实表");
+    Check(
+        ScalarInt64(database,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schedule_creation_request'") == 1,
+        "版本三应创建日程创建键映射表");
 
     {
         auto foreign_keys = database.Prepare("PRAGMA foreign_key_list(schedule)");

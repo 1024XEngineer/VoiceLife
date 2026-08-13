@@ -13,8 +13,16 @@
 
 namespace voicelife::linx {
 
-/** @brief 处理 Linx MCP JSON-RPC payload 并返回完整响应消息。 */
-using LinxMcpMessageHandler = std::function<Result<std::string>(std::string_view payload, std::string_view session_id)>;
+/** @brief Linx 传输适配器接收 MCP JSON-RPC 响应的回调。 */
+using LinxMcpResponseSink = std::function<void(Result<std::string>)>;
+
+/**
+ * @brief 异步投递 MCP JSON-RPC payload。
+ *
+ * Provider 回调只能提交请求；持久化和工具调用在 MCP 模块的专属执行上下文完成。
+ */
+using LinxMcpMessageHandler =
+    std::function<Status(std::string_view payload, std::string_view session_id, LinxMcpResponseSink response_sink)>;
 
 /** 将 Linx 协议和传输适配为稳定的语音 Provider 契约。 */
 class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {

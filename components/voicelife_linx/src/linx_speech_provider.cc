@@ -6,6 +6,22 @@
 namespace voicelife::linx {
 namespace {
 
+std::string EscapeMcpSessionId(std::string_view value) {
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (const char character : value) {
+        if (character == '"' || character == '\\') escaped.push_back('\\');
+        escaped.push_back(character);
+    }
+    return escaped;
+}
+
+std::string WrapMcpResponse(std::string_view payload, std::string_view session_id) {
+    std::string envelope = "{\"type\":\"mcp\"";
+    if (!session_id.empty()) envelope += ",\"session_id\":\"" + EscapeMcpSessionId(session_id) + "\"";
+    return envelope + ",\"payload\":" + std::string(payload) + "}";
+}
+
 voice::VoiceEvent Event(voice::VoiceEventKind kind, std::string_view text = {}, bool aborted = false) {
     voice::VoiceEvent event;
     event.kind = kind;
@@ -391,19 +407,27 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
             }
             return;
         case LinxMessageKind::kMcp: {
+            if (!config_.enable_mcp) {
+                // Runtime 没有装配 MCP 时不宣告该能力。服务端若仍下发 MCP，
+                // 忽略该请求，不能把语音会话误转为故障状态。
+                return;
+            }
             if (!mcp_handler_) {
                 Emit(Event(voice::VoiceEventKind::kError, "Linx 收到 MCP 请求，但设备未配置 MCP handler"));
                 return;
             }
             const std::string session_id = inbound.session_id.value_or(ActiveSessionConfig().session_id);
-            if (const auto response = mcp_handler_(inbound.text, session_id);
-                response.ok() && response.value.has_value()) {
-                if (response.value->empty()) return;
-                const Status status = transport_.SendText(*response.value);
-                if (!status.ok()) Emit(Event(voice::VoiceEventKind::kError, status.message));
-            } else {
-                Emit(Event(voice::VoiceEventKind::kError, response.status.message));
-            }
+            const Status submitted =
+                mcp_handler_(inbound.text, session_id, [this, session_id](Result<std::string> response) {
+                    if (!response.ok() || !response.value.has_value()) {
+                        Emit(Event(voice::VoiceEventKind::kError, response.status.message));
+                        return;
+                    }
+                    if (response.value->empty()) return;
+                    const Status status = transport_.SendText(WrapMcpResponse(*response.value, session_id));
+                    if (!status.ok()) Emit(Event(voice::VoiceEventKind::kError, status.message));
+                });
+            if (!submitted.ok()) Emit(Event(voice::VoiceEventKind::kError, submitted.message));
             return;
         }
         case LinxMessageKind::kGoodbye:

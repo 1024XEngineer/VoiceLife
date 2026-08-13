@@ -101,7 +101,12 @@ int main() {
     auto hello = codec.EncodeHello(config, connection);
     Check(hello.ok(), "Linx hello 应可编码");
     Check(hello.value->find("\"transport\":\"websocket\"") != std::string::npos, "hello 必须声明 websocket transport");
-    Check(hello.value->find("\"mcp\":true") != std::string::npos, "hello 必须声明 MCP 能力");
+    Check(hello.value->find("\"mcp\":true") != std::string::npos, "启用 MCP 时 hello 必须声明能力");
+    auto no_mcp_config = config;
+    no_mcp_config.enable_mcp = false;
+    const auto no_mcp_hello = codec.EncodeHello(no_mcp_config, connection);
+    Check(no_mcp_hello.ok() && no_mcp_hello.value->find("\"mcp\":false") != std::string::npos,
+          "未装配 MCP 时 hello 不得虚报工具能力");
     Check(hello.value->find("\"sample_rate\":16000") != std::string::npos, "hello 必须声明采样率");
     auto detect = codec.EncodeListenDetect(config, "请播报\\测试", "收到！");
     Check(detect.ok() && detect.value->find("\\\\测试") != std::string::npos &&
@@ -198,11 +203,12 @@ int main() {
     int mcp_calls = 0;
     voicelife::linx::LinxSpeechProviderAdapter mcp_provider(
         mcp_transport, codec, connection, voicelife::linx::LinxSpeechProviderAdapter::DefaultCapabilities(),
-        [&mcp_calls](std::string_view, std::string_view session_id) {
+        [&mcp_calls](std::string_view, std::string_view session_id,
+                     voicelife::linx::LinxMcpResponseSink response_sink) {
             ++mcp_calls;
-            return voicelife::Result<std::string>::Success(
-                "{\"type\":\"mcp\",\"session_id\":\"" + std::string(session_id) +
-                "\",\"payload\":{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}");
+            Check(session_id == "remote-linx-session", "Linx 必须将远端 session_id 传给 MCP endpoint");
+            response_sink(voicelife::Result<std::string>::Success("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}"));
+            return Status::Ok();
         });
     Check(mcp_provider.Connect(session_config, {}).ok(), "配置 MCP handler 的 Provider 应连接成功");
     std::vector<voicelife::voice::VoiceEvent> mcp_events;
@@ -215,10 +221,28 @@ int main() {
     const auto mcp_events_before_request = mcp_events.size();
     mcp_transport.EmitText(R"({"type":"mcp","payload":{"jsonrpc":"2.0","method":"tools/list","id":1}})");
     Check(mcp_calls == 1 && mcp_transport.texts.back().find("\"type\":\"mcp\"") != std::string::npos &&
-              mcp_transport.texts.back().find("\"session_id\":\"remote-linx-session\"") != std::string::npos,
-          "MCP payload 应调用 handler 并回发响应");
+              mcp_transport.texts.back().find("\"session_id\":\"remote-linx-session\"") != std::string::npos &&
+              mcp_transport.texts.back().find("\"payload\":{\"jsonrpc\":\"2.0\"") != std::string::npos,
+          "Linx Adapter 必须封装 MCP endpoint 的 JSON-RPC 响应");
     Check(mcp_events.size() == mcp_events_before_request,
           "MCP 网络回调只能交给受控 handler，不能直接投递可绕过 Runtime 的工具事件");
+
+    FakeTransport disabled_mcp_transport;
+    voicelife::linx::LinxSpeechProviderAdapter disabled_mcp_provider(disabled_mcp_transport, codec, connection);
+    std::vector<voicelife::voice::VoiceEvent> disabled_mcp_events;
+    auto disabled_mcp_config = session_config;
+    disabled_mcp_config.enable_mcp = false;
+    Check(disabled_mcp_provider
+              .Connect(disabled_mcp_config,
+                       [&disabled_mcp_events](const voicelife::voice::VoiceEvent& event) {
+                           disabled_mcp_events.push_back(event);
+                       })
+              .ok(),
+          "关闭 MCP 的 Provider 应正常连接");
+    const auto disabled_mcp_event_count = disabled_mcp_events.size();
+    disabled_mcp_transport.EmitText(R"({"type":"mcp","payload":{"jsonrpc":"2.0","method":"tools/list","id":1}})");
+    Check(disabled_mcp_transport.texts.size() == 1 && disabled_mcp_events.size() == disabled_mcp_event_count,
+          "未宣告 MCP 能力时必须忽略迟到工具请求，不能影响语音会话");
 
     voicelife::voice::AudioFrame uplink;
     uplink.generation = 7;

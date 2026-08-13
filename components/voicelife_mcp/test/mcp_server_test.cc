@@ -31,7 +31,7 @@ Status RegisterTypedTool(McpServer& server, int64_t& captured_value) {
                            PropertyList({Property("enabled", PropertyType::kBoolean, true),
                                          Property("level", PropertyType::kInteger, 0, 100),
                                          Property::WithStringLength("label", 1, 10, std::string("default"))}),
-                           [&captured_value](const PropertyList& properties) {
+                           [&captured_value](const voicelife::ToolCall&, const PropertyList& properties) {
                                captured_value = properties.value<int64_t>("level").value_or(-1);
                                return ToolResult{.status = Status::Ok(), .output = {}};
                            });
@@ -68,7 +68,7 @@ void TestPropertyList() {
  */
 void TestRegistrationValidation() {
     McpServer server;
-    const PropertyHandler handler = [](const PropertyList&) {
+    const PropertyHandler handler = [](const voicelife::ToolCall&, const PropertyList&) {
         return ToolResult{.status = Status::Ok(), .output = {}};
     };
 
@@ -164,7 +164,7 @@ void TestToolCalls() {
     Check(server
               .add_tool("self.device.optional", "可选参数测试",
                         PropertyList({Property::Optional("location", PropertyType::kString)}),
-                        [](const PropertyList& properties) {
+                        [](const voicelife::ToolCall&, const PropertyList& properties) {
                             return ToolResult{
                                 .status = Status::Ok(),
                                 .output = {{"location", properties.value<std::string>("location").value_or("none")}}};
@@ -213,7 +213,7 @@ void TestToolListing() {
     yyjson_doc_free(empty_document);
 
     Check(RegisterTypedTool(server, captured_value).ok(), "列表测试工具应注册成功");
-    const PropertyHandler handler = [](const PropertyList&) {
+    const PropertyHandler handler = [](const voicelife::ToolCall&, const PropertyList&) {
         return ToolResult{.status = Status::Ok(), .output = {}};
     };
     Check(server

@@ -21,9 +21,11 @@
       "configRef": "nvs://linx/websocket_url"
     },
     "storage": {
-      "driver": "memory",
+      "driver": "fatfs-sqlite",
       "capabilities": [
-        "atomic-calendar-write"
+        "atomic-calendar-write",
+        "persistent-sqlite",
+        "once-only-reminder"
       ]
     },
     "im": {
@@ -47,6 +49,12 @@
     "CONFIG_NVS_ENCRYPTION=y",
     "CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC=y",
     "CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID=1",
+    "CONFIG_FATFS_SECTOR_4096=y",
+    "CONFIG_WL_SECTOR_SIZE_4096=y",
+    "CONFIG_VOICELIFE_STORAGE_FATFS=y",
+    "CONFIG_VOICELIFE_STORAGE_SQLITE=y",
+    "CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_ADDRESS=0x700000",
+    "CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_SIZE=0x200000",
     "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
     "CONFIG_LV_USE_CLIB_MALLOC=y",
     "CONFIG_LV_FONT_FMT_TXT_LARGE=y",

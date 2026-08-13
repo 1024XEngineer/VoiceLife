@@ -1,4 +1,4 @@
-#include "schedule_mcp_tools.h"
+#include "voicelife/mcp/schedule_tools.h"
 
 #include <chrono>
 #include <cstdint>
@@ -10,16 +10,14 @@
 #include "voicelife/schedule/schedule_results.h"
 #include "voicelife/schedule/schedule_service.h"
 
-namespace voicelife::runtime {
+namespace voicelife::mcp {
 namespace {
 
-using mcp::Property;
-using mcp::PropertyList;
-using mcp::PropertyType;
+using schedule::DateTime;
 
 ToolResult Failure(Status status) { return {.status = std::move(status), .output = {}}; }
 
-std::string UnixTime(const schedule::DateTime& value) { return std::to_string(value.time_since_epoch().count()); }
+std::string UnixTime(const DateTime& value) { return std::to_string(value.time_since_epoch().count()); }
 
 void AddScheduleOutput(const schedule::Schedule& value, ToolResult& result) {
     result.output["id"] = std::to_string(value.id);
@@ -31,9 +29,9 @@ void AddScheduleOutput(const schedule::Schedule& value, ToolResult& result) {
     if (value.notes.has_value()) result.output["notes"] = *value.notes;
 }
 
-std::optional<schedule::DateTime> ToUnixTime(const PropertyList& properties, const char* name) {
+std::optional<DateTime> ToUnixTime(const PropertyList& properties, const char* name) {
     const auto value = properties.value<int64_t>(name);
-    return value.has_value() ? std::optional<schedule::DateTime>(std::chrono::seconds{*value}) : std::nullopt;
+    return value.has_value() ? std::optional<DateTime>(std::chrono::seconds{*value}) : std::nullopt;
 }
 
 schedule::ScheduleStatusFilter ParseStatus(const std::string& value, Status& status) {
@@ -70,10 +68,10 @@ PropertyList QueryProperties() {
 
 }  // namespace
 
-Status RegisterScheduleMcpTools(mcp::McpServer& server, schedule::ScheduleService& service) {
+Status RegisterScheduleTools(McpServer& server, schedule::ScheduleService& service) {
     Status status =
         server.add_tool("schedule.create", "创建一条日程；时间参数使用 Unix 秒。", CreateProperties(),
-                        [&service](const PropertyList& properties) {
+                        [&service](const ToolCall& call, const PropertyList& properties) {
                             schedule::CreateScheduleCommand command;
                             command.event = properties.value<std::string>("event").value();
                             command.start_time = ToUnixTime(properties, "start_time");
@@ -81,6 +79,7 @@ Status RegisterScheduleMcpTools(mcp::McpServer& server, schedule::ScheduleServic
                             command.location = properties.value<std::string>("location");
                             command.notes = properties.value<std::string>("notes");
                             command.ignore_conflict = properties.value<bool>("ignore_conflict").value_or(false);
+                            command.idempotency_key = call.request_id;
                             const auto result = service.create_schedule(command);
                             if (!result.status.ok()) return Failure(result.status);
                             ToolResult output{.status = result.status, .output = {{"message", result.message}}};
@@ -93,7 +92,7 @@ Status RegisterScheduleMcpTools(mcp::McpServer& server, schedule::ScheduleServic
 
     return server.add_tool(
         "schedule.query", "查询日程；时间筛选使用 Unix 秒。", QueryProperties(),
-        [&service](const PropertyList& properties) {
+        [&service](const ToolCall&, const PropertyList& properties) {
             Status parse_status = Status::Ok();
             schedule::QueryScheduleCommand command;
             command.schedule_id = properties.value<int64_t>("schedule_id");
@@ -111,11 +110,12 @@ Status RegisterScheduleMcpTools(mcp::McpServer& server, schedule::ScheduleServic
             for (std::size_t index = 0; index < result.schedules.size(); ++index) {
                 ToolResult item{.status = Status::Ok(), .output = {}};
                 AddScheduleOutput(result.schedules[index], item);
-                for (const auto& [key, value] : item.output)
+                for (const auto& [key, value] : item.output) {
                     output.output["schedule_" + std::to_string(index) + "_" + key] = value;
+                }
             }
             return output;
         });
 }
 
-}  // namespace voicelife::runtime
+}  // namespace voicelife::mcp

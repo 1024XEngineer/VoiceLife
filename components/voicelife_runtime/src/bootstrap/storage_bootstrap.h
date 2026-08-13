@@ -4,13 +4,17 @@
 
 #include "voicelife/contracts/status.h"
 
+namespace voicelife::schedule {
+class ScheduleRepository;
+}
+
 namespace voicelife::runtime {
 
 /**
  * @brief 负责组装并管理运行时的持久化基础设施。
  *
  * 存储启动顺序固定为 FATFS/Wear Levelling 挂载、SQLite 连接、Schema 健康检查。
- * 该类不创建任何业务 Repository；业务模块在基础设施就绪后由更上层按需装配。
+ * 该类只管理存储资源；组合根可在就绪后借用 Repository 创建独立的应用模块。
  */
 class StorageBootstrap final {
    public:
@@ -46,6 +50,9 @@ class StorageBootstrap final {
      * @return 已成功启动且尚未停止时返回 true。
      */
     [[nodiscard]] bool IsReady() const;
+
+    /** @brief 返回生命周期受 StorageBootstrap 管理的日程 Repository。 */
+    [[nodiscard]] schedule::ScheduleRepository* schedule_repository();
 
    private:
     class Impl;

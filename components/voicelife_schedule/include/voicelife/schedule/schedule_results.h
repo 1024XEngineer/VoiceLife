@@ -17,6 +17,8 @@ struct CreateScheduleResult {
     std::vector<Schedule> conflicts;
     std::vector<Schedule> nearby_schedules;
     std::string error;
+    /// 同一外部创建键重试时为 true；不会生成第二条日程。
+    bool idempotent_replay = false;
 };
 
 /// 修改日程的返回数据。

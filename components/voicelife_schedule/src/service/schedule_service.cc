@@ -37,6 +37,33 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
     if (command.start_time.has_value() && command.end_time.has_value() && *command.end_time <= *command.start_time) {
         return InvalidCreateScheduleResult("日程结束时间必须晚于开始时间");
     }
+    if (command.idempotency_key.has_value() &&
+        (command.idempotency_key->empty() || command.idempotency_key->size() > 128)) {
+        return InvalidCreateScheduleResult("日程创建键无效");
+    }
+
+    // 重试必须优先回放既有结果，不能被随后创建的冲突日程改变语义。
+    if (repository_ != nullptr && command.idempotency_key.has_value()) {
+        const Result<std::optional<Schedule>> existing = repository_->FindByIdempotencyKey(*command.idempotency_key);
+        if (!existing.ok()) {
+            return {.status = existing.status,
+                    .message = {},
+                    .schedule = std::nullopt,
+                    .conflicts = {},
+                    .nearby_schedules = {},
+                    .error = "读取已创建日程失败：" + existing.status.message,
+                    .idempotent_replay = false};
+        }
+        if (existing.value->has_value()) {
+            return {.status = Status::Ok(),
+                    .message = "日程创建成功",
+                    .schedule = std::move(**existing.value),
+                    .conflicts = {},
+                    .nearby_schedules = {},
+                    .error = {},
+                    .idempotent_replay = true};
+        }
+    }
 
     // 组装日程
     Schedule schedule{
@@ -99,7 +126,9 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
     }
 
     if (repository_ != nullptr) {
-        const Result<Schedule> stored = repository_->Insert(schedule);
+        const Result<Schedule> stored = command.idempotency_key.has_value()
+                                            ? repository_->InsertOnce(schedule, *command.idempotency_key)
+                                            : repository_->Insert(schedule);
         if (!stored.ok()) {
             const std::string error = "保存日程失败：" + stored.status.message;
             return {
@@ -122,6 +151,7 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
         .conflicts = std::move(conflicts),
         .nearby_schedules = std::move(nearby_schedules),
         .error = {},
+        .idempotent_replay = false,
     };
 }
 

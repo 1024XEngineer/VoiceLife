@@ -64,6 +64,17 @@ class ProfileValidationTest(unittest.TestCase):
 
         self.assertIn("CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y", profile["sdkconfig"])
 
+    def test_sparkbot_profile_declares_real_schedule_storage(self) -> None:
+        profile_path = ROOT / "config" / "profiles" / "esp32s3-esp-sparkbot.json"
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(profile["adapters"]["storage"]["driver"], "fatfs-sqlite")
+        self.assertIn("persistent-sqlite", profile["adapters"]["storage"]["capabilities"])
+        self.assertIn("once-only-reminder", profile["adapters"]["storage"]["capabilities"])
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_SQLITE=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_ADDRESS=0x700000", profile["sdkconfig"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstddef>
+#include <optional>
+#include <string_view>
 #include <vector>
 
 #include "voicelife/schedule/schedule_repository.h"
@@ -33,6 +36,9 @@ class SqliteScheduleRepository final : public schedule::ScheduleRepository {
      */
     Result<schedule::Schedule> Insert(const schedule::Schedule& schedule) override;
 
+    [[nodiscard]] Result<std::optional<schedule::Schedule>> FindByIdempotencyKey(std::string_view key) const override;
+    Result<schedule::Schedule> InsertOnce(const schedule::Schedule& schedule, std::string_view key) override;
+
     /** @brief 更新一条日程。 @param schedule 待更新日程。 @return 更新状态。 */
     Status Update(const schedule::Schedule& schedule) override;
 
@@ -44,6 +50,10 @@ class SqliteScheduleRepository final : public schedule::ScheduleRepository {
      * @return 按开始时间和标识排序的日程集合。
      */
     [[nodiscard]] Result<std::vector<schedule::Schedule>> FindAll() const override;
+
+    /** @brief 原子领取到期且未投递的有效日程提醒。 */
+    Result<std::vector<schedule::DueScheduleReminder>> ClaimDueReminders(schedule::DateTime now,
+                                                                         std::size_t limit) override;
 
    private:
     SqliteDatabase& database_;

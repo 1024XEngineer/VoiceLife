@@ -41,6 +41,12 @@ struct Schedule {
     DateTime updated_at;
 };
 
+/// 已到期且尚未投递的日程提醒。领取成功即持久化投递事实，重启后不得重复领取。
+struct DueScheduleReminder {
+    Schedule schedule;
+    DateTime delivered_at;
+};
+
 /// 日程操作记录，对应 OperationRecord 数据表。
 struct OperationRecord {
     OperationId id = 0;

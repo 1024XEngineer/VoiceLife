@@ -6,6 +6,7 @@
 
 #include "voicelife/storage_fatfs/fatfs_volume.h"
 #include "voicelife/storage_sqlite/sqlite_database.h"
+#include "voicelife/storage_sqlite/sqlite_schedule_repository.h"
 #include "voicelife/storage_sqlite/sqlite_schema.h"
 #include "voicelife/storage_sqlite/voicelife_schema.h"
 
@@ -142,6 +143,14 @@ class StorageBootstrap::Impl final {
      */
     [[nodiscard]] bool IsReady() const { return ready_; }
 
+    [[nodiscard]] schedule::ScheduleRepository* schedule_repository() {
+#if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_STORAGE_FATFS_RUNTIME
+        return ready_ ? &schedule_repository_ : nullptr;
+#else
+        return nullptr;
+#endif
+    }
+
    private:
 #if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_STORAGE_FATFS_RUNTIME
     /**
@@ -157,6 +166,7 @@ class StorageBootstrap::Impl final {
 
     storage_fatfs::FatFsVolume volume_;
     storage_sqlite::SqliteDatabase database_;
+    storage_sqlite::SqliteScheduleRepository schedule_repository_{database_};
 #endif
     bool ready_ = false;
 };
@@ -170,5 +180,7 @@ Status StorageBootstrap::Start() { return impl_->Start(); }
 Status StorageBootstrap::Stop() { return impl_->Stop(); }
 
 bool StorageBootstrap::IsReady() const { return impl_->IsReady(); }
+
+schedule::ScheduleRepository* StorageBootstrap::schedule_repository() { return impl_->schedule_repository(); }
 
 }  // namespace voicelife::runtime

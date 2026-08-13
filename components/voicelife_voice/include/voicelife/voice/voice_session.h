@@ -46,7 +46,7 @@ class VoiceSession {
     /**
      * @brief 上报已受控 MCP 工具开始执行的会话语义。
      *
-     * Runtime 的 MCP worker 调用此入口；它不会访问 Provider、音频或显示，
+     * MCP 应用的专属执行器调用此入口；它不会访问 Provider、音频或显示，
      * 只经 EvidenceSink 投递给交互事件循环。
      */
     void ReportToolCallStarted();

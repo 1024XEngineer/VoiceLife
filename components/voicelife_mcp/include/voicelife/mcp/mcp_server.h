@@ -210,7 +210,7 @@ std::optional<T> PropertyList::value(const std::string& name) const {
 }
 
 /// 使用已校验参数执行工具业务逻辑的回调。
-using PropertyHandler = std::function<ToolResult(const PropertyList&)>;
+using PropertyHandler = std::function<ToolResult(const ToolCall&, const PropertyList&)>;
 
 /// 面向业务层的 MCP 工具注册门面。
 class McpServer {

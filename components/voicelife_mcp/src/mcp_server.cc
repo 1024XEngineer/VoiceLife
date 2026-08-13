@@ -168,7 +168,7 @@ Status McpServer::add_tool(std::string name, std::string description, PropertyLi
                                                                   .input_schema = properties.to_schema()},
                                                    .handler = [properties = std::move(properties),
                                                                handler = std::move(handler)](const ToolCall& call) {
-                                                       return handler(properties.with_values(call.arguments));
+                                                       return handler(call, properties.with_values(call.arguments));
                                                    }});
     registration_order_.push_back(registered_name);
     return Status::Ok();

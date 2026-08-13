@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstddef>
+#include <optional>
+#include <string_view>
 #include <vector>
 
 #include "voicelife/contracts/status.h"
@@ -24,6 +27,30 @@ class ScheduleRepository {
      */
     virtual Result<Schedule> Insert(const Schedule& schedule) = 0;
 
+    /**
+     * @brief 查找指定外部创建键对应的首次创建结果。
+     *
+     * 创建键来自受控调用边界，而不是用户可编辑的日程内容。实现必须跨进程重启保留
+     * 该映射，避免重试重复写入日程。
+     */
+    [[nodiscard]] virtual Result<std::optional<Schedule>> FindByIdempotencyKey(std::string_view key) const {
+        (void)key;
+        return Result<std::optional<Schedule>>::Failure(ErrorCode::kUnavailable, "当前仓储不支持查询日程创建键");
+    }
+
+    /**
+     * @brief 原子创建日程或返回同一创建键既有的日程。
+     *
+     * @param schedule 首次写入的日程。
+     * @param key 外部调用边界生成的稳定创建键。
+     * @return 首次写入或历史回放的完整日程。
+     */
+    virtual Result<Schedule> InsertOnce(const Schedule& schedule, std::string_view key) {
+        (void)schedule;
+        (void)key;
+        return Result<Schedule>::Failure(ErrorCode::kUnavailable, "当前仓储不支持幂等创建日程");
+    }
+
     /** @brief 更新已有日程的全部持久化字段。 @param schedule 包含有效 id 的日程。 @return 更新结果。 */
     virtual Status Update(const Schedule& schedule) {
         (void)schedule;
@@ -41,6 +68,21 @@ class ScheduleRepository {
      * @return 日程集合或数据库错误。
      */
     [[nodiscard]] virtual Result<std::vector<Schedule>> FindAll() const = 0;
+
+    /**
+     * @brief 原子领取截至指定时间尚未投递的有效日程。
+     *
+     * 返回的每条日程都已同步写入“已投递”事实；调用方可在进程重启后安全重试，
+     * 不会再次获得同一条提醒。具体的通知、TTS 和显示不属于 Repository。
+     * @param now 当前 UTC Unix 秒。
+     * @param limit 单次最多领取的数量。
+     * @return 已领取的提醒日程或底层存储错误。
+     */
+    virtual Result<std::vector<DueScheduleReminder>> ClaimDueReminders(DateTime now, std::size_t limit) {
+        (void)now;
+        (void)limit;
+        return Result<std::vector<DueScheduleReminder>>::Failure(ErrorCode::kUnavailable, "当前仓储不支持领取到期提醒");
+    }
 };
 
 }  // namespace voicelife::schedule

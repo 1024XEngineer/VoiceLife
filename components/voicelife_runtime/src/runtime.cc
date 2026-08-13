@@ -10,13 +10,11 @@
 
 #ifdef ESP_PLATFORM
 #include <atomic>
-#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <deque>
 #include <mutex>
-#include <optional>
 #include <string_view>
 
 #include "esp_log.h"
@@ -25,7 +23,6 @@
 #include "freertos/task.h"
 #include "nvs.h"
 #include "nvs_flash.h"
-#include "voicelife/contracts/json.h"
 #include "voicelife/im/esp_http_transport_factory.h"
 #include "voicelife/im/im_config_store.h"
 #include "voicelife/im/im_retry_policy.h"
@@ -33,15 +30,12 @@
 #include "voicelife/linx/linx_speech_provider.h"
 #include "voicelife/linx/linx_types.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
-#include "voicelife/mcp/mcp_server.h"
-#include "voicelife/schedule/schedule_service.h"
+#include "voicelife/mcp/mcp_schedule_application.h"
 #endif
 
 #include "bootstrap/storage_bootstrap.h"
 #include "im_runtime_bootstrap.h"
-#include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
-#include "schedule_mcp_tools.h"
 #include "voicelife/voice/display_snapshot.h"
 #include "voicelife/voice/voice_interaction_controller.h"
 #include "voicelife/voice/voice_ports.h"
@@ -160,15 +154,14 @@ class Runtime final {
     Runtime() {
         auto& registry = voice::SpeechProviderRegistry::Instance();
 #ifdef ESP_PLATFORM
-        init_status_ = RegisterScheduleMcpTools(mcp_server_, schedule_service_);
-        if (init_status_.ok()) {
-            ESP_LOGI(kTag, "MCP_TOOLS_READY count=2 names=schedule.create,schedule.query");
-        }
         registry.Register("xrobot-websocket", linx::LinxSpeechProviderAdapter::DefaultCapabilities(), [this]() {
             return std::make_unique<linx::LinxSpeechProviderAdapter>(
                 *linx_transport_, linx_codec_, linx_config_, linx::LinxSpeechProviderAdapter::DefaultCapabilities(),
-                [this](std::string_view payload, std::string_view session_id) {
-                    return HandleMcpRequest(payload, session_id);
+                [this](std::string_view payload, std::string_view, linx::LinxMcpResponseSink response_sink) {
+                    if (mcp_application_ == nullptr) {
+                        return Status::Error(ErrorCode::kUnavailable, "MCP 应用尚未就绪");
+                    }
+                    return mcp_application_->SubmitJsonRpc(payload, std::move(response_sink));
                 });
         });
 #endif
@@ -180,7 +173,6 @@ class Runtime final {
         assembly_ = &assembly;
         const auto fail_startup = [this](Status status) {
 #ifdef ESP_PLATFORM
-            StopMcpWorker();
             StopEventLoop();
 #endif
             return status;
@@ -190,6 +182,12 @@ class Runtime final {
         const Status storage_status = storage_.Start();
         if (!storage_status.ok()) return storage_status;
 #ifdef ESP_PLATFORM
+        if (auto* repository = storage_.schedule_repository(); repository != nullptr) {
+            mcp_application_ = std::make_unique<mcp::McpScheduleApplication>(*repository);
+            init_status_ = mcp_application_->Initialize();
+            if (!init_status_.ok()) return init_status_;
+            ESP_LOGI(kTag, "MCP_APPLICATION_READY tools=schedule.create,schedule.query");
+        }
         // 立创实战派 ESP32-S3 板载 WS2812 灯珠接 GPIO48（小智 BUILTIN_LED_GPIO）。
         // 主 NVS 分区初始化（Wi-Fi 驱动/凭据等依赖；linx_secrets 为加密分区另行初始化）。
         {
@@ -220,9 +218,6 @@ class Runtime final {
         }
         if (xTaskCreate(&Runtime::EventLoopTaskEntry, "voicelife_interaction", 8192, this, 5, &event_task_) != pdPASS) {
             return Status::Error(ErrorCode::kInternal, "创建交互事件循环任务失败");
-        }
-        if (const Status mcp_worker = StartMcpWorker(); !mcp_worker.ok()) {
-            return fail_startup(mcp_worker);
         }
         ShowDisplay(voice::VoiceMood::kConnecting, "联网", "");
         if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) {
@@ -272,6 +267,7 @@ class Runtime final {
         config.audio.channels = 1;
         config.audio.bits_per_sample = 16;
         config.audio.frame_duration_ms = 20;
+        config.enable_mcp = mcp_application_ != nullptr;
 #else
         session_ = std::make_unique<voice::VoiceSession>(audio_input_, audio_output_, *provider_);
         voice::VoiceSessionConfig config;
@@ -284,6 +280,18 @@ class Runtime final {
             ShowDisplay(voice::VoiceMood::kSad, "错误", "");
             return fail_startup(session_status);
         }
+#ifdef ESP_PLATFORM
+        if (mcp_application_ != nullptr) {
+            mcp_application_->SetExecutionObserver([this](bool started, bool success, std::string_view summary) {
+                if (session_ == nullptr) return;
+                if (started) {
+                    session_->ReportToolCallStarted();
+                } else {
+                    session_->ReportToolResult(summary, success);
+                }
+            });
+        }
+#endif
 
 #ifdef ESP_PLATFORM
         if (wake_queue_ == nullptr) {
@@ -320,122 +328,6 @@ class Runtime final {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
         event_task_ = nullptr;
-    }
-
-    struct McpRequest {
-        std::string payload;
-        std::string session_id;
-        std::mutex mutex;
-        std::condition_variable completed_cv;
-        std::optional<Result<std::string>> response;
-        bool completed = false;
-        std::atomic_bool abandoned{false};
-    };
-
-    static constexpr std::size_t kMcpWorkerQueueCapacity = 4;
-    static constexpr uint32_t kMcpResponseTimeoutMs = 3000;
-
-    Status StartMcpWorker() {
-        std::lock_guard<std::mutex> lock(mcp_mutex_);
-        if (mcp_task_ != nullptr) return Status::Ok();
-        mcp_stop_ = false;
-        mcp_stopped_.store(false);
-        if (xTaskCreate(&Runtime::McpWorkerTaskEntry, "voicelife_mcp", 6144, this, 4, &mcp_task_) != pdPASS) {
-            return Status::Error(ErrorCode::kInternal, "创建 MCP 工作任务失败");
-        }
-        ESP_LOGI(kTag, "MCP_WORKER_READY capacity=%u", static_cast<unsigned>(kMcpWorkerQueueCapacity));
-        return Status::Ok();
-    }
-
-    void StopMcpWorker() {
-        {
-            std::lock_guard<std::mutex> lock(mcp_mutex_);
-            if (mcp_task_ == nullptr) return;
-            mcp_stop_ = true;
-            for (const auto& request : mcp_queue_) request->abandoned.store(true);
-            mcp_queue_.clear();
-        }
-        mcp_cv_.notify_all();
-        for (int attempt = 0; attempt < 20 && !mcp_stopped_.load(); ++attempt) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
-        mcp_task_ = nullptr;
-    }
-
-    static std::string TruncateUtf8(std::string_view value, std::size_t max_bytes) {
-        if (value.size() <= max_bytes) return std::string(value);
-        std::size_t end = max_bytes;
-        while (end > 0 && (static_cast<unsigned char>(value[end]) & 0xC0U) == 0x80U) --end;
-        return std::string(value.substr(0, end)) + "...";
-    }
-
-    static bool IsMcpToolCall(std::string_view payload) {
-        JsonValue request;
-        if (!ParseJson(payload, request).ok() || !request.IsObject()) return false;
-        const JsonValue* method = request.Get("method");
-        return method != nullptr && method->IsString() && method->string == "tools/call";
-    }
-
-    Result<std::string> HandleMcpRequest(std::string_view payload, std::string_view session_id) {
-        auto request = std::make_shared<McpRequest>();
-        request->payload.assign(payload);
-        request->session_id.assign(session_id);
-        {
-            std::lock_guard<std::mutex> lock(mcp_mutex_);
-            if (mcp_stop_ || mcp_task_ == nullptr || mcp_queue_.size() >= kMcpWorkerQueueCapacity) {
-                ESP_LOGW(kTag, "MCP_REQUEST_REJECTED reason=queue_full");
-                return BuildLinxMcpUnavailableResponse(payload, "设备 MCP 正忙，请稍后重试", session_id);
-            }
-            mcp_queue_.push_back(request);
-        }
-        ESP_LOGI(kTag, "MCP_REQUEST_QUEUED bytes=%u", static_cast<unsigned>(payload.size()));
-        mcp_cv_.notify_one();
-
-        std::unique_lock<std::mutex> lock(request->mutex);
-        if (!request->completed_cv.wait_for(lock, std::chrono::milliseconds(kMcpResponseTimeoutMs),
-                                            [&] { return request->completed; })) {
-            request->abandoned.store(true);
-            ESP_LOGW(kTag, "MCP_REQUEST_REJECTED reason=timeout");
-            return BuildLinxMcpUnavailableResponse(payload, "设备 MCP 响应超时", session_id);
-        }
-        return std::move(*request->response);
-    }
-
-    static void McpWorkerTaskEntry(void* arg) { static_cast<Runtime*>(arg)->McpWorkerLoop(); }
-
-    void McpWorkerLoop() {
-        while (true) {
-            std::shared_ptr<McpRequest> request;
-            {
-                std::unique_lock<std::mutex> lock(mcp_mutex_);
-                mcp_cv_.wait(lock, [this] { return mcp_stop_ || !mcp_queue_.empty(); });
-                if (mcp_stop_ && mcp_queue_.empty()) break;
-                request = std::move(mcp_queue_.front());
-                mcp_queue_.pop_front();
-            }
-            if (request->abandoned.load()) continue;
-            const bool tool_call = IsMcpToolCall(request->payload);
-            if (tool_call && session_) session_->ReportToolCallStarted();
-            auto response = HandleLinxMcpPayload(request->payload, mcp_server_, request->session_id);
-            if (!response.ok()) {
-                response = BuildLinxMcpUnavailableResponse(request->payload, "设备 MCP 执行失败", request->session_id);
-            }
-            if (tool_call && !request->abandoned.load() && session_) {
-                const LinxMcpToolOutcome outcome = InspectLinxMcpToolOutcome(request->payload, response);
-                session_->ReportToolResult(TruncateUtf8(outcome.summary, 96), outcome.success);
-            }
-            ESP_LOGI(kTag, "MCP_TOOL_EXECUTED tool_call=%d result=%d", tool_call ? 1 : 0, response.ok() ? 1 : 0);
-            {
-                std::lock_guard<std::mutex> lock(request->mutex);
-                if (!request->abandoned.load()) {
-                    request->response = std::move(response);
-                    request->completed = true;
-                }
-            }
-            request->completed_cv.notify_one();
-        }
-        mcp_stopped_.store(true);
-        vTaskDelete(nullptr);
     }
 
     void StartImRuntime() {
@@ -1290,8 +1182,7 @@ class Runtime final {
                               [](const std::string& origin) { return im::CreateEspHttpTransport(origin); }};
     std::atomic_bool im_lifecycle_started_{false};
     TaskHandle_t im_lifecycle_task_ = nullptr;
-    mcp::McpServer mcp_server_;
-    schedule::ScheduleService schedule_service_;
+    std::unique_ptr<mcp::McpScheduleApplication> mcp_application_;
     Status init_status_ = Status::Ok();
     linx::LinxJsonCodec linx_codec_;
     linx::LinxConnectionConfig linx_config_;
@@ -1338,13 +1229,6 @@ class Runtime final {
     bool event_loop_stopped_ = false;
     /** @brief 音量 overlay 到期标志（timer 置位，事件循环消费）。 */
     std::atomic<bool> overlay_expired_{false};
-    std::mutex mcp_mutex_;
-    std::condition_variable mcp_cv_;
-    std::deque<std::shared_ptr<McpRequest>> mcp_queue_;
-    TaskHandle_t mcp_task_ = nullptr;
-    bool mcp_stop_ = false;
-    std::atomic_bool mcp_stopped_{true};
-
     /** @brief 投递交互事件（有界队列，满丢最旧；任何线程可调用）。 */
     void EnqueueEvent(voice::VoiceInteractionEvent event, std::string_view wake_word = {}) {
         InteractionEventItem item{};

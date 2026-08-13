@@ -111,6 +111,60 @@ int64_t CheckWriteAndQueryThroughService(const std::filesystem::path& path) {
     return created.schedule->id;
 }
 
+/** @brief 验证创建键在同一进程中只能写入一条日程。 */
+int64_t CheckIdempotentCreate(const std::filesystem::path& path) {
+    SqliteDatabase database(path.string());
+    Check(database.Open().ok(), "幂等创建测试应打开 SQLite 数据库");
+    SqliteScheduleRepository repository(database);
+    Check(repository.Initialize().ok(), "幂等创建测试应完成 Schema 迁移");
+    ScheduleService service(repository);
+    const CreateScheduleCommand command{
+        .event = "幂等项目评审",
+        .start_time = voicelife::schedule::DateTime{std::chrono::seconds{2'000'010'000}},
+        .end_time = std::nullopt,
+        .location = std::nullopt,
+        .notes = std::nullopt,
+        .ignore_conflict = false,
+        .idempotency_key = "linx-create-project-review-001",
+    };
+    const auto first = service.create_schedule(command);
+    const auto retried = service.create_schedule(command);
+    Check(first.status.ok() && first.schedule.has_value() && retried.status.ok() && retried.schedule.has_value() &&
+              first.schedule->id == retried.schedule->id && retried.idempotent_replay,
+          "同一创建键在同一进程重试必须只返回首次写入日程");
+    const auto all = repository.FindAll();
+    Check(all.ok() && all.value->size() == 2, "重复创建键不得额外插入日程");
+    return first.schedule->id;
+}
+
+/**
+ * @brief 验证到期提醒领取与重启后的去重语义。
+ * @param path 已写入日程的数据库路径。
+ * @param schedule_id 要领取的日程。
+ * @return 无。
+ */
+void CheckDueReminderClaim(const std::filesystem::path& path, int64_t schedule_id) {
+    SqliteDatabase database(path.string());
+    Check(database.Open().ok(), "到期提醒测试应打开数据库");
+    SqliteScheduleRepository repository(database);
+    Check(repository.Initialize().ok(), "到期提醒测试应完成 Schema 迁移");
+
+    const auto before_due =
+        repository.ClaimDueReminders(voicelife::schedule::DateTime{std::chrono::seconds{1'999'999'999}}, 4);
+    Check(before_due.ok() && before_due.value->empty(), "未来日程不应提前被领取");
+
+    const auto claimed =
+        repository.ClaimDueReminders(voicelife::schedule::DateTime{std::chrono::seconds{2'000'000'001}}, 4);
+    Check(claimed.ok() && claimed.value->size() == 1 && claimed.value->front().schedule.id == schedule_id,
+          "到期日程应被领取一次并返回原日程");
+    Check(claimed.value->front().delivered_at == voicelife::schedule::DateTime{std::chrono::seconds{2'000'000'001}},
+          "领取结果应记录投递时间");
+
+    const auto duplicate =
+        repository.ClaimDueReminders(voicelife::schedule::DateTime{std::chrono::seconds{2'000'000'002}}, 4);
+    Check(duplicate.ok() && duplicate.value->empty(), "同一进程内重复领取不得重复投递");
+}
+
 /**
  * @brief 重新打开数据库并验证提交后的日程仍可查询。
  * @param path 已写入日程的数据库路径。
@@ -124,8 +178,32 @@ void CheckRestartPersistence(const std::filesystem::path& path, int64_t schedule
     Check(repository.Initialize().ok(), "重复初始化表结构应保持幂等");
 
     const auto stored = repository.FindAll();
-    Check(stored.ok() && stored.value->size() == 1 && stored.value->front().id == schedule_id,
+    Check(stored.ok() && stored.value->size() == 2 && stored.value->front().id == schedule_id,
           "关闭并重连后应保留已写入的日程");
+    const auto duplicate =
+        repository.ClaimDueReminders(voicelife::schedule::DateTime{std::chrono::seconds{2'000'000'003}}, 4);
+    Check(duplicate.ok() && duplicate.value->empty(), "重启后已领取日程不得再次投递");
+}
+
+/** @brief 验证进程重启后同一创建键仍回放首次结果。 */
+void CheckIdempotentCreateAfterRestart(const std::filesystem::path& path, int64_t schedule_id) {
+    SqliteDatabase database(path.string());
+    Check(database.Open().ok(), "重启幂等测试应重新打开 SQLite 数据库");
+    SqliteScheduleRepository repository(database);
+    Check(repository.Initialize().ok(), "重启幂等测试应完成 Schema 迁移");
+    ScheduleService service(repository);
+    const auto replayed = service.create_schedule({
+        .event = "不应覆盖首次内容",
+        .start_time = voicelife::schedule::DateTime{std::chrono::seconds{2'100'000'000}},
+        .end_time = std::nullopt,
+        .location = std::nullopt,
+        .notes = std::nullopt,
+        .ignore_conflict = false,
+        .idempotency_key = "linx-create-project-review-001",
+    });
+    Check(replayed.status.ok() && replayed.idempotent_replay && replayed.schedule.has_value() &&
+              replayed.schedule->id == schedule_id && replayed.schedule->event == "幂等项目评审",
+          "重启后同一创建键必须回放原始日程，而非创建或覆盖新内容");
 }
 
 }  // namespace
@@ -137,6 +215,9 @@ void CheckRestartPersistence(const std::filesystem::path& path, int64_t schedule
 int main() {
     const TemporaryDatabaseFile temporary = MakeTemporaryDatabaseFile();
     const int64_t schedule_id = CheckWriteAndQueryThroughService(temporary.path);
+    const int64_t idempotent_schedule_id = CheckIdempotentCreate(temporary.path);
+    CheckDueReminderClaim(temporary.path, schedule_id);
     CheckRestartPersistence(temporary.path, schedule_id);
+    CheckIdempotentCreateAfterRestart(temporary.path, idempotent_schedule_id);
     return 0;
 }

@@ -22,6 +22,8 @@ struct CreateScheduleCommand {
     std::optional<std::string> location;
     std::optional<std::string> notes;
     bool ignore_conflict = false;
+    /// 由外部调用方提供的稳定创建键；重复提交时必须返回首次创建的日程。
+    std::optional<std::string> idempotency_key;
 };
 
 /// 删除日程所需的数据。
