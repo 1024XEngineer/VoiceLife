@@ -96,7 +96,8 @@ void CheckFindAllFailure() {
                                                                        .start_time = std::nullopt,
                                                                        .end_time = std::nullopt,
                                                                        .location = std::nullopt,
-                                                                       .notes = std::nullopt});
+                                                                       .notes = std::nullopt,
+                                                                       .idempotency_key = std::nullopt});
     Check(created.status.code == ErrorCode::kUnavailable && created.error == "读取现有日程失败：读取故障",
           "创建应返回 Repository 读取错误");
     Check(repository.insert_calls == 0, "读取失败后不应继续写入");
@@ -120,7 +121,8 @@ void CheckInsertFailure() {
                                                                       .start_time = std::nullopt,
                                                                       .end_time = std::nullopt,
                                                                       .location = std::nullopt,
-                                                                      .notes = std::nullopt});
+                                                                      .notes = std::nullopt,
+                                                                      .idempotency_key = std::nullopt});
     Check(result.status.code == ErrorCode::kInternal && result.error == "保存日程失败：写入故障",
           "创建应返回 Repository 写入错误");
     Check(repository.find_all_calls == 1 && repository.insert_calls == 1, "写入失败前应完成冲突读取和一次写入");
@@ -141,6 +143,7 @@ void CheckConflictOrchestration() {
         .end_time = At(2'800),
         .location = std::nullopt,
         .notes = std::nullopt,
+        .idempotency_key = std::nullopt,
     };
     const auto rejected = service.create_schedule(command);
     Check(rejected.status.code == ErrorCode::kConflict && rejected.conflicts.size() == 1,
@@ -162,6 +165,7 @@ void CheckConflictOrchestration() {
         .end_time = At(6'000),
         .location = std::nullopt,
         .notes = std::nullopt,
+        .idempotency_key = std::nullopt,
     });
     Check(
         nearby.status.ok() && nearby.nearby_schedules.size() == 1 && nearby.message == "日程创建成功，附近还有其他日程",
