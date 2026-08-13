@@ -4,8 +4,10 @@
 #include <cstddef>
 #include <deque>
 #include <functional>
+#include <list>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -110,23 +112,24 @@ struct RunDueTasksResult {
  */
 bool CanTransition(TaskStatus from, TaskStatus to);
 
-/// 日程模块异步提交一次性 task 注册和取消命令的公开接口。
+/// 日程模块提交一次性 task 注册和取消命令的公开接口。
+/// 外部调用异步排队；Runner callback 在所属 Runner 执行上下文中调用时立即应用。
 class TimingTaskService {
    public:
     /** @brief 允许通过接口指针安全释放实现。 */
     virtual ~TimingTaskService() = default;
 
     /**
-     * @brief 异步提交一个一次性 task。
+     * @brief 提交一个一次性 task；外部调用异步排队，Runner callback 内调用立即应用。
      * @param command 包含不透明 task_id、绝对到点时刻和运行时 callback 的命令。
-     * @return kAccepted 表示命令已被接收，最终应用结果由 Runner 另行通知。
+     * @return kAccepted 表示命令已被接收；外部调用稍后通知结果，callback 内调用可在返回前通知。
      */
     virtual CommandAcceptance RegisterTask(RegisterTaskCommand command) = 0;
 
     /**
-     * @brief 异步提交一个 task 取消请求。
+     * @brief 提交一个 task 取消请求；外部调用异步排队，Runner callback 内调用立即应用。
      * @param command 包含待取消的不透明 task_id 和可选的最终结果回调。
-     * @return kAccepted 表示命令已被接收；Runner 消费后通过 on_result 通知 cancelled 或 not found。
+     * @return kAccepted 表示命令已被接收；外部调用稍后通知结果，callback 内调用可在返回前通知。
      */
     virtual CommandAcceptance CancelTask(CancelTaskCommand command) = 0;
 };
@@ -134,19 +137,19 @@ class TimingTaskService {
 /**
  * @brief Host 可用的异步命令 Runner，独占内存 task 注册表。
  *
- * 公开命令入口只保存命令；注册表仅由 Runner 的消费和推进入口修改。
+ * 外部命令入口只保存命令；Runner callback 内命令由同一 Runner 执行上下文立即应用。
  */
 class InMemoryTimingTaskRunner final : public TimingTaskService {
    public:
     /**
-     * @brief 异步接收一条注册命令。
+     * @brief 接收一条注册命令；Runner callback 内调用时立即应用，其他上下文异步排队。
      * @param command 待 Runner 应用的注册命令。
      * @return 命令接收后固定返回 kAccepted。
      */
     CommandAcceptance RegisterTask(RegisterTaskCommand command) override;
 
     /**
-     * @brief 异步接收一条取消命令。
+     * @brief 接收一条取消命令；Runner callback 内调用时立即应用，其他上下文异步排队。
      * @param command 待 Runner 应用的取消命令。
      * @return 命令接收后固定返回 kAccepted。
      */
@@ -179,14 +182,20 @@ class InMemoryTimingTaskRunner final : public TimingTaskService {
         TaskCallback callback;
     };
 
+    using PendingTaskList = std::list<PendingTask>;
     /// 按公开入口接收顺序保存的 Runner 命令。
     using PendingCommand = std::variant<RegisterTaskCommand, CancelTaskCommand>;
 
+    void ApplyRegisterTask(RegisterTaskCommand command, TriggerAt applied_at);
+    void ApplyCancelTask(CancelTaskCommand command, TriggerAt applied_at);
+
     std::deque<PendingCommand> commands_;
     std::vector<std::string> used_task_ids_;
-    std::vector<PendingTask> pending_tasks_;
+    PendingTaskList pending_tasks_;
+    std::unordered_map<std::string, PendingTaskList::iterator> pending_tasks_by_id_;
     std::vector<Task> terminal_tasks_;
     bool processing_commands_ = false;
+    std::optional<TriggerAt> callback_applied_at_;
 };
 
 }  // namespace voicelife::timing
