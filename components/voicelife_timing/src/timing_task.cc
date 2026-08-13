@@ -105,6 +105,29 @@ size_t InMemoryTimingTaskRunner::ProcessPendingCommands(TriggerAt applied_at) {
     return processed_count;
 }
 
+RunDueTasksResult InMemoryTimingTaskRunner::RunDueTasks(TriggerAt now) {
+    ProcessPendingCommands(now);
+    const auto due_end = std::upper_bound(
+        pending_tasks_.begin(), pending_tasks_.end(), now,
+        [](TriggerAt boundary, const PendingTask& pending) { return boundary < pending.task.trigger_at; });
+    const auto processed_count = static_cast<size_t>(due_end - pending_tasks_.begin());
+    terminal_tasks_.reserve(terminal_tasks_.size() + processed_count);
+    for (auto due_task = pending_tasks_.begin(); due_task != due_end; ++due_task) {
+        due_task->task.status = TaskStatus::kExecuting;
+        due_task->task.updated_at = now;
+        due_task->callback(due_task->task.id, due_task->task.trigger_at);
+        due_task->task.status = TaskStatus::kCompleted;
+        due_task->task.updated_at = now;
+        terminal_tasks_.push_back(std::move(due_task->task));
+    }
+    pending_tasks_.erase(pending_tasks_.begin(), due_end);
+    return {
+        .processed_count = processed_count,
+        .skipped_count = 0,
+        .next_wake_at = NextWakeAt(),
+    };
+}
+
 std::optional<TriggerAt> InMemoryTimingTaskRunner::NextWakeAt() const {
     if (pending_tasks_.empty()) {
         return std::nullopt;
