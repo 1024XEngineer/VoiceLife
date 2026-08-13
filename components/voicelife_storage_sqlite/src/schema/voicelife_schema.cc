@@ -4,6 +4,7 @@
 
 #include "schema/migrations/v001_create_schedule.h"
 #include "schema/migrations/v002_create_schedule_operation.h"
+#include "schema/migrations/v003_create_schedule_rule.h"
 
 namespace voicelife::storage_sqlite {
 namespace {
@@ -12,6 +13,7 @@ namespace {
 constexpr SqliteMigration kMigrations[] = {
     {.version = 1, .apply = &schema::migrations::ApplyV001CreateSchedule},
     {.version = 2, .apply = &schema::migrations::ApplyV002CreateScheduleOperation},
+    {.version = 3, .apply = &schema::migrations::ApplyV003CreateScheduleRule},
 };
 
 }  // namespace

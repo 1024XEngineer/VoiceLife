@@ -7,6 +7,7 @@
 #include "voicelife/storage_fatfs/fatfs_volume.h"
 #include "voicelife/storage_sqlite/sqlite_database.h"
 #include "voicelife/storage_sqlite/sqlite_schedule_repository.h"
+#include "voicelife/storage_sqlite/sqlite_schedule_rule_repository.h"
 #include "voicelife/storage_sqlite/sqlite_schema.h"
 #include "voicelife/storage_sqlite/voicelife_schema.h"
 
@@ -52,7 +53,8 @@ class StorageBootstrap::Impl final {
 #if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_STORAGE_FATFS_RUNTIME
         : volume_(MakeVolumeConfig()),
           database_(DatabaseUri(volume_.config().base_path), "unix-none"),
-          schedule_repository_(database_)
+          schedule_repository_(database_),
+          schedule_rule_repository_(database_)
 #endif
     {
     }
@@ -158,6 +160,12 @@ class StorageBootstrap::Impl final {
     [[nodiscard]] schedule::ScheduleOperationRepository& GetScheduleOperationRepository() {
         return schedule_repository_;
     }
+
+    [[nodiscard]] schedule::ScheduleRuleRepository& GetScheduleRuleRepository() { return schedule_rule_repository_; }
+
+    [[nodiscard]] schedule::ScheduleExceptionRepository& GetScheduleExceptionRepository() {
+        return schedule_rule_repository_;
+    }
 #endif
 
    private:
@@ -176,6 +184,7 @@ class StorageBootstrap::Impl final {
     storage_fatfs::FatFsVolume volume_;
     storage_sqlite::SqliteDatabase database_;
     storage_sqlite::SqliteScheduleRepository schedule_repository_;
+    storage_sqlite::SqliteScheduleRuleRepository schedule_rule_repository_;
 #endif
     bool ready_ = false;
 };
@@ -195,6 +204,14 @@ schedule::ScheduleRepository& StorageBootstrap::GetScheduleRepository() { return
 
 schedule::ScheduleOperationRepository& StorageBootstrap::GetScheduleOperationRepository() {
     return impl_->GetScheduleOperationRepository();
+}
+
+schedule::ScheduleRuleRepository& StorageBootstrap::GetScheduleRuleRepository() {
+    return impl_->GetScheduleRuleRepository();
+}
+
+schedule::ScheduleExceptionRepository& StorageBootstrap::GetScheduleExceptionRepository() {
+    return impl_->GetScheduleExceptionRepository();
 }
 #endif
 
