@@ -256,7 +256,7 @@ class Runtime final {
 #ifdef ESP_PLATFORM
         init_status_ = RegisterScheduleMcpTools(mcp_server_, schedule_service_);
         if (init_status_.ok()) {
-            ESP_LOGI(kTag, "MCP_TOOLS_READY count=2 names=schedule.create,schedule.query");
+            ESP_LOGI(kTag, "MCP_TOOLS_READY count=4 names=schedule.create,schedule.update,schedule.delete,schedule.query");
         }
         if (init_status_.ok()) {
             init_status_ = mcp::RegisterScheduleRuleMcpTools(mcp_server_, schedule_rule_service_);

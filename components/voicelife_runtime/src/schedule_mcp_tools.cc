@@ -68,6 +68,32 @@ PropertyList QueryProperties() {
     });
 }
 
+std::optional<schedule::ScheduleStatus> ParseScheduleStatus(const std::string& value) {
+    if (value == "active") return schedule::ScheduleStatus::kActive;
+    if (value == "cancelled") return schedule::ScheduleStatus::kCancelled;
+    if (value == "completed") return schedule::ScheduleStatus::kCompleted;
+    return std::nullopt;
+}
+
+PropertyList UpdateProperties() {
+    return PropertyList({
+        Property("schedule_id", PropertyType::kInteger),
+        Property::Optional("event", PropertyType::kString),
+        Property::Optional("start_time", PropertyType::kInteger),
+        Property::Optional("end_time", PropertyType::kInteger),
+        Property::Optional("location", PropertyType::kString),
+        Property::Optional("notes", PropertyType::kString),
+        Property::Optional("status", PropertyType::kString),
+        Property("ignore_conflict", PropertyType::kBoolean, bool{false}),
+    });
+}
+
+PropertyList DeleteProperties() {
+    return PropertyList({
+        Property("schedule_id", PropertyType::kInteger),
+    });
+}
+
 }  // namespace
 
 Status RegisterScheduleMcpTools(mcp::McpServer& server, schedule::ScheduleService& service) {
@@ -89,6 +115,55 @@ Status RegisterScheduleMcpTools(mcp::McpServer& server, schedule::ScheduleServic
                             output.output["nearby_count"] = std::to_string(result.nearby_schedules.size());
                             return output;
                         });
+    if (!status.ok()) return status;
+
+    status = server.add_tool(
+        "schedule.update", "修改一条一次性日程；时间参数使用 Unix 秒。", UpdateProperties(),
+        [&service](const PropertyList& properties) {
+            schedule::UpdateScheduleCommand command;
+            command.schedule_id = properties.value<int64_t>("schedule_id").value_or(0);
+            if (properties.value<std::string>("event").has_value()) {
+                command.event = *properties.value<std::string>("event");
+            }
+            if (properties.value<int64_t>("start_time").has_value()) {
+                command.start_time =
+                    schedule::DateTime{std::chrono::seconds{*properties.value<int64_t>("start_time")}};
+            }
+            if (properties.value<int64_t>("end_time").has_value()) {
+                command.end_time = schedule::DateTime{std::chrono::seconds{*properties.value<int64_t>("end_time")}};
+            }
+            if (properties.value<std::string>("location").has_value()) {
+                command.location = *properties.value<std::string>("location");
+            }
+            if (properties.value<std::string>("notes").has_value()) {
+                command.notes = *properties.value<std::string>("notes");
+            }
+            if (properties.value<std::string>("status").has_value()) {
+                command.status = ParseScheduleStatus(*properties.value<std::string>("status"));
+            }
+            command.ignore_conflict = properties.value<bool>("ignore_conflict").value_or(false);
+
+            const auto result = service.update_schedule(command);
+            if (!result.status.ok()) return Failure(result.status);
+            ToolResult output{.status = result.status, .output = {{"message", result.message}}};
+            if (result.schedule.has_value()) AddScheduleOutput(*result.schedule, output);
+            output.output["conflict_count"] = std::to_string(result.conflicts.size());
+            return output;
+        });
+    if (!status.ok()) return status;
+
+    status = server.add_tool(
+        "schedule.delete", "取消一条一次性日程。", DeleteProperties(),
+        [&service](const PropertyList& properties) {
+            schedule::DeleteScheduleCommand command;
+            command.schedule_id = properties.value<int64_t>("schedule_id").value_or(0);
+            const auto result = service.delete_schedule(command);
+            if (!result.status.ok()) return Failure(result.status);
+            ToolResult output{.status = result.status,
+                              .output = {{"schedule_id", std::to_string(result.schedule_id)},
+                                         {"deleted", result.deleted ? "true" : "false"}}};
+            return output;
+        });
     if (!status.ok()) return status;
 
     return server.add_tool(
