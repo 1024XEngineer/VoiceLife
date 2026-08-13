@@ -36,7 +36,7 @@ struct BindingResult {
 /// 平台无关的微信公众号绑定用例；轮询由外部任务调用 Poll 驱动。
 class BindingUseCase {
    public:
-    /// 创建尚未绑定 IM Runtime 的用例；Start 将返回 unavailable。
+    /** @brief 创建尚未绑定 IM Runtime 的用例；Start 将返回 unavailable。 */
     BindingUseCase() = default;
     /** @brief 绑定底层配对端口与时钟。 @param client 配对端口。 @param clock 配对时钟。 */
     BindingUseCase(ImPairingPort& client, ImPairingClock& clock);
@@ -51,7 +51,7 @@ class BindingUseCase {
     /** @brief 替换用户引用。 @param user_id 已配置的非 Secret 用户引用。 */
     void set_user_id(std::optional<std::string> user_id);
 
-    /** @brief 创建短期绑定会话但不执行轮询。 @param expires_in_minutes 有效期（1～10 分钟）。 */
+    /** @brief 创建短期绑定会话但不执行轮询。 @param expires_in_minutes 有效期（1～10 分钟）。 @return 创建结果。 */
     BindingResult Start(int expires_in_minutes = 10);
     /** @brief 推进一次有限轮询状态机。 @return 最近一次脱敏状态。 */
     BindingResult Poll();
