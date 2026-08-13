@@ -46,6 +46,9 @@ Status ValidateQueryScheduleCommand(const QueryScheduleCommand& command) {
     if (command.schedule_id.has_value() && *command.schedule_id <= 0) {
         return Status::Error(ErrorCode::kInvalidArgument, "日程 ID 必须大于 0");
     }
+    if (command.rule_id.has_value() && *command.rule_id <= 0) {
+        return Status::Error(ErrorCode::kInvalidArgument, "规则 ID 必须大于 0");
+    }
     if (command.start_from.has_value() && command.start_to.has_value() && *command.start_from > *command.start_to) {
         return Status::Error(ErrorCode::kInvalidArgument, "开始时间范围下限不能晚于上限");
     }
@@ -72,6 +75,10 @@ bool MatchesScheduleKeyword(std::string_view event, std::string_view keyword) {
 
 bool MatchesScheduleQuery(const Schedule& schedule, const QueryScheduleCommand& command) {
     if (command.schedule_id.has_value() && schedule.id != *command.schedule_id) return false;
+    if (command.rule_id.has_value() &&
+        (!schedule.rule_id.has_value() || *schedule.rule_id != *command.rule_id)) {
+        return false;
+    }
     if (!MatchesStatus(schedule.status, command.status)) return false;
     if (command.keyword.has_value() && !MatchesScheduleKeyword(schedule.event, *command.keyword)) return false;
 

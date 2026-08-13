@@ -347,7 +347,19 @@ UpdateScheduleOccurrenceResult ScheduleRuleService::update_schedule_occurrence(
         return {.status = loaded.status, .schedule = std::nullopt, .exception = std::nullopt, .conflicts = {},
                 .error = loaded.status.message};
     }
-    std::optional<Schedule> materialized = FindScheduleByRuleAndTime(command.rule_id, command.original_start_time, *loaded.value);
+    // 已物化实例优先按例外关联的 schedule_id 定位，其次按 (rule_id, original_start_time) 匹配。
+    std::optional<Schedule> materialized;
+    if (exception.schedule_id.has_value()) {
+        for (const Schedule& schedule : *loaded.value) {
+            if (schedule.id == *exception.schedule_id) {
+                materialized = schedule;
+                break;
+            }
+        }
+    }
+    if (!materialized.has_value()) {
+        materialized = FindScheduleByRuleAndTime(command.rule_id, command.original_start_time, *loaded.value);
+    }
 
     if (materialized.has_value()) {
         // 更新已物化实例并写入例外。
@@ -382,26 +394,49 @@ SkipScheduleOccurrenceResult ScheduleRuleService::skip_schedule_occurrence(const
                 .schedule = std::nullopt, .exception = std::nullopt, .error = "规则 ID 必须大于零"};
     }
 
-    ScheduleException exception;
-    exception.rule_id = command.rule_id;
-    exception.original_start_time = command.original_start_time;
-    exception.type = ExceptionType::kSkip;
+    // 读取既有例外，用于定位可能已物化的实例。
+    const Result<std::optional<ScheduleException>> existing =
+        exception_repository_.FindByRuleAndTime(command.rule_id, command.original_start_time);
+    if (!existing.ok()) {
+        return {.status = existing.status, .schedule = std::nullopt, .exception = std::nullopt,
+                .error = existing.status.message};
+    }
+    const std::optional<ScheduleException>& maybe_existing = *existing.value;
 
     const Result<std::vector<Schedule>> loaded = schedule_repository_.FindAll();
     if (!loaded.ok()) {
         return {.status = loaded.status, .schedule = std::nullopt, .exception = std::nullopt, .error = loaded.status.message};
     }
-    std::optional<Schedule> materialized = FindScheduleByRuleAndTime(command.rule_id, command.original_start_time, *loaded.value);
+
+    // 定位已物化实例：优先按例外关联的 schedule_id，其次按 (rule_id, original_start_time)。
+    std::optional<ScheduleId> materialized_id;
+    if (maybe_existing.has_value() && maybe_existing->schedule_id.has_value()) {
+        materialized_id = maybe_existing->schedule_id;
+    } else {
+        const std::optional<Schedule> materialized =
+            FindScheduleByRuleAndTime(command.rule_id, command.original_start_time, *loaded.value);
+        if (materialized.has_value()) materialized_id = materialized->id;
+    }
+
+    ScheduleException exception;
+    exception.rule_id = command.rule_id;
+    exception.original_start_time = command.original_start_time;
+    exception.type = ExceptionType::kSkip;
+    exception.schedule_id = materialized_id;
 
     std::optional<Schedule> cancelled_schedule;
-    if (materialized.has_value()) {
-        const Status deleted = schedule_repository_.Delete(materialized->id);
+    if (materialized_id.has_value()) {
+        const Status deleted = schedule_repository_.Delete(*materialized_id);
         if (!deleted.ok()) {
             return {.status = deleted, .schedule = std::nullopt, .exception = std::nullopt, .error = deleted.message};
         }
-        exception.schedule_id = materialized->id;
-        cancelled_schedule = *materialized;
-        cancelled_schedule->status = ScheduleStatus::kCancelled;
+        for (const Schedule& schedule : *loaded.value) {
+            if (schedule.id == *materialized_id) {
+                cancelled_schedule = schedule;
+                cancelled_schedule->status = ScheduleStatus::kCancelled;
+                break;
+            }
+        }
     }
 
     const Result<ScheduleException> upserted = exception_repository_.Upsert(exception);
@@ -433,22 +468,29 @@ GenerateNextScheduleInstanceResult ScheduleRuleService::generate_next_schedule_i
         if (!next.has_value()) {
             return {.status = Status::Ok(), .schedule = std::nullopt, .error = {}};
         }
-        // 已物化则继续找下一条。
-        if (FindScheduleByRuleAndTime(command.rule_id, *next, *loaded.value).has_value()) {
-            cursor = *next + std::chrono::seconds{1};
-            continue;
-        }
-        // 检查例外。
+
         const Result<std::optional<ScheduleException>> existing =
             exception_repository_.FindByRuleAndTime(command.rule_id, *next);
         if (!existing.ok()) {
             return {.status = existing.status, .schedule = std::nullopt, .error = existing.status.message};
         }
         const std::optional<ScheduleException>& maybe_exception = *existing.value;
-        if (maybe_exception.has_value() && maybe_exception->type == ExceptionType::kSkip) {
+
+        // 已物化则继续找下一条：例外已关联实例，或（无例外）已有 start_time 等于原始时间的实例。
+        if (maybe_exception.has_value()) {
+            if (maybe_exception->schedule_id.has_value()) {
+                cursor = *next + std::chrono::seconds{1};
+                continue;
+            }
+            if (maybe_exception->type == ExceptionType::kSkip) {
+                cursor = *next + std::chrono::seconds{1};
+                continue;
+            }
+        } else if (FindScheduleByRuleAndTime(command.rule_id, *next, *loaded.value).has_value()) {
             cursor = *next + std::chrono::seconds{1};
             continue;
         }
+
         Schedule schedule = MakeSchedule(*rule.value, *next);
         if (maybe_exception.has_value()) ApplyOverride(schedule, *maybe_exception);
         schedule.rule_id = command.rule_id;
@@ -456,6 +498,18 @@ GenerateNextScheduleInstanceResult ScheduleRuleService::generate_next_schedule_i
         if (!inserted.ok()) {
             return {.status = inserted.status, .schedule = std::nullopt, .error = inserted.status.message};
         }
+
+        // 物化 modify 例外后回写 schedule_id，保证后续按 (rule_id, original_start_time) 去重能命中。
+        if (maybe_exception.has_value()) {
+            ScheduleException linked = *maybe_exception;
+            linked.schedule_id = inserted.value->id;
+            const Result<ScheduleException> linked_exception = exception_repository_.Upsert(linked);
+            if (!linked_exception.ok()) {
+                return {.status = linked_exception.status, .schedule = std::nullopt,
+                        .error = linked_exception.status.message};
+            }
+        }
+
         return {.status = Status::Ok(), .schedule = inserted.value, .error = {}};
     }
     return {.status = Status::Error(ErrorCode::kInternal, "生成下一条实例超出迭代上限"),

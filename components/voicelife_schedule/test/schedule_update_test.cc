@@ -35,16 +35,12 @@ void CheckFieldUpdates(ScheduleService& service) {
     command.event = "  更新后的周会  ";
     command.location = std::optional<std::string>{"会议室 B"};
     command.notes = std::optional<std::string>{};
-    command.rule_id = std::optional<int64_t>{42};
-    command.status = ScheduleStatus::kCompleted;
 
     const auto result = service.update_schedule(command);
     Check(result.status.ok() && result.schedule.has_value(), "合法字段修改应成功并返回完整日程");
     Check(result.schedule->event == "更新后的周会", "修改日程应清理事件名称两端空白");
     Check(result.schedule->location == "会议室 B" && !result.schedule->notes.has_value(),
           "修改日程应支持设置和清空可空文本字段");
-    Check(result.schedule->rule_id == 42 && result.schedule->status == ScheduleStatus::kCompleted,
-          "修改日程应支持关联提醒和完成状态");
 }
 
 /**
@@ -111,6 +107,12 @@ void CheckInvalidInputs(ScheduleService& service) {
     empty_event.event = "   ";
     Check(service.update_schedule(empty_event).status.code == ErrorCode::kInvalidArgument,
           "事件名称不得通过修改被清空");
+
+    UpdateScheduleCommand recurring;
+    recurring.schedule_id = 1003;
+    recurring.event = "试图修改周期实例";
+    Check(service.update_schedule(recurring).status.code == ErrorCode::kInvalidArgument,
+          "周期规则生成的实例应改用 update_schedule_occurrence");
 }
 
 }  // namespace

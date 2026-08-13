@@ -27,14 +27,11 @@ bool SchedulesConflict(const Schedule& left, const Schedule& right) {
 }
 
 bool SchedulesAreNearby(const Schedule& left, const Schedule& right) {
+    // 临近日程围绕开始时间：两个开始时间相差不超过 15 分钟。
     const DateTime left_start = *left.start_time;
     const DateTime right_start = *right.start_time;
-    const DateTime left_end = RangeEnd(left);
-    const DateTime right_end = RangeEnd(right);
-
-    if (left_end <= right_start) return right_start - left_end <= kNearbyWindow;
-    if (right_end <= left_start) return left_start - right_end <= kNearbyWindow;
-    return false;
+    if (left_start <= right_start) return right_start - left_start <= kNearbyWindow;
+    return left_start - right_start <= kNearbyWindow;
 }
 
 }  // namespace voicelife::schedule

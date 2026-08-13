@@ -95,24 +95,36 @@ void CheckNearbySchedules(const ScheduleService& service, InMemoryScheduleReposi
     adjacent.end_time = At(1'800'004'200);
     const auto adjacent_result = service.create_schedule(adjacent);
     Check(adjacent_result.status.ok() && adjacent_result.conflicts.empty(), "首尾相接不应视为冲突");
-    Check(adjacent_result.nearby_schedules.size() == 1, "首尾相接的已有日程应作为临近日程返回");
 
-    // 每个断言场景使用同一份固定初始数据，避免前一个创建结果影响附近数量。
+    // 围绕开始时间：新日程开始时间在已有日程开始时间 10 分钟前。
+    repository.Reset(InMemoryScheduleRepository::DefaultSchedules());
+    CreateScheduleCommand ten_minutes;
+    ten_minutes.event = "开始前十分钟";
+    ten_minutes.start_time = At(1'799'999'400);
+    ten_minutes.end_time = At(1'799'999'700);
+    const auto ten_result = service.create_schedule(ten_minutes);
+    Check(ten_result.status.ok() && ten_result.nearby_schedules.size() == 1,
+          "开始时间相差十分钟的不冲突日程应作为临近日程返回");
+
+    // 十五分钟边界。
     repository.Reset(InMemoryScheduleRepository::DefaultSchedules());
     CreateScheduleCommand fifteen_minutes;
-    fifteen_minutes.event = "十五分钟边界";
-    fifteen_minutes.start_time = At(1'800'004'500);
-    fifteen_minutes.end_time = At(1'800'005'100);
-    const auto nearby_result = service.create_schedule(fifteen_minutes);
-    Check(nearby_result.status.ok() && nearby_result.nearby_schedules.size() == 1, "相距十五分钟的不冲突日程应被返回");
-    Check(nearby_result.message == "日程创建成功，附近还有其他日程", "临近日程应反映在成功消息中");
+    fifteen_minutes.event = "开始前十五分钟";
+    fifteen_minutes.start_time = At(1'799'999'100);
+    fifteen_minutes.end_time = At(1'799'999'400);
+    const auto fifteen_result = service.create_schedule(fifteen_minutes);
+    Check(fifteen_result.status.ok() && fifteen_result.nearby_schedules.size() == 1,
+          "开始时间相差十五分钟的不冲突日程应作为临近日程返回");
+    Check(fifteen_result.message == "日程创建成功，附近还有其他日程", "临近日程应反映在成功消息中");
 
+    // 超过十五分钟。
     repository.Reset(InMemoryScheduleRepository::DefaultSchedules());
     CreateScheduleCommand outside_window;
-    outside_window.event = "临近范围外";
-    outside_window.start_time = At(1'800'004'501);
-    outside_window.end_time = At(1'800'005'101);
-    Check(service.create_schedule(outside_window).nearby_schedules.empty(), "超过十五分钟的日程不应作为临近日程返回");
+    outside_window.event = "开始前十六分钟";
+    outside_window.start_time = At(1'799'999'040);
+    outside_window.end_time = At(1'799'999'340);
+    Check(service.create_schedule(outside_window).nearby_schedules.empty(),
+          "开始时间相差超过十五分钟不应作为临近日程返回");
 }
 
 /** @brief 验证无结束时间日程之间的冲突规则。 */

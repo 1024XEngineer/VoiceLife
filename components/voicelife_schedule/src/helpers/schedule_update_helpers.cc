@@ -14,14 +14,4 @@ UpdateScheduleResult InvalidUpdateScheduleResult(std::string error) {
     };
 }
 
-bool IsSupportedScheduleStatus(ScheduleStatus status) {
-    switch (status) {
-        case ScheduleStatus::kActive:
-        case ScheduleStatus::kCancelled:
-        case ScheduleStatus::kCompleted:
-            return true;
-    }
-    return false;
-}
-
 }  // namespace voicelife::schedule

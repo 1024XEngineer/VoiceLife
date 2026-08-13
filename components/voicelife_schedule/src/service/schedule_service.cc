@@ -128,6 +128,28 @@ DeleteScheduleResult ScheduleService::delete_schedule(const DeleteScheduleComman
         };
     }
 
+    // 仅允许删除一次性日程；周期实例应通过 skip_schedule_occurrence 跳过。
+    const Result<std::vector<Schedule>> loaded = repository_.FindAll();
+    if (!loaded.ok()) {
+        return {
+            .status = loaded.status,
+            .schedule_id = command.schedule_id,
+            .deleted = false,
+            .error = loaded.status.message,
+        };
+    }
+    for (const Schedule& schedule : *loaded.value) {
+        if (schedule.id == command.schedule_id && schedule.rule_id.has_value()) {
+            constexpr char kError[] = "该日程属于周期规则，请使用 skip_schedule_occurrence 跳过";
+            return {
+                .status = Status::Error(ErrorCode::kInvalidArgument, kError),
+                .schedule_id = command.schedule_id,
+                .deleted = false,
+                .error = kError,
+            };
+        }
+    }
+
     // 由仓储原子执行软取消，保留历史数据和后续撤销能力。
     const Status deleted = repository_.Delete(command.schedule_id);
     if (!deleted.ok()) {
@@ -153,8 +175,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
 
     // 确认至少提供一个待修改字段，避免无意义的数据库读取和写入。
     const bool has_update = command.event.has_value() || command.start_time.has_value() ||
-                            command.end_time.has_value() || command.location.has_value() || command.notes.has_value() ||
-                            command.rule_id.has_value() || command.status.has_value();
+                            command.end_time.has_value() || command.location.has_value() || command.notes.has_value();
     if (!has_update) return InvalidUpdateScheduleResult("至少需要提供一个要修改的字段");
 
     // 从仓储读取目标和冲突候选，确保修改基于数据库中的最新日程。
@@ -186,6 +207,9 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
             .error = error,
         };
     }
+    if (target->rule_id.has_value()) {
+        return InvalidUpdateScheduleResult("该日程属于周期规则，请使用 update_schedule_occurrence 修改");
+    }
 
     // 组装修改后的日程，未提供的字段保持不变，显式空值用于清空字段
     Schedule updated = *target;
@@ -200,11 +224,6 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
     ApplyNullableUpdate(command.end_time, updated.end_time);
     ApplyNullableUpdate(command.location, updated.location);
     ApplyNullableUpdate(command.notes, updated.notes);
-    ApplyNullableUpdate(command.rule_id, updated.rule_id);
-    if (command.status.has_value()) {
-        if (!IsSupportedScheduleStatus(*command.status)) return InvalidUpdateScheduleResult("不支持的日程状态");
-        updated.status = *command.status;
-    }
 
     // 完整校验合并后的日程，避免增量校验遗漏原有字段约束
     if (!updated.start_time.has_value() && updated.end_time.has_value()) {

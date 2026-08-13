@@ -37,14 +37,13 @@ struct UpdateScheduleCommand {
     NullableScheduleUpdate<DateTime> end_time;
     NullableScheduleUpdate<std::string> location;
     NullableScheduleUpdate<std::string> notes;
-    NullableScheduleUpdate<ScheduleId> rule_id;
-    std::optional<ScheduleStatus> status;
     bool ignore_conflict = false;
 };
 
 /// 查询日程所需的筛选和分页条件。
 struct QueryScheduleCommand {
     std::optional<ScheduleId> schedule_id;
+    std::optional<ScheduleId> rule_id;
     std::optional<std::string> keyword;
     std::optional<DateTime> start_from;
     std::optional<DateTime> start_to;

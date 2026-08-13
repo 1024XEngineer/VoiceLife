@@ -249,8 +249,8 @@ void CheckConflictOrchestration() {
     ScheduleService nearby_service(nearby_repository, nearby_operation_repository);
     const auto nearby = nearby_service.create_schedule(CreateScheduleCommand{
         .event = "临近日程",
-        .start_time = At(5'600),
-        .end_time = At(6'000),
+        .start_time = At(3'500),
+        .end_time = At(3'800),
         .location = std::nullopt,
         .notes = std::nullopt,
     });

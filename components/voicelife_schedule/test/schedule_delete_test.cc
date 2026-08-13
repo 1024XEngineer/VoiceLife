@@ -27,6 +27,10 @@ void CheckInvalidScheduleId(ScheduleService& service) {
     Check(missing.status.code == ErrorCode::kNotFound && missing.schedule_id == 9999 && !missing.deleted &&
               !missing.error.empty(),
           "不存在的日程应返回未找到错误");
+
+    const auto recurring = service.delete_schedule(DeleteScheduleCommand{.schedule_id = 1003});
+    Check(recurring.status.code == ErrorCode::kInvalidArgument && !recurring.deleted,
+          "周期规则生成的实例应改用 skip_schedule_occurrence");
 }
 
 /**

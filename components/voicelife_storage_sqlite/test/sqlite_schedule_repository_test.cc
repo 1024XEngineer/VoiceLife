@@ -148,12 +148,9 @@ CrudResultIds CheckCrudThroughService(const std::filesystem::path& path) {
     update.end_time = std::optional<DateTime>{DateTime{std::chrono::seconds{2'000'021'800}}};
     update.location = std::optional<std::string>{};
     update.notes = std::optional<std::string>{"修改后的真实备注"};
-    update.rule_id = std::optional<ScheduleId>{88};
-    update.status = ScheduleStatus::kCompleted;
     const auto updated = service.update_schedule(update);
     Check(updated.status.ok() && updated.schedule.has_value() && updated.schedule->event == "SQLite 修改验证" &&
-              !updated.schedule->location.has_value() && updated.schedule->notes == "修改后的真实备注" &&
-              updated.schedule->rule_id == 88 && updated.schedule->status == ScheduleStatus::kCompleted,
+              !updated.schedule->location.has_value() && updated.schedule->notes == "修改后的真实备注",
           "服务修改应把全部字段及显式空值写入 SQLite");
 
     const auto deleted = service.delete_schedule(DeleteScheduleCommand{.schedule_id = second.schedule->id});

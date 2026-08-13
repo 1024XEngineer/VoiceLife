@@ -15,7 +15,7 @@ int main() {
     Check(create.event == "架构评审" && !create.ignore_conflict, "创建日程命令默认不忽略冲突");
 
     const UpdateScheduleCommand update;
-    Check(!update.location.has_value() && !update.status.has_value() && !update.ignore_conflict,
+    Check(!update.location.has_value() && !update.ignore_conflict,
           "修改日程命令默认不修改可选字段且不忽略冲突");
     Check(ScheduleStatus::kCompleted != ScheduleStatus::kCancelled, "已完成状态应是独立的日程状态");
 

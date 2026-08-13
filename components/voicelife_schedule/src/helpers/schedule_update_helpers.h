@@ -16,13 +16,6 @@ namespace voicelife::schedule {
 UpdateScheduleResult InvalidUpdateScheduleResult(std::string error);
 
 /**
- * @brief 判断状态是否属于日程模块支持的状态。
- * @param status 要校验的日程状态。
- * @return 状态为进行中、已取消或已完成时返回 true。
- */
-bool IsSupportedScheduleStatus(ScheduleStatus status);
-
-/**
  * @brief 将可清空的修改值应用到目标字段。
  * @tparam T 字段实际保存的数据类型。
  * @param update 外层表示是否修改、内层表示新值的修改数据。

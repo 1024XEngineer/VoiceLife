@@ -68,13 +68,6 @@ PropertyList QueryProperties() {
     });
 }
 
-std::optional<schedule::ScheduleStatus> ParseScheduleStatus(const std::string& value) {
-    if (value == "active") return schedule::ScheduleStatus::kActive;
-    if (value == "cancelled") return schedule::ScheduleStatus::kCancelled;
-    if (value == "completed") return schedule::ScheduleStatus::kCompleted;
-    return std::nullopt;
-}
-
 PropertyList UpdateProperties() {
     return PropertyList({
         Property("schedule_id", PropertyType::kInteger),
@@ -83,7 +76,6 @@ PropertyList UpdateProperties() {
         Property::Optional("end_time", PropertyType::kInteger),
         Property::Optional("location", PropertyType::kString),
         Property::Optional("notes", PropertyType::kString),
-        Property::Optional("status", PropertyType::kString),
         Property("ignore_conflict", PropertyType::kBoolean, bool{false}),
     });
 }
@@ -137,9 +129,6 @@ Status RegisterScheduleMcpTools(mcp::McpServer& server, schedule::ScheduleServic
             }
             if (properties.value<std::string>("notes").has_value()) {
                 command.notes = *properties.value<std::string>("notes");
-            }
-            if (properties.value<std::string>("status").has_value()) {
-                command.status = ParseScheduleStatus(*properties.value<std::string>("status"));
             }
             command.ignore_conflict = properties.value<bool>("ignore_conflict").value_or(false);
 
