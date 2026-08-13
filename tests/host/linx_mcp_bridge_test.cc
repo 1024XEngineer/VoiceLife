@@ -99,8 +99,15 @@ int main() {
     Check(!invalid_outcome.success && invalid_outcome.summary == "日程创建失败",
           "非法参数错误不得进入用户可见 MCP 摘要");
 
-    const auto schedules_before_unavailable =
-        service.query_schedule({.status = voicelife::schedule::ScheduleStatusFilter::kAll});
+    const auto schedules_before_unavailable = service.query_schedule({
+        .schedule_id = std::nullopt,
+        .keyword = std::nullopt,
+        .start_from = std::nullopt,
+        .start_to = std::nullopt,
+        .status = voicelife::schedule::ScheduleStatusFilter::kAll,
+        .limit = 10,
+        .offset = 0,
+    });
     const auto unavailable = voicelife::runtime::BuildLinxMcpUnavailableResponse(
         R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"不应执行"}},"id":"busy-1"})",
         "设备 MCP 正忙，请稍后重试", "remote-session");
@@ -109,8 +116,15 @@ int main() {
     Check(unavailable_result.Get("id")->string == "busy-1" &&
               unavailable_result.Get("error")->Get("code")->number == -32001,
           "MCP 忙响应必须保留请求 id 并使用稳定的 server-error code");
-    const auto schedules_after_unavailable =
-        service.query_schedule({.status = voicelife::schedule::ScheduleStatusFilter::kAll});
+    const auto schedules_after_unavailable = service.query_schedule({
+        .schedule_id = std::nullopt,
+        .keyword = std::nullopt,
+        .start_from = std::nullopt,
+        .start_to = std::nullopt,
+        .status = voicelife::schedule::ScheduleStatusFilter::kAll,
+        .limit = 10,
+        .offset = 0,
+    });
     Check(schedules_after_unavailable.schedules.size() == schedules_before_unavailable.schedules.size(),
           "构建 busy 响应不得执行任何日程工具");
 
