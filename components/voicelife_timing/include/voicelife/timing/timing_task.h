@@ -134,7 +134,7 @@ class TimingTaskService {
 /**
  * @brief Host 可用的异步命令 Runner，独占内存 task 注册表。
  *
- * 公开入口只保存命令；注册表仅由 ProcessPendingCommands 修改。
+ * 公开命令入口只保存命令；注册表仅由 Runner 的消费和推进入口修改。
  */
 class InMemoryTimingTaskRunner final : public TimingTaskService {
    public:
@@ -158,6 +158,13 @@ class InMemoryTimingTaskRunner final : public TimingTaskService {
      * @return 本轮消费的命令数量。
      */
     size_t ProcessPendingCommands(TriggerAt applied_at);
+
+    /**
+     * @brief 应用已接收命令并在调用线程中串行推进 trigger_at 不晚于 now 的 task。
+     * @param now 本轮到期边界和生命周期更新时间。
+     * @return 本轮处理、跳过数量及剩余 task 的最近唤醒时间。
+     */
+    RunDueTasksResult RunDueTasks(TriggerAt now);
 
     /**
      * @brief 查询 pending 注册表中的最早到点时刻。
