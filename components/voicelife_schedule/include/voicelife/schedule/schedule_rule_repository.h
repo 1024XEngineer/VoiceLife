@@ -50,12 +50,21 @@ class ScheduleRuleRepository {
                                                   const std::optional<Schedule>& first_instance) = 0;
 
     /**
-     * @brief 在同一事务中将规则及其未发生的未来实例标记为取消。
+     * @brief 在同一事务中取消规则、全部已创建实例，并清理该规则的例外。
      * @param id 规则标识。
-     * @param cancelled_instance_count 输出被标记取消的未来实例数量。
+     * @param cancelled_instance_count 输出被标记取消的实例数量。
      * @return 更新结果。
      */
-    virtual Status CancelAndCancelFuture(ScheduleRuleId id, int64_t& cancelled_instance_count) = 0;
+    virtual Status CancelRuleAndInstances(ScheduleRuleId id, int64_t& cancelled_instance_count) = 0;
+
+    /**
+     * @brief 在单个事务中插入日程实例，并可选地将单次例外关联到该实例。
+     * @param schedule 待插入日程实例。
+     * @param linked_exception 需要回写 schedule_id 的单次例外；可为空。
+     * @return 实际保存后的日程实例。
+     */
+    virtual Result<Schedule> CreateNextInstance(const Schedule& schedule,
+                                                const std::optional<ScheduleException>& linked_exception) = 0;
 };
 
 }  // namespace voicelife::schedule

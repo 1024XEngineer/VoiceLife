@@ -24,8 +24,8 @@ struct CreateScheduleCommand {
     bool ignore_conflict = false;
 };
 
-/// 删除日程所需的数据。
-struct DeleteScheduleCommand {
+/// 取消一次性日程所需的数据。
+struct CancelScheduleCommand {
     ScheduleId schedule_id = 0;
 };
 

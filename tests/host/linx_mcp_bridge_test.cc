@@ -1,13 +1,20 @@
 #include "linx_mcp_bridge.h"
 
-#include "schedule_mcp_tools.h"
+#include "voicelife/mcp/schedule_mcp_tools.h"
 #include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/mcp/mcp_server.h"
 #include "voicelife/schedule/schedule_service.h"
 
+using voicelife::JsonValue;
+using voicelife::MakeToolOutput;
+using voicelife::ToolOutputValue;
 using voicelife::mcp::McpServer;
+using voicelife::mcp::Property;
+using voicelife::mcp::PropertyHandler;
+using voicelife::mcp::PropertyList;
+using voicelife::mcp::PropertyType;
 using voicelife::schedule::ScheduleService;
 using voicelife::test::Check;
 using voicelife::test::InMemoryScheduleRepository;
@@ -29,8 +36,8 @@ voicelife::JsonValue ParseMcpEnvelope(const std::string& encoded) {
 int main() {
     McpServer server;
     InMemoryScheduleRepository repository;
-    ScheduleService service(repository, repository);
-    Check(voicelife::runtime::RegisterScheduleMcpTools(server, service).ok(), "测试前应注册日程工具");
+    ScheduleService service(repository);
+    Check(voicelife::mcp::RegisterScheduleMcpTools(server, service).ok(), "测试前应注册日程工具");
 
     const auto initialize =
         voicelife::runtime::HandleLinxMcpPayload(R"({"jsonrpc":"2.0","method":"initialize","id":1})", server);
@@ -49,27 +56,57 @@ int main() {
     Check(list.value->find("\"session_id\":\"remote-session\"") != std::string::npos,
           "MCP 响应必须回传 Linx session_id");
     const auto& tools = listed.Get("result")->Get("tools")->array;
-    Check(tools.size() == 2 && tools[0].Get("name")->string == "schedule.create" &&
-              tools[1].Get("name")->string == "schedule.query",
-          "tools/list 必须返回两个稳定排序的 MVP 工具");
+    Check(tools.size() == 4 && tools[0].Get("name")->string == "schedule.create" &&
+              tools[1].Get("name")->string == "schedule.query" &&
+              tools[2].Get("name")->string == "schedule.update" &&
+              tools[3].Get("name")->string == "schedule.delete",
+          "tools/list 必须返回稳定排序的一次性日程工具");
     const auto* create_schema = tools[0].Get("inputSchema");
     Check(create_schema->Get("required")->array.size() == 1 &&
               create_schema->Get("required")->array[0].string == "event" &&
-              create_schema->Get("properties")->Get("start_time")->Get("type")->string == "integer" &&
+              create_schema->Get("properties")->Get("start_time")->Get("type")->string == "string" &&
               create_schema->Get("properties")->Get("start_time")->Get("default") == nullptr,
           "可选日程时间不得被伪造成带默认值的必填参数");
 
     const auto call = voicelife::runtime::HandleLinxMcpPayload(
-        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"创建会议","start_time":1900000000}},"id":3})",
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"创建会议","start_time":"2030-03-18 00:00:00"}},"id":3})",
         server);
     Check(call.ok(), "tools/call 应分发给日程工具并回传文本结果");
     const auto& called = ParseMcpEnvelope(*call.value);
     Check(called.Get("result")->Get("content")->array.size() == 1 &&
               called.Get("result")->Get("content")->array[0].Get("type")->string == "text" &&
-              called.Get("result")->Get("content")->array[0].Get("text")->string.find("event=创建会议") !=
+              called.Get("result")->Get("content")->array[0].Get("text")->string.find("\"event\":\"创建会议\"") !=
                   std::string::npos,
           "tools/call 必须返回 MCP text content");
     Check(called.Get("result")->Get("isError")->boolean == false, "成功 tools/call 必须明确声明 isError=false");
+
+    const PropertyHandler object_handler = [](const PropertyList& properties) {
+        const auto payload = properties.value<JsonValue>("payload");
+        return voicelife::ToolResult::Success(ToolOutputValue::Object({
+            MakeToolOutput("has_enabled",
+                           ToolOutputValue::Boolean(payload.has_value() && payload->IsObject() &&
+                                                     payload->Get("enabled") != nullptr)),
+        }));
+    };
+    Check(server
+              .add_tool("object.echo", "读取对象参数",
+                        PropertyList({Property(
+                            "payload",
+                            PropertyList({
+                                Property("enabled", PropertyType::kBoolean),
+                                Property::Optional("count", PropertyType::kInteger),
+                            }))}),
+                        object_handler)
+              .ok(),
+          "对象参数工具应能注册");
+    const auto object_call = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"object.echo","arguments":{"payload":{"enabled":true,"count":2}}},"id":5})",
+        server);
+    Check(object_call.ok(), "对象参数 tools/call 应成功分发");
+    const auto& object_called = ParseMcpEnvelope(*object_call.value);
+    Check(object_called.Get("result")->Get("content")->array[0].Get("text")->string.find("\"has_enabled\":true") !=
+              std::string::npos,
+          "对象参数应能传到业务回调并返回结构化结果");
 
     const auto initialized_notification = voicelife::runtime::HandleLinxMcpPayload(
         R"({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})", server, "remote-session");

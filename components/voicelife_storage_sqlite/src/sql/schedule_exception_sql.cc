@@ -37,4 +37,7 @@ FROM schedule_rule_exception WHERE rule_id = ? AND original_start_time = ?
 const char kDeleteFutureExceptionsByRule[] =
     "DELETE FROM schedule_rule_exception WHERE rule_id = ? AND original_start_time >= ?";
 
+const char kDeleteExceptionsByRule[] =
+    "DELETE FROM schedule_rule_exception WHERE rule_id = ?";
+
 }  // namespace voicelife::storage_sqlite::sql

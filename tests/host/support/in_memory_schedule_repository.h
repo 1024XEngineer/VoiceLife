@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "voicelife/schedule/schedule_operation_repository.h"
+#include "voicelife/schedule/schedule_query_score.h"
 #include "voicelife/schedule/schedule_repository.h"
 
 namespace voicelife::test {
@@ -188,6 +189,70 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
     [[nodiscard]] Result<std::vector<schedule::Schedule>> FindAll() const override {
         std::lock_guard<std::mutex> lock(mutex_);
         return Result<std::vector<schedule::Schedule>>::Success(schedules_);
+    }
+
+    [[nodiscard]] Result<schedule::Schedule> FindById(schedule::ScheduleId id) const override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto found = std::find_if(schedules_.begin(), schedules_.end(),
+                                        [id](const schedule::Schedule& stored) { return stored.id == id; });
+        if (found == schedules_.end()) return Result<schedule::Schedule>::Failure(ErrorCode::kNotFound, "未找到指定日程");
+        return Result<schedule::Schedule>::Success(*found);
+    }
+
+    [[nodiscard]] Result<std::vector<schedule::Schedule>> Find(
+        const schedule::QueryScheduleCommand& query) const override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<schedule::Schedule> matched;
+        for (const schedule::Schedule& schedule : schedules_) {
+            if (!MatchesQueryLocked(schedule, query)) continue;
+            matched.push_back(schedule);
+        }
+        std::sort(matched.begin(), matched.end(), [&query](const schedule::Schedule& left,
+                                                           const schedule::Schedule& right) {
+            if (query.keyword.has_value() && !query.keyword->empty()) {
+                const int64_t left_score = schedule::ScoreScheduleKeyword(left.event, *query.keyword);
+                const int64_t right_score = schedule::ScoreScheduleKeyword(right.event, *query.keyword);
+                if (left_score != right_score) return left_score > right_score;
+            }
+            if (left.start_time != right.start_time) {
+                if (!left.start_time.has_value()) return false;
+                if (!right.start_time.has_value()) return true;
+                return *left.start_time < *right.start_time;
+            }
+            return left.id < right.id;
+        });
+        const auto begin = std::min(static_cast<std::size_t>(query.offset), matched.size());
+        const auto count = std::min(static_cast<std::size_t>(query.limit), matched.size() - begin);
+        return Result<std::vector<schedule::Schedule>>::Success(
+            std::vector<schedule::Schedule>(matched.begin() + static_cast<std::ptrdiff_t>(begin),
+                                            matched.begin() + static_cast<std::ptrdiff_t>(begin + count)));
+    }
+
+    [[nodiscard]] Result<int64_t> Count(const schedule::QueryScheduleCommand& query) const override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        int64_t total = 0;
+        for (const schedule::Schedule& schedule : schedules_) {
+            if (MatchesQueryLocked(schedule, query)) ++total;
+        }
+        return Result<int64_t>::Success(total);
+    }
+
+    [[nodiscard]] Result<std::vector<schedule::Schedule>> FindOverlapping(
+        schedule::DateTime start, schedule::DateTime end,
+        std::optional<schedule::ScheduleId> exclude_id) const override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<schedule::Schedule> matched;
+        for (const schedule::Schedule& schedule : schedules_) {
+            if (schedule.status != schedule::ScheduleStatus::kActive || !schedule.start_time.has_value()) continue;
+            if (exclude_id.has_value() && schedule.id == *exclude_id) continue;
+            const schedule::DateTime schedule_start = *schedule.start_time;
+            const schedule::DateTime schedule_end = schedule.end_time.value_or(schedule_start);
+            if (schedule_start <= end && schedule_end >= start) matched.push_back(schedule);
+        }
+        std::sort(matched.begin(), matched.end(), [](const schedule::Schedule& left, const schedule::Schedule& right) {
+            return *left.start_time < *right.start_time;
+        });
+        return Result<std::vector<schedule::Schedule>>::Success(std::move(matched));
     }
 
     /**
@@ -375,6 +440,41 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
      */
     static bool IsWithinUndoWindow(const schedule::OperationRecord& operation, schedule::DateTime now) {
         return operation.operated_at >= now - std::chrono::minutes{15} && operation.operated_at <= now;
+    }
+
+    /** @brief 判断日程是否匹配查询条件。 @param schedule 日程。 @param query 查询条件。 @return 匹配时返回 true。 */
+    static bool MatchesQueryLocked(const schedule::Schedule& schedule, const schedule::QueryScheduleCommand& query) {
+        if (query.schedule_id.has_value() && schedule.id != *query.schedule_id) return false;
+        if (query.rule_id.has_value() && schedule.rule_id != query.rule_id) return false;
+        if (query.status != schedule::ScheduleStatusFilter::kAll) {
+            switch (query.status) {
+                case schedule::ScheduleStatusFilter::kActive:
+                    if (schedule.status != schedule::ScheduleStatus::kActive) return false;
+                    break;
+                case schedule::ScheduleStatusFilter::kCancelled:
+                    if (schedule.status != schedule::ScheduleStatus::kCancelled) return false;
+                    break;
+                case schedule::ScheduleStatusFilter::kCompleted:
+                    if (schedule.status != schedule::ScheduleStatus::kCompleted) return false;
+                    break;
+                case schedule::ScheduleStatusFilter::kAll:
+                    break;
+            }
+        }
+        if (query.keyword.has_value() && !query.keyword->empty()) {
+            const std::string& keyword = *query.keyword;
+            if (schedule.event.find(keyword) == std::string::npos &&
+                (!schedule.location.has_value() || schedule.location->find(keyword) == std::string::npos) &&
+                (!schedule.notes.has_value() || schedule.notes->find(keyword) == std::string::npos)) {
+                return false;
+            }
+        }
+        if (query.start_from.has_value() || query.start_to.has_value()) {
+            if (!schedule.start_time.has_value()) return false;
+            if (query.start_from.has_value() && *schedule.start_time < *query.start_from) return false;
+            if (query.start_to.has_value() && *schedule.start_time > *query.start_to) return false;
+        }
+        return true;
     }
 
     /** @brief 在锁内按标识查找日程。 @param id 日程标识。 @return 日程地址或 nullptr。 */

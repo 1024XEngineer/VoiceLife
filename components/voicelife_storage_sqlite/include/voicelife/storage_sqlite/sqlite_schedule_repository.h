@@ -49,6 +49,21 @@ class SqliteScheduleRepository final : public schedule::ScheduleRepository,
      */
     [[nodiscard]] Result<std::vector<schedule::Schedule>> FindAll() const override;
 
+    /** @brief 按标识读取一条日程。 @param id 日程标识。 @return 日程或未找到错误。 */
+    [[nodiscard]] Result<schedule::Schedule> FindById(schedule::ScheduleId id) const override;
+
+    /** @brief 按条件读取当前页日程。 @param query 查询条件。 @return 当前页日程集合。 */
+    [[nodiscard]] Result<std::vector<schedule::Schedule>> Find(
+        const schedule::QueryScheduleCommand& query) const override;
+
+    /** @brief 按条件统计日程总数。 @param query 查询条件。 @return 总数。 */
+    [[nodiscard]] Result<int64_t> Count(const schedule::QueryScheduleCommand& query) const override;
+
+    /** @brief 查询与时间窗口可能重叠的有效日程。 */
+    [[nodiscard]] Result<std::vector<schedule::Schedule>> FindOverlapping(
+        schedule::DateTime start, schedule::DateTime end,
+        std::optional<schedule::ScheduleId> exclude_id) const override;
+
     /**
      * @brief 插入一条日程操作记录。
      * @param operation 待保存的操作。

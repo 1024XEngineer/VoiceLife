@@ -276,8 +276,8 @@ Result<ScheduleRule> SqliteScheduleRuleRepository::UpdateAndRebuild(
     return Result<ScheduleRule>::Success(rule);
 }
 
-Status SqliteScheduleRuleRepository::CancelAndCancelFuture(schedule::ScheduleRuleId id,
-                                                           int64_t& cancelled_instance_count) {
+Status SqliteScheduleRuleRepository::CancelRuleAndInstances(schedule::ScheduleRuleId id,
+                                                             int64_t& cancelled_instance_count) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!database_.IsOpen()) return DatabaseUnavailable();
     if (id <= 0) return Status::Error(ErrorCode::kInvalidArgument, "规则标识无效");
@@ -303,23 +303,66 @@ Status SqliteScheduleRuleRepository::CancelAndCancelFuture(schedule::ScheduleRul
 
     cancelled_instance_count = 0;
     {
-        Result<SqliteStatement> prepared = database_.Prepare(sql::kCancelFutureSchedulesByRule);
+        Result<SqliteStatement> prepared = database_.Prepare(sql::kCancelSchedulesByRule);
         if (!prepared.ok()) return RollbackAfterFailure(database_, prepared.status);
         SqliteStatement statement = std::move(*prepared.value);
         Status status = statement.BindInt64(1, now.time_since_epoch().count());
         if (!status.ok()) return RollbackAfterFailure(database_, status);
         status = statement.BindInt64(2, id);
         if (!status.ok()) return RollbackAfterFailure(database_, status);
-        status = statement.BindInt64(3, now.time_since_epoch().count());
-        if (!status.ok()) return RollbackAfterFailure(database_, status);
         const Result<SqliteStep> stepped = statement.Step();
         if (!stepped.ok()) return RollbackAfterFailure(database_, stepped.status);
         cancelled_instance_count = statement.Changes();
     }
 
+    {
+        Result<SqliteStatement> prepared = database_.Prepare(sql::kDeleteExceptionsByRule);
+        if (!prepared.ok()) return RollbackAfterFailure(database_, prepared.status);
+        SqliteStatement statement = std::move(*prepared.value);
+        Status status = statement.BindInt64(1, id);
+        if (!status.ok()) return RollbackAfterFailure(database_, status);
+        const Result<SqliteStep> stepped = statement.Step();
+        if (!stepped.ok()) return RollbackAfterFailure(database_, stepped.status);
+    }
+
     const Status committed = database_.Commit();
     if (!committed.ok()) return CombineRollbackFailure(committed, database_.Rollback());
     return Status::Ok();
+}
+
+Result<Schedule> SqliteScheduleRuleRepository::CreateNextInstance(
+    const Schedule& schedule, const std::optional<ScheduleException>& linked_exception) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!database_.IsOpen()) return Result<Schedule>::Failure(ErrorCode::kUnavailable, DatabaseUnavailable().message);
+    if (schedule.event.empty() || schedule.rule_id <= 0) {
+        return Result<Schedule>::Failure(ErrorCode::kInvalidArgument, "日程实例字段无效");
+    }
+
+    const Status begin = database_.BeginTransaction();
+    if (!begin.ok()) return Result<Schedule>::Failure(begin.code, begin.message);
+
+    const Result<Schedule> inserted = InsertScheduleLocked(schedule);
+    if (!inserted.ok()) {
+        const Status failure = RollbackAfterFailure(database_, inserted.status);
+        return Result<Schedule>::Failure(failure.code, failure.message);
+    }
+
+    if (linked_exception.has_value()) {
+        ScheduleException linked = *linked_exception;
+        linked.schedule_id = inserted.value->id;
+        const Result<ScheduleException> saved = UpsertExceptionLocked(linked);
+        if (!saved.ok()) {
+            const Status failure = RollbackAfterFailure(database_, saved.status);
+            return Result<Schedule>::Failure(failure.code, failure.message);
+        }
+    }
+
+    const Status committed = database_.Commit();
+    if (!committed.ok()) {
+        const Status failure = CombineRollbackFailure(committed, database_.Rollback());
+        return Result<Schedule>::Failure(failure.code, failure.message);
+    }
+    return Result<Schedule>::Success(*inserted.value);
 }
 
 Result<std::optional<ScheduleException>> SqliteScheduleRuleRepository::FindByRuleAndTimeLocked(
@@ -341,8 +384,7 @@ Result<std::optional<ScheduleException>> SqliteScheduleRuleRepository::FindByRul
     return Result<std::optional<ScheduleException>>::Success(*row.value);
 }
 
-Result<ScheduleException> SqliteScheduleRuleRepository::Upsert(const ScheduleException& exception) {
-    std::lock_guard<std::mutex> lock(mutex_);
+Result<ScheduleException> SqliteScheduleRuleRepository::UpsertExceptionLocked(const ScheduleException& exception) {
     if (!database_.IsOpen()) return Result<ScheduleException>::Failure(ErrorCode::kUnavailable, "SQLite 数据库尚未打开");
     if (exception.rule_id <= 0) return Result<ScheduleException>::Failure(ErrorCode::kInvalidArgument, "例外规则标识无效");
 
@@ -366,6 +408,11 @@ Result<ScheduleException> SqliteScheduleRuleRepository::Upsert(const ScheduleExc
     if (!found.ok()) return Result<ScheduleException>::Failure(found.status.code, found.status.message);
     if (!found.value->has_value()) return Result<ScheduleException>::Failure(ErrorCode::kInternal, "写入例外后未找到");
     return Result<ScheduleException>::Success(**found.value);
+}
+
+Result<ScheduleException> SqliteScheduleRuleRepository::Upsert(const ScheduleException& exception) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return UpsertExceptionLocked(exception);
 }
 
 Result<std::vector<ScheduleException>> SqliteScheduleRuleRepository::FindByRule(schedule::ScheduleRuleId rule_id) const {

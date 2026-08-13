@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -11,13 +12,16 @@
 namespace voicelife::mcp {
 
 /// MCP 工具参数支持的数据类型。
-enum class ToolInputType { kString, kInteger, kBoolean };
+enum class ToolInputType { kString, kInteger, kBoolean, kObject };
+
+struct ToolInputSchema;
 
 /// MCP 工具的单个输入字段定义。
 struct ToolInputField {
     ToolInputType type = ToolInputType::kString;
     std::optional<ToolValue> default_value;
     std::string description;
+    std::shared_ptr<ToolInputSchema> object_schema;
     std::optional<int64_t> minimum;
     std::optional<int64_t> maximum;
     std::optional<std::size_t> min_length;
@@ -48,7 +52,9 @@ struct ListToolsResult {
 };
 
 /// 工具参数支持的类型。
-enum class PropertyType { kBoolean, kInteger, kString };
+enum class PropertyType { kBoolean, kInteger, kString, kObject };
+
+class PropertyList;
 
 /// 面向业务代码的单个工具参数声明。
 class Property {
@@ -69,6 +75,13 @@ class Property {
      */
     Property(std::string name, PropertyType type, ToolValue default_value);
     /**
+     * @brief 创建带内部字段定义的对象参数声明。
+     * @param name 参数名称。
+     * @param object_properties 对象内部字段定义。
+     * @return 无。
+     */
+    Property(std::string name, PropertyList object_properties);
+    /**
      * @brief 创建带数值或字符串长度约束的参数声明。
      * @param name 参数名称。
      * @param type 参数类型；整数类型使用数值范围，字符串类型使用字符长度。
@@ -81,12 +94,34 @@ class Property {
              std::optional<ToolValue> default_value = std::nullopt);
 
     /**
+     * @brief 设置参数字段描述。
+     * @param description 输出到 JSON Schema 字段上的描述。
+     * @return 当前参数声明，便于链式构造。
+     */
+    Property& with_description(std::string description);
+    /**
+     * @brief 设置对象参数内部字段定义。
+     * @param object_properties 对象内部字段定义。
+     * @return 当前参数声明，便于链式构造。
+     */
+    Property& with_object_properties(PropertyList object_properties);
+
+    ~Property();
+
+    /**
      * @brief 创建一个没有默认值但允许调用方省略的参数声明。
      * @param name 参数名称。
      * @param type 参数类型。
      * @return 可选参数声明。
      */
     static Property Optional(std::string name, PropertyType type);
+    /**
+     * @brief 创建可省略的对象参数声明并设置内部字段定义。
+     * @param name 参数名称。
+     * @param object_properties 对象内部字段定义。
+     * @return 可选对象参数声明。
+     */
+    static Property OptionalObject(std::string name, PropertyList object_properties);
 
     /**
      * @brief 获取参数名称。
@@ -98,6 +133,16 @@ class Property {
      * @return 参数类型。
      */
     [[nodiscard]] PropertyType type() const { return type_; }
+    /**
+     * @brief 获取参数字段描述。
+     * @return 字段描述；未设置时为空字符串。
+     */
+    [[nodiscard]] const std::string& description() const { return description_; }
+    /**
+     * @brief 获取对象参数内部字段定义。
+     * @return 内部字段定义；未设置时为空。
+     */
+    [[nodiscard]] const std::shared_ptr<PropertyList>& object_properties() const { return object_properties_; }
     /**
      * @brief 获取参数默认值。
      * @return 默认值；未设置时为空。
@@ -131,6 +176,8 @@ class Property {
    private:
     std::string name_;
     PropertyType type_;
+    std::string description_;
+    std::shared_ptr<PropertyList> object_properties_;
     std::optional<ToolValue> default_value_;
     std::optional<int64_t> minimum_;
     std::optional<int64_t> maximum_;
@@ -257,5 +304,12 @@ class McpServer {
     std::unordered_map<std::string, RegisteredTool> tools_;
     std::vector<std::string> registration_order_;
 };
+
+/**
+ * @brief 将结构化工具输出序列化为紧凑 JSON 文本。
+ * @param output 待序列化的工具输出。
+ * @return 序列化成功时返回 JSON 文本，失败时返回空对象。
+ */
+std::string SerializeToolOutputValue(const ToolOutputValue& output);
 
 }  // namespace voicelife::mcp

@@ -17,7 +17,7 @@ struct CreateScheduleRuleCommand {
     std::string event;
     Frequency freq_type = Frequency::kDaily;
     LocalTime start_time;
-    LocalDate start_date;
+    std::optional<LocalDate> start_date;
     std::optional<LocalTime> end_time;
     std::optional<std::string> location;
     std::optional<std::string> notes;
@@ -53,8 +53,8 @@ struct UpdateScheduleRuleCommand {
     FieldPatch<uint8_t> month_of_year;
     FieldPatch<MonthlyMode> monthly_mode;
     std::optional<LocalTime> start_time;
+    FieldPatch<LocalDate> start_date;
     FieldPatch<LocalTime> end_time;
-    std::optional<LocalDate> start_date;
     FieldPatch<LocalDate> end_date;
     FieldPatch<int32_t> occurrence_count;
     bool ignore_conflict = false;

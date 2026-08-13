@@ -2,6 +2,7 @@
 
 #include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
+#include "voicelife/schedule/schedule_query_score.h"
 #include "voicelife/schedule/schedule_service.h"
 
 using voicelife::ErrorCode;
@@ -9,6 +10,7 @@ using voicelife::schedule::DateTime;
 using voicelife::schedule::QueryScheduleCommand;
 using voicelife::schedule::ScheduleService;
 using voicelife::schedule::ScheduleStatusFilter;
+using voicelife::schedule::ScoreScheduleKeyword;
 using voicelife::test::Check;
 using voicelife::test::InMemoryScheduleRepository;
 
@@ -93,6 +95,14 @@ void CheckKeywordNormalization(const ScheduleService& service) {
     Check(service.query_schedule(empty_required_token).total == 2, "空加号词不应过滤有效日程");
 }
 
+/** @brief 验证关键词相关度评分只使用用户约定的三档规则。 @return 无。 */
+void CheckKeywordScore() {
+    Check(ScoreScheduleKeyword("数据库连接评审", "数据库连接评审") == 100, "完全相等应得到最高分");
+    Check(ScoreScheduleKeyword("数据库连接评审", "数据库") == 80, "标题前缀应得到次高分");
+    Check(ScoreScheduleKeyword("评审数据库连接", "数据库") == 60, "标题包含但非前缀应得到基础包含分");
+    Check(ScoreScheduleKeyword("产品方案讨论", "数据库") == 0, "标题未包含关键词时得分应为零");
+}
+
 }  // namespace
 
 int main() {
@@ -103,5 +113,6 @@ int main() {
     CheckStatusAndPagination(service);
     CheckValidation(service);
     CheckKeywordNormalization(service);
+    CheckKeywordScore();
     return 0;
 }

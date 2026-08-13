@@ -1,6 +1,8 @@
 #include "voicelife/storage_sqlite/sqlite_schedule_repository.h"
 
 #include <chrono>
+#include <optional>
+#include <string>
 #include <utility>
 
 #include "mapping/operation_row_mapper.h"
@@ -15,6 +17,7 @@ namespace {
 using schedule::DateTime;
 using schedule::OperationRecord;
 using schedule::Schedule;
+using schedule::QueryScheduleCommand;
 
 /** @brief 返回当前秒级系统时间。 @return 当前日程时间。 */
 DateTime Now() {
@@ -53,6 +56,59 @@ Result<Schedule> ReadOneSchedule(SqliteStatement& statement) {
         return Result<Schedule>::Failure(ErrorCode::kNotFound, "未找到指定日程");
     }
     return mapping::ReadSchedule(statement);
+}
+
+/**
+ * @brief 将可空整数绑定到 SQLite 参数。
+ * @param statement 目标语句。
+ * @param index 参数序号。
+ * @param value 可空整数。
+ * @return 绑定成功时返回成功状态。
+ */
+Status BindOptionalInt64(SqliteStatement& statement, int index, const std::optional<int64_t>& value) {
+    return value.has_value() ? statement.BindInt64(index, *value) : statement.BindNull(index);
+}
+
+/**
+ * @brief 绑定日程查询共用的筛选参数。
+ * @param statement 已准备语句。
+ * @param query 查询条件。
+ * @param include_paging 是否绑定 limit/offset。
+ * @return 绑定成功时返回成功状态。
+ */
+Status BindScheduleQueryFilters(SqliteStatement& statement, const QueryScheduleCommand& query,
+                                bool include_paging) {
+    Status status = BindOptionalInt64(statement, 1, query.schedule_id);
+    if (!status.ok()) return status;
+    status = BindOptionalInt64(statement, 2, query.rule_id);
+    if (!status.ok()) return status;
+    if (query.status != schedule::ScheduleStatusFilter::kAll) {
+        status = statement.BindInt(3, static_cast<int>(query.status));
+    } else {
+        status = statement.BindNull(3);
+    }
+    if (!status.ok()) return status;
+
+    if (query.keyword.has_value() && !query.keyword->empty()) {
+        status = statement.BindText(4, *query.keyword);
+    } else {
+        status = statement.BindNull(4);
+    }
+    if (!status.ok()) return status;
+
+    status = query.start_from.has_value()
+                 ? statement.BindInt64(5, query.start_from->time_since_epoch().count())
+                 : statement.BindNull(5);
+    if (!status.ok()) return status;
+    status = query.start_to.has_value()
+                 ? statement.BindInt64(6, query.start_to->time_since_epoch().count())
+                 : statement.BindNull(6);
+    if (!status.ok()) return status;
+    if (!include_paging) return Status::Ok();
+
+    status = statement.BindInt64(7, query.limit);
+    if (!status.ok()) return status;
+    return statement.BindInt64(8, query.offset);
 }
 
 /**
@@ -129,6 +185,91 @@ Result<std::vector<Schedule>> SqliteScheduleRepository::FindAll() const {
     Result<SqliteStatement> prepared = database_.Prepare(sql::kFindAllSchedules);
     if (!prepared.ok()) return Result<std::vector<Schedule>>::Failure(prepared.status.code, prepared.status.message);
     SqliteStatement statement = std::move(*prepared.value);
+    std::vector<Schedule> schedules;
+    while (true) {
+        const Result<SqliteStep> stepped = statement.Step();
+        if (!stepped.ok()) return Result<std::vector<Schedule>>::Failure(stepped.status.code, stepped.status.message);
+        if (*stepped.value == SqliteStep::kDone) break;
+        const Result<Schedule> row = mapping::ReadSchedule(statement);
+        if (!row.ok()) return Result<std::vector<Schedule>>::Failure(row.status.code, row.status.message);
+        schedules.push_back(*row.value);
+    }
+    return Result<std::vector<Schedule>>::Success(std::move(schedules));
+}
+
+Result<Schedule> SqliteScheduleRepository::FindById(schedule::ScheduleId id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!database_.IsOpen()) return Result<Schedule>::Failure(ErrorCode::kUnavailable, DatabaseUnavailable().message);
+    if (id <= 0) return Result<Schedule>::Failure(ErrorCode::kInvalidArgument, "日程标识无效");
+    return FindByIdLocked(id);
+}
+
+Result<std::vector<Schedule>> SqliteScheduleRepository::Find(const QueryScheduleCommand& query) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!database_.IsOpen()) {
+        return Result<std::vector<Schedule>>::Failure(ErrorCode::kUnavailable, DatabaseUnavailable().message);
+    }
+
+    const std::string sql = sql::BuildScheduleFindSql(query);
+    Result<SqliteStatement> prepared = database_.Prepare(sql);
+    if (!prepared.ok()) return Result<std::vector<Schedule>>::Failure(prepared.status.code, prepared.status.message);
+    SqliteStatement statement = std::move(*prepared.value);
+    const Status bound = BindScheduleQueryFilters(statement, query, true);
+    if (!bound.ok()) return Result<std::vector<Schedule>>::Failure(bound.code, bound.message);
+
+    std::vector<Schedule> schedules;
+    while (true) {
+        const Result<SqliteStep> stepped = statement.Step();
+        if (!stepped.ok()) return Result<std::vector<Schedule>>::Failure(stepped.status.code, stepped.status.message);
+        if (*stepped.value == SqliteStep::kDone) break;
+        const Result<Schedule> row = mapping::ReadSchedule(statement);
+        if (!row.ok()) return Result<std::vector<Schedule>>::Failure(row.status.code, row.status.message);
+        schedules.push_back(*row.value);
+    }
+    return Result<std::vector<Schedule>>::Success(std::move(schedules));
+}
+
+Result<int64_t> SqliteScheduleRepository::Count(const QueryScheduleCommand& query) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!database_.IsOpen()) {
+        return Result<int64_t>::Failure(ErrorCode::kUnavailable, DatabaseUnavailable().message);
+    }
+
+    const std::string sql = sql::BuildScheduleCountSql(query);
+    Result<SqliteStatement> prepared = database_.Prepare(sql);
+    if (!prepared.ok()) return Result<int64_t>::Failure(prepared.status.code, prepared.status.message);
+    SqliteStatement statement = std::move(*prepared.value);
+    const Status bound = BindScheduleQueryFilters(statement, query, false);
+    if (!bound.ok()) return Result<int64_t>::Failure(bound.code, bound.message);
+    const Result<SqliteStep> stepped = statement.Step();
+    if (!stepped.ok()) return Result<int64_t>::Failure(stepped.status.code, stepped.status.message);
+    if (*stepped.value != SqliteStep::kRow) return Result<int64_t>::Failure(ErrorCode::kInternal, "统计日程未返回行");
+    return Result<int64_t>::Success(statement.ColumnInt64(0));
+}
+
+Result<std::vector<Schedule>> SqliteScheduleRepository::FindOverlapping(
+    DateTime start, DateTime end, std::optional<schedule::ScheduleId> exclude_id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!database_.IsOpen()) {
+        return Result<std::vector<Schedule>>::Failure(ErrorCode::kUnavailable, DatabaseUnavailable().message);
+    }
+
+    Result<SqliteStatement> prepared = database_.Prepare(sql::kFindOverlappingSchedules);
+    if (!prepared.ok()) return Result<std::vector<Schedule>>::Failure(prepared.status.code, prepared.status.message);
+    SqliteStatement statement = std::move(*prepared.value);
+    Status status = statement.BindInt64(1, end.time_since_epoch().count());
+    if (!status.ok()) return Result<std::vector<Schedule>>::Failure(status.code, status.message);
+    status = statement.BindInt64(2, start.time_since_epoch().count());
+    if (!status.ok()) return Result<std::vector<Schedule>>::Failure(status.code, status.message);
+    status = BindOptionalInt64(statement, 3, exclude_id);
+    if (!status.ok()) return Result<std::vector<Schedule>>::Failure(status.code, status.message);
+    if (exclude_id.has_value()) {
+        status = statement.BindInt64(4, *exclude_id);
+    } else {
+        status = statement.BindNull(4);
+    }
+    if (!status.ok()) return Result<std::vector<Schedule>>::Failure(status.code, status.message);
+
     std::vector<Schedule> schedules;
     while (true) {
         const Result<SqliteStep> stepped = statement.Step();

@@ -36,7 +36,11 @@ class SqliteScheduleRuleRepository final : public schedule::ScheduleRuleReposito
         const schedule::ScheduleRule& rule, const std::optional<schedule::Schedule>& first_instance) override;
     Result<schedule::ScheduleRule> UpdateAndRebuild(
         const schedule::ScheduleRule& rule, const std::optional<schedule::Schedule>& first_instance) override;
-    Status CancelAndCancelFuture(schedule::ScheduleRuleId id, int64_t& cancelled_instance_count) override;
+    Status CancelRuleAndInstances(schedule::ScheduleRuleId id, int64_t& cancelled_instance_count) override;
+
+    Result<schedule::Schedule> CreateNextInstance(
+        const schedule::Schedule& schedule,
+        const std::optional<schedule::ScheduleException>& linked_exception) override;
 
     Result<schedule::ScheduleException> Upsert(const schedule::ScheduleException& exception) override;
     [[nodiscard]] Result<std::vector<schedule::ScheduleException>> FindByRule(
@@ -53,6 +57,7 @@ class SqliteScheduleRuleRepository final : public schedule::ScheduleRuleReposito
     /** @brief 在调用方持有仓储锁时按逻辑键读取例外。 */
     Result<std::optional<schedule::ScheduleException>> FindByRuleAndTimeLocked(
         schedule::ScheduleRuleId rule_id, schedule::DateTime original_start_time) const;
+    Result<schedule::ScheduleException> UpsertExceptionLocked(const schedule::ScheduleException& exception);
 
     SqliteDatabase& database_;
     mutable std::mutex mutex_;

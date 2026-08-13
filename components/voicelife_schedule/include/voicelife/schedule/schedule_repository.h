@@ -1,9 +1,10 @@
 #pragma once
 
+#include <optional>
 #include <vector>
 
 #include "voicelife/contracts/status.h"
-#include "voicelife/schedule/schedule_types.h"
+#include "voicelife/schedule/schedule_commands.h"
 
 namespace voicelife::schedule {
 
@@ -38,6 +39,47 @@ class ScheduleRepository {
     virtual Status Delete(ScheduleId id) {
         (void)id;
         return Status::Error(ErrorCode::kUnavailable, "当前仓储不支持删除日程");
+    }
+
+    /**
+     * @brief 按标识读取一条日程。
+     * @param id 日程标识。
+     * @return 日程；不存在时返回 kNotFound。
+     */
+    [[nodiscard]] virtual Result<Schedule> FindById(ScheduleId id) const {
+        (void)id;
+        return Result<Schedule>::Failure(ErrorCode::kUnavailable, "当前仓储不支持按 ID 查询日程");
+    }
+
+    /**
+     * @brief 按筛选条件读取当前页日程。
+     * @param query 日程查询条件。
+     * @return 当前页日程集合。
+     */
+    [[nodiscard]] virtual Result<std::vector<Schedule>> Find(const QueryScheduleCommand& query) const {
+        (void)query;
+        return Result<std::vector<Schedule>>::Failure(ErrorCode::kUnavailable, "当前仓储不支持条件查询日程");
+    }
+
+    /** @brief 按筛选条件统计总数，不受 limit/offset 影响。 */
+    [[nodiscard]] virtual Result<int64_t> Count(const QueryScheduleCommand& query) const {
+        (void)query;
+        return Result<int64_t>::Failure(ErrorCode::kUnavailable, "当前仓储不支持统计日程");
+    }
+
+    /**
+     * @brief 查询与给定时间窗口可能重叠或临近的有效日程。
+     * @param start 窗口起点。
+     * @param end 窗口终点；单点日程应传同一时间。
+     * @param exclude_id 排除的日程标识。
+     * @return 有开始时间且可能重叠的有效日程集合。
+     */
+    [[nodiscard]] virtual Result<std::vector<Schedule>> FindOverlapping(
+        DateTime start, DateTime end, std::optional<ScheduleId> exclude_id) const {
+        (void)start;
+        (void)end;
+        (void)exclude_id;
+        return Result<std::vector<Schedule>>::Failure(ErrorCode::kUnavailable, "当前仓储不支持时间窗口查询日程");
     }
 
     /**

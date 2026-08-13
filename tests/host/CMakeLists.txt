@@ -62,11 +62,20 @@ add_voicelife_library(im voicelife_im
 target_include_directories(im PUBLIC "${ROOT_DIR}/components/voicelife_im/src/transport")
 target_link_libraries(im PUBLIC contracts)
 add_voicelife_library(schedule voicelife_schedule
+    "${ROOT_DIR}/components/voicelife_schedule/src/calendar.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/factory/schedule_factory.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_create_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_occurrence_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_operation_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_operation_query_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_query_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_rule_result_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_rule_update_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_rule_result_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_operation_service.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_rule_service.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_service.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/rules/recurrence_planner.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/rules/schedule_time_rules.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_undo_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_update_helpers.cc")
@@ -155,6 +164,13 @@ add_voicelife_test(schedule_query_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_query_test.cc")
 target_link_libraries(schedule_query_test PRIVATE schedule)
 
+add_voicelife_test(schedule_recurrence_planner_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_recurrence_planner_test.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/rules/recurrence_planner.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/calendar.cc")
+target_include_directories(schedule_recurrence_planner_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_schedule/src")
+
 add_voicelife_test(schedule_repository_service_test "unit;schedule;repository"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_repository_service_test.cc")
 target_link_libraries(schedule_repository_service_test PRIVATE schedule)
@@ -228,13 +244,12 @@ target_link_libraries(mcp_server_test PRIVATE mcp)
 
 
 add_voicelife_test(schedule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_mcp_tools_test.cc
-    "${ROOT_DIR}/components/voicelife_runtime/src/schedule_mcp_tools.cc")
-target_include_directories(schedule_mcp_tools_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule)
 
 add_voicelife_test(linx_mcp_bridge_test "unit;mcp;linx;runtime" linx_mcp_bridge_test.cc
     "${ROOT_DIR}/components/voicelife_runtime/src/linx_mcp_bridge.cc"
-    "${ROOT_DIR}/components/voicelife_runtime/src/schedule_mcp_tools.cc")
+    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 target_include_directories(linx_mcp_bridge_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
 target_link_libraries(linx_mcp_bridge_test PRIVATE contracts mcp schedule)
 

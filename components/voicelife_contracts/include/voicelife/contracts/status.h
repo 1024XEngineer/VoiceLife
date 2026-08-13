@@ -58,6 +58,30 @@ struct Result {
     }
 };
 
+/** @brief 命令/用例返回结果，统一承载状态、业务值和错误说明。 */
+template <typename T>
+struct CommandResult {
+    Status status;
+    T value;
+    std::string error;
+
+    /** @brief 判断命令是否成功。 @return status 为成功时返回 true。 */
+    [[nodiscard]] bool ok() const { return status.ok(); }
+
+    /** @brief 创建成功结果。 @param value 命令返回的业务值。 @return 携带业务值的成功结果。 */
+    static CommandResult Success(T value) { return {Status::Ok(), std::move(value), {}}; }
+
+    /**
+     * @brief 创建失败结果。
+     * @param status 失败状态。
+     * @return 不携带业务值且保留错误说明的失败结果。
+     */
+    static CommandResult Failure(Status status) {
+        const std::string error = status.message;
+        return {std::move(status), {}, error};
+    }
+};
+
 /** @brief 返回稳定的错误码名称。 @param code 要描述的错误码。 @return 静态字符串形式的名称。 */
 const char* ErrorCodeName(ErrorCode code);
 

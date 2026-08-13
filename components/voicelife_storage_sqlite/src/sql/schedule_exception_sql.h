@@ -10,5 +10,7 @@ extern const char kFindExceptionsByRule[];
 extern const char kFindExceptionByRuleAndTime[];
 /** @brief 删除某规则在指定时间之后的未发生例外。 */
 extern const char kDeleteFutureExceptionsByRule[];
+/** @brief 删除某规则的全部例外。 */
+extern const char kDeleteExceptionsByRule[];
 
 }  // namespace voicelife::storage_sqlite::sql

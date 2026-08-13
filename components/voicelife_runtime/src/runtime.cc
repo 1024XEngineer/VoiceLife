@@ -37,6 +37,7 @@
 #include "voicelife/linx/linx_types.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
 #include "voicelife/mcp/mcp_server.h"
+#include "voicelife/schedule/schedule_operation_service.h"
 #include "voicelife/schedule/schedule_service.h"
 #include "voicelife/schedule/schedule_rule_service.h"
 #endif
@@ -45,8 +46,7 @@
 #include "im_runtime_bootstrap.h"
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
-#include "schedule_mcp_tools.h"
-#include "voicelife/mcp/schedule_rule_mcp_tools.h"
+#include "voicelife/mcp/schedule_mcp_tools.h"
 #include "voicelife/voice/voice_interaction_controller.h"
 #include "voicelife/voice/voice_ports.h"
 #include "voicelife/voice/voice_session.h"
@@ -247,19 +247,17 @@ class Runtime final {
     /** @brief 构造运行时并将日程服务绑定到持久化仓储。 */
     Runtime()
 #ifdef ESP_PLATFORM
-        : schedule_service_(storage_.GetScheduleRepository(), storage_.GetScheduleOperationRepository()),
+        : schedule_service_(storage_.GetScheduleRepository()),
+          schedule_operation_service_(storage_.GetScheduleOperationRepository()),
           schedule_rule_service_(storage_.GetScheduleRuleRepository(), storage_.GetScheduleExceptionRepository(),
                                  storage_.GetScheduleRepository())
 #endif
     {
         auto& registry = voice::SpeechProviderRegistry::Instance();
 #ifdef ESP_PLATFORM
-        init_status_ = RegisterScheduleMcpTools(mcp_server_, schedule_service_);
+        init_status_ = mcp::RegisterScheduleMcpTools(mcp_server_, schedule_service_, schedule_rule_service_);
         if (init_status_.ok()) {
-            ESP_LOGI(kTag, "MCP_TOOLS_READY count=4 names=schedule.create,schedule.update,schedule.delete,schedule.query");
-        }
-        if (init_status_.ok()) {
-            init_status_ = mcp::RegisterScheduleRuleMcpTools(mcp_server_, schedule_rule_service_);
+            ESP_LOGI(kTag, "MCP_TOOLS_READY count=4 names=schedule.create,schedule.query,schedule.update,schedule.delete");
         }
         registry.Register("xrobot-websocket", linx::LinxSpeechProviderAdapter::DefaultCapabilities(), [this]() {
             return std::make_unique<linx::LinxSpeechProviderAdapter>(
@@ -1270,6 +1268,7 @@ class Runtime final {
     TaskHandle_t im_lifecycle_task_ = nullptr;
     mcp::McpServer mcp_server_;
     schedule::ScheduleService schedule_service_;
+    schedule::ScheduleOperationService schedule_operation_service_;
     schedule::ScheduleRuleService schedule_rule_service_;
     Status init_status_ = Status::Ok();
     linx::LinxJsonCodec linx_codec_;
