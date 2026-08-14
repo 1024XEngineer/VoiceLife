@@ -1,5 +1,6 @@
 #include <chrono>
 #include <cstdint>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -207,6 +208,88 @@ void CheckRepositoryQuery() {
           "Repository 查询应按时间排序并将无时间日程放在末尾");
 }
 
+/**
+ * @brief 验证创建键的合法性校验在触碰 Repository 前完成。
+ * @return 无。
+ */
+void CheckIdempotencyKeyValidation() {
+    FakeScheduleRepository repository;
+    const ScheduleService service(repository);
+
+    const auto empty_key = service.create_schedule(CreateScheduleCommand{.event = "空创建键",
+                                                                         .start_time = std::nullopt,
+                                                                         .end_time = std::nullopt,
+                                                                         .location = std::nullopt,
+                                                                         .notes = std::nullopt,
+                                                                         .idempotency_key = ""});
+    Check(empty_key.status.code == ErrorCode::kInvalidArgument && empty_key.error == "日程创建键无效",
+          "空创建键应被 Service 拒绝");
+
+    const auto long_key = service.create_schedule(CreateScheduleCommand{.event = "超长创建键",
+                                                                        .start_time = std::nullopt,
+                                                                        .end_time = std::nullopt,
+                                                                        .location = std::nullopt,
+                                                                        .notes = std::nullopt,
+                                                                        .idempotency_key = std::string(129, 'k')});
+    Check(long_key.status.code == ErrorCode::kInvalidArgument && long_key.error == "日程创建键无效",
+          "超过 128 字符的创建键应被 Service 拒绝");
+    Check(repository.find_all_calls == 0 && repository.insert_calls == 0, "创建键校验失败不应触碰 Repository");
+}
+
+/**
+ * @brief 验证 Repository 未实现幂等与到期提醒接口时错误被保留。
+ * @return 无。
+ */
+void CheckRepositoryUnsupportedIdempotency() {
+    // 未覆写幂等接口，走 ScheduleRepository 基类的默认实现。
+    FakeScheduleRepository repository;
+    const ScheduleService service(repository);
+    const auto created = service.create_schedule(CreateScheduleCommand{.event = "无幂等支持",
+                                                                       .start_time = std::nullopt,
+                                                                       .end_time = std::nullopt,
+                                                                       .location = std::nullopt,
+                                                                       .notes = std::nullopt,
+                                                                       .idempotency_key = "unsupported-key"});
+    Check(created.status.code == ErrorCode::kUnavailable &&
+              created.error == "读取已创建日程失败：当前仓储不支持查询日程创建键",
+          "仓储不支持幂等查询时应保留底层错误");
+    Check(repository.insert_calls == 0, "幂等查询失败后不应继续写入");
+
+    // 覆写查询返回空结果，但保留基类默认的 InsertOnce 实现。
+    class IdempotencyAwareRepository final : public ScheduleRepository {
+       public:
+        Result<std::vector<Schedule>> FindAll() const override {
+            return Result<std::vector<Schedule>>::Success(schedules);
+        }
+        Result<Schedule> Insert(const Schedule& schedule) override {
+            auto stored = schedule;
+            stored.id = 1;
+            schedules.push_back(stored);
+            return Result<Schedule>::Success(std::move(stored));
+        }
+        Result<std::optional<Schedule>> FindByIdempotencyKey(std::string_view key) const override {
+            (void)key;
+            return Result<std::optional<Schedule>>::Success(std::nullopt);
+        }
+        std::vector<Schedule> schedules;
+    };
+    IdempotencyAwareRepository aware_repository;
+    const ScheduleService aware_service(aware_repository);
+    const auto stored = aware_service.create_schedule(CreateScheduleCommand{.event = "无幂等写入",
+                                                                            .start_time = std::nullopt,
+                                                                            .end_time = std::nullopt,
+                                                                            .location = std::nullopt,
+                                                                            .notes = std::nullopt,
+                                                                            .idempotency_key = "unsupported-insert"});
+    Check(stored.status.code == ErrorCode::kUnavailable && stored.error == "保存日程失败：当前仓储不支持幂等创建日程",
+          "仓储不支持幂等写入时应保留底层错误");
+
+    // 基类默认实现拒绝领取到期提醒。
+    const auto due = repository.ClaimDueReminders(At(1'000), 4);
+    Check(due.status.code == ErrorCode::kUnavailable && due.status.message == "当前仓储不支持领取到期提醒",
+          "仓储默认实现应拒绝领取到期提醒");
+}
+
 }  // namespace
 
 /** @brief 执行 ScheduleRepository 注入行为测试。 @return 全部断言通过时返回 0。 */
@@ -215,5 +298,7 @@ int main() {
     CheckInsertFailure();
     CheckConflictOrchestration();
     CheckRepositoryQuery();
+    CheckIdempotencyKeyValidation();
+    CheckRepositoryUnsupportedIdempotency();
     return 0;
 }

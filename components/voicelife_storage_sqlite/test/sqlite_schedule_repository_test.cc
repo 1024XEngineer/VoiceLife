@@ -10,6 +10,7 @@
 #include "voicelife/schedule/schedule_service.h"
 #include "voicelife/storage_sqlite/sqlite_database.h"
 
+using voicelife::ErrorCode;
 using voicelife::schedule::CreateScheduleCommand;
 using voicelife::schedule::ScheduleService;
 using voicelife::storage_sqlite::SqliteDatabase;
@@ -207,6 +208,82 @@ void CheckIdempotentCreateAfterRestart(const std::filesystem::path& path, int64_
           "重启后同一创建键必须回放原始日程，而非创建或覆盖新内容");
 }
 
+/**
+ * @brief 验证创建键与领取数量的边界校验。
+ * @param path 临时数据库文件路径。
+ * @return 无返回值；断言失败时终止测试。
+ */
+void CheckRepositoryArgumentValidation(const std::filesystem::path& path) {
+    SqliteDatabase database(path.string());
+    Check(database.Open().ok(), "边界校验测试应打开 SQLite 数据库");
+    SqliteScheduleRepository repository(database);
+    Check(repository.Initialize().ok(), "边界校验测试应完成 Schema 迁移");
+
+    const auto empty_key_find = repository.FindByIdempotencyKey("");
+    Check(empty_key_find.status.code == ErrorCode::kInvalidArgument && empty_key_find.status.message == "日程创建键无效",
+          "空创建键查询应被拒绝");
+    const auto long_key_find = repository.FindByIdempotencyKey(std::string(129, 'k'));
+    Check(long_key_find.status.code == ErrorCode::kInvalidArgument && long_key_find.status.message == "日程创建键无效",
+          "超长创建键查询应被拒绝");
+
+    const voicelife::schedule::Schedule sample{
+        .id = 0,
+        .event = "边界校验",
+        .start_time = voicelife::schedule::DateTime{std::chrono::seconds{2'000'000'000}},
+        .end_time = std::nullopt,
+        .location = std::nullopt,
+        .notes = std::nullopt,
+        .rule_id = std::nullopt,
+        .status = voicelife::schedule::ScheduleStatus::kActive,
+        .created_at = {},
+        .updated_at = {},
+    };
+    const auto empty_key_insert = repository.InsertOnce(sample, "");
+    Check(empty_key_insert.status.code == ErrorCode::kInvalidArgument && empty_key_insert.status.message == "日程创建键无效",
+          "空创建键写入应被拒绝");
+    const auto long_key_insert = repository.InsertOnce(sample, std::string(129, 'k'));
+    Check(long_key_insert.status.code == ErrorCode::kInvalidArgument && long_key_insert.status.message == "日程创建键无效",
+          "超长创建键写入应被拒绝");
+
+    const auto zero_limit = repository.ClaimDueReminders(
+        voicelife::schedule::DateTime{std::chrono::seconds{2'000'000'001}}, 0);
+    Check(zero_limit.status.code == ErrorCode::kInvalidArgument &&
+              zero_limit.status.message == "领取到期提醒的数量必须大于零",
+          "领取数量为零应被拒绝");
+}
+
+/**
+ * @brief 验证数据库未打开时所有仓储入口返回不可用错误。
+ * @param path 临时数据库文件路径。
+ * @return 无返回值；断言失败时终止测试。
+ */
+void CheckClosedDatabase(const std::filesystem::path& path) {
+    SqliteDatabase database(path.string());
+    SqliteScheduleRepository repository(database);
+
+    const auto found = repository.FindByIdempotencyKey("closed-key");
+    Check(found.status.code == ErrorCode::kUnavailable, "未打开数据库的创建键查询应失败");
+
+    const voicelife::schedule::Schedule sample{
+        .id = 0,
+        .event = "未打开数据库",
+        .start_time = std::nullopt,
+        .end_time = std::nullopt,
+        .location = std::nullopt,
+        .notes = std::nullopt,
+        .rule_id = std::nullopt,
+        .status = voicelife::schedule::ScheduleStatus::kActive,
+        .created_at = {},
+        .updated_at = {},
+    };
+    const auto inserted = repository.InsertOnce(sample, "closed-key");
+    Check(inserted.status.code == ErrorCode::kUnavailable, "未打开数据库的幂等写入应失败");
+
+    const auto claimed = repository.ClaimDueReminders(
+        voicelife::schedule::DateTime{std::chrono::seconds{2'000'000'001}}, 4);
+    Check(claimed.status.code == ErrorCode::kUnavailable, "未打开数据库的到期提醒领取应失败");
+}
+
 }  // namespace
 
 /**
@@ -220,5 +297,7 @@ int main() {
     CheckDueReminderClaim(temporary.path, schedule_id);
     CheckRestartPersistence(temporary.path, schedule_id);
     CheckIdempotentCreateAfterRestart(temporary.path, idempotent_schedule_id);
+    CheckRepositoryArgumentValidation(temporary.path);
+    CheckClosedDatabase(temporary.path);
     return 0;
 }
