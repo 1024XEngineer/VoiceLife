@@ -35,7 +35,6 @@
 #include "voicelife/linx_esp/esp_websocket_transport.h"
 #include "voicelife/mcp/mcp_server.h"
 #include "voicelife/schedule/schedule_service.h"
-#include "voicelife/timing_esp/esp_timing_runtime.h"
 #endif
 
 #include "bootstrap/storage_bootstrap.h"
@@ -181,7 +180,6 @@ class Runtime final {
         assembly_ = &assembly;
         const auto fail_startup = [this](Status status) {
 #ifdef ESP_PLATFORM
-            timing_runtime_.reset();
             StopMcpWorker();
             StopEventLoop();
 #endif
@@ -192,11 +190,6 @@ class Runtime final {
         const Status storage_status = storage_.Start();
         if (!storage_status.ok()) return storage_status;
 #ifdef ESP_PLATFORM
-        auto timing_runtime = timing_esp::EspTimingTaskRuntime::Create();
-        if (!timing_runtime.ok()) {
-            return timing_runtime.status;
-        }
-        timing_runtime_ = std::move(*timing_runtime.value);
         // 立创实战派 ESP32-S3 板载 WS2812 灯珠接 GPIO48（小智 BUILTIN_LED_GPIO）。
         // 主 NVS 分区初始化（Wi-Fi 驱动/凭据等依赖；linx_secrets 为加密分区另行初始化）。
         {
@@ -207,7 +200,7 @@ class Runtime final {
             }
             if (nvs_error != ESP_OK) {
                 ESP_LOGE(kTag, "STARTUP_ERROR stage=nvs_flash_init code=%d", static_cast<int>(nvs_error));
-                return fail_startup(Status::Error(ErrorCode::kInternal, "主 NVS 初始化失败"));
+                return Status::Error(ErrorCode::kInternal, "主 NVS 初始化失败");
             }
         }
         // 板级 LED 初始化（板型专属，Assembly 持有）。
@@ -215,7 +208,7 @@ class Runtime final {
         if (const Status display_status = assembly_->Start(); !display_status.ok()) {
             ESP_LOGE(kTag, "STARTUP_ERROR stage=display_start code=%d msg=%s", static_cast<int>(display_status.code),
                      display_status.message.c_str());
-            return fail_startup(display_status);
+            return display_status;
         }
         // 显示启动后立即启动唯一的交互/显示语义写者。此后的启动、网络、音量
         // 和会话事件均只投递到该循环，不允许 Runtime 直接 Render。
@@ -226,7 +219,7 @@ class Runtime final {
             event_loop_stopped_ = false;
         }
         if (xTaskCreate(&Runtime::EventLoopTaskEntry, "voicelife_interaction", 8192, this, 5, &event_task_) != pdPASS) {
-            return fail_startup(Status::Error(ErrorCode::kInternal, "创建交互事件循环任务失败"));
+            return Status::Error(ErrorCode::kInternal, "创建交互事件循环任务失败");
         }
         if (const Status mcp_worker = StartMcpWorker(); !mcp_worker.ok()) {
             return fail_startup(mcp_worker);
@@ -1596,7 +1589,6 @@ class Runtime final {
     uint64_t last_rendered_revision_ = 0;
     // 构建期选定的平台装配（显示语义提交目标）。
     PlatformAssembly* assembly_ = nullptr;
-    std::unique_ptr<timing_esp::EspTimingTaskRuntime> timing_runtime_;
     esp_timer_handle_t listen_timer_ = nullptr;
 #else
     ScaffoldAudioInput audio_input_;
