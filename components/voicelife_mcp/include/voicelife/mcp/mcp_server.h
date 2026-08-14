@@ -90,6 +90,17 @@ class Property {
                                      std::optional<ToolValue> default_value = std::nullopt);
 
     /**
+     * @brief 创建带整数范围约束的参数声明。
+     * @param name 参数名称。
+     * @param minimum 最小值（含）。
+     * @param maximum 最大值（含）。
+     * @param default_value 默认值；未设置时该参数为必填。
+     * @return 参数声明。
+     */
+    static Property WithIntegerRange(std::string name, int64_t minimum, int64_t maximum,
+                                     std::optional<ToolValue> default_value = std::nullopt);
+
+    /**
      * @brief 创建一个没有默认值但允许调用方省略的参数声明。
      * @param name 参数名称。
      * @param type 参数类型。

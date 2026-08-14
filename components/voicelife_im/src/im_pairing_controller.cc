@@ -17,6 +17,15 @@ uint64_t SaturatingAdd(uint64_t left, uint64_t right) {
     return left + right;
 }
 
+/// 绑定码必须是恰好六位十进制数字；异常响应不得进入 active 状态。
+bool IsValidDisplayCode(const std::string& code) {
+    if (code.size() != 6) return false;
+    for (const char character : code) {
+        if (character < '0' || character > '9') return false;
+    }
+    return true;
+}
+
 int64_t DaysFromCivil(int year, unsigned month, unsigned day) {
     year -= month <= 2;
     const int era = (year >= 0 ? year : year - 399) / 400;
@@ -100,6 +109,14 @@ PairingFlowResult PairingSessionController::Begin(const PairingCreateOptions& op
                     .message = created.message};
         }
         return {.status = PairingFlowStatus::kFailed, .display_code = {}, .expires_at = {}, .message = created.message};
+    }
+    // 网关返回的绑定码必须恰好六位数字；否则立即收敛为 failed，绝不进入 active，
+    // 避免把异常码交给模型/用户后交互必然失败。
+    if (!IsValidDisplayCode(created.value->displayCode)) {
+        return {.status = PairingFlowStatus::kFailed,
+                .display_code = {},
+                .expires_at = {},
+                .message = "服务端返回的绑定码格式非法"};
     }
 
     const uint64_t now = clock_.MonotonicMillis();

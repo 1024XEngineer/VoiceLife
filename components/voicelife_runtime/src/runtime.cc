@@ -27,6 +27,7 @@
 #include "nvs_flash.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/im/esp_http_transport_factory.h"
+#include "voicelife/im/im_binding_use_case.h"
 #include "voicelife/im/im_config_store.h"
 #include "voicelife/im/im_retry_policy.h"
 #include "voicelife/im/im_runtime.h"
@@ -38,6 +39,7 @@
 #endif
 
 #include "bootstrap/storage_bootstrap.h"
+#include "im_binding_mcp_tools.h"
 #include "im_runtime_bootstrap.h"
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
@@ -162,7 +164,11 @@ class Runtime final {
 #ifdef ESP_PLATFORM
         init_status_ = RegisterScheduleMcpTools(mcp_server_, schedule_service_);
         if (init_status_.ok()) {
-            ESP_LOGI(kTag, "MCP_TOOLS_READY count=2 names=schedule.create,schedule.query");
+            // 会话创建成功（pending）后启动有界后台轮询，轮询到终态释放会话。
+            init_status_ = RegisterImBindingMcpTools(mcp_server_, binding_use_case_, [this] { StartBindingPolling(); });
+        }
+        if (init_status_.ok()) {
+            ESP_LOGI(kTag, "MCP_TOOLS_READY count=3 names=schedule.create,schedule.query,im.binding.start");
         }
         registry.Register("xrobot-websocket", linx::LinxSpeechProviderAdapter::DefaultCapabilities(), [this]() {
             return std::make_unique<linx::LinxSpeechProviderAdapter>(
@@ -337,10 +343,17 @@ class Runtime final {
 
     Status StartMcpWorker() {
         std::lock_guard<std::mutex> lock(mcp_mutex_);
-        if (mcp_task_ != nullptr) return Status::Ok();
+        if (mcp_task_ != nullptr) {
+            // 旧 worker 可能仍在执行网络请求；未确认退出前不得重建，避免双 worker
+            // 并发访问队列、MCP server 与 BindingUseCase。
+            if (!mcp_stopped_.load()) {
+                return Status::Error(ErrorCode::kInternal, "MCP 工作任务尚未退出");
+            }
+            mcp_task_ = nullptr;  // 任务已自删，仅句柄残留。
+        }
         mcp_stop_ = false;
         mcp_stopped_.store(false);
-        if (xTaskCreate(&Runtime::McpWorkerTaskEntry, "voicelife_mcp", 6144, this, 4, &mcp_task_) != pdPASS) {
+        if (xTaskCreate(&Runtime::McpWorkerTaskEntry, "voicelife_mcp", 32768, this, 4, &mcp_task_) != pdPASS) {
             return Status::Error(ErrorCode::kInternal, "创建 MCP 工作任务失败");
         }
         ESP_LOGI(kTag, "MCP_WORKER_READY capacity=%u", static_cast<unsigned>(kMcpWorkerQueueCapacity));
@@ -356,10 +369,62 @@ class Runtime final {
             mcp_queue_.clear();
         }
         mcp_cv_.notify_all();
-        for (int attempt = 0; attempt < 20 && !mcp_stopped_.load(); ++attempt) {
+        // 有界等待任务确认退出。worker 内 HTTPS 请求最长约 10s（传输层超时），
+        // 等待上限给足 5s；仍未退出时保留句柄并报错，拒绝在旧任务存续期重建。
+        constexpr int kStopWaitAttempts = 500;
+        for (int attempt = 0; attempt < kStopWaitAttempts && !mcp_stopped_.load(); ++attempt) {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
-        mcp_task_ = nullptr;
+        if (mcp_stopped_.load()) {
+            std::lock_guard<std::mutex> lock(mcp_mutex_);
+            mcp_task_ = nullptr;
+        } else {
+            ESP_LOGE(kTag, "MCP_WORKER_STOP_TIMEOUT=1 task_still_running=1");
+        }
+    }
+
+    // ---- im.binding.start 有界后台轮询 ----
+    static constexpr uint32_t kBindingPollIntervalMs = 3000;
+    // Poll 内含 HTTPS 查询与 JSON 解析，但无 MCP/Linx 调用链；栈按 16KB 预留，
+    // 需以真机 uxTaskGetStackHighWaterMark 实测校准（任务退出时已上报高水位）。
+    static constexpr uint32_t kBindingPollStackBytes = 16384;
+
+    void StartBindingPolling() {
+        bool expected = false;
+        if (!binding_poll_started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+            ESP_LOGW(kTag, "IM_BINDING_POLL_ALREADY_RUNNING=1");
+            return;
+        }
+        if (xTaskCreate(&Runtime::BindingPollTaskEntry, "voicelife_binding_poll", kBindingPollStackBytes, this, 2,
+                        nullptr) != pdPASS) {
+            binding_poll_started_.store(false, std::memory_order_release);
+            ESP_LOGW(kTag, "IM_BINDING_POLL_TASK_FAILED=1");
+            return;
+        }
+        ESP_LOGI(kTag, "IM_BINDING_POLL_STARTED=1");
+    }
+
+    static void BindingPollTaskEntry(void* context) { static_cast<Runtime*>(context)->BindingPollLoop(); }
+
+    void BindingPollLoop() {
+        while (true) {
+            vTaskDelay(pdMS_TO_TICKS(kBindingPollIntervalMs));
+            const im::BindingResult result = binding_use_case_.Poll();
+            if (result.state == im::BindingState::kPending || result.state == im::BindingState::kWaiting ||
+                result.state == im::BindingState::kRetrying) {
+                continue;
+            }
+            // 终态或会话已释放。Start/Poll 由同一把锁串行化：若竞态窗口内新会话
+            // 已由 Start 建立（active 再次为真），继续轮询新会话；否则复位标志退出，
+            // 下一次 Start 的 hook 会重新拉起本任务。
+            if (binding_use_case_.active()) continue;
+            ESP_LOGI(kTag, "IM_BINDING_STATUS=%s stack_high_water=%u", BindingStatusName(result.state),
+                     static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+            binding_poll_started_.store(false, std::memory_order_release);
+            break;
+        }
+        ESP_LOGI(kTag, "IM_BINDING_POLL_STOPPED=1");
+        vTaskDelete(nullptr);
     }
 
     static std::string TruncateUtf8(std::string_view value, std::size_t max_bytes) {
@@ -479,6 +544,7 @@ class Runtime final {
             }
 
             if (im_runtime_.state() == im::ImRuntimeState::kReady) {
+                binding_use_case_.Bind(*im_runtime_.pairing_client(), im_pairing_clock_, im_runtime_.user_id());
                 RegisterImPairingAcceptance(im_runtime_.pairing_client(), im_runtime_.user_id());
                 ESP_LOGI(kTag, "IM_RUNTIME_READY=1");
                 break;
@@ -1288,6 +1354,9 @@ class Runtime final {
     EspImRuntimeReadiness im_readiness_;
     im::ImRuntime im_runtime_{im_config_, im_config_, im_readiness_,
                               [](const std::string& origin) { return im::CreateEspHttpTransport(origin); }};
+    EspPairingClock im_pairing_clock_;
+    im::BindingUseCase binding_use_case_;
+    std::atomic_bool binding_poll_started_{false};
     std::atomic_bool im_lifecycle_started_{false};
     TaskHandle_t im_lifecycle_task_ = nullptr;
     mcp::McpServer mcp_server_;

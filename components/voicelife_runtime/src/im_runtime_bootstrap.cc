@@ -47,12 +47,6 @@ std::atomic_uint32_t g_pairing_window_generation{0};
 std::atomic_bool g_pairing_active{false};
 std::optional<std::string> g_pairing_user_id;
 
-class EspPairingClock final : public im::ImPairingClock {
-   public:
-    uint64_t MonotonicMillis() const override { return static_cast<uint64_t>(esp_timer_get_time() / 1000); }
-    uint64_t UnixMillis() const override { return static_cast<uint64_t>(time(nullptr)) * 1000U; }
-};
-
 bool IsPairingTrigger(std::span<const uint8_t> bytes) {
     constexpr std::array<uint8_t, 4> kMagic{'V', 'L', 'P', '1'};
     return bytes.size() >= kMagic.size() && std::equal(kMagic.begin(), kMagic.end(), bytes.begin());
@@ -322,6 +316,10 @@ void ProvisioningTask(void*) {
 }
 
 }  // namespace
+
+uint64_t EspPairingClock::MonotonicMillis() const { return static_cast<uint64_t>(esp_timer_get_time() / 1000); }
+
+uint64_t EspPairingClock::UnixMillis() const { return static_cast<uint64_t>(time(nullptr)) * 1000U; }
 
 Result<std::string> NvsImSecretStore::Read(std::string_view key) {
 #if !CONFIG_NVS_ENCRYPTION
