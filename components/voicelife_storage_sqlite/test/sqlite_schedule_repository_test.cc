@@ -94,6 +94,7 @@ int64_t CheckWriteAndQueryThroughService(const std::filesystem::path& path) {
         .location = "会议室 A",
         .notes = "由真实仓储写入",
         .ignore_conflict = false,
+        .idempotency_key = std::nullopt,
     });
     Check(created.status.ok() && created.schedule.has_value() && created.schedule->id > 0,
           "服务应通过 SQLite 生成日程 ID");
