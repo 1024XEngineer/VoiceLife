@@ -13,6 +13,7 @@ set(known_components
     voicelife_storage_fatfs
     voicelife_storage_sqlite
     voicelife_timing
+    voicelife_timing_esp
     voicelife_voice
     voicelife_linx
     voicelife_linx_esp
@@ -98,8 +99,10 @@ assert_dependencies(voicelife_storage_sqlite PUBLIC voicelife_contracts voicelif
 assert_dependencies(voicelife_storage_sqlite PRIVATE sqlite3)
 assert_dependencies(voicelife_storage_fatfs PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_storage_fatfs PRIVATE esp_partition fatfs)
-assert_dependencies(voicelife_timing PUBLIC)
+assert_dependencies(voicelife_timing PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_timing PRIVATE)
+assert_dependencies(voicelife_timing_esp PUBLIC voicelife_contracts voicelife_timing)
+assert_dependencies(voicelife_timing_esp PRIVATE esp_timer freertos)
 assert_dependencies(voicelife_mcp PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_mcp PRIVATE yyjson)
 assert_dependencies(voicelife_voice PUBLIC voicelife_contracts)

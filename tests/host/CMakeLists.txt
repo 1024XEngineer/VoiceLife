@@ -78,7 +78,12 @@ add_voicelife_library(schedule voicelife_schedule
 target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule PUBLIC contracts Threads::Threads)
 add_voicelife_library(timing voicelife_timing
-    "${ROOT_DIR}/components/voicelife_timing/src/timing_task.cc")
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_task.cc"
+    "${ROOT_DIR}/components/voicelife_timing/src/timing_runtime.cc")
+target_link_libraries(timing PUBLIC contracts)
+add_voicelife_library(timing_esp voicelife_timing_esp
+    "${ROOT_DIR}/components/voicelife_timing_esp/src/esp_timing_runtime.cc")
+target_link_libraries(timing_esp PUBLIC timing contracts)
 add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_server.cc"
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_json_writer.cc")
@@ -209,6 +214,13 @@ target_link_libraries(timing_cancellation_test PRIVATE timing)
 
 add_voicelife_test(timing_due_tasks_test "unit;timing" timing_due_tasks_test.cc)
 target_link_libraries(timing_due_tasks_test PRIVATE timing)
+
+add_voicelife_test(timing_runtime_test "unit;timing" timing_runtime_test.cc)
+target_link_libraries(timing_runtime_test PRIVATE timing)
+
+add_voicelife_test(timing_esp_runtime_contract_test "unit;timing;esp;contract"
+    timing_esp_runtime_contract_test.cc)
+target_link_libraries(timing_esp_runtime_contract_test PRIVATE timing_esp)
 
 add_voicelife_test(fatfs_volume_contract_test "unit;storage;fatfs"
     "${ROOT_DIR}/components/voicelife_storage_fatfs/test/fatfs_volume_contract_test.cc")
