@@ -1,7 +1,7 @@
 <div align="center">
 
 <h1 align="center">
-  <img src="./assets/logo.png" alt="VoiceLife 声活 Logo" width="88" valign="middle" />
+  <img src="./assets/logo.png" alt="VoiceLife 声活 Logo" width="120" valign="middle" />
   VoiceLife 声活
 </h1>
 
