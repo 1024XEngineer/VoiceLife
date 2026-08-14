@@ -100,10 +100,10 @@ void TestRejectsOutOfRangeExpiryAtBoundary() {
     McpServer server;
     Check(voicelife::runtime::RegisterImBindingMcpTools(server, use_case).ok(), "绑定工具应可注册");
 
-    for (const int64_t invalid : {int64_t{0}, int64_t{-1}, int64_t{11}, int64_t{100}, int64_t{INT64_MAX},
-                                  int64_t{INT32_MAX} + 1}) {
-        const auto result = server.call({.request_id = "bind-range", .name = "im.binding.start",
-                                         .arguments = {{"expires_in_minutes", invalid}}});
+    for (const int64_t invalid :
+         {int64_t{0}, int64_t{-1}, int64_t{11}, int64_t{100}, int64_t{INT64_MAX}, int64_t{INT32_MAX} + 1}) {
+        const auto result = server.call(
+            {.request_id = "bind-range", .name = "im.binding.start", .arguments = {{"expires_in_minutes", invalid}}});
         Check(result.status.code == ErrorCode::kInvalidArgument,
               "越界有效期（含 INT64_MAX 截断场景）必须由 MCP 边界以 kInvalidArgument 拒绝，不得静默改值");
     }

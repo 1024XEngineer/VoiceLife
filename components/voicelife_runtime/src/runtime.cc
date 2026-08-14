@@ -165,8 +165,7 @@ class Runtime final {
         init_status_ = RegisterScheduleMcpTools(mcp_server_, schedule_service_);
         if (init_status_.ok()) {
             // 会话创建成功（pending）后启动有界后台轮询，轮询到终态释放会话。
-            init_status_ = RegisterImBindingMcpTools(mcp_server_, binding_use_case_,
-                                                     [this] { StartBindingPolling(); });
+            init_status_ = RegisterImBindingMcpTools(mcp_server_, binding_use_case_, [this] { StartBindingPolling(); });
         }
         if (init_status_.ok()) {
             ESP_LOGI(kTag, "MCP_TOOLS_READY count=3 names=schedule.create,schedule.query,im.binding.start");

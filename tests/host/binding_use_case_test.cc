@@ -237,7 +237,7 @@ void TestRejectsOutOfRangeExpiry() {
 }
 
 void TestRejectsMalformedDisplayCode() {
-    for (const std::string& bad : {"", "12345", "1234567", "12345a", "abcdef"}) {
+    for (const char* bad : {"", "12345", "1234567", "12345a", "abcdef"}) {
         FakePairingPort port;
         FakeClock clock;
         auto session = CreatedSession("2026-08-03T00:00:00.000Z", "2026-08-03T00:05:00.000Z");
