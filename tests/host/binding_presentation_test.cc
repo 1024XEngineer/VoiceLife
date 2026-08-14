@@ -18,7 +18,8 @@ BindingResult Result(BindingState state, std::string code = {}, int expiry_minut
     return {.state = state,
             .display_code = std::move(code),
             .expires_at = "2026-08-03T00:10:00.000Z",
-            .expires_in_minutes = expiry_minutes};
+            .expires_in_minutes = expiry_minutes,
+            .message = {}};
 }
 
 void TestPendingShowsAndSpeaksTheSameCodeOnce() {
