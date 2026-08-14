@@ -337,7 +337,7 @@ target_link_libraries(im_pairing_client_test PRIVATE im contracts)
 target_compile_definitions(im_pairing_client_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
 
 add_voicelife_test(binding_use_case_test "unit;im;binding" binding_use_case_test.cc)
-target_link_libraries(binding_use_case_test PRIVATE im contracts)
+target_link_libraries(binding_use_case_test PRIVATE im contracts Threads::Threads)
 
 add_voicelife_test(im_binding_mcp_tools_test "unit;mcp;im;runtime" im_binding_mcp_tools_test.cc
     "${ROOT_DIR}/components/voicelife_runtime/src/im_binding_mcp_tools.cc")

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -8,7 +9,7 @@
 
 namespace voicelife::im {
 
-/// 微信公众号绑定用例对交互层可见的稳定状态。
+/// IM 平台绑定用例对交互层可见的稳定状态。
 enum class BindingState {
     kIdle,
     kUnavailable,
@@ -33,7 +34,11 @@ struct BindingResult {
     std::string message;
 };
 
-/// 平台无关的微信公众号绑定用例；轮询由外部任务调用 Poll 驱动。
+/// 平台无关的 IM 平台绑定用例；轮询由外部任务调用 Poll 驱动。
+///
+/// 线程模型：Runtime 的 IM lifecycle 任务调用 Bind 注入依赖，MCP worker 任务
+/// 调用 Start，后台轮询任务调用 Poll；三者可能并发，因此全部公开方法以同一把
+/// 互斥锁串行化（内部 HTTPS 调用期间也持锁，调用频率低、可接受）。
 class BindingUseCase {
    public:
     /** @brief 创建尚未绑定 IM Runtime 的用例；Start 将返回 unavailable。 */
@@ -51,7 +56,11 @@ class BindingUseCase {
     /** @brief 替换用户引用。 @param user_id 已配置的非 Secret 用户引用。 */
     void set_user_id(std::optional<std::string> user_id);
 
-    /** @brief 创建短期绑定会话但不执行轮询。 @param expires_in_minutes 有效期（1～10 分钟）。 @return 创建结果。 */
+    /**
+     * @brief 创建短期绑定会话但不执行轮询。
+     * @param expires_in_minutes 有效期，必须为 1～10 分钟；越界直接返回 kFailed，不做静默截断。
+     * @return 创建结果；已有 active 会话时返回 kAlreadyActive 并携带当前绑定码与到期时间。
+     */
     BindingResult Start(int expires_in_minutes = 10);
     /** @brief 推进一次有限轮询状态机。 @return 最近一次脱敏状态。 */
     BindingResult Poll();
@@ -59,7 +68,7 @@ class BindingUseCase {
     /** @brief 当前是否持有待确认会话。 @return active 时为 true。 */
     [[nodiscard]] bool active() const;
     /** @brief 返回最近一次观察到的绑定状态。 @return 稳定业务状态。 */
-    [[nodiscard]] BindingState state() const { return state_; }
+    [[nodiscard]] BindingState state() const;
 
    private:
     ImPairingPort* client_ = nullptr;
@@ -67,6 +76,7 @@ class BindingUseCase {
     std::optional<std::string> user_id_;
     std::unique_ptr<PairingSessionController> controller_;
     BindingState state_ = BindingState::kIdle;
+    mutable std::mutex mutex_;
 };
 
 }  // namespace voicelife::im

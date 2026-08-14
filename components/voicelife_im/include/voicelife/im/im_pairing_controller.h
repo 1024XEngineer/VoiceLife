@@ -53,6 +53,10 @@ class PairingSessionController {
     PairingFlowResult Poll();
     /** @brief 当前是否持有待确认会话。 @return active 时为 true。 */
     [[nodiscard]] bool active() const { return active_; }
+    /** @brief 当前 active 会话的六位绑定码。 @return 绑定码；无 active 会话时为空字符串。 */
+    [[nodiscard]] const std::string& display_code() const { return display_code_; }
+    /** @brief 当前 active 会话的服务端到期时间。 @return ISO 时间；无 active 会话时为空字符串。 */
+    [[nodiscard]] const std::string& expires_at() const { return expires_at_; }
 
    private:
     PairingFlowResult Finish(PairingFlowStatus status, std::string message = {});

@@ -1,7 +1,9 @@
-// #235 平台无关微信公众号绑定用例：主机测试先于实现存在（TDD RED）。
+// #235 IM 平台绑定用例：并发安全、already_active 携带当前码、有效期与绑定码校验。
 
+#include <atomic>
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include "support/im_pairing_test_support.h"
@@ -54,6 +56,20 @@ void TestStartsAndRejectsDuplicateSession() {
           "绑定用例应创建 pending 会话并返回六位码与到期时间");
     Check(use_case.Start().state == BindingState::kAlreadyActive && use_case.active(),
           "重复开始不得创建第二个 active 配对会话");
+}
+
+void TestAlreadyActiveReturnsCurrentCode() {
+    FakePairingPort port;
+    FakeClock clock;
+    Prepare(port);
+    BindingUseCase use_case(port, clock);
+    use_case.set_user_id("user-fixture");
+    Check(use_case.Start().state == BindingState::kPending, "重复开始测试必须先建立会话");
+
+    const auto again = use_case.Start();
+    Check(again.state == BindingState::kAlreadyActive && again.display_code == "123456" &&
+              again.expires_at == "2026-08-03T00:05:00.000Z",
+          "already_active 必须携带当前六位码与到期时间，保证「使用当前绑定码」可执行");
 }
 
 void TestObservesTerminalStates() {
@@ -191,15 +207,91 @@ void TestRebindClearsSessionAndTerminalAllowsRestart() {
     Check(use_case.Start().state == BindingState::kPending, "终态后应允许显式开始下一次绑定");
 }
 
+void TestRejectsOutOfRangeExpiry() {
+    {
+        FakePairingPort port;
+        FakeClock clock;
+        // 服务端会话窗口必须与请求时长匹配（控制器拒绝“服务端窗口超过请求上限”）。
+        port.created = {.status = PairingClientStatus::kSuccess,
+                        .value = CreatedSession("2026-08-03T00:00:00.000Z", "2026-08-03T00:01:00.000Z"),
+                        .message = {}};
+        BindingUseCase use_case(port, clock);
+        use_case.set_user_id("user-fixture");
+        for (const int invalid : {0, -1, 11, 100}) {
+            const auto result = use_case.Start(invalid);
+            Check(result.state == BindingState::kFailed && !use_case.active() && result.display_code.empty(),
+                  "越界有效期必须直接失败，不得静默截断或创建会话");
+        }
+        Check(use_case.Start(1).state == BindingState::kPending, "下边界 1 分钟应可用");
+    }
+    {
+        FakePairingPort port;
+        FakeClock clock;
+        port.created = {.status = PairingClientStatus::kSuccess,
+                        .value = CreatedSession("2026-08-03T00:00:00.000Z", "2026-08-03T00:10:00.000Z"),
+                        .message = {}};
+        BindingUseCase use_case(port, clock);
+        use_case.set_user_id("user-fixture");
+        Check(use_case.Start(10).state == BindingState::kPending, "上边界 10 分钟应可用");
+    }
+}
+
+void TestRejectsMalformedDisplayCode() {
+    for (const std::string& bad : {"", "12345", "1234567", "12345a", "abcdef"}) {
+        FakePairingPort port;
+        FakeClock clock;
+        auto session = CreatedSession("2026-08-03T00:00:00.000Z", "2026-08-03T00:05:00.000Z");
+        session.displayCode = bad;
+        port.created = {.status = PairingClientStatus::kSuccess, .value = std::move(session), .message = {}};
+        BindingUseCase use_case(port, clock);
+        use_case.set_user_id("user-fixture");
+        const auto result = use_case.Start();
+        Check(result.state == BindingState::kFailed && !use_case.active(),
+              "服务端返回非法绑定码必须立即失败且不得进入 active");
+    }
+}
+
+void TestConcurrentBindAndStart() {
+    FakePairingPort port;
+    FakeClock clock;
+    Prepare(port);
+    // 预置足够多的 pending 查询响应，供并发轮询消费，避免假端口查询枯竭。
+    port.queried.assign(20000, Query("pending"));
+    BindingUseCase use_case(port, clock);
+
+    std::atomic<unsigned> starter_iterations{0};
+    std::atomic<unsigned> poller_iterations{0};
+    std::thread starter([&] {
+        while (starter_iterations.fetch_add(1) < 3000) (void)use_case.Start(5);
+    });
+    std::thread poller([&] {
+        while (poller_iterations.fetch_add(1) < 3000) {
+            (void)use_case.Poll();
+            (void)use_case.active();
+            (void)use_case.state();
+        }
+    });
+    for (int index = 0; index < 300; ++index) {
+        use_case.Bind(port, clock, "user-fixture");
+    }
+    starter.join();
+    poller.join();
+    Check(true, "并发 Bind/Start/Poll/active/state 必须无崩溃、无死锁");
+}
+
 }  // namespace
 
 int main() {
     TestStartsAndRejectsDuplicateSession();
+    TestAlreadyActiveReturnsCurrentCode();
     TestObservesTerminalStates();
     TestMapsCreateAndQueryFailures();
     TestRequiresReadyRuntimeAndUser();
     TestObservesWaitingNotFoundAndTimedOut();
     TestPollAfterTerminalStaysIdle();
     TestRebindClearsSessionAndTerminalAllowsRestart();
+    TestRejectsOutOfRangeExpiry();
+    TestRejectsMalformedDisplayCode();
+    TestConcurrentBindAndStart();
     return 0;
 }

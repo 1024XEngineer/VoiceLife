@@ -9,20 +9,18 @@
 namespace voicelife::runtime {
 namespace {
 
-const char* BindingStatusName(im::BindingState state) {
+const char* BindingReasonCode(im::BindingState state) {
     switch (state) {
-        case im::BindingState::kIdle:
-            return "idle";
-        case im::BindingState::kUnavailable:
-            return "unavailable";
         case im::BindingState::kPending:
-            return "pending";
-        case im::BindingState::kWaiting:
-            return "waiting";
-        case im::BindingState::kRetrying:
-            return "retrying";
+            return "created";
         case im::BindingState::kAlreadyActive:
-            return "already_active";
+            return "session_active";
+        case im::BindingState::kUnavailable:
+            return "not_ready";
+        case im::BindingState::kWaiting:
+            return "waiting_confirmation";
+        case im::BindingState::kRetrying:
+            return "network_retrying";
         case im::BindingState::kConfirmed:
             return "confirmed";
         case im::BindingState::kExpired:
@@ -30,15 +28,31 @@ const char* BindingStatusName(im::BindingState state) {
         case im::BindingState::kCancelled:
             return "cancelled";
         case im::BindingState::kNotFound:
-            return "not_found";
+            return "session_not_found";
         case im::BindingState::kTimedOut:
             return "timed_out";
         case im::BindingState::kCredentialRejected:
             return "credential_rejected";
+        case im::BindingState::kIdle:
         case im::BindingState::kFailed:
             return "failed";
     }
     return "failed";
+}
+
+/// 是否值得在收到该结果后稍后重试（区别于需要人工换凭据等不可重试场景）。
+bool BindingRetryable(im::BindingState state) {
+    switch (state) {
+        case im::BindingState::kUnavailable:
+        case im::BindingState::kRetrying:
+        case im::BindingState::kTimedOut:
+        case im::BindingState::kExpired:
+        case im::BindingState::kNotFound:
+        case im::BindingState::kCancelled:
+            return true;
+        default:
+            return false;
+    }
 }
 
 std::string BindingMessage(im::BindingState state) {
@@ -74,17 +88,61 @@ std::string BindingMessage(im::BindingState state) {
 
 }  // namespace
 
-Status RegisterImBindingMcpTools(mcp::McpServer& server, im::BindingUseCase& use_case) {
+const char* BindingStatusName(im::BindingState state) {
+    switch (state) {
+        case im::BindingState::kIdle:
+            return "idle";
+        case im::BindingState::kUnavailable:
+            return "unavailable";
+        case im::BindingState::kPending:
+            return "pending";
+        case im::BindingState::kWaiting:
+            return "waiting";
+        case im::BindingState::kRetrying:
+            return "retrying";
+        case im::BindingState::kAlreadyActive:
+            return "already_active";
+        case im::BindingState::kConfirmed:
+            return "confirmed";
+        case im::BindingState::kExpired:
+            return "expired";
+        case im::BindingState::kCancelled:
+            return "cancelled";
+        case im::BindingState::kNotFound:
+            return "not_found";
+        case im::BindingState::kTimedOut:
+            return "timed_out";
+        case im::BindingState::kCredentialRejected:
+            return "credential_rejected";
+        case im::BindingState::kFailed:
+            return "failed";
+    }
+    return "failed";
+}
+
+Status RegisterImBindingMcpTools(mcp::McpServer& server, im::BindingUseCase& use_case,
+                                 BindingSessionStartedHook on_session_started) {
     return server.add_tool(
-        "im.binding.start", "创建微信公众号绑定会话并返回六位绑定码；用户在公众号输入该码后完成设备绑定。",
-        mcp::PropertyList({mcp::Property("expires_in_minutes", mcp::PropertyType::kInteger, int64_t{10})}),
-        [&use_case](const mcp::PropertyList& properties) {
-            const int64_t expires = properties.value<int64_t>("expires_in_minutes").value_or(10);
-            const im::BindingResult result = use_case.Start(static_cast<int>(expires));
+        "im.binding.start",
+        "创建 IM 平台绑定会话并返回六位绑定码；用户须在公众号发送「绑定 <六位码>」完成设备绑定，例如：绑定 123456。",
+        mcp::PropertyList({mcp::Property::WithIntegerRange("expires_in_minutes", 1, 10, int64_t{10})}),
+        [&use_case, on_session_started = std::move(on_session_started)](const mcp::PropertyList& properties) {
+            // 越界参数已被 MCP 边界按 Schema（1～10）拒绝；此处 int64→int 转换安全。
+            const int expires_in_minutes = static_cast<int>(properties.value<int64_t>("expires_in_minutes").value_or(10));
+            const im::BindingResult result = use_case.Start(expires_in_minutes);
+            if (result.state == im::BindingState::kPending && on_session_started) on_session_started();
             ToolResult output{.status = Status::Ok(), .output = {}};
             output.output["status"] = BindingStatusName(result.state);
+            output.output["reason"] = BindingReasonCode(result.state);
+            output.output["retryable"] = BindingRetryable(result.state) ? "true" : "false";
             output.output["message"] = BindingMessage(result.state);
-            if (!result.display_code.empty()) output.output["display_code"] = result.display_code;
+            if (!result.display_code.empty()) {
+                output.output["display_code"] = result.display_code;
+                if (result.state == im::BindingState::kPending) {
+                    // 确定性播报指令：直接给出「绑定 + 六位码」完整句子，不让模型临场发挥。
+                    output.output["speak_text"] = "请在微信公众号发送：绑定 " + result.display_code;
+                }
+            }
             if (!result.expires_at.empty()) output.output["expires_at"] = result.expires_at;
             return output;
         });

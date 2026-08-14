@@ -81,6 +81,16 @@ Property Property::WithStringLength(std::string name, std::size_t minimum, std::
     return property;
 }
 
+Property Property::WithIntegerRange(std::string name, int64_t minimum, int64_t maximum,
+                                    std::optional<ToolValue> default_value) {
+    Property property(std::move(name), PropertyType::kInteger);
+    property.default_value_ = std::move(default_value);
+    property.minimum_ = minimum;
+    property.maximum_ = maximum;
+    property.required_ = !property.default_value_.has_value();
+    return property;
+}
+
 Property Property::Optional(std::string name, PropertyType type) {
     Property property(std::move(name), type);
     property.required_ = false;
