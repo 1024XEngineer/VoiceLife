@@ -1,0 +1,30 @@
+#pragma once
+
+#include <cstdint>
+#include <string>
+
+#include "voicelife/im/im_binding_use_case.h"
+
+namespace voicelife::runtime {
+
+/** 绑定状态映射出的纯用户呈现语义，不包含任何显示或语音硬件句柄。 */
+struct BindingPresentation {
+    /** true 时绑定码界面应在普通语音回合结束后恢复。 */
+    bool keep_visible = false;
+    /** true 时仅请求一次系统播报。 */
+    bool announce = false;
+    std::string status_text;
+    std::string content_text;
+    std::string speech_text;
+};
+
+/**
+ * 将脱敏绑定结果转换为固定 OLED/TTS 文案。
+ * 中间轮询状态刻意不产生输出，避免高频刷新和重复播报。
+ */
+BindingPresentation PresentBindingResult(const im::BindingResult& result);
+
+/** @brief 仅当前 Runtime/会话代次的结果才允许进入设备呈现。 */
+bool IsCurrentBindingResult(const im::BindingResult& result, uint64_t current_generation);
+
+}  // namespace voicelife::runtime

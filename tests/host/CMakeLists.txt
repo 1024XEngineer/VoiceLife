@@ -356,6 +356,11 @@ add_voicelife_test(im_binding_mcp_tools_test "unit;mcp;im;runtime" im_binding_mc
 target_include_directories(im_binding_mcp_tools_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
 target_link_libraries(im_binding_mcp_tools_test PRIVATE mcp im)
 
+add_voicelife_test(binding_presentation_test "unit;im;runtime;binding" binding_presentation_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime/src/im_binding_presentation.cc")
+target_include_directories(binding_presentation_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_link_libraries(binding_presentation_test PRIVATE im)
+
 add_voicelife_test(im_runtime_test "unit;im;runtime" im_runtime_test.cc)
 target_link_libraries(im_runtime_test PRIVATE im contracts)
 

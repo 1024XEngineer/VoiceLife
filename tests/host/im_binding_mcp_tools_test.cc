@@ -117,12 +117,21 @@ void TestInvokesStartHookOnceAndCarriesFields() {
     use_case.set_user_id("user-fixture");
     McpServer server;
     int hook_count = 0;
-    Check(voicelife::runtime::RegisterImBindingMcpTools(server, use_case, [&hook_count] { ++hook_count; }).ok(),
+    voicelife::im::BindingResult hook_result;
+    Check(voicelife::runtime::RegisterImBindingMcpTools(
+              server, use_case,
+              [&hook_count, &hook_result](const voicelife::im::BindingResult& result) {
+                  ++hook_count;
+                  hook_result = result;
+              })
+              .ok(),
           "带 hook 的绑定工具应可注册");
 
     const auto first = server.call({.request_id = "bind-hook-1", .name = "im.binding.start", .arguments = {}});
-    Check(first.status.ok() && first.output.at("status") == "pending" && hook_count == 1,
-          "创建成功必须恰好触发一次会话开始 hook");
+    Check(first.status.ok() && first.output.at("status") == "pending" && hook_count == 1 &&
+              hook_result.state == voicelife::im::BindingState::kPending && hook_result.display_code == "123456" &&
+              hook_result.generation != 0,
+          "创建成功必须恰好触发一次并携带脱敏结果与代次的会话开始 hook");
     const auto second = server.call({.request_id = "bind-hook-2", .name = "im.binding.start", .arguments = {}});
     Check(second.status.ok() && second.output.at("status") == "already_active" &&
               second.output.at("display_code") == "123456" && second.output.at("reason") == "session_active" &&

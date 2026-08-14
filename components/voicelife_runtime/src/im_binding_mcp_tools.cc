@@ -120,18 +120,17 @@ const char* BindingStatusName(im::BindingState state) {
     return "failed";
 }
 
-Status RegisterImBindingMcpTools(mcp::McpServer& server, im::BindingUseCase& use_case,
-                                 BindingSessionStartedHook on_session_started) {
+Status RegisterImBindingMcpTools(mcp::McpServer& server, im::BindingUseCase& use_case, BindingResultHook on_result) {
     return server.add_tool(
         "im.binding.start",
         "创建 IM 平台绑定会话并返回六位绑定码；用户须在公众号发送「绑定 <六位码>」完成设备绑定，例如：绑定 123456。",
         mcp::PropertyList({mcp::Property::WithIntegerRange("expires_in_minutes", 1, 10, int64_t{10})}),
-        [&use_case, on_session_started = std::move(on_session_started)](const mcp::PropertyList& properties) {
+        [&use_case, on_result = std::move(on_result)](const mcp::PropertyList& properties) {
             // 越界参数已被 MCP 边界按 Schema（1～10）拒绝；此处 int64→int 转换安全。
             const int expires_in_minutes =
                 static_cast<int>(properties.value<int64_t>("expires_in_minutes").value_or(10));
             const im::BindingResult result = use_case.Start(expires_in_minutes);
-            if (result.state == im::BindingState::kPending && on_session_started) on_session_started();
+            if (result.state == im::BindingState::kPending && on_result) on_result(result);
             ToolResult output{.status = Status::Ok(), .output = {}};
             output.output["status"] = BindingStatusName(result.state);
             output.output["reason"] = BindingReasonCode(result.state);

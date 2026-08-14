@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -31,6 +32,10 @@ struct BindingResult {
     BindingState state = BindingState::kIdle;
     std::string display_code;
     std::string expires_at;
+    /** 创建该会话时请求的有效期；仅供本地呈现，绝不传入外部协议。 */
+    int expires_in_minutes = 0;
+    /** Runtime/配置代次；用于丢弃重绑后迟到的旧会话结果。 */
+    uint64_t generation = 0;
     std::string message;
 };
 
@@ -69,6 +74,9 @@ class BindingUseCase {
     [[nodiscard]] bool active() const;
     /** @brief 返回最近一次观察到的绑定状态。 @return 稳定业务状态。 */
     [[nodiscard]] BindingState state() const;
+    /** @brief 返回当前 Runtime/会话代次；重绑后旧结果必须被交互层丢弃。
+     * @return 当前单调递增的绑定代次。 */
+    [[nodiscard]] uint64_t generation() const;
 
    private:
     ImPairingPort* client_ = nullptr;
@@ -76,6 +84,8 @@ class BindingUseCase {
     std::optional<std::string> user_id_;
     std::unique_ptr<PairingSessionController> controller_;
     BindingState state_ = BindingState::kIdle;
+    int active_expiry_minutes_ = 0;
+    uint64_t generation_ = 0;
     mutable std::mutex mutex_;
 };
 
