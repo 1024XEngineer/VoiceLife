@@ -1,11 +1,15 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
 #include "voicelife/im/im_binding_use_case.h"
 
 namespace voicelife::runtime {
+
+/// BoardRequest 为绑定系统播报预留的 UTF-8 字节数（含结尾空字符）。
+constexpr std::size_t kBindingSystemSpeechCapacity = 96;
 
 /** 绑定状态映射出的纯用户呈现语义，不包含任何显示或语音硬件句柄。 */
 struct BindingPresentation {

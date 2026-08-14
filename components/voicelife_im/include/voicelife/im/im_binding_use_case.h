@@ -69,6 +69,12 @@ class BindingUseCase {
     BindingResult Start(int expires_in_minutes = 10);
     /** @brief 推进一次有限轮询状态机。 @return 最近一次脱敏状态。 */
     BindingResult Poll();
+    /**
+     * @brief 轮询任务无法启动时终止指定的待确认会话。
+     * @param generation 创建该会话时返回的代次；不匹配时不影响当前会话。
+     * @return 终止后的失败结果，或当前会话的稳定状态。
+     */
+    BindingResult AbortPending(uint64_t generation);
 
     /** @brief 当前是否持有待确认会话。 @return active 时为 true。 */
     [[nodiscard]] bool active() const;

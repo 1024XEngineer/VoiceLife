@@ -130,7 +130,9 @@ Status RegisterImBindingMcpTools(mcp::McpServer& server, im::BindingUseCase& use
             const int expires_in_minutes =
                 static_cast<int>(properties.value<int64_t>("expires_in_minutes").value_or(10));
             const im::BindingResult result = use_case.Start(expires_in_minutes);
-            if (result.state == im::BindingState::kPending && on_result) on_result(result);
+            // 每次语音命令都把脱敏结果交给 Runtime：already_active 可以恢复被普通
+            // 对话覆盖的绑定码，创建失败也必须在设备侧给出确定反馈。
+            if (on_result) on_result(result);
             ToolResult output{.status = Status::Ok(), .output = {}};
             output.output["status"] = BindingStatusName(result.state);
             output.output["reason"] = BindingReasonCode(result.state);

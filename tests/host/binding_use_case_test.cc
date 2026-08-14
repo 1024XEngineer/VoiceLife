@@ -232,6 +232,20 @@ void TestRebindInvalidatesResultsFromThePreviousRuntime() {
           "重启策略必须清理本地会话并要求下一次显式开始，新的会话使用新代次");
 }
 
+void TestAbortingThePendingSessionAllowsARecoveryStart() {
+    FakePairingPort port;
+    FakeClock clock;
+    Prepare(port);
+    BindingUseCase use_case(port, clock);
+    use_case.set_user_id("user-fixture");
+
+    const auto pending = use_case.Start();
+    const auto aborted = use_case.AbortPending(pending.generation);
+    Check(aborted.state == BindingState::kFailed && aborted.generation == pending.generation && !use_case.active(),
+          "轮询任务无法创建时必须终止本地 pending，不能留下无轮询的绑定码");
+    Check(use_case.Start().state == BindingState::kPending, "终止后用户的下一次明确命令必须可以重新开始绑定");
+}
+
 void TestRejectsOutOfRangeExpiry() {
     {
         FakePairingPort port;
@@ -316,6 +330,7 @@ int main() {
     TestPollAfterTerminalStaysIdle();
     TestRebindClearsSessionAndTerminalAllowsRestart();
     TestRebindInvalidatesResultsFromThePreviousRuntime();
+    TestAbortingThePendingSessionAllowsARecoveryStart();
     TestRejectsOutOfRangeExpiry();
     TestRejectsMalformedDisplayCode();
     TestConcurrentBindAndStart();

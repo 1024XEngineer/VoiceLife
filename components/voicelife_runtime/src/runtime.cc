@@ -40,6 +40,7 @@
 
 #include "bootstrap/storage_bootstrap.h"
 #include "im_binding_mcp_tools.h"
+#include "im_binding_polling_lease.h"
 #include "im_binding_presentation.h"
 #include "im_runtime_bootstrap.h"
 #include "linx_mcp_bridge.h"
@@ -169,7 +170,7 @@ class Runtime final {
             init_status_ =
                 RegisterImBindingMcpTools(mcp_server_, binding_use_case_, [this](const im::BindingResult& result) {
                     EnqueueBindingResult(result);
-                    if (result.state == im::BindingState::kPending) StartBindingPolling();
+                    if (result.state == im::BindingState::kPending) StartBindingPolling(result.generation);
                 });
         }
         if (init_status_.ok()) {
@@ -394,25 +395,27 @@ class Runtime final {
     // 需以真机 uxTaskGetStackHighWaterMark 实测校准（任务退出时已上报高水位）。
     static constexpr uint32_t kBindingPollStackBytes = 16384;
 
-    void StartBindingPolling() {
-        bool expected = false;
-        if (!binding_poll_started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-            ESP_LOGW(kTag, "IM_BINDING_POLL_ALREADY_RUNNING=1");
+    void StartBindingPolling(uint64_t generation) {
+        if (!binding_poll_lease_.Acquire(generation)) {
+            ESP_LOGI(kTag, "IM_BINDING_POLL_ADOPTED generation=%llu", static_cast<unsigned long long>(generation));
             return;
         }
         if (xTaskCreate(&Runtime::BindingPollTaskEntry, "voicelife_binding_poll", kBindingPollStackBytes, this, 2,
                         nullptr) != pdPASS) {
-            binding_poll_started_.store(false, std::memory_order_release);
+            if (binding_poll_lease_.Release(generation)) {
+                EnqueueBindingResult(binding_use_case_.AbortPending(generation));
+            }
             ESP_LOGW(kTag, "IM_BINDING_POLL_TASK_FAILED=1");
             return;
         }
-        ESP_LOGI(kTag, "IM_BINDING_POLL_STARTED=1");
+        ESP_LOGI(kTag, "IM_BINDING_POLL_STARTED generation=%llu", static_cast<unsigned long long>(generation));
     }
 
     static void BindingPollTaskEntry(void* context) { static_cast<Runtime*>(context)->BindingPollLoop(); }
 
     void BindingPollLoop() {
         while (true) {
+            const uint64_t owner_generation = binding_poll_lease_.generation();
             vTaskDelay(pdMS_TO_TICKS(kBindingPollIntervalMs));
             const im::BindingResult result = binding_use_case_.Poll();
             if (result.state == im::BindingState::kPending || result.state == im::BindingState::kWaiting ||
@@ -422,14 +425,14 @@ class Runtime final {
             // 轮询任务只投递脱敏语义结果。事件循环按 BindingUseCase generation
             // 丢弃 origin/凭据变更后迟到的旧 confirmed，绝不直接访问显示或语音硬件。
             EnqueueBindingResult(result);
-            // 终态或会话已释放。Start/Poll 由同一把锁串行化：若竞态窗口内新会话
-            // 已由 Start 建立（active 再次为真），继续轮询新会话；否则复位标志退出，
-            // 下一次 Start 的 hook 会重新拉起本任务。
+            // 终态或会话已释放。若新 Start 在旧任务退出窗口接管租约，Release
+            // 会失败，本任务继续服务新会话，避免出现 pending 却没有轮询任务。
             if (binding_use_case_.active()) continue;
-            ESP_LOGI(kTag, "IM_BINDING_STATUS=%s stack_high_water=%u", BindingStatusName(result.state),
-                     static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
-            binding_poll_started_.store(false, std::memory_order_release);
-            break;
+            if (binding_poll_lease_.Release(owner_generation)) {
+                ESP_LOGI(kTag, "IM_BINDING_STATUS=%s stack_high_water=%u", BindingStatusName(result.state),
+                         static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+                break;
+            }
         }
         ESP_LOGI(kTag, "IM_BINDING_POLL_STOPPED=1");
         vTaskDelete(nullptr);
@@ -597,7 +600,7 @@ class Runtime final {
         /** 物理唤醒门已就绪后是否需将 Controller 收口为 standby。 */
         bool settle_controller = true;
         /** 当存在时，以 Provider 的正式 TTS 请求播报这段系统话术。 */
-        char system_speech[48];
+        char system_speech[kBindingSystemSpeechCapacity];
     };
 
     void EnqueueBoardInput(BoardInputAction action) {
@@ -675,15 +678,21 @@ class Runtime final {
         (void)xQueueSend(wake_queue_, &recovery, 0);
     }
 
-    void QueueSystemSpeech(std::string_view text) {
-        if (wake_queue_ == nullptr || text.empty()) return;
+    bool QueueSystemSpeech(std::string_view text) {
+        if (wake_queue_ == nullptr || text.empty()) return false;
+        if (text.size() >= kBindingSystemSpeechCapacity) {
+            ESP_LOGE(kTag, "SYSTEM_SPEECH_TOO_LONG bytes=%u", static_cast<unsigned>(text.size()));
+            return false;
+        }
         BoardRequest request{};
         request.kind = BoardRequestKind::kInterrupt;
-        const std::size_t size =
-            text.size() < sizeof(request.system_speech) - 1 ? text.size() : sizeof(request.system_speech) - 1;
-        std::memcpy(request.system_speech, text.data(), size);
-        request.system_speech[size] = '\0';
-        (void)xQueueSend(wake_queue_, &request, 0);
+        std::memcpy(request.system_speech, text.data(), text.size());
+        request.system_speech[text.size()] = '\0';
+        if (xQueueSend(wake_queue_, &request, 0) != pdTRUE) {
+            ESP_LOGW(kTag, "SYSTEM_SPEECH_QUEUE_FULL=1");
+            return false;
+        }
+        return true;
     }
 
     // 下行长文本滚动由显示 Adapter 负责（Ssd1306PresentationAdapter）。
@@ -1377,11 +1386,12 @@ class Runtime final {
                               [](const std::string& origin) { return im::CreateEspHttpTransport(origin); }};
     EspPairingClock im_pairing_clock_;
     im::BindingUseCase binding_use_case_;
-    std::atomic_bool binding_poll_started_{false};
+    BindingPollingLease binding_poll_lease_;
     bool binding_display_active_ = false;
     uint64_t binding_display_generation_ = 0;
     std::string binding_status_text_;
     std::string binding_content_text_;
+    std::optional<BindingPresentation> deferred_binding_presentation_;
     std::string deferred_binding_speech_;
     std::atomic_bool im_lifecycle_started_{false};
     TaskHandle_t im_lifecycle_task_ = nullptr;
@@ -1528,10 +1538,15 @@ class Runtime final {
     }
 
     void QueueDeferredBindingSpeechIfStandby() {
-        if (interaction_.state() != voice::VoiceInteractionState::kStandby || deferred_binding_speech_.empty()) return;
+        if (interaction_.state() != voice::VoiceInteractionState::kStandby) return;
+        if (deferred_binding_presentation_.has_value()) {
+            CommitBindingPresentation(*deferred_binding_presentation_);
+            deferred_binding_presentation_.reset();
+        }
+        if (deferred_binding_speech_.empty()) return;
         std::string speech = std::move(deferred_binding_speech_);
         deferred_binding_speech_.clear();
-        QueueSystemSpeech(speech);
+        if (!QueueSystemSpeech(speech)) deferred_binding_speech_ = std::move(speech);
     }
 
     void ProcessBindingResult(const im::BindingResult& result) {
@@ -1557,10 +1572,18 @@ class Runtime final {
             binding_status_text_.clear();
             binding_content_text_.clear();
         }
+        // 终态在普通对话中抵达时，将 OLED 与 TTS 作为一个结果延后到待机。
+        // 这不会抢写用户正在看的 STT 或助手回复。
+        if (!presentation.keep_visible && interaction_.state() != voice::VoiceInteractionState::kStandby) {
+            deferred_binding_presentation_ = presentation;
+            deferred_binding_speech_ = presentation.speech_text;
+            return;
+        }
+
         CommitBindingPresentation(presentation);
         if (!presentation.announce) return;
         if (interaction_.state() == voice::VoiceInteractionState::kStandby) {
-            QueueSystemSpeech(presentation.speech_text);
+            if (!QueueSystemSpeech(presentation.speech_text)) deferred_binding_speech_ = presentation.speech_text;
         } else {
             // 终态可能在用户正常对话期间抵达。保留提示，待当前回合回待机后
             // 再播报，避免轮询任务打断唤醒、按键和普通语音。
@@ -1689,6 +1712,7 @@ class Runtime final {
                     binding_display_generation_ = item.binding_generation;
                     binding_status_text_.clear();
                     binding_content_text_.clear();
+                    deferred_binding_presentation_.reset();
                     deferred_binding_speech_.clear();
                     // 重绑/重启策略不允许旧 origin 的绑定码或成功提示留在屏幕上。
                     // 非空闲回合会由紧随其后的交互事件接管显示；空闲时立即收口。

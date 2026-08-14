@@ -9,6 +9,7 @@ using voicelife::im::BindingResult;
 using voicelife::im::BindingState;
 using voicelife::runtime::BindingPresentation;
 using voicelife::runtime::IsCurrentBindingResult;
+using voicelife::runtime::kBindingSystemSpeechCapacity;
 using voicelife::runtime::PresentBindingResult;
 using voicelife::test::Check;
 
@@ -43,21 +44,38 @@ void TestTerminalStatesPromptTheUser() {
               confirmed.speech_text == "微信公众号绑定成功",
           "confirmed 必须显示并播报成功");
 
-    for (const BindingState state : {BindingState::kExpired, BindingState::kCancelled, BindingState::kTimedOut}) {
+    const BindingPresentation expired = PresentBindingResult(Result(BindingState::kExpired));
+    Check(!expired.keep_visible && expired.announce && expired.content_text == "绑定已过期" &&
+              expired.speech_text == "绑定已过期，请重新获取绑定码",
+          "expired 必须提示用户重新获取绑定码");
+
+    const BindingPresentation cancelled = PresentBindingResult(Result(BindingState::kCancelled));
+    Check(!cancelled.keep_visible && cancelled.announce && cancelled.content_text == "绑定已取消" &&
+              cancelled.speech_text == "绑定已取消，请重新获取绑定码",
+          "cancelled 不得伪装成自然过期");
+
+    const BindingPresentation timed_out = PresentBindingResult(Result(BindingState::kTimedOut));
+    Check(!timed_out.keep_visible && timed_out.announce && timed_out.content_text == "等待超时" &&
+              timed_out.speech_text == "等待确认超时，请重新获取绑定码",
+          "timed_out 必须明确是本地等待截止");
+}
+
+void TestFailureStatesGiveSafeDeviceFeedback() {
+    for (const BindingState state : {BindingState::kUnavailable, BindingState::kFailed,
+                                     BindingState::kCredentialRejected, BindingState::kNotFound}) {
         const BindingPresentation presentation = PresentBindingResult(Result(state));
-        Check(!presentation.keep_visible && presentation.announce && presentation.content_text == "请重新绑定" &&
-                  presentation.speech_text == "绑定已过期，请重新获取绑定码",
-              "过期、取消和本地截止都必须提示用户重新绑定");
+        Check(!presentation.keep_visible && presentation.announce && !presentation.status_text.empty() &&
+                  !presentation.content_text.empty() && !presentation.speech_text.empty(),
+              "创建或轮询失败必须有脱敏的 OLED/TTS 反馈，不能只留在 MCP 返回中");
     }
 }
 
 void TestPollingStatesDoNotLeakOrSpamTheDisplay() {
-    for (const BindingState state : {BindingState::kWaiting, BindingState::kRetrying, BindingState::kIdle,
-                                     BindingState::kUnavailable, BindingState::kFailed}) {
+    for (const BindingState state : {BindingState::kWaiting, BindingState::kRetrying, BindingState::kIdle}) {
         const BindingPresentation presentation = PresentBindingResult(Result(state));
         Check(!presentation.keep_visible && !presentation.announce && presentation.status_text.empty() &&
                   presentation.content_text.empty() && presentation.speech_text.empty(),
-              "轮询中间态与内部失败不得刷新屏幕、重复播报或透传内部详情");
+              "轮询中间态不得刷新屏幕、重复播报或透传内部详情");
     }
 }
 
@@ -68,13 +86,27 @@ void TestStaleRuntimeResultsAreRejectedBeforePresentation() {
     Check(IsCurrentBindingResult(old_result, old_result.generation), "同代次结果必须可被呈现");
 }
 
+void TestDeviceBindingSpeechNeverRequiresTruncation() {
+    for (const BindingState state :
+         {BindingState::kPending, BindingState::kConfirmed, BindingState::kExpired, BindingState::kCancelled,
+          BindingState::kTimedOut, BindingState::kUnavailable, BindingState::kCredentialRejected,
+          BindingState::kNotFound, BindingState::kFailed}) {
+        const BindingPresentation presentation =
+            PresentBindingResult(Result(state, state == BindingState::kPending ? "123456" : std::string{}, 10));
+        Check(presentation.speech_text.size() < kBindingSystemSpeechCapacity,
+              "所有固定绑定 TTS 文案必须完整装入 BoardRequest，禁止静默截断");
+    }
+}
+
 }  // namespace
 
 int main() {
     TestPendingShowsAndSpeaksTheSameCodeOnce();
     TestAlreadyActiveKeepsTheCodeWithoutRepeatingSpeech();
     TestTerminalStatesPromptTheUser();
+    TestFailureStatesGiveSafeDeviceFeedback();
     TestPollingStatesDoNotLeakOrSpamTheDisplay();
     TestStaleRuntimeResultsAreRejectedBeforePresentation();
+    TestDeviceBindingSpeechNeverRequiresTruncation();
     return 0;
 }

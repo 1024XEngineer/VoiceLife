@@ -109,7 +109,7 @@ void TestRejectsOutOfRangeExpiryAtBoundary() {
     }
 }
 
-void TestInvokesStartHookOnceAndCarriesFields() {
+void TestInvokesResultHookAndCarriesFields() {
     FakePairingPort port;
     FakeClock clock;
     Prepare(port);
@@ -135,19 +135,30 @@ void TestInvokesStartHookOnceAndCarriesFields() {
     const auto second = server.call({.request_id = "bind-hook-2", .name = "im.binding.start", .arguments = {}});
     Check(second.status.ok() && second.output.at("status") == "already_active" &&
               second.output.at("display_code") == "123456" && second.output.at("reason") == "session_active" &&
-              second.output.at("retryable") == "false" && hook_count == 1,
-          "already_active 必须携带当前码且不再触发 hook");
+              second.output.at("retryable") == "false" && hook_count == 2 &&
+              hook_result.state == voicelife::im::BindingState::kAlreadyActive,
+          "already_active 必须投递当前码，以恢复被普通语音覆盖的 OLED 内容，但不重启轮询");
 }
 
 void TestReturnsSpeakableUnavailableResult() {
     BindingUseCase use_case;
     McpServer server;
-    Check(voicelife::runtime::RegisterImBindingMcpTools(server, use_case).ok(), "绑定工具应可注册");
+    int hook_count = 0;
+    voicelife::im::BindingResult hook_result;
+    Check(voicelife::runtime::RegisterImBindingMcpTools(
+              server, use_case,
+              [&hook_count, &hook_result](const voicelife::im::BindingResult& result) {
+                  ++hook_count;
+                  hook_result = result;
+              })
+              .ok(),
+          "绑定工具应可注册");
     const auto result = server.call({.request_id = "bind-6", .name = "im.binding.start", .arguments = {}});
     Check(result.status.ok() && result.output.at("status") == "unavailable" && !result.output.at("message").empty() &&
               result.output.at("reason") == "not_ready" && result.output.at("retryable") == "true" &&
-              !result.output.contains("display_code"),
-          "IM 未 ready 时应返回可播报 unavailable 与稳定字段，而非 JSON-RPC error");
+              !result.output.contains("display_code") && hook_count == 1 &&
+              hook_result.state == voicelife::im::BindingState::kUnavailable,
+          "IM 未 ready 时必须投递可呈现 unavailable，而非只返回 MCP 文本");
 }
 
 }  // namespace
@@ -156,7 +167,7 @@ int main() {
     TestRegistersAndCreatesBinding();
     TestAcceptsExplicitExpiryAndRejectsInvalidArguments();
     TestRejectsOutOfRangeExpiryAtBoundary();
-    TestInvokesStartHookOnceAndCarriesFields();
+    TestInvokesResultHookAndCarriesFields();
     TestReturnsSpeakableUnavailableResult();
     return 0;
 }

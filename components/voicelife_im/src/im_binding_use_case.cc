@@ -136,6 +136,21 @@ BindingResult BindingUseCase::Poll() {
     return result;
 }
 
+BindingResult BindingUseCase::AbortPending(uint64_t generation) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (generation != generation_ || controller_ == nullptr || !controller_->active()) {
+        return {.state = state_, .display_code = {}, .expires_at = {}, .generation = generation_, .message = {}};
+    }
+    controller_.reset();
+    active_expiry_minutes_ = 0;
+    state_ = BindingState::kFailed;
+    return {.state = state_,
+            .display_code = {},
+            .expires_at = {},
+            .generation = generation_,
+            .message = "绑定轮询任务无法启动"};
+}
+
 bool BindingUseCase::active() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return controller_ != nullptr && controller_->active();

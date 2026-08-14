@@ -35,13 +35,47 @@ BindingPresentation PresentBindingResult(const im::BindingResult& result) {
                     .content_text = "绑定成功",
                     .speech_text = "微信公众号绑定成功"};
         case im::BindingState::kExpired:
+            return {.keep_visible = false,
+                    .announce = true,
+                    .status_text = "公众号绑定",
+                    .content_text = "绑定已过期",
+                    .speech_text = "绑定已过期，请重新获取绑定码"};
         case im::BindingState::kCancelled:
+            return {.keep_visible = false,
+                    .announce = true,
+                    .status_text = "公众号绑定",
+                    .content_text = "绑定已取消",
+                    .speech_text = "绑定已取消，请重新获取绑定码"};
         case im::BindingState::kTimedOut:
             return {.keep_visible = false,
                     .announce = true,
                     .status_text = "公众号绑定",
-                    .content_text = "请重新绑定",
-                    .speech_text = "绑定已过期，请重新获取绑定码"};
+                    .content_text = "等待超时",
+                    .speech_text = "等待确认超时，请重新获取绑定码"};
+        case im::BindingState::kUnavailable:
+            return {.keep_visible = false,
+                    .announce = true,
+                    .status_text = "公众号绑定",
+                    .content_text = "暂不可用",
+                    .speech_text = "绑定功能暂不可用，请稍后再试"};
+        case im::BindingState::kCredentialRejected:
+            return {.keep_visible = false,
+                    .announce = true,
+                    .status_text = "公众号绑定",
+                    .content_text = "设备凭据无效",
+                    .speech_text = "设备凭据无效，无法完成绑定"};
+        case im::BindingState::kNotFound:
+            return {.keep_visible = false,
+                    .announce = true,
+                    .status_text = "公众号绑定",
+                    .content_text = "会话不存在",
+                    .speech_text = "绑定会话不存在，请重新获取绑定码"};
+        case im::BindingState::kFailed:
+            return {.keep_visible = false,
+                    .announce = true,
+                    .status_text = "公众号绑定",
+                    .content_text = "绑定失败",
+                    .speech_text = "绑定失败，请稍后再试"};
         default:
             return {};
     }
