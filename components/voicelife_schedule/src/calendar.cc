@@ -11,13 +11,24 @@ int DaysInMonth(int year, int month) {
     return kDays[month - 1];
 }
 
-// Howard Hinnant 风格的 civil date 换算，用于跳过日期表并保持统一 UTC 偏移。
+/**
+ * @brief 将公历年月日换算成相对 1970-01-01 的天数。
+ *
+ * 这里不是从 1970-01-01 开始逐日累加，而是按公历的 400 年周期、年内月份偏移
+ * 直接数学换算，避免日期越远计算量越大。
+ */
 std::int64_t DaysFromCivil(int year, int month, int day) {
+    // 把 1、2 月并入上一年，让 3 月到次年 2 月成为一个连续的“年周期”，便于统一处理闰年。
     year -= month <= 2;
+    // 公历每 400 年循环一次，era 是第几个 400 年周期。
     const std::int64_t era = (year >= 0 ? year : year - 399) / 400;
+    // yoe 是当前 400 年周期内的第几年。
     const unsigned yoe = static_cast<unsigned>(year - era * 400);
+    // doy 是调整后“年周期”内的第几天；月份累计天数由公式直接算出，不逐月扫描。
     const unsigned doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+    // doe 是当前 400 年周期内已经经过的天数，包含普通年天数和闰年补偿。
     const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    // 146097 是一个 400 年周期的总天数，719468 是相对 1970-01-01 的基准偏移。
     return era * 146097 + static_cast<std::int64_t>(doe) - 719468;
 }
 
@@ -35,7 +46,12 @@ void CivilFromDays(std::int64_t days, int& year, int& month, int& day) {
     year += (month <= 2);
 }
 
-// 返回 ISO 风格星期编号（0 = 周一），周期周规则用它匹配 weekdays_mask。
+/**
+ * @brief 根据年月日计算星期几。
+ *
+ * 先得到相对 1970-01-01 的总天数，再对 7 取余得到星期编号。1970-01-01 是周四，
+ * 因此需要 +3 做偏移，使返回值固定为 0=周一，6=周日。
+ */
 int Weekday(int year, int month, int day) {
     const std::int64_t days = DaysFromCivil(year, month, day);
     const int weekday = static_cast<int>((days + 3) % 7);
