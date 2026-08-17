@@ -1079,6 +1079,22 @@ class Runtime final {
         }
     }
 
+    // “收到！”是唤醒确认的短暂显示。即使服务端暂时没有后续语音事件，
+    // 也必须由事件循环在租约到期后主动刷新，否则 OLED 会永久保留确认文本。
+    void ClearExpiredWakeAck() {
+        if (wake_ack_until_us_ == 0 || esp_timer_get_time() < wake_ack_until_us_) return;
+        wake_ack_until_us_ = 0;
+        if (snapshot_.phase != voice::VoiceInteractionState::kListening ||
+            snapshot_.role != voice::VoiceContentRole::kSystem || snapshot_.content_text != "收到！") {
+            return;
+        }
+        snapshot_.content_text.clear();
+        snapshot_.role = voice::VoiceContentRole::kNone;
+        ++snapshot_.revision;
+        CommitSnapshot();
+        ESP_LOGI(kTag, "WAKE_ACK_DISPLAY_EXPIRED=1");
+    }
+
     Status HandleInteractionEvent(voice::VoiceInteractionEvent event, std::string_view wake_word = {}) {
         const auto transition = interaction_.Handle(event);
         if (!transition.ok() || !transition.value.has_value()) {
@@ -1659,7 +1675,8 @@ class Runtime final {
                     break;
                 }
                 if (event_queue_.empty()) {
-                    // 超时轮询：处理音量 overlay 到期恢复（不依赖 timer 直接提交）。
+                    // 超时轮询：处理短暂显示的到期刷新（不依赖 timer 直接提交）。
+                    ClearExpiredWakeAck();
                     if (overlay_expired_.exchange(false)) {
                         if (overlay_active_) {
                             snapshot_ = overlay_base_snapshot_;
