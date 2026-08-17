@@ -2,12 +2,22 @@
 
 #include <mutex>
 #include <string>
+#include <string_view>
 
 #include "voicelife/contracts/status.h"
 #include "voicelife/display_esp/ssd1306_status_display.h"
 #include "voicelife/voice/voice_ports.h"
 
 namespace voicelife::display_esp {
+
+/**
+ * @brief 判断文本能否完整放入 SSD1306 内容栏而无需滚动。
+ *
+ * 内容栏从 x=20 开始；ASCII 使用 9px，中文与全角字符使用 17px。
+ * @param content 待渲染的 UTF-8 内容。
+ * @return 文本完整可见时为 true。
+ */
+[[nodiscard]] bool Ssd1306ContentFitsLine(std::string_view content);
 
 /**
  * @brief VoiceLife PCB 128x32 SSD1306 点阵屏显示适配器。

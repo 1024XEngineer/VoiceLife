@@ -54,7 +54,12 @@ int main() {
     Check(sparkbot_as_interface.presentation().Render(snapshot).ok(), "SparkBot Render 必须接受快照并入队");
 
     // SSD1306 初始化是受控边界：必须实际调用面板初始化，并保留失败状态。
+    using voicelife::display_esp::Ssd1306ContentFitsLine;
     using voicelife::display_esp::Ssd1306PresentationAdapter;
+    Check(Ssd1306ContentFitsLine("12345678"), "8 位 ASCII 配网密码必须完整显示而不滚动");
+    Check(Ssd1306ContentFitsLine("123456789012"), "12 位 ASCII 必须刚好填满内容栏");
+    Check(!Ssd1306ContentFitsLine("1234567890123"), "超过内容栏宽度的 ASCII 必须滚动");
+    Check(!Ssd1306ContentFitsLine("一二三四五六七"), "7 个中文字符必须滚动，保留 6 字绑定码布局");
     Ssd1306PresentationAdapter initialized_display(&InitializeDisplaySuccessfully);
     Check(initialized_display.Start().ok() && g_display_initializations == 1, "SSD1306 Start 必须调用面板初始化");
     Ssd1306PresentationAdapter unavailable_display(&InitializeDisplayFailure);

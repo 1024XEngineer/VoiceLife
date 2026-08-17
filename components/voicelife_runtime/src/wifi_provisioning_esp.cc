@@ -295,7 +295,8 @@ Result<WifiProvisioningCredentials> ProvisionWifiOverSoftAp(WifiProvisioningCaus
         return Result<WifiProvisioningCredentials>::Failure(dns.code, dns.message);
     }
     if (status_sink) {
-        status_sink("配网", "连接 " + ssid + "，密码 " + password);
+        // OLED 内容栏只有 108px 宽。热点名称可由手机 Wi-Fi 列表识别，密码必须完整可见。
+        status_sink("配网密码", password);
     }
     ESP_LOGI(kTag, "SOFTAP_STARTED=1 timeout_ms=%lu", static_cast<unsigned long>(kPortalTimeoutMs));
 
