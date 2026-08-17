@@ -12,6 +12,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "docs:check": "node --test scripts/check-public-api-docs.test.mjs && node scripts/check-public-api-docs.mjs",
     "dev:wechat": "pnpm run build && node --env-file=../../.env scripts/run-wechat-dev-harness.mjs",
+    "device": "pnpm --silent run build 1>&2 && node --env-file-if-exists=../../.env scripts/device-cli.mjs",
     "start": "pnpm run build && node --env-file-if-exists=../../.env scripts/start-gateway.mjs",
     "test": "pnpm run build && node test/run-tests.mjs && node --test --test-concurrency=1 test/*.test.mjs",
     "coverage": "pnpm run build && c8 --all --clean false --temp-directory coverage/.tmp --extension .js --include 'dist/**/*.js' --exclude 'dist/**/*.d.ts' --reporter=none --reports-dir coverage node test/run-tests.mjs && c8 --all --clean false --temp-directory coverage/.tmp --extension .js --include 'dist/**/*.js' --exclude 'dist/**/*.d.ts' --reporter=none --reports-dir coverage node --test --test-concurrency=1 test/*.test.mjs && c8 report --temp-directory coverage/.tmp --reporter=lcov --reporter=text --reports-dir coverage",

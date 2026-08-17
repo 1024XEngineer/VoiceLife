@@ -563,7 +563,7 @@ class Runtime final {
                 // 明确语音命令会创建新会话，Gateway 会原子取消同设备旧 pending。
                 binding_use_case_.Bind(*im_runtime_.pairing_client(), im_pairing_clock_, im_runtime_.user_id());
                 EnqueueBindingReset(binding_use_case_.generation());
-                RegisterImPairingAcceptance(im_runtime_.pairing_client(), im_runtime_.user_id());
+                RegisterImPairingAcceptance(im_runtime_.pairing_client(), im_runtime_.device_id(), im_runtime_.user_id());
                 ESP_LOGI(kTag, "IM_RUNTIME_READY=1");
                 break;
             }

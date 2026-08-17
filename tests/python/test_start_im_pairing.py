@@ -30,7 +30,30 @@ class StartImPairingTest(unittest.TestCase):
             PAIRING.parse_pairing_line(b"I VoiceLifeIm: IM_PAIRING_STATUS=confirmed\r\n"),
             {"status": "confirmed"},
         )
+        self.assertEqual(
+            PAIRING.parse_pairing_line(
+                "I VoiceLifeIm: IM_PAIRING_SCOPE device_id=device-1 user_id=用户 1\r\n".encode()
+            ),
+            {"device_id": "device-1", "user_id": "用户 1"},
+        )
         self.assertIsNone(PAIRING.parse_pairing_line(b"Authorization: Bearer secret\r\n"))
+
+    def test_auth_smoke_requires_expected_registered_scope(self):
+        with self.assertRaises(SystemExit):
+            PAIRING.parse_args(["--port", "/dev/null", "--auth-smoke"])
+        args = PAIRING.parse_args(
+            [
+                "--port",
+                "/dev/null",
+                "--auth-smoke",
+                "--expected-device-id",
+                "device-1",
+                "--expected-user-id",
+                "user-1",
+            ]
+        )
+        self.assertEqual(args.expected_device_id, "device-1")
+        self.assertEqual(args.expected_user_id, "user-1")
 
 
 if __name__ == "__main__":

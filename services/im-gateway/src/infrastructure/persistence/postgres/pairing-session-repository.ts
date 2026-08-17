@@ -82,6 +82,33 @@ export class PostgresPairingSessionRepository implements PairingSessionRepositor
         return row === undefined ? undefined : mapPairingSession(row);
     }
 
+    /** {@inheritDoc PairingSessionRepository.lockPendingByIdAndDisplayCodeHash} */
+    public async lockPendingByIdAndDisplayCodeHash(
+        id: PairingSessionId,
+        hash: string,
+    ): Promise<PairingSession | undefined> {
+        const row = await queryOne(
+            this.executor,
+            `SELECT * FROM im_pairing_sessions
+             WHERE id = $1 AND display_code_hash = $2 AND status = $3
+             FOR UPDATE`,
+            [id, hash, 'pending'],
+        );
+        return row === undefined ? undefined : mapPairingSession(row);
+    }
+
+    /** {@inheritDoc PairingSessionRepository.transitionPending} */
+    public async transitionPending(id: PairingSessionId, status: 'cancelled' | 'expired'): Promise<boolean> {
+        const row = await queryOne(
+            this.executor,
+            `UPDATE im_pairing_sessions SET status = $2
+             WHERE id = $1 AND status = 'pending'
+             RETURNING id`,
+            [id, status],
+        );
+        return row !== undefined;
+    }
+
     /** {@inheritDoc PairingSessionRepository.findExpiredPairingSessions} */
     public async findExpiredPairingSessions(now: IsoDateTime): Promise<readonly PairingSession[]> {
         const { rows } = await this.executor.query(

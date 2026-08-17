@@ -12,7 +12,13 @@ async function withHarness(overrides, work) {
     const harness = await startWechatDevHttpHarness({
         host: '127.0.0.1',
         port: 0,
-        deviceToken,
+        expectedDeviceId: 'device-fixture',
+        authentication: {
+            authenticate: async (authorization) => {
+                if (authorization !== `Bearer ${deviceToken}`) throw new Error('unauthorized');
+                return { deviceId: 'device-fixture', userId: 'user-fixture' };
+            },
+        },
         webhookApi: {
             verify: (request) => {
                 webhookRequests.push({ method: 'GET', request });
@@ -127,6 +133,12 @@ test('WeChat development harness protects test controls and bounds request bodie
     await withHarness({}, async ({ origin }) => {
         const unauthorized = await globalThis.fetch(`${origin}/__dev/wechat/send-test`, { method: 'POST' });
         assert.equal(unauthorized.status, 401);
+
+        const wrongDevice = await globalThis.fetch(`${origin}/__dev/wechat/send-test`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer wrong-device' },
+        });
+        assert.equal(wrongDevice.status, 401);
 
         const sent = await globalThis.fetch(`${origin}/__dev/wechat/send-test`, {
             method: 'POST',

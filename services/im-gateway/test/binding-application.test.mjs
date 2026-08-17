@@ -4,11 +4,14 @@ import assert from 'node:assert/strict';
 import { createMockImGateway } from '../dist/index.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
 import { InMemoryImUnitOfWork } from '../dist/infrastructure/persistence/in-memory.js';
-import { bindFixtureUser, expectGatewayError } from './helpers.mjs';
+import { bindFixtureUser, expectGatewayError, seedDevice } from './helpers.mjs';
 
 class ExposedUnitOfWork extends InMemoryImUnitOfWork {
     binding(bindingId) {
         return this.bindingRows.get(bindingId);
+    }
+    allBindings() {
+        return [...this.bindingRows.values()];
     }
 }
 
@@ -53,6 +56,32 @@ test('repeated pairing reuses the active user, device and external identity bind
         (await gateway.application.bindings.list(binding.userId)).map((item) => item.id),
         [binding.id],
     );
+});
+
+test('binding a device to a new identity unbinds its previous identity', async () => {
+    const { gateway, uow } = bindingGateway();
+    const first = await bindFixtureUser(gateway, { externalUserId: 'open-first' });
+    const second = await bindFixtureUser(gateway, { externalUserId: 'open-second' });
+    assert.notEqual(first.binding.id, second.binding.id);
+    assert.equal(uow.binding(first.binding.id).status, 'unbound');
+    assert.equal(uow.binding(second.binding.id).status, 'active');
+    assert.equal(uow.allBindings().filter((binding) => binding.status === 'active').length, 1);
+});
+
+test('binding an identity to a new device unbinds its previous device', async () => {
+    const { gateway, uow } = bindingGateway();
+    const first = await bindFixtureUser(gateway, { externalUserId: 'shared-open-id' });
+    seedDevice(uow, 'device-second', 'user-fixture', 4);
+    const pairing = await gateway.application.pairing.create({ userId: 'user-fixture', deviceId: 'device-second' });
+    const secondBinding = await gateway.application.pairing.confirm({
+        displayCode: pairing.displayCode,
+        channelAccountId: first.channel.id,
+        externalUserId: 'shared-open-id',
+    });
+    const second = { binding: secondBinding };
+    assert.equal(uow.binding(first.binding.id).status, 'unbound');
+    assert.equal(uow.binding(second.binding.id).status, 'active');
+    assert.equal(uow.allBindings().filter((binding) => binding.status === 'active').length, 1);
 });
 
 test('unbind records its terminal status and removes the binding from active queries', async () => {

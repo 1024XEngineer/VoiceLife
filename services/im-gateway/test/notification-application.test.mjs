@@ -7,6 +7,7 @@ import {
     expectGatewayError,
     fixedCapabilities,
     scheduleReceiptIntent,
+    seedDevice,
     strongIntent,
     weakIntent,
 } from './helpers.mjs';
@@ -206,7 +207,9 @@ test('notification after revoke produces no new delivery', async () => {
 });
 
 test('notification filters deliveries to the intent device binding', async () => {
-    const { gateway } = buildGateway();
+    const { gateway, unitOfWork } = buildGateway();
+    seedDevice(unitOfWork, 'device-a', 'user-fixture', 2);
+    seedDevice(unitOfWork, 'device-b', 'user-fixture', 3);
     const first = await bindFixtureUser(gateway, {
         userId: 'user-fixture',
         deviceId: 'device-a',

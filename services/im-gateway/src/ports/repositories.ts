@@ -21,6 +21,7 @@ import type {
     ExternalIdentity,
     ImAction,
     ImBinding,
+    ImDevice,
     ImOutboxEvent,
     InboundEventRecord,
     IntentSubmissionRecord,
@@ -42,6 +43,22 @@ export interface ChannelAccountRepository {
      * @returns 保存完成后兑现的 Promise。
      */
     save(account: ChannelAccount): Promise<void>;
+}
+
+/** 注册设备的持久化端口。 */
+export interface DeviceRepository {
+    /** @param device 新设备。 @returns 创建完成。 */
+    create(device: ImDevice): Promise<void>;
+    /** @param deviceId 设备标识。 @returns 匹配设备。 */
+    findById(deviceId: DeviceId): Promise<ImDevice | undefined>;
+    /** @param tokenDigest Token 摘要。 @returns 匹配设备。 */
+    findByTokenDigest(tokenDigest: Uint8Array): Promise<ImDevice | undefined>;
+    /** @param deviceId 设备标识。 @returns 锁定设备。 */
+    lockById(deviceId: DeviceId): Promise<ImDevice | undefined>;
+    /** @param userId 可选所有者过滤。 @returns 设备列表。 */
+    list(userId?: UserId): Promise<readonly ImDevice[]>;
+    /** @param device 设备状态。 @returns 保存完成。 */
+    save(device: ImDevice): Promise<void>;
 }
 
 /** 配对会话的持久化与过期查询端口。 */
@@ -76,6 +93,20 @@ export interface PairingSessionRepository {
      * @returns 被锁定的待确认会话，不存在时返回 undefined。
      */
     lockPendingByDisplayCodeHash(hash: string): Promise<PairingSession | undefined>;
+    /**
+     * 按预查询得到的标识和码摘要重新锁定同一 pending 会话。
+     * @param id 会话标识。
+     * @param hash 展示码摘要。
+     * @returns 锁定会话。
+     */
+    lockPendingByIdAndDisplayCodeHash(id: PairingSessionId, hash: string): Promise<PairingSession | undefined>;
+    /**
+     * 仅当会话仍为 pending 时原子改为终态，防止覆盖并发确认。
+     * @param id 会话标识。
+     * @param status 取消或过期终态。
+     * @returns true 表示本次完成状态转换。
+     */
+    transitionPending(id: PairingSessionId, status: 'cancelled' | 'expired'): Promise<boolean>;
     /**
      * 查询截止时间已到的待确认会话。
      * @param now 当前时间。
@@ -125,11 +156,22 @@ export interface IdentityRepository {
 /** 用户、设备与外部身份绑定关系的持久化端口。 */
 export interface BindingRepository {
     /**
+     * 在读取或写入身份/绑定行前取得绑定替换事务级锁。
+     * @returns 锁取得后兑现的 Promise。
+     */
+    acquireReplacementLock(): Promise<void>;
+    /**
      * 按用户、设备与外部身份三元组幂等创建有效绑定。
      * @param binding 待创建的 active 绑定，必须带设备标识。
      * @returns 新建或并发写入时已存在的权威绑定。
      */
     createActiveIfAbsent(binding: ImBinding): Promise<ImBinding>;
+    /**
+     * 原子替换设备或身份的其他 active 绑定；完全相同组合复用原绑定。
+     * @param binding 新绑定。
+     * @returns 权威 active 绑定。
+     */
+    replaceActiveBinding(binding: ImBinding): Promise<ImBinding>;
     /**
      * 按标识查询绑定。
      * @param id 绑定标识。
@@ -424,6 +466,7 @@ export interface OutboxRepository {
 
 /** 同一事务内可用的全部 IM 聚合仓储。 */
 export interface ImUnitOfWorkContext {
+    readonly devices: DeviceRepository;
     readonly channelAccounts: ChannelAccountRepository;
     readonly pairingSessions: PairingSessionRepository;
     readonly identities: IdentityRepository;

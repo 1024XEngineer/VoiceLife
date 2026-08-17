@@ -23,6 +23,7 @@ import type {
     ExternalIdentity,
     ImAction,
     ImBinding,
+    ImDevice,
     ImOutboxEvent,
     InboundEventRecord,
     IntentSubmissionRecord,
@@ -33,6 +34,7 @@ import type {
     BindingRepository,
     ChannelAccountRepository,
     DeliveryRepository,
+    DeviceRepository,
     IdentityRepository,
     ImUnitOfWork,
     ImUnitOfWorkContext,
@@ -45,6 +47,7 @@ import type { IsoDateTime } from '../../shared/types.js';
 
 /** 测试专用内存工作单元，刻意不模拟回滚与锁。 */
 export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
+    public readonly devices: DeviceRepository = this;
     public readonly channelAccounts: ChannelAccountRepository = this;
     public readonly pairingSessions: PairingSessionRepository = this;
     public readonly identities: IdentityRepository = this;
@@ -55,6 +58,7 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
     public readonly actions: ActionRepository = this;
     public readonly outbox: OutboxRepository = this;
 
+    private readonly deviceRows = new Map<DeviceId, ImDevice>();
     private readonly channelRows = new Map<ChannelAccountId, ChannelAccount>();
     private readonly pairingRows = new Map<PairingSessionId, PairingSession>();
     private readonly identityRows = new Map<ExternalIdentityId, ExternalIdentity>();
@@ -70,6 +74,40 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
     /** {@inheritDoc ImUnitOfWork.transaction} */
     public transaction<T>(work: (context: ImUnitOfWorkContext) => Promise<T>): Promise<T> {
         return work(this);
+    }
+
+    /** @param device 为测试 fixture 同步预置的设备。 */
+    public seedDevice(device: ImDevice): void {
+        this.deviceRows.set(device.deviceId, device);
+    }
+
+    /** {@inheritDoc DeviceRepository.create} */
+    public create(device: ImDevice): Promise<void> {
+        if (this.deviceRows.has(device.deviceId)) return Promise.reject(deviceConflict('im_devices_pkey'));
+        if ([...this.deviceRows.values()].some((row) => digestsEqual(row.tokenDigest, device.tokenDigest))) {
+            return Promise.reject(deviceConflict('im_devices_token_digest_key'));
+        }
+        this.deviceRows.set(device.deviceId, device);
+        return Promise.resolve();
+    }
+
+    /** {@inheritDoc DeviceRepository.findByTokenDigest} */
+    public findByTokenDigest(tokenDigest: Uint8Array): Promise<ImDevice | undefined> {
+        return Promise.resolve(
+            [...this.deviceRows.values()].find((device) => digestsEqual(device.tokenDigest, tokenDigest)),
+        );
+    }
+
+    /** {@inheritDoc DeviceRepository.lockById} */
+    public lockById(deviceId: DeviceId): Promise<ImDevice | undefined> {
+        return Promise.resolve(this.deviceRows.get(deviceId));
+    }
+
+    /** {@inheritDoc DeviceRepository.list} */
+    public list(userId?: UserId): Promise<readonly ImDevice[]> {
+        return Promise.resolve(
+            [...this.deviceRows.values()].filter((device) => userId === undefined || device.userId === userId),
+        );
     }
 
     /** {@inheritDoc PairingSessionRepository.createPendingIfAbsent} */
@@ -92,6 +130,11 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         return Promise.resolve();
     }
 
+    /** {@inheritDoc BindingRepository.acquireReplacementLock} */
+    public acquireReplacementLock(): Promise<void> {
+        return Promise.resolve();
+    }
+
     /** {@inheritDoc BindingRepository.createActiveIfAbsent} */
     public createActiveIfAbsent(binding: ImBinding): Promise<ImBinding> {
         const existing = [...this.bindingRows.values()].find(
@@ -106,6 +149,33 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         return Promise.resolve(binding);
     }
 
+    /** {@inheritDoc BindingRepository.replaceActiveBinding} */
+    public replaceActiveBinding(binding: ImBinding): Promise<ImBinding> {
+        if (binding.status !== 'active' || binding.deviceId === undefined) {
+            return Promise.reject(new Error('Active replacement requires a device'));
+        }
+        const same = [...this.bindingRows.values()].find(
+            (candidate) =>
+                candidate.status === 'active' &&
+                candidate.userId === binding.userId &&
+                candidate.deviceId === binding.deviceId &&
+                candidate.externalIdentityId === binding.externalIdentityId,
+        );
+        if (same !== undefined) return Promise.resolve(same);
+        for (const [id, candidate] of this.bindingRows) {
+            if (
+                candidate.status === 'active' &&
+                (candidate.deviceId === binding.deviceId || candidate.externalIdentityId === binding.externalIdentityId)
+            ) {
+                this.bindingRows.set(id, { ...candidate, status: 'unbound', unboundAt: binding.boundAt });
+            }
+        }
+        this.bindingRows.set(binding.id, binding);
+        return Promise.resolve(binding);
+    }
+
+    /** {@inheritDoc DeviceRepository.save} */
+    public save(value: ImDevice): Promise<void>;
     /** {@inheritDoc ChannelAccountRepository.save} */
     public save(value: ChannelAccount): Promise<void>;
     /** {@inheritDoc PairingSessionRepository.save} */
@@ -127,9 +197,19 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
      */
     public save(
         value:
-            ChannelAccount | PairingSession | ExternalIdentity | ImBinding | InboundEventRecord | Delivery | ImAction,
+            | ImDevice
+            | ChannelAccount
+            | PairingSession
+            | ExternalIdentity
+            | ImBinding
+            | InboundEventRecord
+            | Delivery
+            | ImAction,
     ): Promise<void> {
-        if ('koishiBotId' in value) this.channelRows.set(value.id, value);
+        if ('tokenDigest' in value) {
+            const existing = this.deviceRows.get(value.deviceId);
+            this.deviceRows.set(value.deviceId, existing === undefined ? value : { ...value, userId: existing.userId });
+        } else if ('koishiBotId' in value) this.channelRows.set(value.id, value);
         else if ('displayCodeHash' in value) this.pairingRows.set(value.id, value);
         else if ('externalUserIdCiphertext' in value) {
             this.identityRows.set(value.id, value);
@@ -244,6 +324,8 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         return Promise.resolve(delivery);
     }
 
+    /** {@inheritDoc DeviceRepository.findById} */
+    public findById(id: DeviceId): Promise<ImDevice | undefined>;
     /** {@inheritDoc ChannelAccountRepository.findById} */
     public findById(id: ChannelAccountId): Promise<ChannelAccount | undefined>;
     /** {@inheritDoc PairingSessionRepository.findById} */
@@ -265,6 +347,7 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
      */
     public findById(
         id:
+            | DeviceId
             | ChannelAccountId
             | PairingSessionId
             | ExternalIdentityId
@@ -273,6 +356,7 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
             | DeliveryId
             | ActionId,
     ): Promise<
+        | ImDevice
         | ChannelAccount
         | PairingSession
         | ExternalIdentity
@@ -283,7 +367,8 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         | undefined
     > {
         return Promise.resolve(
-            this.channelRows.get(id as ChannelAccountId) ??
+            this.deviceRows.get(id as DeviceId) ??
+                this.channelRows.get(id as ChannelAccountId) ??
                 this.pairingRows.get(id as PairingSessionId) ??
                 this.identityRows.get(id as ExternalIdentityId) ??
                 this.bindingRows.get(id as BindingId) ??
@@ -305,6 +390,20 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
     /** {@inheritDoc PairingSessionRepository.lockPendingByDisplayCodeHash} */
     public lockPendingByDisplayCodeHash(hash: string): Promise<PairingSession | undefined> {
         return this.findPendingByDisplayCodeHash(hash);
+    }
+
+    /** {@inheritDoc PairingSessionRepository.lockPendingByIdAndDisplayCodeHash} */
+    public lockPendingByIdAndDisplayCodeHash(id: PairingSessionId, hash: string): Promise<PairingSession | undefined> {
+        const session = this.pairingRows.get(id);
+        return Promise.resolve(session?.status === 'pending' && session.displayCodeHash === hash ? session : undefined);
+    }
+
+    /** {@inheritDoc PairingSessionRepository.transitionPending} */
+    public transitionPending(id: PairingSessionId, status: 'cancelled' | 'expired'): Promise<boolean> {
+        const session = this.pairingRows.get(id);
+        if (session === undefined || session.status !== 'pending') return Promise.resolve(false);
+        this.pairingRows.set(id, { ...session, status });
+        return Promise.resolve(true);
     }
 
     /** {@inheritDoc PairingSessionRepository.findExpiredPairingSessions} */
@@ -578,6 +677,14 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         const index = this.outboxRows.findIndex((candidate) => candidate.id === event.id);
         if (index >= 0) this.outboxRows[index] = event;
     }
+}
+
+function deviceConflict(constraint: string): Error & { constraint: string } {
+    return Object.assign(new Error('Device already exists'), { constraint });
+}
+
+function digestsEqual(left: Uint8Array, right: Uint8Array): boolean {
+    return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function inboundKey(channelAccountId: ChannelAccountId, externalEventId: string): string {

@@ -132,7 +132,7 @@ export class DeviceIntentController {
      */
     public async postScheduleReceipt(input: AuthenticatedIntentRequest): Promise<NotificationSubmission> {
         const body = parseScheduleReceiptIntent(input.body);
-        await this.authenticateDevice(input.authorization, body.deviceId);
+        await this.authenticateDevice(input.authorization, body.deviceId, body.userId);
         this.assertIdempotencyKey(input.idempotencyKey, body.eventId);
         return this.notifications.submitScheduleReceipt(body);
     }
@@ -144,7 +144,7 @@ export class DeviceIntentController {
      */
     public async postNotification(input: AuthenticatedIntentRequest): Promise<NotificationSubmission> {
         const body = parseNotificationIntent(input.body);
-        await this.authenticateDevice(input.authorization, body.recipient.deviceId);
+        await this.authenticateDevice(input.authorization, body.recipient.deviceId, body.recipient.userId);
         this.assertIdempotencyKey(input.idempotencyKey, body.businessEventId);
         return this.notifications.submitNotification(body);
     }
@@ -168,9 +168,16 @@ export class DeviceIntentController {
         return this.actions.recordResult(input.commandId, input.deviceId, body);
     }
 
-    private async authenticateDevice(authorization: string, expectedDeviceId: DeviceId): Promise<void> {
+    private async authenticateDevice(
+        authorization: string,
+        expectedDeviceId: DeviceId,
+        expectedUserId?: string,
+    ): Promise<void> {
         const principal = await this.authentication.authenticate(authorization);
-        if (principal.deviceId !== expectedDeviceId) {
+        if (
+            principal.deviceId !== expectedDeviceId ||
+            (expectedUserId !== undefined && principal.userId !== expectedUserId)
+        ) {
             throw new ImGatewayError('invalid_transition', 'Device principal does not match the intent body');
         }
     }

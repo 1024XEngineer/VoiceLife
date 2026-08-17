@@ -7,7 +7,7 @@ try {
     console.log(`WeChat development harness listening at ${harness.origin}`);
     console.log('Public webhook path: /wechat');
     console.log('Public Action UI path: /voicelife/reminder-actions/:token');
-    console.log('Test sends require the local DEVICE_TOKEN-protected endpoint.');
+    console.log('Test sends require the selected registered device Bearer token.');
 
     let stopping = false;
     const stop = async () => {

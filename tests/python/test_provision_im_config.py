@@ -7,6 +7,7 @@ SPEC = importlib.util.spec_from_file_location("provision_im_config", ROOT / "scr
 assert SPEC and SPEC.loader
 PROVISION = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PROVISION)
+TOKEN = "A" * 43
 
 
 class ProvisionImConfigTest(unittest.TestCase):
@@ -16,18 +17,18 @@ class ProvisionImConfigTest(unittest.TestCase):
 
     def test_payload_matches_vli1_wire_format(self):
         payload = PROVISION.request_payload(
-            "https://gateway.example", "device-test", "opaque-test-credential", "user-test"
+            "https://gateway.example", "device-test", TOKEN, "user-test"
         )
 
         self.assertIsInstance(payload, bytearray)
         self.assertEqual(payload[:4], b"VLI1")
         lengths = [int.from_bytes(payload[offset : offset + 2], "big") for offset in range(4, 12, 2)]
-        self.assertEqual(lengths, [23, 11, 22, 9])
+        self.assertEqual(lengths, [23, 11, 43, 9])
         self.assertEqual(len(payload), 12 + sum(lengths))
 
     def test_force_payload_uses_explicit_vli2_magic(self):
         payload = PROVISION.request_payload(
-            "https://gateway.example", "device-test", "opaque-test-credential", "user-test", allow_overwrite=True
+            "https://gateway.example", "device-test", TOKEN, "user-test", allow_overwrite=True
         )
 
         self.assertEqual(payload[:4], b"VLI2")
@@ -44,19 +45,21 @@ class ProvisionImConfigTest(unittest.TestCase):
             "https://gateway.example:70000",
         ):
             with self.subTest(origin=origin), self.assertRaises(ValueError):
-                PROVISION.request_payload(origin, "device-test", "credential", "")
+                PROVISION.request_payload(origin, "device-test", TOKEN, "user-test")
 
         with self.assertRaises(ValueError):
-            PROVISION.request_payload("https://gateway.example", "", "credential", "")
+            PROVISION.request_payload("https://gateway.example", "", TOKEN, "user-test")
         with self.assertRaises(ValueError):
-            PROVISION.request_payload("https://gateway.example", "device-test", "x" * 513, "")
+            PROVISION.request_payload("https://gateway.example", "device-test", "x" * 513, "user-test")
+        with self.assertRaises(ValueError):
+            PROVISION.request_payload("https://gateway.example", "device-test", TOKEN, "")
         for device_id, token in (
             ("device test", "credential"),
             ("device-test", "token with spaces"),
             ("设备", "token"),
         ):
             with self.subTest(device_id=device_id, token=token), self.assertRaises(ValueError):
-                PROVISION.request_payload("https://gateway.example", device_id, token, "")
+                PROVISION.request_payload("https://gateway.example", device_id, token, "user-test")
 
 
 if __name__ == "__main__":

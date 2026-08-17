@@ -1,7 +1,7 @@
 import { queryOne, type SqlExecutor } from './sql.js';
 
 /** 当前 schema 版本号；低于该版本的库会在 migrate() 时逐版本升级。 */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 7;
 
 /** 迁移版本表：version 行与对应 DDL 在同一事务内写入，保证原子可见。 */
 const SCHEMA_MIGRATIONS_TABLE = 'im_schema_migrations';
@@ -11,6 +11,7 @@ const MIGRATION_LOCK_KEY = 727271001288;
 
 /** IM Gateway 持久化表清单，按外键依赖顺序排列，供清空与诊断使用。 */
 export const IM_TABLES = [
+    'im_devices',
     'im_channel_accounts',
     'im_pairing_sessions',
     'im_external_identities',
@@ -267,6 +268,46 @@ const V5_STATEMENTS: readonly string[] = [
         ) NOT VALID`,
 ];
 
+/** v6 注册设备：只保存固定长度 SHA-256 摘要。 */
+const V6_STATEMENTS: readonly string[] = [
+    `CREATE TABLE IF NOT EXISTS im_devices (
+        device_id text PRIMARY KEY,
+        user_id text NOT NULL,
+        token_digest bytea NOT NULL UNIQUE,
+        status text NOT NULL CHECK (status IN ('active', 'revoked')),
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL,
+        CHECK (octet_length(token_digest) = 32)
+    )`,
+    'CREATE INDEX IF NOT EXISTS im_devices_user_id_idx ON im_devices (user_id)',
+];
+
+/** v7 清理历史冲突，并实施设备与外部身份各自一对一的 active 约束。 */
+const V7_STATEMENTS: readonly string[] = [
+    `UPDATE im_bindings SET status = 'unbound', unbound_at = now()
+     WHERE status = 'active' AND device_id IS NULL`,
+    `WITH ranked AS (
+        SELECT id,
+               row_number() OVER (PARTITION BY device_id ORDER BY bound_at DESC, id DESC) AS device_rank,
+               row_number() OVER (PARTITION BY external_identity_id ORDER BY bound_at DESC, id DESC) AS identity_rank
+        FROM im_bindings
+        WHERE status = 'active'
+    )
+    UPDATE im_bindings AS binding
+    SET status = 'unbound', unbound_at = now()
+    FROM ranked
+    WHERE binding.id = ranked.id AND (ranked.device_rank > 1 OR ranked.identity_rank > 1)`,
+    'DROP INDEX IF EXISTS im_bindings_active_user_device_identity_uq',
+    `CREATE UNIQUE INDEX IF NOT EXISTS im_bindings_active_device_uq
+        ON im_bindings (device_id) WHERE status = 'active'`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS im_bindings_active_external_identity_uq
+        ON im_bindings (external_identity_id) WHERE status = 'active'`,
+    'ALTER TABLE im_bindings DROP CONSTRAINT IF EXISTS im_bindings_active_device_check',
+    `ALTER TABLE im_bindings ADD CONSTRAINT im_bindings_active_device_check
+        CHECK (status <> 'active' OR device_id IS NOT NULL) NOT VALID`,
+    'ALTER TABLE im_bindings VALIDATE CONSTRAINT im_bindings_active_device_check',
+];
+
 /** 按版本号索引的迁移脚本；下标 i 对应版本 i+1。 */
 const VERSIONED_STATEMENTS: readonly (readonly string[])[] = [
     V1_STATEMENTS,
@@ -274,6 +315,8 @@ const VERSIONED_STATEMENTS: readonly (readonly string[])[] = [
     V3_STATEMENTS,
     V4_STATEMENTS,
     V5_STATEMENTS,
+    V6_STATEMENTS,
+    V7_STATEMENTS,
 ];
 
 /**

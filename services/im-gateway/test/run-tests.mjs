@@ -442,9 +442,8 @@ async function runOutboundGenerationTests() {
         'NotificationSubmission 生成与 notification-submission.json 结构不一致',
     );
 
-    // 弱提醒 + 无绑定的 userId（deviceId 保持与令牌一致以通过认证）→ 空 deliveries，
-    // 与 notification-submission-weak.json 完整深比较。
-    const emptySubmission = await submitFixture(gateway, {
+    // 应用层无绑定 userId → 空 deliveries；设备 API 会额外拒绝冒充其他 userId。
+    const emptySubmission = await gateway.application.notifications.submitNotification({
         ...weak,
         recipient: { userId: 'unbound-user', deviceId: 'device-fixture' },
     });

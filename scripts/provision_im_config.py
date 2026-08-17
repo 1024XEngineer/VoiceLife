@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", required=True, help="locally attached serial device")
     parser.add_argument("--gateway-origin", required=True, help="HTTPS origin without path/query/fragment")
     parser.add_argument("--device-id", required=True, help="Gateway device identifier")
-    parser.add_argument("--user-id", default="", help="optional non-secret Gateway user reference")
+    parser.add_argument("--user-id", required=True, help="non-secret Gateway user reference")
     parser.add_argument(
         "--force",
         action="store_true",
@@ -83,9 +83,11 @@ def request_payload(
     allow_overwrite: bool = False,
 ) -> bytearray:
     validate_gateway_origin(gateway_origin)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43}", device_token):
+        raise ValueError("device token must be exactly 43 base64url characters")
     fields = tuple(value.encode("utf-8") for value in (gateway_origin, device_id, device_token, user_id))
     for index, (field, maximum) in enumerate(zip(fields, FIELD_LIMITS, strict=True)):
-        minimum = 0 if index == 3 else 1
+        minimum = 1
         if not minimum <= len(field) <= maximum:
             raise ValueError(f"field {index + 1} must encode to {minimum}..{maximum} bytes")
         credential = index in (1, 2)
