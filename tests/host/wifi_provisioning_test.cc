@@ -23,6 +23,16 @@ int main() {
     voicelife::test::Check(!ParseWifiProvisioningForm("ssid=Office&password=secret123&extra=1"),
                            "unexpected fields are rejected");
 
+    std::string largest_encoded_form = "ssid=";
+    for (int index = 0; index < 32; ++index) largest_encoded_form += "%41";
+    largest_encoded_form += "&password=";
+    for (int index = 0; index < 64; ++index) largest_encoded_form += "%21";
+    const auto largest_credentials = ParseWifiProvisioningForm(largest_encoded_form);
+    voicelife::test::Check(largest_encoded_form.size() == 303, "maximum encoded form size is 303 bytes");
+    voicelife::test::Check(largest_credentials.has_value() && largest_credentials->ssid.size() == 32 &&
+                               largest_credentials->password.size() == 64,
+                           "maximum URL-encoded Wi-Fi credentials are accepted");
+
     WifiProvisioningSession session;
     session.Start(WifiProvisioningCause::kConnectionFailed);
     voicelife::test::Check(session.phase() == WifiProvisioningPhase::kServing, "session starts serving");

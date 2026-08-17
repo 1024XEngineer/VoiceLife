@@ -257,6 +257,11 @@ Status EnsureWifiStaConnected(const WifiProvisioningStatusSink& status_sink) {
     } else {
         if (stored_credentials.status.code != ErrorCode::kNotFound && !force_provisioning)
             return stored_credentials.status;
+        // 物理长按只请求下一次启动进入配网。开始流程时立即消费标记，
+        // 这样用户取消、热点超时或候选网络失败后仍能在下次启动恢复旧网络。
+        if (force_provisioning) {
+            if (const Status consumed = SetWifiProvisioningRequested(false); !consumed.ok()) return consumed;
+        }
         if (const Status prepared = PrepareWifiForProvisioning(); !prepared.ok()) return prepared;
         provisioning_cause =
             force_provisioning ? WifiProvisioningCause::kUserRequested : WifiProvisioningCause::kMissingCredentials;
@@ -320,7 +325,6 @@ Status EnsureWifiStaConnected(const WifiProvisioningStatusSink& status_sink) {
                 const Status stored = StoreWifiCredentials(credentials.ssid, credentials.password);
                 if (!stored.ok()) return stored;
             }
-            if (force_provisioning) (void)SetWifiProvisioningRequested(false);
             return Status::Ok();
         }
         if (status_sink) status_sink("配网", "无法连接该 Wi-Fi，请重新输入");

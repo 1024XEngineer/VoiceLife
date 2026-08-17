@@ -25,7 +25,8 @@ namespace {
 
 constexpr char kTag[] = "VoiceLifeSoftAp";
 constexpr uint32_t kPortalTimeoutMs = 5 * 60 * 1000;
-constexpr size_t kMaxFormBytes = 192;
+// ssid= (5) + 32 个字节各自最坏 %XX（96）+ &password=（10）+ 64 个字节各自最坏 %XX（192）。
+constexpr size_t kMaxFormBytes = 303;
 constexpr uint16_t kDnsPort = 53;
 constexpr std::array<uint8_t, 4> kPortalAddress = {192, 168, 4, 1};
 
