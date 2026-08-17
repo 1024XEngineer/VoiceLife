@@ -35,9 +35,11 @@
 
 ### 3.1 位置规则
 
-除 GitHub 约定文件外，项目说明统一放在 `docs/`：架构在 `docs/architecture/`，操作与协作规范在 `docs/engineering/`，组件说明在 `docs/components/`，服务说明在 `docs/services/`。根目录只保留 GitHub 或发布工具约定的 `README.md`、`CONTRIBUTING.md`、`SECURITY.md`、`SUPPORT.md`、`CHANGELOG.md` 和 `THIRD_PARTY.md`。
+项目说明统一放在 `docs/`：架构在 `docs/architecture/`，操作、协作、安全与第三方来源在 `docs/engineering/`，组件说明在 `docs/components/`，服务说明在 `docs/services/`。根目录的唯一项目说明入口是 `README.md`；GitHub Community Health 的发现约定不构成在根目录重复放置政策文档的理由，README 和 `docs/README.md` 必须提供当前入口。
 
 组件、服务和测试目录不放项目级长文档。唯一例外是第三方源码/生成模板相邻的短 README、许可证和机器必需的说明；它们只解释该目录的来源、生成方式或许可，完整维护手册仍回到 `docs/`。
+
+文件扩展名不决定归档结论。构建、测试或运行实际读取的 `csv`、`txt`、`yml`、`yaml`、`defaults`、lockfile、schema、fixture 与许可证原文必须留在其消费者约定的位置，例如根目录的分区表、`sdkconfig.defaults`、CI/Compose 配置和 `third_party/licenses/` 的许可证。没有消费者、只记录过程、来源或一次性结果的同类文件，按第 4 节归档或删除，不能因为是“配置格式”而留在根目录。
 
 文件名使用小写连字符的主题名；历史归档加日期，例如 `esp32-s3-pcb-validation-20260804.md`。新文件首段先写结论、适用范围和替代/关联入口，避免读者把草稿或历史记录当成当前规则。
 

@@ -82,7 +82,7 @@ voicelife_runtime                  只组装
 - 每个组件的公共头文件放在 `include/voicelife/<capability>/`，路径与 C++ namespace 对齐；私有实现放 `src/`，不从其他组件直接引用。
 - C++ 文件使用小写下划线与 `.cc` / `.h`；测试文件使用 `_test.cc`。Python、Shell 和配置文件沿用各自生态的常见后缀，不制造项目专属缩写。
 - `tests/host` 放无硬件 C++ 测试，`tests/python` 放构建工具测试；真机测试独立建目录后再接入，不能混在主机测试里伪装通过。
-- `docs/adr` 中的文件使用 `NNNN-title.md`，编号只增不改。第三方许可原文放 `third_party/licenses`，迁移清单和上游 commit 统一记录在 `THIRD_PARTY.md`。
+- `docs/adr` 中的文件使用 `NNNN-title.md`，编号只增不改。第三方许可原文放 `third_party/licenses`，迁移清单和上游 commit 统一记录在[第三方来源与许可](../engineering/third-party-notices.md)。
 
 `voicelife_platform` 当前只放内存存储、时钟和标识等轻量出站实现。某类 Adapter 一旦引入独立 SDK、持久化格式或生命周期，就拆成明确组件，例如 `voicelife_storage_sqlite`；不能继续把所有硬件和基础设施塞进 `platform`。
 

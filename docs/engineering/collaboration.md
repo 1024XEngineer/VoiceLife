@@ -126,7 +126,7 @@ CI 不使用未说明用途的 secret，历史遗留的 AI 变量也不得在新
 ## 7. 发布与变更记录
 
 - 版本遵循 Semantic Versioning；`0.x` 阶段仍要记录不兼容变化。
-- `CHANGELOG.md` 只写用户和集成人能感知的 Added、Changed、Deprecated、Removed、Fixed、Security。
+- 用户和集成人可感知的发布变化只写入 GitHub Release Notes，按 Added、Changed、Deprecated、Removed、Fixed、Security 分类；未发布的过程记录留在 PR 和提交历史，不维护根目录变更日志副本。
 - 每个 Release 使用受保护 Tag，固件包带 Profile、版本、SHA-256 和构建 manifest。
 - 发布前冻结 Profile Schema、持久化格式和对外协议；必须准备上一版本回退路径。
 - 构建产物通过 Release/Artifact 分发，不提交到 Git。
@@ -137,7 +137,7 @@ CI 不使用未说明用途的 secret，历史遗留的 AI 变量也不得在新
 - 使用 AI 生成代码时，作者仍对接口、许可、测试和可解释性负责。
 - 未理解的代码不能提交；“模型建议如此”不是设计依据。
 - AI Review 只能提出建议，不能自动合并、自动关闭安全问题或替代导师 Review。
-- 发现漏洞按 [SECURITY.md](../../SECURITY.md) 私密报告，不开公开 Issue。
+- 发现漏洞按[安全报告规则](security-reporting.md)私密报告，不开公开 Issue。
 
 ## 9. 会议和进度记录
 
@@ -163,3 +163,9 @@ CI 不使用未说明用途的 secret，历史遗留的 AI 变量也不得在新
 - [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
 
 没有照搬企业级审批矩阵、强制多人 CODEOWNERS 和复杂发布列车。当前团队没有可靠的所有者名单，伪造 `CODEOWNERS` 只会制造错误安全感；确认模块负责人后再增加。
+
+## 11. 协作行为
+
+讨论可以直接，不能伤人。围绕代码、设计和证据讨论，不针对个人能力下结论；明确区分 `blocking`、问题、建议和偏好；尊重隐私、许可和署名，并给新人提供必要上下文。
+
+骚扰、歧视、威胁、人身攻击、公开他人隐私、蓄意破坏协作，以及在被要求停止后继续不受欢迎的交流不可接受。普通技术分歧在 Issue 或 PR 中基于证据解决；涉及人身安全、骚扰或隐私时，停止公开争论并联系仓库维护者。维护者可编辑或移除内容、暂停参与或锁定讨论，并须记录决定及其理由。

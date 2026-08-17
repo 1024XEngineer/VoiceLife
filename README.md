@@ -15,7 +15,7 @@
 <a href="#快速开始">快速开始</a> ·
 <a href="#模块边界">模块边界</a> ·
 <a href="#开发方式">开发方式</a> ·
-<a href="./CONTRIBUTING.md">参与开发</a>
+<a href="./docs/engineering/collaboration.md">参与开发</a>
 </p>
 
 <p>
@@ -164,8 +164,8 @@ README 只保留项目入口和跨模块信息。当前维护文档按[文档导
 - [IM Gateway 运行手册](./docs/services/im-gateway.md)
 - [协同开发规范](./docs/engineering/collaboration.md)
 - [提交描述规范](./docs/engineering/commit-convention.md)
-- [参与开发](./CONTRIBUTING.md)
+- [参与开发](./docs/engineering/collaboration.md)
 
 ## 致谢
 
-设备侧部分实现参考了 [`78/xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32) 的音频、协议和构建经验。具体迁移范围和许可证记录在 [THIRD_PARTY.md](./THIRD_PARTY.md)。
+设备侧部分实现参考了 [`78/xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32) 的音频、协议和构建经验。具体迁移范围和许可证记录在[第三方来源与许可](./docs/engineering/third-party-notices.md)。
