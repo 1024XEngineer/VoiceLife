@@ -364,6 +364,10 @@ target_link_libraries(binding_presentation_test PRIVATE im)
 add_voicelife_test(binding_polling_lease_test "unit;im;runtime;binding" binding_polling_lease_test.cc)
 target_include_directories(binding_polling_lease_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
 
+add_voicelife_test(mcp_worker_policy_test "unit;mcp;im;runtime" mcp_worker_policy_test.cc)
+target_include_directories(mcp_worker_policy_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_link_libraries(mcp_worker_policy_test PRIVATE im)
+
 add_voicelife_test(im_runtime_test "unit;im;runtime" im_runtime_test.cc)
 target_link_libraries(im_runtime_test PRIVATE im contracts)
 

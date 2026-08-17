@@ -45,6 +45,7 @@
 #include "im_runtime_bootstrap.h"
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
+#include "mcp_worker_policy.h"
 #include "schedule_mcp_tools.h"
 #include "voicelife/voice/display_snapshot.h"
 #include "voicelife/voice/voice_interaction_controller.h"
@@ -345,7 +346,6 @@ class Runtime final {
     };
 
     static constexpr std::size_t kMcpWorkerQueueCapacity = 4;
-    static constexpr uint32_t kMcpResponseTimeoutMs = 3000;
 
     Status StartMcpWorker() {
         std::lock_guard<std::mutex> lock(mcp_mutex_);

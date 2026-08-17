@@ -11,12 +11,12 @@
 #include "im_response_reader.h"
 #include "voicelife/im/esp_http_transport_factory.h"
 #include "voicelife/im/im_endpoint.h"
+#include "voicelife/im/im_http_policy.h"
 
 namespace voicelife::im {
 namespace {
 
 constexpr char kTag[] = "voicelife_im_http";
-constexpr int kTransportTimeoutMs = 10 * 1000;
 constexpr size_t kMinimumTransmitBufferBytes = 1024;
 // 受理结果响应体上限：防止恶意网关回灌无界响应耗尽设备堆内存。
 constexpr size_t kMaxResponseBodyBytes = 64 * 1024;
@@ -63,7 +63,7 @@ ImHttpResponse EspHttpTransport::Perform(const ImHttpRequest& request, esp_http_
     esp_http_client_config_t config = {};
     config.url = url.c_str();
     config.method = method;
-    config.timeout_ms = kTransportTimeoutMs;
+    config.timeout_ms = static_cast<int>(kImHttpRequestTimeoutMs);
     // GET 没有 body，但仍需容纳 URL、Bearer 头与 esp_http_client 生成的请求头。
     // 保留固定下限，POST 则按受控请求体继续扩展。
     config.buffer_size_tx = std::max(kMinimumTransmitBufferBytes, request.body.size() + 32);
