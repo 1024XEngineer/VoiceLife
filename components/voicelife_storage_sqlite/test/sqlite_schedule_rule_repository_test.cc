@@ -81,6 +81,15 @@ Schedule FirstInstance(ScheduleRuleId rule_id) {
     return schedule;
 }
 
+/** @brief 构造可复用的单次例外。 @param rule_id 规则标识。 @return 修改类型例外。 */
+ScheduleException ModifyException(ScheduleRuleId rule_id) {
+    ScheduleException exception;
+    exception.rule_id = rule_id;
+    exception.original_start_time = DateTime{std::chrono::seconds{4'071'258'000}};
+    exception.type = ExceptionType::kModify;
+    return exception;
+}
+
 /**
  * @brief 验证规则与例外 Mapper 的绑定错误和非法结果行拒绝分支。
  * @param path 临时数据库路径。
@@ -342,6 +351,40 @@ void CheckRuleRepositorySqlFailures() {
         Check(repository.FindByRuleAndTime(1, DateTime{}).status.code == ErrorCode::kInternal,
               "FindByRuleAndTime 应透传例外表缺失错误");
     }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "插入规则失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "插入规则失败分支应初始化表结构");
+        Check(database.Execute("DROP TABLE schedule_rule").ok(), "应删除规则表制造插入 SQL 错误");
+        Check(repository.Insert(DailyRule()).status.code == ErrorCode::kInternal,
+              "Insert 应透传插入规则 SQL 编译错误");
+    }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "更新规则失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "更新规则失败分支应初始化表结构");
+        Check(database.Execute("DROP TABLE schedule_rule").ok(), "应删除规则表制造更新 SQL 错误");
+        ScheduleRule rule = DailyRule();
+        rule.id = 1;
+        Check(repository.Update(rule).code == ErrorCode::kInternal, "Update 应透传更新规则 SQL 编译错误");
+    }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "删除未来例外失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "删除未来例外失败分支应初始化表结构");
+        Check(database.Execute("DROP TABLE schedule_rule_exception").ok(), "应删除例外表制造删除 SQL 错误");
+        Check(repository.DeleteFuture(1, DateTime{}).code == ErrorCode::kInternal,
+              "DeleteFuture 应透传删除未来例外 SQL 编译错误");
+    }
 }
 
 /**
@@ -376,6 +419,169 @@ void CheckRuleRepositoryDeleteFailures() {
         Check(database.Execute("DROP TABLE schedule_rule_exception").ok(), "应删除例外表制造 DELETE 错误");
         Check(repository.UpdateAndRebuild(update, std::nullopt).status.code == ErrorCode::kInternal,
               "UpdateAndRebuild 应透传删除未来例外语句错误");
+    }
+}
+
+/**
+ * @brief 验证规则仓储在语句执行阶段失败时透传错误并回滚。
+ * @return 无。
+ */
+void CheckRuleRepositoryStepFailures() {
+    const char* create_rule_insert_trigger =
+        "CREATE TRIGGER reject_rule_insert BEFORE INSERT ON schedule_rule "
+        "BEGIN SELECT RAISE(ABORT, 'rule insert blocked'); END";
+    const char* create_rule_update_trigger =
+        "CREATE TRIGGER reject_rule_update BEFORE UPDATE ON schedule_rule "
+        "BEGIN SELECT RAISE(ABORT, 'rule update blocked'); END";
+    const char* create_schedule_insert_trigger =
+        "CREATE TRIGGER reject_schedule_insert BEFORE INSERT ON schedule "
+        "BEGIN SELECT RAISE(ABORT, 'schedule insert blocked'); END";
+    const char* create_exception_insert_trigger =
+        "CREATE TRIGGER reject_exception_insert BEFORE INSERT ON schedule_rule_exception "
+        "BEGIN SELECT RAISE(ABORT, 'exception insert blocked'); END";
+    const char* create_exception_delete_trigger =
+        "CREATE TRIGGER reject_exception_delete BEFORE DELETE ON schedule_rule_exception "
+        "BEGIN SELECT RAISE(ABORT, 'exception delete blocked'); END";
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "插入规则执行失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "插入规则执行失败分支应初始化表结构");
+        Check(database.Execute(create_rule_insert_trigger).ok(), "应创建规则插入拒绝触发器");
+        Check(repository.Insert(DailyRule()).status.code == ErrorCode::kAlreadyExists,
+              "Insert 应透传插入规则执行错误");
+    }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "更新规则执行失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "更新规则执行失败分支应初始化表结构");
+        const auto created = repository.CreateWithFirstInstance(DailyRule(), std::nullopt);
+        Check(created.ok(), "更新规则执行失败分支应创建基准规则");
+        ScheduleRule update = *created.value;
+        update.event = "更新触发失败";
+        Check(database.Execute(create_rule_update_trigger).ok(), "应创建规则更新拒绝触发器");
+        Check(repository.Update(update).code == ErrorCode::kAlreadyExists, "Update 应透传更新规则执行错误");
+    }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "创建首条实例执行失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "创建首条实例执行失败分支应初始化表结构");
+        Check(database.Execute(create_schedule_insert_trigger).ok(), "应创建日程插入拒绝触发器");
+        Check(repository.CreateWithFirstInstance(DailyRule(), FirstInstance(0)).status.code == ErrorCode::kAlreadyExists,
+              "CreateWithFirstInstance 应透传首条实例插入执行错误");
+    }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "更新重建执行失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "更新重建执行失败分支应初始化表结构");
+        const auto created = repository.CreateWithFirstInstance(DailyRule(), std::nullopt);
+        Check(created.ok(), "更新重建执行失败分支应创建基准规则");
+        ScheduleRule update = *created.value;
+        update.event = "更新重建触发失败";
+        Check(database.Execute(create_rule_update_trigger).ok(), "应创建规则更新拒绝触发器");
+        Check(repository.UpdateAndRebuild(update, std::nullopt).status.code == ErrorCode::kAlreadyExists,
+              "UpdateAndRebuild 应透传更新规则执行错误");
+    }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "创建下一条实例执行失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "创建下一条实例执行失败分支应初始化表结构");
+        const auto created = repository.CreateWithFirstInstance(DailyRule(), std::nullopt);
+        Check(created.ok(), "创建下一条实例执行失败分支应创建基准规则");
+        Check(database.Execute(create_schedule_insert_trigger).ok(), "应创建日程插入拒绝触发器");
+        Check(repository.CreateNextInstance(FirstInstance(created.value->id), std::nullopt).status.code ==
+                  ErrorCode::kAlreadyExists,
+              "CreateNextInstance 应透传日程插入执行错误");
+    }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "取消规则执行失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "取消规则执行失败分支应初始化表结构");
+        const auto created = repository.CreateWithFirstInstance(DailyRule(), FirstInstance(0));
+        Check(created.ok(), "取消规则执行失败分支应创建基准规则");
+        Check(database.Execute(create_rule_update_trigger).ok(), "应创建规则更新拒绝触发器");
+        int64_t cancelled = 0;
+        Check(repository.CancelRuleAndInstances(created.value->id, cancelled).code == ErrorCode::kAlreadyExists,
+              "CancelRuleAndInstances 应透传取消规则执行错误");
+    }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "例外 Upsert 执行失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "例外 Upsert 执行失败分支应初始化表结构");
+        const auto created = repository.CreateWithFirstInstance(DailyRule(), std::nullopt);
+        Check(created.ok(), "例外 Upsert 执行失败分支应创建基准规则");
+        Check(database.Execute(create_exception_insert_trigger).ok(), "应创建例外插入拒绝触发器");
+        Check(repository.Upsert(ModifyException(created.value->id)).status.code == ErrorCode::kAlreadyExists,
+              "Upsert 应透传例外写入执行错误");
+    }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "删除未来例外执行失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "删除未来例外执行失败分支应初始化表结构");
+        const auto created = repository.CreateWithFirstInstance(DailyRule(), std::nullopt);
+        Check(created.ok(), "删除未来例外执行失败分支应创建基准规则");
+        Check(repository.Upsert(ModifyException(created.value->id)).ok(), "删除未来例外执行失败分支应写入例外");
+        Check(database.Execute(create_exception_delete_trigger).ok(), "应创建例外删除拒绝触发器");
+        Check(repository.DeleteFuture(created.value->id, DateTime{}).code == ErrorCode::kAlreadyExists,
+              "DeleteFuture 应透传删除未来例外执行错误");
+    }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "取消清理例外执行失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "取消清理例外执行失败分支应初始化表结构");
+        const auto created = repository.CreateWithFirstInstance(DailyRule(), FirstInstance(0));
+        Check(created.ok(), "取消清理例外执行失败分支应创建基准规则");
+        Check(repository.Upsert(ModifyException(created.value->id)).ok(), "取消清理例外执行失败分支应写入例外");
+        Check(database.Execute(create_exception_delete_trigger).ok(), "应创建例外删除拒绝触发器");
+        int64_t cancelled = 0;
+        Check(repository.CancelRuleAndInstances(created.value->id, cancelled).code == ErrorCode::kAlreadyExists,
+              "CancelRuleAndInstances 应透传清理例外执行错误");
+    }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "取消实例执行失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "取消实例执行失败分支应初始化表结构");
+        const auto created = repository.CreateWithFirstInstance(DailyRule(), FirstInstance(0));
+        Check(created.ok(), "取消实例执行失败分支应创建基准规则");
+        Check(database.Execute(create_rule_update_trigger).ok(), "应创建规则更新拒绝触发器");
+        Check(database.Execute("DROP TRIGGER reject_rule_update").ok(), "应删除规则更新拒绝触发器");
+        Check(database
+                  .Execute("CREATE TRIGGER reject_schedule_cancel BEFORE UPDATE OF status ON schedule "
+                           "BEGIN SELECT RAISE(ABORT, 'schedule cancel blocked'); END")
+                  .ok(),
+              "应创建日程取消拒绝触发器");
+        int64_t cancelled = 0;
+        Check(repository.CancelRuleAndInstances(created.value->id, cancelled).code == ErrorCode::kAlreadyExists,
+              "CancelRuleAndInstances 应透传取消实例执行错误");
     }
 }
 
@@ -473,5 +679,6 @@ int main() {
     CheckRuleRepositoryRollbackBranches(rollback_file.path);
     CheckRuleRepositorySqlFailures();
     CheckRuleRepositoryDeleteFailures();
+    CheckRuleRepositoryStepFailures();
     return 0;
 }
