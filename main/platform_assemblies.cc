@@ -111,6 +111,7 @@ void VoiceLifePcbAssembly::BoardInputTask() {
             } else if (pressed && !button.long_fired && now - button.pressed_at_us >= kLongPressUs) {
                 button.long_fired = true;
                 if (board_input_sink_) {
+                    if (index == 0) board_input_sink_(BoardInputAction::kStartWifiProvisioning);
                     if (index == 2) board_input_sink_(BoardInputAction::kVolumeMaximum);
                     if (index == 3) board_input_sink_(BoardInputAction::kVolumeMute);
                 }
@@ -221,11 +222,20 @@ voicelife::Status SparkBotAssembly::StartBoardInput(BoardInputSink sink) {
 
 void SparkBotAssembly::BoardInputTask() {
 #ifdef ESP_PLATFORM
+    constexpr int64_t kLongPressUs = 2 * 1000 * 1000;
     while (true) {
+        const int64_t now = esp_timer_get_time();
         const bool pressed = gpio_get_level(static_cast<gpio_num_t>(boot_button_.gpio)) == 0;
-        if (!pressed && boot_button_.previous_pressed && board_input_sink_) {
+        if (pressed && !boot_button_.previous_pressed) {
+            boot_button_.pressed_at_us = now;
+            boot_button_.long_fired = false;
+        } else if (pressed && !boot_button_.long_fired && now - boot_button_.pressed_at_us >= kLongPressUs) {
+            boot_button_.long_fired = true;
+            if (board_input_sink_) board_input_sink_(BoardInputAction::kStartWifiProvisioning);
+        } else if (!pressed && boot_button_.previous_pressed && board_input_sink_ && !boot_button_.long_fired) {
             board_input_sink_(BoardInputAction::kToggleChat);
         }
+        if (!pressed) boot_button_.pressed_at_us = 0;
         boot_button_.previous_pressed = pressed;
         vTaskDelay(pdMS_TO_TICKS(20));
     }

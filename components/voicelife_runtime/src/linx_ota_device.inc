@@ -20,8 +20,9 @@ std::string PartitionTableJson() {
     return result + ']';
 }
 
-Result<linx::LinxOtaDeviceInfo> ReadOtaDeviceInfo(std::string_view board_identity) {
-    if (const Status wifi_status = EnsureWifiStaConnected(); !wifi_status.ok()) {
+Result<linx::LinxOtaDeviceInfo> ReadOtaDeviceInfo(std::string_view board_identity,
+                                                  const WifiProvisioningStatusSink& provisioning_status_sink) {
+    if (const Status wifi_status = EnsureWifiStaConnected(provisioning_status_sink); !wifi_status.ok()) {
         return Result<linx::LinxOtaDeviceInfo>::Failure(wifi_status.code, wifi_status.message);
     }
     wifi_ap_record_t access_point{};
