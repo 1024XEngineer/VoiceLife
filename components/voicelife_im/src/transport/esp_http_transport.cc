@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "im_response_reader.h"
@@ -20,6 +21,14 @@ constexpr char kTag[] = "voicelife_im_http";
 constexpr size_t kMinimumTransmitBufferBytes = 1024;
 // 受理结果响应体上限：防止恶意网关回灌无界响应耗尽设备堆内存。
 constexpr size_t kMaxResponseBodyBytes = 64 * 1024;
+
+void LogHttpHeap(std::string_view phase) {
+    ESP_LOGI(kTag, "IM_HTTP_HEAP phase=%.*s internal_free=%u internal_largest=%u psram_free=%u",
+             static_cast<int>(phase.size()), phase.data(),
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
+}
 
 /// 把 esp_http_client 适配为 ImResponseReader，供 ReadResponseBody 判定读取完整性。
 class EspResponseReader : public ImResponseReader {
@@ -75,6 +84,7 @@ ImHttpResponse EspHttpTransport::Perform(const ImHttpRequest& request, esp_http_
     // 通过系统证书 bundle 校验网关证书；若网关使用私有 CA，可改用 config.cert_pem 注入根证书。
     config.crt_bundle_attach = esp_crt_bundle_attach;
 
+    LogHttpHeap("init");
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == nullptr) {
         result.status = ImTransportStatus::kNetworkFailure;
@@ -110,6 +120,7 @@ ImHttpResponse EspHttpTransport::Perform(const ImHttpRequest& request, esp_http_
     // fetch_headers() 只消费响应头（响应体仍留在传输层，由 read() 逐块取回）。
     const esp_err_t open_err = esp_http_client_open(client, static_cast<int>(request.body.size()));
     if (open_err != ESP_OK) {
+        LogHttpHeap("open_failed");
         result.status_code = esp_http_client_get_status_code(client);
         if (result.status_code == 401 || result.status_code == 403) {
             result.status = ImTransportStatus::kCredentialRejected;

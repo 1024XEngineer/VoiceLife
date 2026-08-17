@@ -19,6 +19,7 @@
 #include <optional>
 #include <string_view>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -1229,6 +1230,10 @@ class Runtime final {
         const uint64_t latency_ms =
             started_at > 0 && now >= started_at ? static_cast<uint64_t>((now - started_at) / 1000) : 0;
         if (assembly_ != nullptr) assembly_->LogAudioStats();
+        ESP_LOGI(kTag, "VOICE_HEAP event=%s internal_free=%u internal_largest=%u psram_free=%u", evidence.event.c_str(),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
         ESP_LOGI(kTag, "VOICE_EVENT session=%s generation=%llu event=%s detail_present=%d latency_from_capture_ms=%llu",
                  evidence.session_id.c_str(), static_cast<unsigned long long>(evidence.generation),
                  evidence.event.c_str(), evidence.detail.empty() ? 0 : 1, static_cast<unsigned long long>(latency_ms));
