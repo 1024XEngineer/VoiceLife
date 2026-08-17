@@ -1,16 +1,14 @@
 #pragma once
 
-#include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <optional>
-#include <sstream>
-#include <string>
 #include <utility>
 #include <vector>
 
+#include "support/in_memory_schedule_repository_helpers.h"
+#include "support/schedule_repository_test_data.h"
 #include "voicelife/schedule/schedule_operation_repository.h"
 #include "voicelife/schedule/schedule_query_score.h"
 #include "voicelife/schedule/schedule_repository.h"
@@ -31,109 +29,22 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
      * @param schedules 初始日程集合。
      */
     explicit InMemoryScheduleRepository(std::vector<schedule::Schedule> schedules = {})
-        : schedules_(std::move(schedules)), next_schedule_id_(NextScheduleId(schedules_)) {}
+        : schedules_(std::move(schedules)),
+          next_schedule_id_(in_memory_schedule_repository_helpers::NextScheduleId(schedules_)) {}
 
     /**
      * @brief 返回创建、修改和删除服务测试使用的固定日程。
      * @return 与原日程模拟数据等价的独立集合。
      */
     static std::vector<schedule::Schedule> DefaultSchedules() {
-        return {
-            schedule::Schedule{
-                .id = 1001,
-                .event = "模拟团队周会",
-                .start_time = At(1'800'000'000),
-                .end_time = At(1'800'003'600),
-                .location = std::nullopt,
-                .notes = std::nullopt,
-                .rule_id = std::nullopt,
-                .status = schedule::ScheduleStatus::kActive,
-                .created_at = At(1'799'900'000),
-                .updated_at = At(1'799'900'000),
-            },
-            schedule::Schedule{
-                .id = 1002,
-                .event = "模拟单点日程",
-                .start_time = At(1'800'007'200),
-                .end_time = std::nullopt,
-                .location = std::nullopt,
-                .notes = std::nullopt,
-                .rule_id = std::nullopt,
-                .status = schedule::ScheduleStatus::kActive,
-                .created_at = At(1'799'900'000),
-                .updated_at = At(1'799'900'000),
-            },
-            schedule::Schedule{
-                .id = 1003,
-                .event = "模拟周期规则实例",
-                .start_time = At(1'800'010'800),
-                .end_time = At(1'800'014'400),
-                .location = std::nullopt,
-                .notes = std::nullopt,
-                .rule_id = 3001,
-                .status = schedule::ScheduleStatus::kActive,
-                .created_at = At(1'799'900'000),
-                .updated_at = At(1'799'900'000),
-            },
-        };
+        return schedule_repository_test_data::DefaultSchedules();
     }
 
     /**
      * @brief 返回查询服务测试使用的固定日程。
      * @return 与原查询模拟数据等价的独立集合。
      */
-    static std::vector<schedule::Schedule> QuerySchedules() {
-        return {
-            schedule::Schedule{
-                .id = 2001,
-                .event = "数据库连接评审",
-                .start_time = At(1'810'000'000),
-                .end_time = At(1'810'003'600),
-                .location = "会议室 A",
-                .notes = std::nullopt,
-                .rule_id = std::nullopt,
-                .status = schedule::ScheduleStatus::kActive,
-                .created_at = At(1'809'900'000),
-                .updated_at = At(1'809'900'000),
-            },
-            schedule::Schedule{
-                .id = 2002,
-                .event = "数据库连接复盘",
-                .start_time = At(1'810'007'200),
-                .end_time = std::nullopt,
-                .location = "线上",
-                .notes = std::nullopt,
-                .rule_id = std::nullopt,
-                .status = schedule::ScheduleStatus::kCompleted,
-                .created_at = At(1'809'900'100),
-                .updated_at = At(1'810'008'000),
-            },
-            schedule::Schedule{
-                .id = 2003,
-                .event = "产品方案讨论",
-                .start_time = At(1'810'003'600),
-                .end_time = At(1'810'005'400),
-                .location = "会议室 B",
-                .notes = std::nullopt,
-                .rule_id = std::nullopt,
-                .status = schedule::ScheduleStatus::kCancelled,
-                .created_at = At(1'809'900'200),
-                .updated_at = At(1'809'901'000),
-            },
-            schedule::Schedule{
-                .id = 2004,
-                .event = "整理周报",
-                .start_time = std::nullopt,
-                .end_time = std::nullopt,
-                .location = std::nullopt,
-                .notes = std::nullopt,
-                .rule_id = std::nullopt,
-                .status = schedule::ScheduleStatus::kActive,
-                .created_at = At(1'809'900'300),
-                .updated_at = At(1'809'900'300),
-            },
-        };
-    }
+    static std::vector<schedule::Schedule> QuerySchedules() { return schedule_repository_test_data::QuerySchedules(); }
 
     /**
      * @brief 插入日程并生成标识和缺失的时间戳。
@@ -207,7 +118,7 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         std::lock_guard<std::mutex> lock(mutex_);
         std::vector<schedule::Schedule> matched;
         for (const schedule::Schedule& schedule : schedules_) {
-            if (!MatchesQueryLocked(schedule, query)) continue;
+            if (!in_memory_schedule_repository_helpers::MatchesQuery(schedule, query)) continue;
             matched.push_back(schedule);
         }
         std::sort(matched.begin(), matched.end(),
@@ -235,7 +146,7 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         std::lock_guard<std::mutex> lock(mutex_);
         int64_t total = 0;
         for (const schedule::Schedule& schedule : schedules_) {
-            if (MatchesQueryLocked(schedule, query)) ++total;
+            if (in_memory_schedule_repository_helpers::MatchesQuery(schedule, query)) ++total;
         }
         return Result<int64_t>::Success(total);
     }
@@ -278,7 +189,8 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         std::lock_guard<std::mutex> lock(mutex_);
         std::vector<schedule::OperationRecord> result;
         for (const StoredOperation& stored : operations_) {
-            if (stored.active && IsWithinUndoWindow(stored.operation, now)) result.push_back(stored.operation);
+            if (stored.active && in_memory_schedule_repository_helpers::IsWithinUndoWindow(stored.operation, now))
+                result.push_back(stored.operation);
         }
         std::sort(result.begin(), result.end(),
                   [](const schedule::OperationRecord& left, const schedule::OperationRecord& right) {
@@ -342,7 +254,7 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         std::lock_guard<std::mutex> lock(mutex_);
         schedules_ = std::move(schedules);
         operations_.clear();
-        next_schedule_id_ = NextScheduleId(schedules_);
+        next_schedule_id_ = in_memory_schedule_repository_helpers::NextScheduleId(schedules_);
         next_operation_id_ = 1;
         next_undo_failure_.reset();
     }
@@ -421,84 +333,6 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
     }
 
-    /** @brief 转换 Unix 秒。 @param seconds Unix 秒。 @return 日程时间。 */
-    static schedule::DateTime At(int64_t seconds) { return schedule::DateTime{std::chrono::seconds{seconds}}; }
-
-    /** @brief 将关键词拆成空格分隔的词语。 @param keyword 原始关键词。 @return 规范化后的词语。 */
-    static bool MatchesKeywordLocked(std::string_view text, std::string_view keyword) {
-        std::string normalized_text(text);
-        std::string normalized_keyword(keyword);
-        std::transform(normalized_text.begin(), normalized_text.end(), normalized_text.begin(),
-                       [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-        std::transform(normalized_keyword.begin(), normalized_keyword.end(), normalized_keyword.begin(),
-                       [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-
-        std::istringstream stream{normalized_keyword};
-        std::string token;
-        while (stream >> token) {
-            if (!token.empty() && token.front() == '+') token.erase(0, 1);
-            if (token.empty()) continue;
-            if (normalized_text.find(token) == std::string::npos) return false;
-        }
-        return true;
-    }
-
-    /**
-     * @brief 计算下一条日程标识。
-     * @param schedules 已有日程。
-     * @return 大于全部已有标识的正整数。
-     */
-    static schedule::ScheduleId NextScheduleId(const std::vector<schedule::Schedule>& schedules) {
-        schedule::ScheduleId next = 1;
-        for (const schedule::Schedule& stored : schedules) next = std::max(next, stored.id + 1);
-        return next;
-    }
-
-    /**
-     * @brief 判断操作是否位于撤销窗口内。
-     * @param operation 操作记录。
-     * @param now 当前时间。
-     * @return 操作时间位于闭区间时返回 true。
-     */
-    static bool IsWithinUndoWindow(const schedule::OperationRecord& operation, schedule::DateTime now) {
-        return operation.operated_at >= now - std::chrono::minutes{15} && operation.operated_at <= now;
-    }
-
-    /** @brief 判断日程是否匹配查询条件。 @param schedule 日程。 @param query 查询条件。 @return 匹配时返回 true。 */
-    static bool MatchesQueryLocked(const schedule::Schedule& schedule, const schedule::QueryScheduleCommand& query) {
-        if (query.schedule_id.has_value() && schedule.id != *query.schedule_id) return false;
-        if (query.rule_id.has_value() && schedule.rule_id != query.rule_id) return false;
-        if (query.status != schedule::ScheduleStatusFilter::kAll) {
-            switch (query.status) {
-                case schedule::ScheduleStatusFilter::kActive:
-                    if (schedule.status != schedule::ScheduleStatus::kActive) return false;
-                    break;
-                case schedule::ScheduleStatusFilter::kCancelled:
-                    if (schedule.status != schedule::ScheduleStatus::kCancelled) return false;
-                    break;
-                case schedule::ScheduleStatusFilter::kCompleted:
-                    if (schedule.status != schedule::ScheduleStatus::kCompleted) return false;
-                    break;
-                case schedule::ScheduleStatusFilter::kAll:
-                    break;
-            }
-        }
-        if (query.keyword.has_value() && !query.keyword->empty()) {
-            const std::string& keyword = *query.keyword;
-            if (!MatchesKeywordLocked(schedule.event, keyword) &&
-                (!schedule.location.has_value() || !MatchesKeywordLocked(*schedule.location, keyword)) &&
-                (!schedule.notes.has_value() || !MatchesKeywordLocked(*schedule.notes, keyword))) {
-                return false;
-            }
-        }
-        if (query.start_from.has_value() || query.start_to.has_value()) {
-            if (!schedule.start_time.has_value()) return false;
-            if (query.start_from.has_value() && *schedule.start_time < *query.start_from) return false;
-            if (query.start_to.has_value() && *schedule.start_time > *query.start_to) return false;
-        }
-        return true;
-    }
-
     /** @brief 在锁内按标识查找日程。 @param id 日程标识。 @return 日程地址或 nullptr。 */
     schedule::Schedule* FindScheduleLocked(schedule::ScheduleId id) {
         const auto found = FindScheduleIteratorLocked(id);
@@ -556,7 +390,7 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         if (stored->operation.operated_at > now) {
             return Result<schedule::OperationRecord>::Failure(ErrorCode::kConflict, "操作时间晚于当前时间，不能撤销");
         }
-        if (!IsWithinUndoWindow(stored->operation, now)) {
+        if (!in_memory_schedule_repository_helpers::IsWithinUndoWindow(stored->operation, now)) {
             return Result<schedule::OperationRecord>::Failure(ErrorCode::kConflict, "操作已超过十五分钟撤销期限");
         }
         return Result<schedule::OperationRecord>::Success(stored->operation);

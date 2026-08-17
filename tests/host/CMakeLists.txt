@@ -77,6 +77,7 @@ add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_rule_update_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_rule_result_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_operation_service.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_rule_service_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_rule_service.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_service.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/rules/recurrence_planner.cc"
@@ -94,7 +95,9 @@ add_voicelife_library(timing_esp voicelife_timing_esp
 target_link_libraries(timing_esp PUBLIC timing contracts)
 add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_server.cc"
-    "${ROOT_DIR}/components/voicelife_mcp/src/mcp_json_writer.cc")
+    "${ROOT_DIR}/components/voicelife_mcp/src/mcp_json_writer.cc"
+    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools_input.cc")
+target_include_directories(mcp PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src/tools")
 target_link_libraries(mcp PUBLIC contracts schedule)
 target_link_libraries(mcp PRIVATE yyjson)
 add_voicelife_library(voice voicelife_voice
@@ -252,6 +255,14 @@ target_link_libraries(mcp_server_test PRIVATE mcp)
 add_voicelife_test(schedule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_mcp_tools_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule)
+
+add_voicelife_test(schedule_rule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_rule_mcp_tools_test.cc
+    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_rule_mcp_tools.cc")
+target_include_directories(schedule_rule_mcp_tools_test PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src/tools")
+target_link_libraries(schedule_rule_mcp_tools_test PRIVATE mcp schedule)
+
+add_voicelife_test(schedule_rule_service_test "unit;schedule" schedule_rule_service_test.cc)
+target_link_libraries(schedule_rule_service_test PRIVATE schedule)
 
 add_voicelife_test(linx_mcp_bridge_test "unit;mcp;linx;runtime" linx_mcp_bridge_test.cc
     "${ROOT_DIR}/components/voicelife_runtime/src/linx_mcp_bridge.cc"

@@ -64,6 +64,8 @@ std::string FormatDate(const schedule::LocalDate& value) {
     return buffer;
 }
 
+int64_t UnixTime(schedule::DateTime value) { return value.time_since_epoch().count(); }
+
 const char* FrequencyName(schedule::Frequency value) {
     switch (value) {
         case schedule::Frequency::kDaily:
@@ -117,8 +119,7 @@ ToolOutputValue ExceptionOutput(const schedule::ScheduleException& exception) {
     ToolOutputObject fields = {
         MakeToolOutput("id", ToolOutputValue::Integer(exception.id)),
         MakeToolOutput("rule_id", ToolOutputValue::Integer(exception.rule_id)),
-        MakeToolOutput("original_start_time",
-                       ToolOutputValue::Integer(schedule_tool_output::UnixTime(exception.original_start_time))),
+        MakeToolOutput("original_start_time", ToolOutputValue::Integer(UnixTime(exception.original_start_time))),
         MakeToolOutput("type",
                        ToolOutputValue::String(exception.type == schedule::ExceptionType::kSkip ? "skip" : "modify")),
     };
@@ -126,11 +127,10 @@ ToolOutputValue ExceptionOutput(const schedule::ScheduleException& exception) {
         fields.emplace_back(MakeToolOutput("schedule_id", ToolOutputValue::Integer(*exception.schedule_id)));
     if (exception.override_start_time.has_value())
         fields.emplace_back(
-            MakeToolOutput("override_start_time",
-                           ToolOutputValue::Integer(schedule_tool_output::UnixTime(*exception.override_start_time))));
+            MakeToolOutput("override_start_time", ToolOutputValue::Integer(UnixTime(*exception.override_start_time))));
     if (exception.override_end_time.has_value())
-        fields.emplace_back(MakeToolOutput("override_end_time", ToolOutputValue::Integer(schedule_tool_output::UnixTime(
-                                                                    *exception.override_end_time))));
+        fields.emplace_back(
+            MakeToolOutput("override_end_time", ToolOutputValue::Integer(UnixTime(*exception.override_end_time))));
     if (exception.override_event.has_value())
         fields.emplace_back(MakeToolOutput("override_event", ToolOutputValue::String(*exception.override_event)));
     return ToolOutputValue::Object(std::move(fields));
@@ -149,7 +149,7 @@ ToolOutputArray DateTimeArrayOutput(const std::vector<schedule::DateTime>& value
     ToolOutputArray output;
     output.reserve(values.size());
     for (const auto& value : values) {
-        output.emplace_back(MakeToolOutput(ToolOutputValue::Integer(schedule_tool_output::UnixTime(value))));
+        output.emplace_back(MakeToolOutput(ToolOutputValue::Integer(UnixTime(value))));
     }
     return output;
 }

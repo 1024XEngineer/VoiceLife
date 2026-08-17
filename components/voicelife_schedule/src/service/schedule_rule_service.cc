@@ -1,148 +1,28 @@
 #include "voicelife/schedule/schedule_rule_service.h"
 
-#include <algorithm>
-#include <chrono>
 #include <cstddef>
 #include <utility>
 
+#include "../helpers/schedule_create_helpers.h"
 #include "../helpers/schedule_occurrence_helpers.h"
 #include "../helpers/schedule_rule_result_helpers.h"
 #include "../helpers/schedule_rule_update_helpers.h"
 #include "../rules/recurrence_planner.h"
 #include "../rules/schedule_time_rules.h"
+#include "schedule_rule_service_helpers.h"
 #include "voicelife/schedule/calendar.h"
 #include "voicelife/schedule/schedule_factory.h"
 
 namespace voicelife::schedule {
 namespace {
 
-constexpr std::size_t kMaximumEventLength = 100;
-constexpr int kMaximumDayOfMonth = 31;
-constexpr int kMaximumMonthOfYear = 12;
-
-/// 供服务层比较和校验本地日期使用，避免散落多处年月日比较逻辑。
-DateTime Now() { return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()); }
-
-DateTime AtLocalDate(const LocalDate& date, const LocalTime& time) {
-    constexpr int64_t kTimezoneOffsetSeconds = 8 * 3600;
-    const int64_t days = DaysFromCivil(date.year, date.month, date.day);
-    return DateTime{std::chrono::seconds{days * 86400 + LocalTimeToSeconds(time) - kTimezoneOffsetSeconds}};
-}
-
-int CompareLocalDate(const LocalDate& left, const LocalDate& right) {
-    if (left.year != right.year) return left.year < right.year ? -1 : 1;
-    if (left.month != right.month) return left.month < right.month ? -1 : 1;
-    if (left.day != right.day) return left.day < right.day ? -1 : 1;
-    return 0;
-}
-
-/// 校验与 start_date 无关的规则字段，避免无效参数进入周期计算。
-Status ValidateRuleFields(const ScheduleRule& rule) {
-    if (rule.event.empty()) return Status::Error(ErrorCode::kInvalidArgument, "规则名称不能为空");
-    if (rule.event.length() > kMaximumEventLength)
-        return Status::Error(ErrorCode::kInvalidArgument, "规则名称不能超过 100 个字符");
-    if (rule.interval_val < 1) return Status::Error(ErrorCode::kInvalidArgument, "周期间隔必须大于零");
-    // 当前规划器只按 end_date 终止；occurrence_count 先拒绝，避免产生“看似支持但实际无效”的规则。
-    if (rule.occurrence_count.has_value()) {
-        return Status::Error(ErrorCode::kInvalidArgument, "当前版本暂不支持最大发生次数");
-    }
-    switch (rule.freq_type) {
-        case Frequency::kWeekly:
-            if (!rule.weekdays_mask.has_value() || *rule.weekdays_mask < 1 || *rule.weekdays_mask > 127) {
-                return Status::Error(ErrorCode::kInvalidArgument, "每周规则必须提供有效的星期位图");
-            }
-            break;
-        case Frequency::kMonthly:
-            if (!rule.monthly_mode.has_value())
-                return Status::Error(ErrorCode::kInvalidArgument, "每月规则必须提供月模式");
-            if (*rule.monthly_mode == MonthlyMode::kSpecificDay && !rule.day_of_month.has_value()) {
-                return Status::Error(ErrorCode::kInvalidArgument, "指定日期模式必须提供日期");
-            }
-            if (*rule.monthly_mode == MonthlyMode::kSpecificDay &&
-                (*rule.day_of_month < 1 || *rule.day_of_month > kMaximumDayOfMonth)) {
-                return Status::Error(ErrorCode::kInvalidArgument, "每月指定日期必须在 1 到 31 之间");
-            }
-            break;
-        case Frequency::kYearly:
-            if (!rule.month_of_year.has_value() || !rule.day_of_month.has_value()) {
-                return Status::Error(ErrorCode::kInvalidArgument, "每年规则必须提供月份和日期");
-            }
-            if (*rule.month_of_year < 1 || *rule.month_of_year > kMaximumMonthOfYear) {
-                return Status::Error(ErrorCode::kInvalidArgument, "每年规则月份必须在 1 到 12 之间");
-            }
-            if (*rule.day_of_month < 1 || *rule.day_of_month > kMaximumDayOfMonth) {
-                return Status::Error(ErrorCode::kInvalidArgument, "每年规则日期必须在 1 到 31 之间");
-            }
-            // 闰年使用 2000 年作为基准检查月份与日期的最大合法组合，2/29 是合法值。
-            if (*rule.day_of_month > DaysInMonth(2000, *rule.month_of_year)) {
-                return Status::Error(ErrorCode::kInvalidArgument, "每年规则月份与日期组合必须有效");
-            }
-            break;
-        case Frequency::kDaily:
-            break;
-    }
-    if (rule.start_time.hour < 0 || rule.start_time.hour > 23 || rule.start_time.minute < 0 ||
-        rule.start_time.minute > 59 || rule.start_time.second < 0 || rule.start_time.second > 59) {
-        return Status::Error(ErrorCode::kInvalidArgument, "规则开始时间必须在有效时钟范围内");
-    }
-    // 先校验时钟字段，再做 end_time 与 start_time 的大小比较，避免非法值绕过前置检查。
-    if (rule.end_time.has_value() && LocalTimeToSeconds(*rule.end_time) <= LocalTimeToSeconds(rule.start_time)) {
-        return Status::Error(ErrorCode::kInvalidArgument, "规则结束时间必须晚于开始时间");
-    }
-    if (rule.end_time.has_value() &&
-        (rule.end_time->hour < 0 || rule.end_time->hour > 23 || rule.end_time->minute < 0 ||
-         rule.end_time->minute > 59 || rule.end_time->second < 0 || rule.end_time->second > 59)) {
-        return Status::Error(ErrorCode::kInvalidArgument, "规则结束时间必须在有效时钟范围内");
-    }
-    return Status::Ok();
-}
-
-/// 校验依赖 start_date 的规则字段。
-Status ValidateRuleDateRange(const ScheduleRule& rule) {
-    // start_date 由服务层在创建/更新时先计算出来，因此这里只补依赖锚点的最终边界校验。
-    if (rule.end_date.has_value() && CompareLocalDate(*rule.end_date, rule.start_date) < 0) {
-        return Status::Error(ErrorCode::kInvalidArgument, "规则失效日期不能早于生效日期");
-    }
-    return Status::Ok();
-}
-
-/// 计算规则在 from 之后的前 n 次发生时间。
-std::vector<DateTime> NextOccurrences(const ScheduleRule& rule, DateTime from, int n) {
-    std::vector<DateTime> result;
-    DateTime cursor = from;
-    for (int index = 0; index < n; ++index) {
-        const std::optional<DateTime> next = NextOccurrence(rule, cursor);
-        if (!next.has_value()) break;
-        result.push_back(*next);
-        // 命中点 +1 秒作为下一次搜索起点，兼容同秒多次触发的场景。
-        cursor = *next + std::chrono::seconds{1};
-    }
-    return result;
-}
-
-/// 判断关键词是否命中规则。
-bool MatchesKeyword(const ScheduleRule& rule, const std::string& keyword) {
-    if (keyword.empty()) return true;
-    if (rule.event.find(keyword) != std::string::npos) return true;
-    if (rule.location.has_value() && rule.location->find(keyword) != std::string::npos) return true;
-    if (rule.notes.has_value() && rule.notes->find(keyword) != std::string::npos) return true;
-    return false;
-}
-
-/// 判断规则状态是否命中筛选。
-bool MatchesStatus(const ScheduleRule& rule, ScheduleStatusFilter filter) {
-    switch (filter) {
-        case ScheduleStatusFilter::kAll:
-            return true;
-        case ScheduleStatusFilter::kActive:
-            return rule.status == ScheduleStatus::kActive;
-        case ScheduleStatusFilter::kCancelled:
-            return rule.status == ScheduleStatus::kCancelled;
-        case ScheduleStatusFilter::kCompleted:
-            return rule.status == ScheduleStatus::kCompleted;
-    }
-    return false;
-}
+using schedule_rule_service_helpers::AtLocalDate;
+using schedule_rule_service_helpers::MatchesKeyword;
+using schedule_rule_service_helpers::MatchesStatus;
+using schedule_rule_service_helpers::NextOccurrences;
+using schedule_rule_service_helpers::Now;
+using schedule_rule_service_helpers::ValidateRuleDateRange;
+using schedule_rule_service_helpers::ValidateRuleFields;
 
 }  // namespace
 

@@ -11,6 +11,7 @@ idf_component_register(
         "src/helpers/schedule_rule_update_helpers.cc"
         "src/service/schedule_service.cc"
         "src/service/schedule_operation_service.cc"
+        "src/service/schedule_rule_service_helpers.cc"
         "src/service/schedule_rule_service.cc"
         "src/factory/schedule_factory.cc"
         "src/rules/schedule_time_rules.cc"
