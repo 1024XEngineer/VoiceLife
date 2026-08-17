@@ -273,7 +273,16 @@ int main() {
         .freq_type = Frequency::kDaily,
         .start_time = LocalTime{9, 0, 0},
         .start_date = LocalDate{2099, 1, 1},
+        .end_time = std::nullopt,
+        .location = std::nullopt,
+        .notes = std::nullopt,
         .interval_val = 1,
+        .weekdays_mask = std::nullopt,
+        .day_of_month = std::nullopt,
+        .month_of_year = std::nullopt,
+        .monthly_mode = std::nullopt,
+        .end_date = std::nullopt,
+        .occurrence_count = std::nullopt,
     });
     Check(created.status.ok() && created.rule.has_value() && created.rule->id > 0 && created.schedules.size() == 1 &&
               created.schedules.front().start_time.has_value() &&
@@ -289,6 +298,7 @@ int main() {
     (void)exceptions.Upsert(modify);
     const auto queried = service.query_schedule_rules({
         .rule_id = created.rule->id,
+        .keyword = std::nullopt,
         .status = ScheduleStatusFilter::kAll,
         .limit = 10,
         .offset = 0,
@@ -300,6 +310,8 @@ int main() {
     const auto updated = service.update_schedule_rule({
         .rule_id = created.rule->id,
         .event = std::optional<std::string>{"新每日例会"},
+        .location = std::nullopt,
+        .notes = std::nullopt,
         .freq_type = std::nullopt,
         .interval_val = std::nullopt,
         .weekdays_mask = std::nullopt,
@@ -337,6 +349,11 @@ int main() {
         .rule_id = created.rule->id,
         .original_start_time = At(UtcAtLocal(2099, 1, 1, 9)),
         .event = std::optional<std::string>{"不能改"},
+        .start_time = std::nullopt,
+        .end_time = std::nullopt,
+        .location = std::nullopt,
+        .notes = std::nullopt,
+        .ignore_conflict = false,
     });
     Check(materialized_conflict.status.code == ErrorCode::kConflict,
           "已物化实例必须走 update_schedule，不能通过 occurrence 修改");
