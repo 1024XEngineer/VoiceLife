@@ -9,7 +9,7 @@ class ScheduleRepository;
 class ScheduleOperationRepository;
 class ScheduleRuleRepository;
 class ScheduleExceptionRepository;
-}
+}  // namespace voicelife::schedule
 
 namespace voicelife::runtime {
 

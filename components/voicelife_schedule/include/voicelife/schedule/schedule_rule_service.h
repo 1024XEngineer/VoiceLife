@@ -1,9 +1,9 @@
 #pragma once
 
+#include "voicelife/schedule/schedule_exception_repository.h"
 #include "voicelife/schedule/schedule_repository.h"
 #include "voicelife/schedule/schedule_rule_commands.h"
 #include "voicelife/schedule/schedule_rule_repository.h"
-#include "voicelife/schedule/schedule_exception_repository.h"
 #include "voicelife/schedule/schedule_rule_results.h"
 
 namespace voicelife::schedule {
@@ -21,8 +21,8 @@ class ScheduleRuleService {
      * @param exception_repository 单次例外仓储；生命周期必须长于本服务。
      * @param schedule_repository 日程实例仓储，用于物化实例和冲突检测。
      */
-    ScheduleRuleService(ScheduleRuleRepository& rule_repository,
-                        ScheduleExceptionRepository& exception_repository, ScheduleRepository& schedule_repository);
+    ScheduleRuleService(ScheduleRuleRepository& rule_repository, ScheduleExceptionRepository& exception_repository,
+                        ScheduleRepository& schedule_repository);
 
     /** @brief 创建周期规则并物化首条实例。 */
     CreateScheduleRuleResult create_schedule_rule(const CreateScheduleRuleCommand& command) const;

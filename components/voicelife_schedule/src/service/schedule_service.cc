@@ -188,8 +188,7 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
     if (!conflicts.empty() && !command.ignore_conflict) {
         const std::string error = "修改后的日程时间与已有日程冲突";
         return {
-            .result = CommandResult<std::optional<Schedule>>::Failure(
-                Status::Error(ErrorCode::kConflict, error)),
+            .result = CommandResult<std::optional<Schedule>>::Failure(Status::Error(ErrorCode::kConflict, error)),
             .message = {},
             .conflicts = std::move(conflicts),
         };

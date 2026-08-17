@@ -6,8 +6,8 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 #include <variant>
+#include <vector>
 
 #include "voicelife/contracts/json.h"
 #include "voicelife/contracts/status.h"

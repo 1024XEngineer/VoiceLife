@@ -2,10 +2,10 @@
 #include <cstdint>
 #include <optional>
 
+#include "rules/recurrence_planner.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/calendar.h"
 #include "voicelife/schedule/schedule_types.h"
-#include "rules/recurrence_planner.h"
 
 using voicelife::schedule::DateTime;
 using voicelife::schedule::Frequency;
@@ -71,8 +71,7 @@ int main() {
     const auto limited = PlanOccurrences(daily, At(UtcAtLocal(2026, 8, 1, 9)), At(UtcAtLocal(2026, 8, 20, 0)), 2);
     Check(limited.size() == 2, "PlanOccurrences 应按显式参数限制返回数量");
 
-    const auto capped =
-        PlanOccurrences(daily, At(UtcAtLocal(2026, 8, 1, 9)), At(UtcAtLocal(2026, 8, 20, 0)), 10000);
+    const auto capped = PlanOccurrences(daily, At(UtcAtLocal(2026, 8, 1, 9)), At(UtcAtLocal(2026, 8, 20, 0)), 10000);
     Check(capped.size() == 10, "PlanOccurrences 显式数量超过上限时应收敛到 10");
 
     return 0;

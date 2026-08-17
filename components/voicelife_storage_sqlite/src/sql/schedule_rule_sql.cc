@@ -34,10 +34,8 @@ FROM schedule_rule WHERE id = ?
 
 const char kCancelScheduleRuleById[] = "UPDATE schedule_rule SET status = 2, updated_at = ? WHERE id = ?";
 
-const char kCancelSchedulesByRule[] =
-    "UPDATE schedule SET status = 2, updated_at = ? WHERE rule_id = ? AND status = 1";
+const char kCancelSchedulesByRule[] = "UPDATE schedule SET status = 2, updated_at = ? WHERE rule_id = ? AND status = 1";
 
-const char kDeleteFutureSchedulesByRule[] =
-    "DELETE FROM schedule WHERE rule_id = ? AND start_time >= ?";
+const char kDeleteFutureSchedulesByRule[] = "DELETE FROM schedule WHERE rule_id = ? AND start_time >= ?";
 
 }  // namespace voicelife::storage_sqlite::sql

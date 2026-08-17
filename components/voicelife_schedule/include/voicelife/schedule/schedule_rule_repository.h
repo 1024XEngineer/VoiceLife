@@ -19,7 +19,8 @@ class ScheduleRuleRepository {
    public:
     virtual ~ScheduleRuleRepository() = default;
 
-    /** @brief 插入一条周期规则。 @param rule 待插入规则；id 为零时由仓储生成标识和时间戳。 @return 保存后的完整规则。 */
+    /** @brief 插入一条周期规则。 @param rule 待插入规则；id 为零时由仓储生成标识和时间戳。 @return 保存后的完整规则。
+     */
     virtual Result<ScheduleRule> Insert(const ScheduleRule& rule) = 0;
 
     /** @brief 更新已有规则的全部持久化字段。 @param rule 包含有效 id 的规则。 @return 更新结果。 */

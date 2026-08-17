@@ -16,13 +16,11 @@ namespace {
 
 using schedule::DateTime;
 using schedule::OperationRecord;
-using schedule::Schedule;
 using schedule::QueryScheduleCommand;
+using schedule::Schedule;
 
 /** @brief 返回当前秒级系统时间。 @return 当前日程时间。 */
-DateTime Now() {
-    return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
-}
+DateTime Now() { return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()); }
 
 /** @brief 创建数据库未打开的错误状态。 @return 不可用错误。 */
 Status DatabaseUnavailable() { return Status::Error(ErrorCode::kUnavailable, "SQLite 数据库尚未打开"); }
@@ -76,8 +74,7 @@ Status BindOptionalInt64(SqliteStatement& statement, int index, const std::optio
  * @param include_paging 是否绑定 limit/offset。
  * @return 绑定成功时返回成功状态。
  */
-Status BindScheduleQueryFilters(SqliteStatement& statement, const QueryScheduleCommand& query,
-                                bool include_paging) {
+Status BindScheduleQueryFilters(SqliteStatement& statement, const QueryScheduleCommand& query, bool include_paging) {
     Status status = BindOptionalInt64(statement, 1, query.schedule_id);
     if (!status.ok()) return status;
     status = BindOptionalInt64(statement, 2, query.rule_id);
@@ -96,13 +93,11 @@ Status BindScheduleQueryFilters(SqliteStatement& statement, const QueryScheduleC
     }
     if (!status.ok()) return status;
 
-    status = query.start_from.has_value()
-                 ? statement.BindInt64(5, query.start_from->time_since_epoch().count())
-                 : statement.BindNull(5);
+    status = query.start_from.has_value() ? statement.BindInt64(5, query.start_from->time_since_epoch().count())
+                                          : statement.BindNull(5);
     if (!status.ok()) return status;
-    status = query.start_to.has_value()
-                 ? statement.BindInt64(6, query.start_to->time_since_epoch().count())
-                 : statement.BindNull(6);
+    status = query.start_to.has_value() ? statement.BindInt64(6, query.start_to->time_since_epoch().count())
+                                        : statement.BindNull(6);
     if (!status.ok()) return status;
     if (!include_paging) return Status::Ok();
 
@@ -285,7 +280,8 @@ Result<std::vector<Schedule>> SqliteScheduleRepository::FindOverlapping(
 Status SqliteScheduleRepository::Update(const Schedule& schedule) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!database_.IsOpen()) return DatabaseUnavailable();
-    if (schedule.id <= 0 || schedule.event.empty()) return Status::Error(ErrorCode::kInvalidArgument, "日程标识或名称无效");
+    if (schedule.id <= 0 || schedule.event.empty())
+        return Status::Error(ErrorCode::kInvalidArgument, "日程标识或名称无效");
     Result<SqliteStatement> prepared = database_.Prepare(sql::kUpdateSchedule);
     if (!prepared.ok()) return prepared.status;
     SqliteStatement statement = std::move(*prepared.value);
@@ -341,7 +337,8 @@ Result<std::vector<schedule::OperationRecord>> SqliteScheduleRepository::FindRec
     std::vector<OperationRecord> operations;
     while (true) {
         const Result<SqliteStep> stepped = statement.Step();
-        if (!stepped.ok()) return Result<std::vector<OperationRecord>>::Failure(stepped.status.code, stepped.status.message);
+        if (!stepped.ok())
+            return Result<std::vector<OperationRecord>>::Failure(stepped.status.code, stepped.status.message);
         if (*stepped.value == SqliteStep::kDone) break;
         const Result<OperationRecord> row = mapping::ReadOperation(statement);
         if (!row.ok()) return Result<std::vector<OperationRecord>>::Failure(row.status.code, row.status.message);
@@ -372,7 +369,8 @@ Result<OperationRecord> SqliteScheduleRepository::InsertOperationLocked(const Op
         return Result<OperationRecord>::Failure(ErrorCode::kInvalidArgument, "创建操作不能携带 previous 快照");
     }
     if ((operation.type == schedule::ScheduleOperationType::kUpdate ||
-         operation.type == schedule::ScheduleOperationType::kDelete) && !operation.previous.has_value()) {
+         operation.type == schedule::ScheduleOperationType::kDelete) &&
+        !operation.previous.has_value()) {
         return Result<OperationRecord>::Failure(ErrorCode::kInvalidArgument, "修改和删除操作必须携带 previous 快照");
     }
 
@@ -445,7 +443,7 @@ Status SqliteScheduleRepository::RollbackAfterFailure(const Status& failure) {
 }
 
 Result<schedule::UndoOperationResult> SqliteScheduleRepository::UndoOperation(schedule::OperationId operation_id,
-                                                                                DateTime now) {
+                                                                              DateTime now) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!database_.IsOpen()) {
         const Status status = DatabaseUnavailable();
@@ -483,7 +481,8 @@ Result<schedule::UndoOperationResult> SqliteScheduleRepository::UndoOperation(sc
         return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
     }
     if (target.operated_at > now) {
-        const Status failure = RollbackAfterFailure(Status::Error(ErrorCode::kConflict, "操作时间晚于当前时间，不能撤销"));
+        const Status failure =
+            RollbackAfterFailure(Status::Error(ErrorCode::kConflict, "操作时间晚于当前时间，不能撤销"));
         return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
     }
     if (!IsWithinUndoWindow(target, now)) {
@@ -547,7 +546,8 @@ Result<schedule::UndoOperationResult> SqliteScheduleRepository::UndoOperation(sc
         .id = 0,
         .type = schedule::ScheduleOperationType::kUndo,
         .schedule_id = target.schedule_id,
-        .schedule_event = before.has_value() ? before->event : (after.has_value() ? after->event : target.schedule_event),
+        .schedule_event =
+            before.has_value() ? before->event : (after.has_value() ? after->event : target.schedule_event),
         .operated_at = now,
         .previous = before,
     };

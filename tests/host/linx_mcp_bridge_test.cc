@@ -137,6 +137,7 @@ int main() {
 
     const auto schedules_before_unavailable = service.query_schedule({
         .schedule_id = std::nullopt,
+        .rule_id = std::nullopt,
         .keyword = std::nullopt,
         .start_from = std::nullopt,
         .start_to = std::nullopt,
@@ -154,6 +155,7 @@ int main() {
           "MCP 忙响应必须保留请求 id 并使用稳定的 server-error code");
     const auto schedules_after_unavailable = service.query_schedule({
         .schedule_id = std::nullopt,
+        .rule_id = std::nullopt,
         .keyword = std::nullopt,
         .start_from = std::nullopt,
         .start_to = std::nullopt,

@@ -114,8 +114,8 @@ yyjson_mut_val* BuildToolOutputValue(yyjson_mut_doc* document, const ToolOutputV
             if (array == nullptr) return nullptr;
             if (output.array != nullptr) {
                 for (const auto& item : *output.array) {
-                    yyjson_mut_val* child = item == nullptr ? yyjson_mut_null(document)
-                                                            : BuildToolOutputValue(document, *item);
+                    yyjson_mut_val* child =
+                        item == nullptr ? yyjson_mut_null(document) : BuildToolOutputValue(document, *item);
                     if (child == nullptr || !yyjson_mut_arr_append(array, child)) return nullptr;
                 }
             }
@@ -126,9 +126,10 @@ yyjson_mut_val* BuildToolOutputValue(yyjson_mut_doc* document, const ToolOutputV
             if (object == nullptr) return nullptr;
             if (output.object != nullptr) {
                 for (const auto& [key, value] : *output.object) {
-                    yyjson_mut_val* child = value == nullptr ? yyjson_mut_null(document)
-                                                             : BuildToolOutputValue(document, *value);
-                    if (child == nullptr || !yyjson_mut_obj_add(object, MakeString(document, key), child)) return nullptr;
+                    yyjson_mut_val* child =
+                        value == nullptr ? yyjson_mut_null(document) : BuildToolOutputValue(document, *value);
+                    if (child == nullptr || !yyjson_mut_obj_add(object, MakeString(document, key), child))
+                        return nullptr;
                 }
             }
             return object;

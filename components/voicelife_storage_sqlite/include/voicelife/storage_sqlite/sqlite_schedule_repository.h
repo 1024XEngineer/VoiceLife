@@ -4,8 +4,8 @@
 #include <optional>
 #include <vector>
 
-#include "voicelife/schedule/schedule_repository.h"
 #include "voicelife/schedule/schedule_operation_repository.h"
+#include "voicelife/schedule/schedule_repository.h"
 #include "voicelife/storage_sqlite/sqlite_database.h"
 
 namespace voicelife::storage_sqlite {

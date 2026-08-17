@@ -66,10 +66,14 @@ std::string FormatDate(const schedule::LocalDate& value) {
 
 const char* FrequencyName(schedule::Frequency value) {
     switch (value) {
-        case schedule::Frequency::kDaily: return "daily";
-        case schedule::Frequency::kWeekly: return "weekly";
-        case schedule::Frequency::kMonthly: return "monthly";
-        case schedule::Frequency::kYearly: return "yearly";
+        case schedule::Frequency::kDaily:
+            return "daily";
+        case schedule::Frequency::kWeekly:
+            return "weekly";
+        case schedule::Frequency::kMonthly:
+            return "monthly";
+        case schedule::Frequency::kYearly:
+            return "yearly";
     }
     return "daily";
 }
@@ -88,15 +92,24 @@ ToolOutputValue RuleOutput(const schedule::ScheduleRule& rule) {
         MakeToolOutput("start_date", ToolOutputValue::String(FormatDate(rule.start_date))),
         MakeToolOutput("status", ToolOutputValue::Integer(static_cast<int>(rule.status))),
     };
-    if (rule.location.has_value()) fields.emplace_back(MakeToolOutput("location", ToolOutputValue::String(*rule.location)));
+    if (rule.location.has_value())
+        fields.emplace_back(MakeToolOutput("location", ToolOutputValue::String(*rule.location)));
     if (rule.notes.has_value()) fields.emplace_back(MakeToolOutput("notes", ToolOutputValue::String(*rule.notes)));
-    if (rule.end_time.has_value()) fields.emplace_back(MakeToolOutput("end_time", ToolOutputValue::String(FormatTime(*rule.end_time))));
-    if (rule.weekdays_mask.has_value()) fields.emplace_back(MakeToolOutput("weekdays_mask", ToolOutputValue::Integer(*rule.weekdays_mask)));
-    if (rule.day_of_month.has_value()) fields.emplace_back(MakeToolOutput("day_of_month", ToolOutputValue::Integer(*rule.day_of_month)));
-    if (rule.month_of_year.has_value()) fields.emplace_back(MakeToolOutput("month_of_year", ToolOutputValue::Integer(*rule.month_of_year)));
-    if (rule.monthly_mode.has_value()) fields.emplace_back(MakeToolOutput("monthly_mode", ToolOutputValue::String(MonthlyModeName(*rule.monthly_mode))));
-    if (rule.end_date.has_value()) fields.emplace_back(MakeToolOutput("end_date", ToolOutputValue::String(FormatDate(*rule.end_date))));
-    if (rule.occurrence_count.has_value()) fields.emplace_back(MakeToolOutput("occurrence_count", ToolOutputValue::Integer(*rule.occurrence_count)));
+    if (rule.end_time.has_value())
+        fields.emplace_back(MakeToolOutput("end_time", ToolOutputValue::String(FormatTime(*rule.end_time))));
+    if (rule.weekdays_mask.has_value())
+        fields.emplace_back(MakeToolOutput("weekdays_mask", ToolOutputValue::Integer(*rule.weekdays_mask)));
+    if (rule.day_of_month.has_value())
+        fields.emplace_back(MakeToolOutput("day_of_month", ToolOutputValue::Integer(*rule.day_of_month)));
+    if (rule.month_of_year.has_value())
+        fields.emplace_back(MakeToolOutput("month_of_year", ToolOutputValue::Integer(*rule.month_of_year)));
+    if (rule.monthly_mode.has_value())
+        fields.emplace_back(
+            MakeToolOutput("monthly_mode", ToolOutputValue::String(MonthlyModeName(*rule.monthly_mode))));
+    if (rule.end_date.has_value())
+        fields.emplace_back(MakeToolOutput("end_date", ToolOutputValue::String(FormatDate(*rule.end_date))));
+    if (rule.occurrence_count.has_value())
+        fields.emplace_back(MakeToolOutput("occurrence_count", ToolOutputValue::Integer(*rule.occurrence_count)));
     return ToolOutputValue::Object(std::move(fields));
 }
 
@@ -106,12 +119,20 @@ ToolOutputValue ExceptionOutput(const schedule::ScheduleException& exception) {
         MakeToolOutput("rule_id", ToolOutputValue::Integer(exception.rule_id)),
         MakeToolOutput("original_start_time",
                        ToolOutputValue::Integer(schedule_tool_output::UnixTime(exception.original_start_time))),
-        MakeToolOutput("type", ToolOutputValue::String(exception.type == schedule::ExceptionType::kSkip ? "skip" : "modify")),
+        MakeToolOutput("type",
+                       ToolOutputValue::String(exception.type == schedule::ExceptionType::kSkip ? "skip" : "modify")),
     };
-    if (exception.schedule_id.has_value()) fields.emplace_back(MakeToolOutput("schedule_id", ToolOutputValue::Integer(*exception.schedule_id)));
-    if (exception.override_start_time.has_value()) fields.emplace_back(MakeToolOutput("override_start_time", ToolOutputValue::Integer(schedule_tool_output::UnixTime(*exception.override_start_time))));
-    if (exception.override_end_time.has_value()) fields.emplace_back(MakeToolOutput("override_end_time", ToolOutputValue::Integer(schedule_tool_output::UnixTime(*exception.override_end_time))));
-    if (exception.override_event.has_value()) fields.emplace_back(MakeToolOutput("override_event", ToolOutputValue::String(*exception.override_event)));
+    if (exception.schedule_id.has_value())
+        fields.emplace_back(MakeToolOutput("schedule_id", ToolOutputValue::Integer(*exception.schedule_id)));
+    if (exception.override_start_time.has_value())
+        fields.emplace_back(
+            MakeToolOutput("override_start_time",
+                           ToolOutputValue::Integer(schedule_tool_output::UnixTime(*exception.override_start_time))));
+    if (exception.override_end_time.has_value())
+        fields.emplace_back(MakeToolOutput("override_end_time", ToolOutputValue::Integer(schedule_tool_output::UnixTime(
+                                                                    *exception.override_end_time))));
+    if (exception.override_event.has_value())
+        fields.emplace_back(MakeToolOutput("override_event", ToolOutputValue::String(*exception.override_event)));
     return ToolOutputValue::Object(std::move(fields));
 }
 
@@ -128,8 +149,7 @@ ToolOutputArray DateTimeArrayOutput(const std::vector<schedule::DateTime>& value
     ToolOutputArray output;
     output.reserve(values.size());
     for (const auto& value : values) {
-        output.emplace_back(
-            MakeToolOutput(ToolOutputValue::Integer(schedule_tool_output::UnixTime(value))));
+        output.emplace_back(MakeToolOutput(ToolOutputValue::Integer(schedule_tool_output::UnixTime(value))));
     }
     return output;
 }
@@ -167,8 +187,8 @@ PropertyList QueryRulesProperties() {
 
 Status RegisterScheduleRuleMcpTools(McpServer& server, schedule::ScheduleRuleService& service) {
     Status status = server.add_tool(
-        "schedule_rule.create", "创建周期日程规则并生成首条实例；首个发生日期由服务端计算。",
-        CreateRuleProperties(), [&service](const PropertyList& properties) {
+        "schedule_rule.create", "创建周期日程规则并生成首条实例；首个发生日期由服务端计算。", CreateRuleProperties(),
+        [&service](const PropertyList& properties) {
             schedule::CreateScheduleRuleCommand command;
             command.event = properties.value<std::string>("event").value_or("");
             command.freq_type = ParseFrequency(properties.value<std::string>("freq_type").value_or(""))
@@ -184,36 +204,38 @@ Status RegisterScheduleRuleMcpTools(McpServer& server, schedule::ScheduleRuleSer
             command.location = properties.value<std::string>("location");
             command.notes = properties.value<std::string>("notes");
             command.interval_val = static_cast<int32_t>(properties.value<int64_t>("interval_val").value_or(1));
-            command.weekdays_mask = properties.value<int64_t>("weekdays_mask").has_value()
-                                        ? std::optional<uint8_t>{static_cast<uint8_t>(*properties.value<int64_t>("weekdays_mask"))}
-                                        : std::nullopt;
+            command.weekdays_mask =
+                properties.value<int64_t>("weekdays_mask").has_value()
+                    ? std::optional<uint8_t>{static_cast<uint8_t>(*properties.value<int64_t>("weekdays_mask"))}
+                    : std::nullopt;
             if (properties.value<std::string>("monthly_mode").has_value()) {
                 command.monthly_mode = ParseMonthlyMode(*properties.value<std::string>("monthly_mode"));
             }
-            command.day_of_month = properties.value<int64_t>("day_of_month").has_value()
-                                       ? std::optional<uint8_t>{static_cast<uint8_t>(*properties.value<int64_t>("day_of_month"))}
-                                       : std::nullopt;
-            command.month_of_year = properties.value<int64_t>("month_of_year").has_value()
-                                        ? std::optional<uint8_t>{static_cast<uint8_t>(*properties.value<int64_t>("month_of_year"))}
-                                        : std::nullopt;
+            command.day_of_month =
+                properties.value<int64_t>("day_of_month").has_value()
+                    ? std::optional<uint8_t>{static_cast<uint8_t>(*properties.value<int64_t>("day_of_month"))}
+                    : std::nullopt;
+            command.month_of_year =
+                properties.value<int64_t>("month_of_year").has_value()
+                    ? std::optional<uint8_t>{static_cast<uint8_t>(*properties.value<int64_t>("month_of_year"))}
+                    : std::nullopt;
             if (properties.value<std::string>("end_date").has_value()) {
                 command.end_date = ParseLocalDate(*properties.value<std::string>("end_date"));
             }
-            command.occurrence_count = properties.value<int64_t>("occurrence_count").has_value()
-                                           ? std::optional<int32_t>{static_cast<int32_t>(*properties.value<int64_t>("occurrence_count"))}
-                                           : std::nullopt;
+            command.occurrence_count =
+                properties.value<int64_t>("occurrence_count").has_value()
+                    ? std::optional<int32_t>{static_cast<int32_t>(*properties.value<int64_t>("occurrence_count"))}
+                    : std::nullopt;
             command.ignore_conflict = properties.value<bool>("ignore_conflict").value_or(false);
 
             const auto result = service.create_schedule_rule(command);
             if (!result.status.ok()) return Failure(result.status);
             ToolOutputObject fields;
             if (result.rule.has_value()) fields.emplace_back(MakeToolOutput("rule", RuleOutput(*result.rule)));
-            fields.emplace_back(
-                MakeToolOutput("instances",
-                               ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.schedules))));
-            fields.emplace_back(
-                MakeToolOutput("conflicts",
-                               ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.conflicts))));
+            fields.emplace_back(MakeToolOutput(
+                "instances", ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.schedules))));
+            fields.emplace_back(MakeToolOutput(
+                "conflicts", ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.conflicts))));
             return ToolResult::Success(ToolOutputValue::Object(std::move(fields)));
         });
     if (!status.ok()) return status;
@@ -251,8 +273,8 @@ Status RegisterScheduleRuleMcpTools(McpServer& server, schedule::ScheduleRuleSer
 
     status = server.add_tool(
         "schedule_occurrence.skip", "跳过周期规则中的某一次；original_start_time 用 Unix 秒。",
-        PropertyList({Property("rule_id", PropertyType::kInteger),
-                      Property("original_start_time", PropertyType::kInteger)}),
+        PropertyList(
+            {Property("rule_id", PropertyType::kInteger), Property("original_start_time", PropertyType::kInteger)}),
         [&service](const PropertyList& properties) {
             schedule::SkipScheduleOccurrenceCommand command;
             command.rule_id = properties.value<int64_t>("rule_id").value_or(0);
@@ -262,8 +284,7 @@ Status RegisterScheduleRuleMcpTools(McpServer& server, schedule::ScheduleRuleSer
             if (!result.status.ok()) return Failure(result.status);
             ToolOutputObject fields;
             if (result.schedule.has_value()) {
-                fields.emplace_back(
-                    MakeToolOutput("schedule", schedule_tool_output::ScheduleOutput(*result.schedule)));
+                fields.emplace_back(MakeToolOutput("schedule", schedule_tool_output::ScheduleOutput(*result.schedule)));
             }
             if (result.exception.has_value()) {
                 fields.emplace_back(MakeToolOutput("exception", ExceptionOutput(*result.exception)));
@@ -308,8 +329,7 @@ Status RegisterScheduleRuleMcpTools(McpServer& server, schedule::ScheduleRuleSer
                 command.interval_val = static_cast<int32_t>(*properties.value<int64_t>("interval_val"));
             }
             if (properties.value<int64_t>("weekdays_mask").has_value()) {
-                command.weekdays_mask =
-                    static_cast<uint8_t>(*properties.value<int64_t>("weekdays_mask"));
+                command.weekdays_mask = static_cast<uint8_t>(*properties.value<int64_t>("weekdays_mask"));
             }
             if (properties.value<std::string>("monthly_mode").has_value()) {
                 command.monthly_mode = ParseMonthlyMode(*properties.value<std::string>("monthly_mode"));
@@ -338,20 +358,17 @@ Status RegisterScheduleRuleMcpTools(McpServer& server, schedule::ScheduleRuleSer
             if (!result.status.ok()) return Failure(result.status);
             ToolOutputObject fields;
             if (result.rule.has_value()) fields.emplace_back(MakeToolOutput("rule", RuleOutput(*result.rule)));
-            fields.emplace_back(
-                MakeToolOutput("instances",
-                               ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.schedules))));
-            fields.emplace_back(
-                MakeToolOutput("conflicts",
-                               ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.conflicts))));
+            fields.emplace_back(MakeToolOutput(
+                "instances", ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.schedules))));
+            fields.emplace_back(MakeToolOutput(
+                "conflicts", ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.conflicts))));
             return ToolResult::Success(ToolOutputValue::Object(std::move(fields)));
         });
     if (!status.ok()) return status;
 
     status = server.add_tool(
         "schedule_rule.cancel", "取消整条周期规则及其未来实例。",
-        PropertyList({Property("rule_id", PropertyType::kInteger)}),
-        [&service](const PropertyList& properties) {
+        PropertyList({Property("rule_id", PropertyType::kInteger)}), [&service](const PropertyList& properties) {
             schedule::CancelScheduleRuleCommand command;
             command.rule_id = properties.value<int64_t>("rule_id").value_or(0);
             const auto result = service.cancel_schedule_rule(command);
@@ -385,12 +402,10 @@ Status RegisterScheduleRuleMcpTools(McpServer& server, schedule::ScheduleRuleSer
                 command.event = *properties.value<std::string>("event");
             }
             if (properties.value<int64_t>("start_time").has_value()) {
-                command.start_time =
-                    schedule::DateTime{std::chrono::seconds{*properties.value<int64_t>("start_time")}};
+                command.start_time = schedule::DateTime{std::chrono::seconds{*properties.value<int64_t>("start_time")}};
             }
             if (properties.value<int64_t>("end_time").has_value()) {
-                command.end_time =
-                    schedule::DateTime{std::chrono::seconds{*properties.value<int64_t>("end_time")}};
+                command.end_time = schedule::DateTime{std::chrono::seconds{*properties.value<int64_t>("end_time")}};
             }
             if (properties.value<std::string>("location").has_value()) {
                 command.location = *properties.value<std::string>("location");
@@ -404,31 +419,27 @@ Status RegisterScheduleRuleMcpTools(McpServer& server, schedule::ScheduleRuleSer
             if (!result.status.ok()) return Failure(result.status);
             ToolOutputObject fields;
             if (result.schedule.has_value()) {
-                fields.emplace_back(
-                    MakeToolOutput("schedule", schedule_tool_output::ScheduleOutput(*result.schedule)));
+                fields.emplace_back(MakeToolOutput("schedule", schedule_tool_output::ScheduleOutput(*result.schedule)));
             }
             if (result.exception.has_value()) {
                 fields.emplace_back(MakeToolOutput("exception", ExceptionOutput(*result.exception)));
             }
-            fields.emplace_back(
-                MakeToolOutput("conflicts",
-                               ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.conflicts))));
+            fields.emplace_back(MakeToolOutput(
+                "conflicts", ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.conflicts))));
             return ToolResult::Success(ToolOutputValue::Object(std::move(fields)));
         });
     if (!status.ok()) return status;
 
     return server.add_tool(
         "schedule_rule.generate_next", "生成某周期规则的下一条实例。",
-        PropertyList({Property("rule_id", PropertyType::kInteger)}),
-        [&service](const PropertyList& properties) {
+        PropertyList({Property("rule_id", PropertyType::kInteger)}), [&service](const PropertyList& properties) {
             schedule::GenerateNextScheduleInstanceCommand command;
             command.rule_id = properties.value<int64_t>("rule_id").value_or(0);
             const auto result = service.generate_next_schedule_instance(command);
             if (!result.status.ok()) return Failure(result.status);
             ToolOutputObject fields;
             if (result.schedule.has_value()) {
-                fields.emplace_back(
-                    MakeToolOutput("schedule", schedule_tool_output::ScheduleOutput(*result.schedule)));
+                fields.emplace_back(MakeToolOutput("schedule", schedule_tool_output::ScheduleOutput(*result.schedule)));
             }
             return ToolResult::Success(ToolOutputValue::Object(std::move(fields)));
         });

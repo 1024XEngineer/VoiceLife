@@ -78,8 +78,7 @@ bool MatchesScheduleKeyword(std::string_view event, std::string_view keyword) {
 // 按查询命令逐项过滤日程：先匹配固定字段，再判断可选时间范围。
 bool MatchesScheduleQuery(const Schedule& schedule, const QueryScheduleCommand& command) {
     if (command.schedule_id.has_value() && schedule.id != *command.schedule_id) return false;
-    if (command.rule_id.has_value() &&
-        (!schedule.rule_id.has_value() || *schedule.rule_id != *command.rule_id)) {
+    if (command.rule_id.has_value() && (!schedule.rule_id.has_value() || *schedule.rule_id != *command.rule_id)) {
         return false;
     }
     if (!MatchesStatus(schedule.status, command.status)) return false;

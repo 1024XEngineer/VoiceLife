@@ -3,9 +3,9 @@
 namespace voicelife::schedule {
 
 // 先按 exception.schedule_id 读取已物化实例；关联失效时回退到 (rule_id, original_start_time) 查询。
-Result<std::optional<Schedule>> FindMaterializedScheduleOccurrence(
-    ScheduleRepository& repository, ScheduleRuleId rule_id, DateTime original_start_time,
-    std::optional<ScheduleId> exception_schedule_id) {
+Result<std::optional<Schedule>> FindMaterializedScheduleOccurrence(ScheduleRepository& repository,
+                                                                   ScheduleRuleId rule_id, DateTime original_start_time,
+                                                                   std::optional<ScheduleId> exception_schedule_id) {
     if (exception_schedule_id.has_value()) {
         const Result<Schedule> found = repository.FindById(*exception_schedule_id);
         if (!found.ok()) {

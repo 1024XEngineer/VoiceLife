@@ -34,8 +34,8 @@ class SqliteScheduleRuleRepository final : public schedule::ScheduleRuleReposito
     [[nodiscard]] Result<schedule::ScheduleRule> FindById(schedule::ScheduleRuleId id) const override;
     Result<schedule::ScheduleRule> CreateWithFirstInstance(
         const schedule::ScheduleRule& rule, const std::optional<schedule::Schedule>& first_instance) override;
-    Result<schedule::ScheduleRule> UpdateAndRebuild(
-        const schedule::ScheduleRule& rule, const std::optional<schedule::Schedule>& first_instance) override;
+    Result<schedule::ScheduleRule> UpdateAndRebuild(const schedule::ScheduleRule& rule,
+                                                    const std::optional<schedule::Schedule>& first_instance) override;
     Status CancelRuleAndInstances(schedule::ScheduleRuleId id, int64_t& cancelled_instance_count) override;
 
     Result<schedule::Schedule> CreateNextInstance(

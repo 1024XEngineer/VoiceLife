@@ -86,10 +86,8 @@ std::optional<LocalDate> NextWeeklyDate(const ScheduleRule& rule, const LocalDat
     const int64_t target_days = DaysFromCivil(target.year, target.month, target.day);
     const int target_weekday = Weekday(target.year, target.month, target.day);
     const int64_t target_week_monday = target_days - target_weekday;
-    const int64_t week_diff =
-        target_days >= anchor_days ? (target_week_monday - anchor_week_monday) / kDaysPerWeek : 0;
-    const int64_t k =
-        target_days >= anchor_days ? std::max<int64_t>(0, CeilDiv(week_diff, rule.interval_val)) : 0;
+    const int64_t week_diff = target_days >= anchor_days ? (target_week_monday - anchor_week_monday) / kDaysPerWeek : 0;
+    const int64_t k = target_days >= anchor_days ? std::max<int64_t>(0, CeilDiv(week_diff, rule.interval_val)) : 0;
 
     // 粗跳到目标周附近后，只需在连续几个周内找第一个命中星期，不需要长范围扫描。
     for (int attempt = 0; attempt < kMaxDateSearchSteps; ++attempt) {
@@ -147,8 +145,7 @@ std::optional<LocalDate> NextYearlyDate(const ScheduleRule& rule, const LocalDat
 }
 
 /// 从 anchor 所在周期单元开始，直接计算第一个 >= target 的候选日期。
-std::optional<LocalDate> NextDateOnOrAfter(const ScheduleRule& rule, const LocalDate& anchor,
-                                           const LocalDate& target) {
+std::optional<LocalDate> NextDateOnOrAfter(const ScheduleRule& rule, const LocalDate& anchor, const LocalDate& target) {
     switch (rule.freq_type) {
         case Frequency::kDaily:
             return NextDailyDate(rule, anchor, target);
@@ -177,7 +174,8 @@ std::optional<DateTime> NextOccurrence(const ScheduleRule& rule, DateTime from) 
     // rule.start_date 是规则的首个有效发生日，后续周期单元都从它开始推导。
     const LocalDate anchor = rule.start_date;
     int from_year = 0, from_month = 0, from_day = 0, from_hour = 0, from_minute = 0, from_second = 0;
-    LocalFromUnix(from.time_since_epoch().count(), from_year, from_month, from_day, from_hour, from_minute, from_second);
+    LocalFromUnix(from.time_since_epoch().count(), from_year, from_month, from_day, from_hour, from_minute,
+                  from_second);
     const LocalDate from_date{from_year, from_month, from_day};
 
     LocalDate threshold = from_date;
@@ -206,8 +204,7 @@ std::optional<DateTime> NextOccurrence(const ScheduleRule& rule, DateTime from) 
     return std::nullopt;
 }
 
-std::vector<DateTime> PlanOccurrences(const ScheduleRule& rule, DateTime range_start, DateTime range_end,
-                                      int limit) {
+std::vector<DateTime> PlanOccurrences(const ScheduleRule& rule, DateTime range_start, DateTime range_end, int limit) {
     std::vector<DateTime> occurrences;
     // 默认 3 个，显式传入时最多也只返回 10 个；这是给嵌入式查询预留的硬上限。
     const int capped_limit = std::min(kMaxPlanLimit, std::max(0, limit));

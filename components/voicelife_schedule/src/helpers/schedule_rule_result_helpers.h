@@ -9,11 +9,9 @@
 
 namespace voicelife::schedule {
 
-CreateScheduleRuleResult FailedCreateScheduleRuleResult(Status status,
-                                                        std::vector<Schedule> conflicts = {});
+CreateScheduleRuleResult FailedCreateScheduleRuleResult(Status status, std::vector<Schedule> conflicts = {});
 QueryScheduleRulesResult FailedQueryScheduleRulesResult(Status status);
-UpdateScheduleRuleResult FailedUpdateScheduleRuleResult(Status status,
-                                                        std::vector<Schedule> conflicts = {});
+UpdateScheduleRuleResult FailedUpdateScheduleRuleResult(Status status, std::vector<Schedule> conflicts = {});
 CancelScheduleRuleResult FailedCancelScheduleRuleResult(Status status, int64_t cancelled_count = 0);
 UpdateScheduleOccurrenceResult FailedUpdateScheduleOccurrenceResult(Status status);
 SkipScheduleOccurrenceResult FailedSkipScheduleOccurrenceResult(Status status);

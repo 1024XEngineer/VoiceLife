@@ -74,8 +74,8 @@ class ScheduleRepository {
      * @param exclude_id 排除的日程标识。
      * @return 有开始时间且可能重叠的有效日程集合。
      */
-    [[nodiscard]] virtual Result<std::vector<Schedule>> FindOverlapping(
-        DateTime start, DateTime end, std::optional<ScheduleId> exclude_id) const {
+    [[nodiscard]] virtual Result<std::vector<Schedule>> FindOverlapping(DateTime start, DateTime end,
+                                                                        std::optional<ScheduleId> exclude_id) const {
         (void)start;
         (void)end;
         (void)exclude_id;

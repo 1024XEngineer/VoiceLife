@@ -39,7 +39,8 @@ int CompareLocalDate(const LocalDate& left, const LocalDate& right) {
 /// 校验与 start_date 无关的规则字段，避免无效参数进入周期计算。
 Status ValidateRuleFields(const ScheduleRule& rule) {
     if (rule.event.empty()) return Status::Error(ErrorCode::kInvalidArgument, "规则名称不能为空");
-    if (rule.event.length() > kMaximumEventLength) return Status::Error(ErrorCode::kInvalidArgument, "规则名称不能超过 100 个字符");
+    if (rule.event.length() > kMaximumEventLength)
+        return Status::Error(ErrorCode::kInvalidArgument, "规则名称不能超过 100 个字符");
     if (rule.interval_val < 1) return Status::Error(ErrorCode::kInvalidArgument, "周期间隔必须大于零");
     // 当前规划器只按 end_date 终止；occurrence_count 先拒绝，避免产生“看似支持但实际无效”的规则。
     if (rule.occurrence_count.has_value()) {
@@ -52,7 +53,8 @@ Status ValidateRuleFields(const ScheduleRule& rule) {
             }
             break;
         case Frequency::kMonthly:
-            if (!rule.monthly_mode.has_value()) return Status::Error(ErrorCode::kInvalidArgument, "每月规则必须提供月模式");
+            if (!rule.monthly_mode.has_value())
+                return Status::Error(ErrorCode::kInvalidArgument, "每月规则必须提供月模式");
             if (*rule.monthly_mode == MonthlyMode::kSpecificDay && !rule.day_of_month.has_value()) {
                 return Status::Error(ErrorCode::kInvalidArgument, "指定日期模式必须提供日期");
             }
@@ -147,7 +149,8 @@ bool MatchesStatus(const ScheduleRule& rule, ScheduleStatusFilter filter) {
 ScheduleRuleService::ScheduleRuleService(ScheduleRuleRepository& rule_repository,
                                          ScheduleExceptionRepository& exception_repository,
                                          ScheduleRepository& schedule_repository)
-    : rule_repository_(rule_repository), exception_repository_(exception_repository),
+    : rule_repository_(rule_repository),
+      exception_repository_(exception_repository),
       schedule_repository_(schedule_repository) {}
 
 CreateScheduleRuleResult ScheduleRuleService::create_schedule_rule(const CreateScheduleRuleCommand& command) const {
@@ -192,8 +195,8 @@ CreateScheduleRuleResult ScheduleRuleService::create_schedule_rule(const CreateS
         }
         conflicts = FindConflictingSchedules(*first_instance, *candidates.value);
         if (!conflicts.empty() && !command.ignore_conflict) {
-            return FailedCreateScheduleRuleResult(
-                Status::Error(ErrorCode::kConflict, "首条实例与已有日程冲突"), std::move(conflicts));
+            return FailedCreateScheduleRuleResult(Status::Error(ErrorCode::kConflict, "首条实例与已有日程冲突"),
+                                                  std::move(conflicts));
         }
     }
 
@@ -209,8 +212,11 @@ CreateScheduleRuleResult ScheduleRuleService::create_schedule_rule(const CreateS
         first_instance->rule_id = created.value->id;
         schedules.push_back(*first_instance);
     }
-    return {.status = Status::Ok(), .rule = created.value, .schedules = std::move(schedules),
-            .conflicts = std::move(conflicts), .error = {}};
+    return {.status = Status::Ok(),
+            .rule = created.value,
+            .schedules = std::move(schedules),
+            .conflicts = std::move(conflicts),
+            .error = {}};
 }
 
 QueryScheduleRulesResult ScheduleRuleService::query_schedule_rules(const QueryScheduleRulesCommand& command) const {
@@ -300,8 +306,8 @@ UpdateScheduleRuleResult ScheduleRuleService::update_schedule_rule(const UpdateS
         }
         conflicts = FindConflictingSchedules(*first_instance, *candidates.value, command.rule_id);
         if (!conflicts.empty() && !command.ignore_conflict) {
-            return FailedUpdateScheduleRuleResult(
-                Status::Error(ErrorCode::kConflict, "规则下一条实例与已有日程冲突"), std::move(conflicts));
+            return FailedUpdateScheduleRuleResult(Status::Error(ErrorCode::kConflict, "规则下一条实例与已有日程冲突"),
+                                                  std::move(conflicts));
         }
     }
 
@@ -317,8 +323,11 @@ UpdateScheduleRuleResult ScheduleRuleService::update_schedule_rule(const UpdateS
         first_instance->rule_id = rule.id;
         schedules.push_back(*first_instance);
     }
-    return {.status = Status::Ok(), .rule = updated.value, .schedules = std::move(schedules),
-            .conflicts = std::move(conflicts), .error = {}};
+    return {.status = Status::Ok(),
+            .rule = updated.value,
+            .schedules = std::move(schedules),
+            .conflicts = std::move(conflicts),
+            .error = {}};
 }
 
 CancelScheduleRuleResult ScheduleRuleService::cancel_schedule_rule(const CancelScheduleRuleCommand& command) {
@@ -389,10 +398,12 @@ UpdateScheduleOccurrenceResult ScheduleRuleService::update_schedule_occurrence(
     if (!upserted.ok()) {
         return FailedUpdateScheduleOccurrenceResult(upserted.status);
     }
-    return {.status = Status::Ok(), .schedule = std::nullopt, .exception = upserted.value, .conflicts = {}, .error = {}};
+    return {
+        .status = Status::Ok(), .schedule = std::nullopt, .exception = upserted.value, .conflicts = {}, .error = {}};
 }
 
-SkipScheduleOccurrenceResult ScheduleRuleService::skip_schedule_occurrence(const SkipScheduleOccurrenceCommand& command) {
+SkipScheduleOccurrenceResult ScheduleRuleService::skip_schedule_occurrence(
+    const SkipScheduleOccurrenceCommand& command) {
     // 校验规则 ID。
     if (command.rule_id <= 0) {
         return FailedSkipScheduleOccurrenceResult(Status::Error(ErrorCode::kInvalidArgument, "规则 ID 必须大于零"));
@@ -471,8 +482,8 @@ GenerateNextScheduleInstanceResult ScheduleRuleService::generate_next_schedule_i
                 continue;
             }
         } else {
-            const Result<std::optional<Schedule>> materialized = FindMaterializedScheduleOccurrence(
-                schedule_repository_, command.rule_id, *next, std::nullopt);
+            const Result<std::optional<Schedule>> materialized =
+                FindMaterializedScheduleOccurrence(schedule_repository_, command.rule_id, *next, std::nullopt);
             if (!materialized.ok()) {
                 return FailedGenerateNextScheduleInstanceResult(materialized.status);
             }
@@ -495,8 +506,7 @@ GenerateNextScheduleInstanceResult ScheduleRuleService::generate_next_schedule_i
 
         return {.status = Status::Ok(), .schedule = inserted.value, .error = {}};
     }
-    return FailedGenerateNextScheduleInstanceResult(
-        Status::Error(ErrorCode::kInternal, "生成下一条实例超出迭代上限"));
+    return FailedGenerateNextScheduleInstanceResult(Status::Error(ErrorCode::kInternal, "生成下一条实例超出迭代上限"));
 }
 
 }  // namespace voicelife::schedule

@@ -5,7 +5,7 @@
 namespace voicelife::schedule {
 class ScheduleService;
 class ScheduleRuleService;
-}
+}  // namespace voicelife::schedule
 
 namespace voicelife::mcp {
 

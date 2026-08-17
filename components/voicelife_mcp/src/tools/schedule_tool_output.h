@@ -73,19 +73,26 @@ inline std::string FormatTime(const schedule::LocalTime& value) {
 
 inline const char* StatusName(schedule::ScheduleStatus status) {
     switch (status) {
-        case schedule::ScheduleStatus::kActive: return "active";
-        case schedule::ScheduleStatus::kCancelled: return "cancelled";
-        case schedule::ScheduleStatus::kCompleted: return "completed";
+        case schedule::ScheduleStatus::kActive:
+            return "active";
+        case schedule::ScheduleStatus::kCancelled:
+            return "cancelled";
+        case schedule::ScheduleStatus::kCompleted:
+            return "completed";
     }
     return "active";
 }
 
 inline const char* FrequencyName(schedule::Frequency value) {
     switch (value) {
-        case schedule::Frequency::kDaily: return "daily";
-        case schedule::Frequency::kWeekly: return "weekly";
-        case schedule::Frequency::kMonthly: return "monthly";
-        case schedule::Frequency::kYearly: return "yearly";
+        case schedule::Frequency::kDaily:
+            return "daily";
+        case schedule::Frequency::kWeekly:
+            return "weekly";
+        case schedule::Frequency::kMonthly:
+            return "monthly";
+        case schedule::Frequency::kYearly:
+            return "yearly";
     }
     return "daily";
 }
@@ -100,31 +107,26 @@ inline ToolOutputValue RepeatOutput(const schedule::ScheduleRule& rule) {
         MakeToolOutput("interval_val", ToolOutputValue::Integer(rule.interval_val)),
         MakeToolOutput("start_date", ToolOutputValue::String(FormatDate(rule.start_date))),
         MakeToolOutput("start_time", ToolOutputValue::String(FormatTime(rule.start_time))),
-        MakeToolOutput("end_time", rule.end_time.has_value()
-                                       ? ToolOutputValue::String(FormatTime(*rule.end_time))
-                                       : ToolOutputValue::Null()),
+        MakeToolOutput("end_time", rule.end_time.has_value() ? ToolOutputValue::String(FormatTime(*rule.end_time))
+                                                             : ToolOutputValue::Null()),
         MakeToolOutput("end_date", rule.end_date.has_value() ? ToolOutputValue::String(FormatDate(*rule.end_date))
                                                              : ToolOutputValue::Null()),
         MakeToolOutput("occurrence_count", rule.occurrence_count.has_value()
                                                ? ToolOutputValue::Integer(*rule.occurrence_count)
                                                : ToolOutputValue::Null()),
-        MakeToolOutput("weekdays_mask", rule.weekdays_mask.has_value()
-                                            ? ToolOutputValue::Integer(*rule.weekdays_mask)
-                                            : ToolOutputValue::Null()),
-        MakeToolOutput("day_of_month", rule.day_of_month.has_value()
-                                           ? ToolOutputValue::Integer(*rule.day_of_month)
-                                           : ToolOutputValue::Null()),
-        MakeToolOutput("month_of_year", rule.month_of_year.has_value()
-                                            ? ToolOutputValue::Integer(*rule.month_of_year)
-                                            : ToolOutputValue::Null()),
+        MakeToolOutput("weekdays_mask", rule.weekdays_mask.has_value() ? ToolOutputValue::Integer(*rule.weekdays_mask)
+                                                                       : ToolOutputValue::Null()),
+        MakeToolOutput("day_of_month", rule.day_of_month.has_value() ? ToolOutputValue::Integer(*rule.day_of_month)
+                                                                     : ToolOutputValue::Null()),
+        MakeToolOutput("month_of_year", rule.month_of_year.has_value() ? ToolOutputValue::Integer(*rule.month_of_year)
+                                                                       : ToolOutputValue::Null()),
         MakeToolOutput("monthly_mode", rule.monthly_mode.has_value()
                                            ? ToolOutputValue::String(MonthlyModeName(*rule.monthly_mode))
                                            : ToolOutputValue::Null()),
     });
 }
 
-inline ToolOutputValue ScheduleOutput(const schedule::Schedule& value,
-                                      const schedule::ScheduleRule* rule = nullptr) {
+inline ToolOutputValue ScheduleOutput(const schedule::Schedule& value, const schedule::ScheduleRule* rule = nullptr) {
     return ToolOutputValue::Object({
         MakeToolOutput("id", ToolOutputValue::Integer(value.id)),
         MakeToolOutput("event", ToolOutputValue::String(value.event)),
@@ -132,15 +134,14 @@ inline ToolOutputValue ScheduleOutput(const schedule::Schedule& value,
         MakeToolOutput("start_time", value.start_time.has_value()
                                          ? ToolOutputValue::String(FormatDateTime(*value.start_time))
                                          : ToolOutputValue::Null()),
-        MakeToolOutput("end_time", value.end_time.has_value()
-                                       ? ToolOutputValue::String(FormatDateTime(*value.end_time))
-                                       : ToolOutputValue::Null()),
-        MakeToolOutput("location", value.location.has_value() ? ToolOutputValue::String(*value.location)
+        MakeToolOutput("end_time", value.end_time.has_value() ? ToolOutputValue::String(FormatDateTime(*value.end_time))
                                                               : ToolOutputValue::Null()),
-        MakeToolOutput("notes", value.notes.has_value() ? ToolOutputValue::String(*value.notes)
-                                                        : ToolOutputValue::Null()),
-        MakeToolOutput("rule_id", value.rule_id.has_value() ? ToolOutputValue::Integer(*value.rule_id)
-                                                            : ToolOutputValue::Null()),
+        MakeToolOutput("location",
+                       value.location.has_value() ? ToolOutputValue::String(*value.location) : ToolOutputValue::Null()),
+        MakeToolOutput("notes",
+                       value.notes.has_value() ? ToolOutputValue::String(*value.notes) : ToolOutputValue::Null()),
+        MakeToolOutput("rule_id",
+                       value.rule_id.has_value() ? ToolOutputValue::Integer(*value.rule_id) : ToolOutputValue::Null()),
         MakeToolOutput("repeat", rule == nullptr ? ToolOutputValue::Null() : RepeatOutput(*rule)),
     });
 }
@@ -157,8 +158,8 @@ inline ToolOutputArray ScheduleArrayOutput(const std::vector<schedule::Schedule>
 inline ToolOutputValue FutureOccurrenceOutput(const schedule::ScheduleRule& rule, schedule::DateTime occurrence) {
     std::optional<schedule::DateTime> end_time;
     if (rule.end_time.has_value()) {
-        const std::int64_t duration = schedule::LocalTimeToSeconds(*rule.end_time) -
-                                      schedule::LocalTimeToSeconds(rule.start_time);
+        const std::int64_t duration =
+            schedule::LocalTimeToSeconds(*rule.end_time) - schedule::LocalTimeToSeconds(rule.start_time);
         end_time = occurrence + std::chrono::seconds{duration};
     }
     return ToolOutputValue::Object({
@@ -169,10 +170,10 @@ inline ToolOutputValue FutureOccurrenceOutput(const schedule::ScheduleRule& rule
         MakeToolOutput("start_time", ToolOutputValue::String(FormatDateTime(occurrence))),
         MakeToolOutput("end_time", end_time.has_value() ? ToolOutputValue::String(FormatDateTime(*end_time))
                                                         : ToolOutputValue::Null()),
-        MakeToolOutput("location", rule.location.has_value() ? ToolOutputValue::String(*rule.location)
-                                                             : ToolOutputValue::Null()),
-        MakeToolOutput("notes", rule.notes.has_value() ? ToolOutputValue::String(*rule.notes)
-                                                       : ToolOutputValue::Null()),
+        MakeToolOutput("location",
+                       rule.location.has_value() ? ToolOutputValue::String(*rule.location) : ToolOutputValue::Null()),
+        MakeToolOutput("notes",
+                       rule.notes.has_value() ? ToolOutputValue::String(*rule.notes) : ToolOutputValue::Null()),
         MakeToolOutput("repeat", RepeatOutput(rule)),
     });
 }
@@ -203,15 +204,12 @@ inline ToolOutputValue RuleOutput(const schedule::ScheduleRule& rule) {
         MakeToolOutput("occurrence_count", rule.occurrence_count.has_value()
                                                ? ToolOutputValue::Integer(*rule.occurrence_count)
                                                : ToolOutputValue::Null()),
-        MakeToolOutput("weekdays_mask", rule.weekdays_mask.has_value()
-                                            ? ToolOutputValue::Integer(*rule.weekdays_mask)
-                                            : ToolOutputValue::Null()),
-        MakeToolOutput("day_of_month", rule.day_of_month.has_value()
-                                           ? ToolOutputValue::Integer(*rule.day_of_month)
-                                           : ToolOutputValue::Null()),
-        MakeToolOutput("month_of_year", rule.month_of_year.has_value()
-                                            ? ToolOutputValue::Integer(*rule.month_of_year)
-                                            : ToolOutputValue::Null()),
+        MakeToolOutput("weekdays_mask", rule.weekdays_mask.has_value() ? ToolOutputValue::Integer(*rule.weekdays_mask)
+                                                                       : ToolOutputValue::Null()),
+        MakeToolOutput("day_of_month", rule.day_of_month.has_value() ? ToolOutputValue::Integer(*rule.day_of_month)
+                                                                     : ToolOutputValue::Null()),
+        MakeToolOutput("month_of_year", rule.month_of_year.has_value() ? ToolOutputValue::Integer(*rule.month_of_year)
+                                                                       : ToolOutputValue::Null()),
         MakeToolOutput("monthly_mode", rule.monthly_mode.has_value()
                                            ? ToolOutputValue::String(MonthlyModeName(*rule.monthly_mode))
                                            : ToolOutputValue::Null()),
@@ -228,9 +226,10 @@ inline ToolOutputValue ExceptionOutput(const schedule::ScheduleException& except
         MakeToolOutput("schedule_id", exception.schedule_id.has_value()
                                           ? ToolOutputValue::Integer(*exception.schedule_id)
                                           : ToolOutputValue::Null()),
-        MakeToolOutput("override_start_time", exception.override_start_time.has_value()
-                                                  ? ToolOutputValue::String(FormatDateTime(*exception.override_start_time))
-                                                  : ToolOutputValue::Null()),
+        MakeToolOutput("override_start_time",
+                       exception.override_start_time.has_value()
+                           ? ToolOutputValue::String(FormatDateTime(*exception.override_start_time))
+                           : ToolOutputValue::Null()),
         MakeToolOutput("override_end_time", exception.override_end_time.has_value()
                                                 ? ToolOutputValue::String(FormatDateTime(*exception.override_end_time))
                                                 : ToolOutputValue::Null()),

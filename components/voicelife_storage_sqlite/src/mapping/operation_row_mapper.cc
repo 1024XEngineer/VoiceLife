@@ -23,9 +23,9 @@ Status WithField(Status status, const char* field) {
  */
 Status BindOptionalTime(SqliteStatement& statement, int index, const std::optional<schedule::DateTime>& value,
                         const char* field) {
-    return WithField(value.has_value() ? statement.BindInt64(index, value->time_since_epoch().count())
-                                       : statement.BindNull(index),
-                     field);
+    return WithField(
+        value.has_value() ? statement.BindInt64(index, value->time_since_epoch().count()) : statement.BindNull(index),
+        field);
 }
 
 /**
@@ -88,8 +88,7 @@ Result<std::optional<schedule::Schedule>> ReadPrevious(const SqliteStatement& st
     if (statement.IsNull(6)) {
         for (int column = 7; column <= 15; ++column) {
             if (!statement.IsNull(column)) {
-                return Result<std::optional<schedule::Schedule>>::Failure(ErrorCode::kInternal,
-                                                                           "操作快照列不一致");
+                return Result<std::optional<schedule::Schedule>>::Failure(ErrorCode::kInternal, "操作快照列不一致");
             }
         }
         return Result<std::optional<schedule::Schedule>>::Success(std::nullopt);
@@ -139,36 +138,35 @@ Status BindOperation(SqliteStatement& statement, const schedule::OperationRecord
     status = BindOptionalInt64(statement, 5, previous.has_value() ? std::optional<int64_t>(previous->id) : std::nullopt,
                                "previous_id");
     if (!status.ok()) return status;
-    status = BindOptionalText(statement, 6, previous.has_value() ? std::optional<std::string>(previous->event)
-                                                                  : std::nullopt,
+    status = BindOptionalText(statement, 6,
+                              previous.has_value() ? std::optional<std::string>(previous->event) : std::nullopt,
                               "previous_event");
     if (!status.ok()) return status;
     status = BindOptionalTime(statement, 7, previous.has_value() ? previous->start_time : std::nullopt,
                               "previous_start_time");
     if (!status.ok()) return status;
-    status = BindOptionalTime(statement, 8, previous.has_value() ? previous->end_time : std::nullopt,
-                              "previous_end_time");
+    status =
+        BindOptionalTime(statement, 8, previous.has_value() ? previous->end_time : std::nullopt, "previous_end_time");
     if (!status.ok()) return status;
-    status = BindOptionalText(statement, 9, previous.has_value() ? previous->location : std::nullopt,
-                              "previous_location");
+    status =
+        BindOptionalText(statement, 9, previous.has_value() ? previous->location : std::nullopt, "previous_location");
     if (!status.ok()) return status;
     status = BindOptionalText(statement, 10, previous.has_value() ? previous->notes : std::nullopt, "previous_notes");
     if (!status.ok()) return status;
-    status = BindOptionalInt64(statement, 11, previous.has_value() ? previous->rule_id : std::nullopt,
-                               "previous_rule_id");
+    status =
+        BindOptionalInt64(statement, 11, previous.has_value() ? previous->rule_id : std::nullopt, "previous_rule_id");
     if (!status.ok()) return status;
-    status = WithField(previous.has_value() ? statement.BindInt(12, static_cast<int>(previous->status))
-                                             : statement.BindNull(12),
-                       "previous_status");
+    status = WithField(
+        previous.has_value() ? statement.BindInt(12, static_cast<int>(previous->status)) : statement.BindNull(12),
+        "previous_status");
     if (!status.ok()) return status;
-    status = BindOptionalTime(statement, 13, previous.has_value() ? std::optional<schedule::DateTime>(previous->created_at)
-                                                                  : std::nullopt,
-                              "previous_created_at");
+    status = BindOptionalTime(
+        statement, 13, previous.has_value() ? std::optional<schedule::DateTime>(previous->created_at) : std::nullopt,
+        "previous_created_at");
     if (!status.ok()) return status;
-    return BindOptionalTime(statement, 14,
-                            previous.has_value() ? std::optional<schedule::DateTime>(previous->updated_at)
-                                                 : std::nullopt,
-                            "previous_updated_at");
+    return BindOptionalTime(
+        statement, 14, previous.has_value() ? std::optional<schedule::DateTime>(previous->updated_at) : std::nullopt,
+        "previous_updated_at");
 }
 
 Result<schedule::OperationRecord> ReadOperation(const SqliteStatement& statement) {
@@ -183,7 +181,8 @@ Result<schedule::OperationRecord> ReadOperation(const SqliteStatement& statement
         return Result<schedule::OperationRecord>::Failure(ErrorCode::kInternal, "数据库中的操作 active 状态无效");
     }
     const Result<std::optional<schedule::Schedule>> previous = ReadPrevious(statement);
-    if (!previous.ok()) return Result<schedule::OperationRecord>::Failure(previous.status.code, previous.status.message);
+    if (!previous.ok())
+        return Result<schedule::OperationRecord>::Failure(previous.status.code, previous.status.message);
     schedule::OperationRecord operation{
         .id = statement.ColumnInt64(0),
         .type = static_cast<schedule::ScheduleOperationType>(statement.ColumnInt(1)),
