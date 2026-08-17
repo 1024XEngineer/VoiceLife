@@ -10,6 +10,9 @@
 namespace voicelife::runtime {
 namespace {
 
+constexpr std::string_view kBindingToolHandledSummary = "绑定操作已处理";
+constexpr std::string_view kBindingToolFailedSummary = "绑定操作失败";
+
 std::string Escape(std::string_view value) {
     std::string result;
     result.reserve(value.size() + 2);
@@ -101,6 +104,9 @@ std::string ToolOutcomeSummary(std::string_view request_payload, bool success) {
     if (name == nullptr || !name->IsString()) return success ? "操作已完成" : "操作失败";
     if (name->string == "schedule.create") return success ? "日程已创建" : "日程创建失败";
     if (name->string == "schedule.query") return success ? "日程查询完成" : "日程查询失败";
+    if (name->string == "im.binding.start") {
+        return std::string(success ? kBindingToolHandledSummary : kBindingToolFailedSummary);
+    }
     return success ? "操作已完成" : "操作失败";
 }
 
@@ -245,6 +251,10 @@ LinxMcpToolOutcome InspectLinxMcpToolOutcome(std::string_view request_payload, c
     // 成功内容同样是 MCP 的机器可读回包（例如 event=、status=、count=）。
     // 它只随 JSON-RPC 响应回传给 Linx，不能成为设备底部用户文案。
     return outcome;
+}
+
+bool IsBindingMcpToolSummary(std::string_view summary) {
+    return summary == kBindingToolHandledSummary || summary == kBindingToolFailedSummary;
 }
 
 }  // namespace voicelife::runtime

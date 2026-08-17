@@ -1286,20 +1286,30 @@ class Runtime final {
             }
         } else if (evidence.event == "mcp_tool_result" || evidence.event == "mcp_tool_failed") {
             const bool success = evidence.event == "mcp_tool_result";
+            // 绑定工具由 BindingPresentation 显示真实绑定码/终态。通用工具
+            // overlay 不得用“日程操作已完成”等摘要覆盖绑定页面。
+            if (IsBindingMcpToolSummary(evidence.detail)) {
+                ESP_LOGI(kTag, "IM_BINDING_TOOL_OVERLAY_SUPPRESSED=1");
+                return;
+            }
             // evidence.detail 不是可信的用户文本。仅接受 MCP worker 产生的
             // 固定业务短句；任何原始 JSON-RPC/MCP 内容都降级为通用文案。
-            std::string_view summary = success ? "日程操作已完成" : "日程操作失败";
+            std::string_view summary = success ? "操作已完成" : "操作失败";
+            std::string_view status = success ? "操作结果" : "操作错误";
             if (success && evidence.detail == "日程已创建") {
                 summary = "日程已创建";
+                status = "日程结果";
             } else if (success && evidence.detail == "日程查询完成") {
                 summary = "日程查询完成";
+                status = "日程结果";
             } else if (!success && evidence.detail == "日程创建失败") {
                 summary = "日程创建失败";
+                status = "日程错误";
             } else if (!success && evidence.detail == "日程查询失败") {
                 summary = "日程查询失败";
+                status = "日程错误";
             }
-            ShowOverlay(success ? voice::VoiceMood::kHappy : voice::VoiceMood::kSad, success ? "日程结果" : "日程错误",
-                        summary);
+            ShowOverlay(success ? voice::VoiceMood::kHappy : voice::VoiceMood::kSad, status, summary);
             StartOverlayTimer(2500);
         } else if (evidence.event == "tts_started") {
             CancelListenTimer();

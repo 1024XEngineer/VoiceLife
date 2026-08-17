@@ -73,6 +73,14 @@ int main() {
     Check(successful_outcome.success && successful_outcome.summary == "日程已创建",
           "成功 MCP 机器结果不得进入用户可见会话/屏幕语义");
 
+    const auto binding_response = voicelife::Result<std::string>::Success(
+        R"({"type":"mcp","payload":{"jsonrpc":"2.0","id":6,"result":{"content":[],"isError":false}}})");
+    const auto binding_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"im.binding.start","arguments":{}},"id":6})",
+        binding_response);
+    Check(binding_outcome.success && voicelife::runtime::IsBindingMcpToolSummary(binding_outcome.summary),
+          "绑定工具结果必须带独立语义，禁止降级成日程操作结果覆盖绑定码页面");
+
     const auto initialized_notification = voicelife::runtime::HandleLinxMcpPayload(
         R"({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})", server, "remote-session");
     Check(initialized_notification.ok() && initialized_notification.value.has_value() &&
