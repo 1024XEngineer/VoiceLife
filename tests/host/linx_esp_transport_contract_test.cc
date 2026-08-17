@@ -3,6 +3,7 @@
 #include <string_view>
 
 #include "support/test_support.h"
+#include "voicelife/linx_esp/esp_websocket_transport.h"
 #include "voicelife/linx_esp/websocket_fragment_assembler.h"
 
 using voicelife::ErrorCode;
@@ -28,6 +29,9 @@ WebSocketFragment Chunk(uint64_t generation, WebSocketOpcode opcode, std::string
 }  // namespace
 
 int main() {
+    Check(voicelife::linx_esp::EspWebSocketTransportOptions{}.max_message_bytes == 64 * 1024,
+          "Linx WebSocket 默认消息上限必须为 64 KiB");
+
     WebSocketFragmentAssembler assembler(8);
 
     Check(IsWebSocketDataOpcode(WebSocketOpcode::kText) && IsWebSocketDataOpcode(WebSocketOpcode::kBinary) &&
