@@ -6,7 +6,7 @@
 
 ## 私密报告漏洞
 
-不要通过公开 Issue、PR 或讨论区提交未修复漏洞、凭据、设备身份和用户数据。请使用 GitHub 的 [Private Vulnerability Reporting](https://github.com/1024XEngineer/XE6-15/security/advisories/new) 提交：
+不要通过公开 Issue、PR 或讨论区提交未修复漏洞、凭据、设备身份和用户数据。请使用 GitHub 的 [Private Vulnerability Reporting](https://github.com/1024XEngineer/VoiceLife/security/advisories/new) 提交：
 
 - 受影响版本或 commit；
 - 攻击前提和影响；

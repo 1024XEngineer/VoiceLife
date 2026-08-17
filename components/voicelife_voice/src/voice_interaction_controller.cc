@@ -95,8 +95,8 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             state_ = VoiceInteractionState::kStandby;
             transition.action = VoiceInteractionAction::kRestoreStandby;
             break;
-        case VoiceInteractionEvent::kFarewellCompleted:
-            // 告别回复播报完成：kSpeaking → kStandby，恢复待机。
+        case VoiceInteractionEvent::kTerminalResponseCompleted:
+            // 告别、绑定码等终结型回复播报完成：不进入 follow-up，直接恢复待机。
             if (state_ != VoiceInteractionState::kSpeaking) return InvalidTransition(state_, event);
             state_ = VoiceInteractionState::kStandby;
             transition.action = VoiceInteractionAction::kRestoreStandby;

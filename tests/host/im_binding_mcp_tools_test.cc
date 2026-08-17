@@ -135,7 +135,7 @@ void TestRejectsOutOfRangeExpiryAtBoundary() {
     }
 }
 
-void TestInvokesStartHookOnceAndCarriesFields() {
+void TestInvokesResultHookAndCarriesFields() {
     FakePairingPort port;
     FakeClock clock;
     Prepare(port);
@@ -143,30 +143,48 @@ void TestInvokesStartHookOnceAndCarriesFields() {
     use_case.set_user_id("user-fixture");
     McpServer server;
     int hook_count = 0;
-    Check(voicelife::runtime::RegisterImBindingMcpTools(server, use_case, [&hook_count] { ++hook_count; }).ok(),
+    voicelife::im::BindingResult hook_result;
+    Check(voicelife::runtime::RegisterImBindingMcpTools(
+              server, use_case,
+              [&hook_count, &hook_result](const voicelife::im::BindingResult& result) {
+                  ++hook_count;
+                  hook_result = result;
+              })
+              .ok(),
           "带 hook 的绑定工具应可注册");
 
     const auto first = server.call({.request_id = "bind-hook-1", .name = "im.binding.start", .arguments = {}});
-    Check(first.status.ok() && OutputString(first.output, "status") == "pending" && hook_count == 1,
-          "创建成功必须恰好触发一次会话开始 hook");
+    Check(first.status.ok() && first.output.at("status") == "pending" && hook_count == 1 &&
+              hook_result.state == voicelife::im::BindingState::kPending && hook_result.display_code == "123456" &&
+              hook_result.generation != 0,
+          "创建成功必须恰好触发一次并携带脱敏结果与代次的会话开始 hook");
     const auto second = server.call({.request_id = "bind-hook-2", .name = "im.binding.start", .arguments = {}});
-    Check(second.status.ok() && OutputString(second.output, "status") == "already_active" &&
-              OutputString(second.output, "display_code") == "123456" &&
-              OutputString(second.output, "reason") == "session_active" &&
-              OutputString(second.output, "retryable") == "false" && hook_count == 1,
-          "already_active 必须携带当前码且不再触发 hook");
+    Check(second.status.ok() && second.output.at("status") == "already_active" &&
+              second.output.at("display_code") == "123456" && second.output.at("reason") == "session_active" &&
+              second.output.at("retryable") == "false" && hook_count == 2 &&
+              hook_result.state == voicelife::im::BindingState::kAlreadyActive,
+          "already_active 必须投递当前码，以恢复被普通语音覆盖的 OLED 内容，但不重启轮询");
 }
 
 void TestReturnsSpeakableUnavailableResult() {
     BindingUseCase use_case;
     McpServer server;
-    Check(voicelife::runtime::RegisterImBindingMcpTools(server, use_case).ok(), "绑定工具应可注册");
+    int hook_count = 0;
+    voicelife::im::BindingResult hook_result;
+    Check(voicelife::runtime::RegisterImBindingMcpTools(
+              server, use_case,
+              [&hook_count, &hook_result](const voicelife::im::BindingResult& result) {
+                  ++hook_count;
+                  hook_result = result;
+              })
+              .ok(),
+          "绑定工具应可注册");
     const auto result = server.call({.request_id = "bind-6", .name = "im.binding.start", .arguments = {}});
-    Check(result.status.ok() && OutputString(result.output, "status") == "unavailable" &&
-              !OutputString(result.output, "message")->empty() &&
-              OutputString(result.output, "reason") == "not_ready" &&
-              OutputString(result.output, "retryable") == "true" && !OutputContains(result.output, "display_code"),
-          "IM 未 ready 时应返回可播报 unavailable 与稳定字段，而非 JSON-RPC error");
+    Check(result.status.ok() && result.output.at("status") == "unavailable" && !result.output.at("message").empty() &&
+              result.output.at("reason") == "not_ready" && result.output.at("retryable") == "true" &&
+              !result.output.contains("display_code") && hook_count == 1 &&
+              hook_result.state == voicelife::im::BindingState::kUnavailable,
+          "IM 未 ready 时必须投递可呈现 unavailable，而非只返回 MCP 文本");
 }
 
 }  // namespace
@@ -175,7 +193,7 @@ int main() {
     TestRegistersAndCreatesBinding();
     TestAcceptsExplicitExpiryAndRejectsInvalidArguments();
     TestRejectsOutOfRangeExpiryAtBoundary();
-    TestInvokesStartHookOnceAndCarriesFields();
+    TestInvokesResultHookAndCarriesFields();
     TestReturnsSpeakableUnavailableResult();
     return 0;
 }

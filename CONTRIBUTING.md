@@ -4,7 +4,7 @@
 
 ## 开发流程
 
-1. 在 MS3 下创建或领取 Issue，写清场景、范围和验收标准。
+1. 在当前 Milestone 下创建或领取 Issue，写清场景、范围和验收标准。
 2. 涉及边界、接口、数据模型或依赖方向时，先提交 Design Issue；重大取舍补 ADR。
 3. 从最新 `main` 创建短分支，命名为 `dev/<issue>-<short-name>`，例如 `dev/91-tdd-architecture`。仓库不维护长期共享的裸 `dev` 分支。
 4. 先写失败测试并记录 RED 原因，再补最小实现使其 GREEN；重构期间保持测试通过。

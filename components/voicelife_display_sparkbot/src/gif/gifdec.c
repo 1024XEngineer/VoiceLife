@@ -1,6 +1,6 @@
 /* Vendored from xiaozhi-esp32@37d1aee main/display/lvgl_display/gif/gifdec.c.
  * 上游：https://github.com/lecram/gifdec（MIT 许可）。仅按上游维护，不得视为
- * VoiceLife 原创代码；许可与改动记录见 components/voicelife_display_sparkbot/README.md。 */
+ * VoiceLife 原创代码；许可与改动记录见 docs/components/sparkbot-display.md。 */
 #include "gifdec.h"
 
 #include <esp_log.h>

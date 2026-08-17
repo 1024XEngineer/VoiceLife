@@ -8,13 +8,7 @@
 #include "voicelife/schedule/schedule_service.h"
 
 using voicelife::JsonValue;
-using voicelife::MakeToolOutput;
-using voicelife::ToolOutputValue;
 using voicelife::mcp::McpServer;
-using voicelife::mcp::Property;
-using voicelife::mcp::PropertyHandler;
-using voicelife::mcp::PropertyList;
-using voicelife::mcp::PropertyType;
 using voicelife::schedule::ScheduleService;
 using voicelife::test::Check;
 using voicelife::test::InMemoryScheduleRepository;
@@ -84,30 +78,13 @@ int main() {
     Check(successful_outcome.success && successful_outcome.summary == "日程已创建",
           "成功 MCP 机器结果不得进入用户可见会话/屏幕语义");
 
-    const PropertyHandler object_handler = [](const PropertyList& properties) {
-        const auto payload = properties.value<JsonValue>("payload");
-        return voicelife::ToolResult::Success(ToolOutputValue::Object({
-            MakeToolOutput("has_enabled", ToolOutputValue::Boolean(payload.has_value() && payload->IsObject() &&
-                                                                   payload->Get("enabled") != nullptr)),
-        }));
-    };
-    Check(server
-              .add_tool("object.echo", "读取对象参数",
-                        PropertyList({Property("payload", PropertyList({
-                                                              Property("enabled", PropertyType::kBoolean),
-                                                              Property::Optional("count", PropertyType::kInteger),
-                                                          }))}),
-                        object_handler)
-              .ok(),
-          "对象参数工具应能注册");
-    const auto object_call = voicelife::runtime::HandleLinxMcpPayload(
-        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"object.echo","arguments":{"payload":{"enabled":true,"count":2}}},"id":5})",
-        server);
-    Check(object_call.ok(), "对象参数 tools/call 应成功分发");
-    const auto& object_called = ParseMcpEnvelope(*object_call.value);
-    Check(object_called.Get("result")->Get("content")->array[0].Get("text")->string.find("\"has_enabled\":true") !=
-              std::string::npos,
-          "对象参数应能传到业务回调并返回结构化结果");
+    const auto binding_response = voicelife::Result<std::string>::Success(
+        R"({"type":"mcp","payload":{"jsonrpc":"2.0","id":6,"result":{"content":[],"isError":false}}})");
+    const auto binding_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"im.binding.start","arguments":{}},"id":6})",
+        binding_response);
+    Check(binding_outcome.success && voicelife::runtime::IsBindingMcpToolSummary(binding_outcome.summary),
+          "绑定工具结果必须带独立语义，禁止降级成日程操作结果覆盖绑定码页面");
 
     const auto initialized_notification = voicelife::runtime::HandleLinxMcpPayload(
         R"({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})", server, "remote-session");

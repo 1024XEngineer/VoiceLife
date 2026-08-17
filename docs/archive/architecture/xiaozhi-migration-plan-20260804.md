@@ -1,4 +1,6 @@
-# 小智能力迁移方案
+# 历史归档：小智能力迁移方案（2026-08-04）
+
+> 这是一份历史迁移计划，不是当前实现或验收依据。当前语音边界和准入顺序见[语音模块子架构](../../architecture/voice-subarchitecture.md)；归档原因见 Issue [#264](https://github.com/1024XEngineer/VoiceLife/issues/264)。
 
 VoiceLife 迁移小智已经验证且难以重写正确的设备能力，但不会复制其整个应用。迁移按防腐层和 Strangler 方式进行：旧能力先包在 Adapter 后面，用相同输入输出做对照，再逐段替换中心化状态和板型耦合。
 
@@ -50,4 +52,4 @@ VoiceLife 迁移小智已经验证且难以重写正确的设备能力，但不�
 
 不满足这些检查时，迁移只算“代码搬过来”，不算能力迁移完成。
 
-Port、状态、Linx 协议映射和 ESP32-S3 真机验收顺序见 [语音模块子架构](./voice-subarchitecture.md)。
+Port、状态、Linx 协议映射和 ESP32-S3 真机验收顺序见[语音模块子架构](../../architecture/voice-subarchitecture.md)。

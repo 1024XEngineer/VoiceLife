@@ -42,6 +42,17 @@ int main() {
     CheckTransition(controller, VoiceInteractionEvent::kInterruptCompleted, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "打断完成后应恢复本地待机");
 
+    VoiceInteractionController terminal_controller;
+    CheckTransition(terminal_controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "终结型回复测试应先进入待机");
+    CheckTransition(terminal_controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
+                    VoiceInteractionAction::kStartVoiceTurn, "终结型回复应从有效语音回合开始");
+    CheckTransition(terminal_controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
+                    VoiceInteractionAction::kNone, "终结型回复应允许进入播报状态");
+    CheckTransition(terminal_controller, VoiceInteractionEvent::kTerminalResponseCompleted,
+                    VoiceInteractionState::kStandby, VoiceInteractionAction::kRestoreStandby,
+                    "绑定码等终结型回复播报后应直接回待机，不进入 follow-up 聆听");
+
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
                     VoiceInteractionAction::kStartVoiceTurn, "新一轮唤醒应可开始");
     CheckTransition(controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
