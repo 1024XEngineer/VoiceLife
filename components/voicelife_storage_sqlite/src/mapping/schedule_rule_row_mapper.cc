@@ -97,23 +97,25 @@ Status BindScheduleRule(SqliteStatement& statement, const schedule::ScheduleRule
     if (!status.ok()) return status;
     status = BindOptionalInt(statement, index++, rule.month_of_year, "month_of_year");
     if (!status.ok()) return status;
-    status = BindOptionalInt(statement, index++,
-                             rule.monthly_mode.has_value() ? std::optional<int>{static_cast<int>(*rule.monthly_mode)}
-                                                           : std::nullopt,
-                             "monthly_mode");
+    status = BindOptionalInt(
+        statement, index++,
+        rule.monthly_mode.has_value() ? std::optional<int>{static_cast<int>(*rule.monthly_mode)} : std::nullopt,
+        "monthly_mode");
     if (!status.ok()) return status;
     status = WithField(statement.BindInt(index++, static_cast<int>(LocalTimeToSeconds(rule.start_time))), "start_time");
     if (!status.ok()) return status;
     status = BindOptionalInt(statement, index++,
-                             rule.end_time.has_value() ? std::optional<int>{static_cast<int>(LocalTimeToSeconds(*rule.end_time))}
-                                                       : std::nullopt,
+                             rule.end_time.has_value()
+                                 ? std::optional<int>{static_cast<int>(LocalTimeToSeconds(*rule.end_time))}
+                                 : std::nullopt,
                              "end_time");
     if (!status.ok()) return status;
     status = WithField(statement.BindInt64(index++, LocalDateToDays(rule.start_date)), "start_date");
     if (!status.ok()) return status;
     status = BindOptionalInt(statement, index++,
-                             rule.end_date.has_value() ? std::optional<int>{static_cast<int>(LocalDateToDays(*rule.end_date))}
-                                                       : std::nullopt,
+                             rule.end_date.has_value()
+                                 ? std::optional<int>{static_cast<int>(LocalDateToDays(*rule.end_date))}
+                                 : std::nullopt,
                              "end_date");
     if (!status.ok()) return status;
     status = BindOptionalInt(statement, index++, rule.occurrence_count, "occurrence_count");

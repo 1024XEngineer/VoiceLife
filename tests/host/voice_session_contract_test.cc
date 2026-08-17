@@ -12,6 +12,7 @@ namespace {
 
 class FakeInput final : public voicelife::voice::AudioInputPort {
    public:
+    explicit FakeInput(std::vector<char>* close_order = nullptr) : close_order_(close_order) {}
     void SetAudioSink(voicelife::voice::AudioFrameSink sink) override { audio_sink_ = std::move(sink); }
     Status Open(const voicelife::voice::AudioFormat& format) override {
         ++opens;
@@ -26,7 +27,10 @@ class FakeInput final : public voicelife::voice::AudioInputPort {
         ++stops;
         return stop_result;
     }
-    void Close() override { ++closes; }
+    void Close() override {
+        ++closes;
+        if (close_order_ != nullptr) close_order_->push_back('i');
+    }
 
     Status EmitCapture(voicelife::voice::AudioFrame frame) {
         return audio_sink_ ? audio_sink_(std::move(frame))
@@ -44,10 +48,12 @@ class FakeInput final : public voicelife::voice::AudioInputPort {
 
    private:
     voicelife::voice::AudioFrameSink audio_sink_;
+    std::vector<char>* close_order_ = nullptr;
 };
 
 class FakeOutput final : public voicelife::voice::AudioOutputPort {
    public:
+    explicit FakeOutput(std::vector<char>* close_order = nullptr) : close_order_(close_order) {}
     Status Open(const voicelife::voice::AudioFormat& format) override {
         ++opens;
         opened_format = format;
@@ -62,7 +68,10 @@ class FakeOutput final : public voicelife::voice::AudioOutputPort {
         return flush_result;
     }
     bool IsIdle() const override { return true; }
-    void Close() override { ++closes; }
+    void Close() override {
+        ++closes;
+        if (close_order_ != nullptr) close_order_->push_back('o');
+    }
 
     Status open_result = Status::Ok();
     Status push_result = Status::Ok();
@@ -72,6 +81,9 @@ class FakeOutput final : public voicelife::voice::AudioOutputPort {
     int pushes = 0;
     int flushes = 0;
     int closes = 0;
+
+   private:
+    std::vector<char>* close_order_ = nullptr;
 };
 
 class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
@@ -105,6 +117,12 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
         ++speaks;
         return speak_result;
     }
+    Status NotifyLocalWakeWord(std::string_view wake_word, std::string_view text_response = {}) override {
+        ++wake_notifications;
+        last_wake_word = std::string(wake_word);
+        last_wake_response = std::string(text_response);
+        return wake_notification_result;
+    }
     Status Disconnect() override {
         ++disconnects;
         return disconnect_result;
@@ -136,6 +154,7 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
     Status send_result = Status::Ok();
     Status abort_result = Status::Ok();
     Status speak_result = Status::Ok();
+    Status wake_notification_result = Status::Ok();
     Status disconnect_result = Status::Ok();
     int connects = 0;
     int starts = 0;
@@ -143,7 +162,10 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
     int audio_frames = 0;
     int aborts = 0;
     int speaks = 0;
+    int wake_notifications = 0;
     int disconnects = 0;
+    std::string last_wake_word;
+    std::string last_wake_response;
 };
 
 voicelife::voice::VoiceSessionConfig Config() {
@@ -176,15 +198,43 @@ int main() {
           "注册 Provider 应可按能力创建");
     auto missing_capability = registry.Create("fake-registry", {"aec"});
     Check(missing_capability.status.code == ErrorCode::kUnavailable, "缺少能力时不能静默降级");
-    FakeInput input;
-    FakeOutput output;
+    std::vector<char> close_order;
+    FakeInput input(&close_order);
+    FakeOutput output(&close_order);
     FakeProvider provider;
     int evidence_count = 0;
-    voicelife::voice::VoiceSession session(
-        input, output, provider, [&evidence_count](const voicelife::voice::VoiceEvidence&) { ++evidence_count; });
+    std::vector<voicelife::voice::VoiceEvidence> evidence;
+    voicelife::voice::VoiceSession session(input, output, provider,
+                                           [&evidence_count, &evidence](const voicelife::voice::VoiceEvidence& item) {
+                                               ++evidence_count;
+                                               evidence.push_back(item);
+                                           });
 
     Check(session.Start(Config()).ok(), "合法配置应启动语音会话");
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady, "启动后应进入 ready");
+    Check(session.NotifyLocalWakeWord("你好牛牛", "收到！").ok() && provider.wake_notifications == 1 &&
+              provider.last_wake_word == "你好牛牛" && provider.last_wake_response == "收到！",
+          "本地唤醒确认必须只通过 Provider 请求受控 TTS");
+    provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
+                                               .generation = session.generation(),
+                                               .text = {},
+                                               .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kSpeaking,
+          "本地唤醒确认的真实 TTS start 才能进入 speaking");
+    provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStopped,
+                                               .generation = session.generation(),
+                                               .text = {},
+                                               .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
+          "本地唤醒确认 TTS 结束后会话必须允许开始真实聆听");
+    session.ReportToolCallStarted();
+    session.ReportToolResult("event=创建会议", true);
+    Check(session.state() == voicelife::voice::VoiceSessionState::kReady && provider.audio_frames == 0 &&
+              output.pushes == 0,
+          "MCP 语义证据不得伪造音频、改变会话状态或绕过 VoiceSession");
+    Check(evidence.size() >= 3 && evidence[evidence.size() - 2].event == "mcp_tool_started" &&
+              evidence.back().event == "mcp_tool_result" && evidence.back().detail == "event=创建会议",
+          "MCP worker 只能通过 VoiceSession 的受控 evidence 出口回注结果");
     const uint64_t generation = session.generation();
     // 空闲（kReady）收到服务端残留 TTS start 必须忽略，不进入播报。
     provider.Emit(voicelife::voice::VoiceEvent{
@@ -204,6 +254,16 @@ int main() {
           "收到有效 STT 后 TTS start 应进入播报状态");
     Check(provider.EmitAudio(Frame(generation, 0)).ok() && output.pushes == 1,
           "TTS start 后的下行音频应通过会话输出端口");
+    Check(!evidence.empty() && evidence.back().event == "tts_first_audio",
+          "每段 TTS 首个成功播放帧必须提供无内容的时延证据");
+    const std::size_t evidence_before_late_asr = evidence.size();
+    provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kAsrText,
+                                               .generation = generation,
+                                               .text = "迟到的上一段识别",
+                                               .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kSpeaking &&
+              evidence.size() == evidence_before_late_asr + 1 && evidence.back().event == "stale_event_dropped",
+          "播报中的迟到 STT 必须在 VoiceSession 丢弃，不能重新驱动交互状态");
     session.EndCapture();
     provider.Emit(voicelife::voice::VoiceEvent{
         .kind = voicelife::voice::VoiceEventKind::kTtsStopped, .generation = generation, .text = {}, .aborted = false});
@@ -254,11 +314,18 @@ int main() {
           "打断应刷新播放并让 Provider 切换到新 generation");
     Check(provider.EmitAudio(Frame(generation, 1)).code == ErrorCode::kUnavailable && output.pushes == 2,
           "打断后迟到的旧 generation 音频不得重新进入播放队列");
+    provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
+                                               .generation = session.generation(),
+                                               .text = {},
+                                               .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
+          "打断后即使迟到 TTS 被归入新 generation 也不得复活旧播报");
     provider.Emit(voicelife::voice::VoiceEvent{});
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
           "缺少 generation 的迟到 Provider 事件不能改变新会话状态");
     Check(session.Stop().ok() && session.state() == voicelife::voice::VoiceSessionState::kStopped,
           "停止应关闭 Provider 和音频端口");
+    Check(close_order == std::vector<char>{'i', 'o'}, "共享双工设备必须先停止输入，再关闭输出 codec");
     Check(input.EmitCapture(Frame(0, 0)).code == ErrorCode::kUnavailable,
           "停止会话应清理输入回调，避免资源关闭后的迟到帧");
     Check(evidence_count >= 4, "会话生命周期应产出可关联的证据事件");

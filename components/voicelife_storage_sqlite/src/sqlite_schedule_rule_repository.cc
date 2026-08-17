@@ -60,7 +60,8 @@ Result<ScheduleRule> SqliteScheduleRuleRepository::InsertRuleLocked(const Schedu
     if (!bound.ok()) return Result<ScheduleRule>::Failure(bound.code, bound.message);
     const Result<SqliteStep> stepped = statement.Step();
     if (!stepped.ok()) return Result<ScheduleRule>::Failure(stepped.status.code, stepped.status.message);
-    if (*stepped.value != SqliteStep::kDone) return Result<ScheduleRule>::Failure(ErrorCode::kInternal, "插入规则未完成");
+    if (*stepped.value != SqliteStep::kDone)
+        return Result<ScheduleRule>::Failure(ErrorCode::kInternal, "插入规则未完成");
     normalized.id = statement.LastInsertRowId();
     return Result<ScheduleRule>::Success(std::move(normalized));
 }
@@ -86,7 +87,8 @@ Result<Schedule> SqliteScheduleRuleRepository::InsertScheduleLocked(const Schedu
 
 Result<ScheduleRule> SqliteScheduleRuleRepository::Insert(const ScheduleRule& rule) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!database_.IsOpen()) return Result<ScheduleRule>::Failure(ErrorCode::kUnavailable, DatabaseUnavailable().message);
+    if (!database_.IsOpen())
+        return Result<ScheduleRule>::Failure(ErrorCode::kUnavailable, DatabaseUnavailable().message);
     if (rule.event.empty()) return Result<ScheduleRule>::Failure(ErrorCode::kInvalidArgument, "规则名称不能为空");
     return InsertRuleLocked(rule);
 }
@@ -110,14 +112,17 @@ Status SqliteScheduleRuleRepository::Update(const ScheduleRule& rule) {
 
 Result<std::vector<ScheduleRule>> SqliteScheduleRuleRepository::FindAll() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!database_.IsOpen()) return Result<std::vector<ScheduleRule>>::Failure(ErrorCode::kUnavailable, "SQLite 数据库尚未打开");
+    if (!database_.IsOpen())
+        return Result<std::vector<ScheduleRule>>::Failure(ErrorCode::kUnavailable, "SQLite 数据库尚未打开");
     Result<SqliteStatement> prepared = database_.Prepare(sql::kFindAllScheduleRules);
-    if (!prepared.ok()) return Result<std::vector<ScheduleRule>>::Failure(prepared.status.code, prepared.status.message);
+    if (!prepared.ok())
+        return Result<std::vector<ScheduleRule>>::Failure(prepared.status.code, prepared.status.message);
     SqliteStatement statement = std::move(*prepared.value);
     std::vector<ScheduleRule> rules;
     while (true) {
         const Result<SqliteStep> stepped = statement.Step();
-        if (!stepped.ok()) return Result<std::vector<ScheduleRule>>::Failure(stepped.status.code, stepped.status.message);
+        if (!stepped.ok())
+            return Result<std::vector<ScheduleRule>>::Failure(stepped.status.code, stepped.status.message);
         if (*stepped.value == SqliteStep::kDone) break;
         const Result<ScheduleRule> row = mapping::ReadScheduleRule(statement);
         if (!row.ok()) return Result<std::vector<ScheduleRule>>::Failure(row.status.code, row.status.message);
@@ -173,11 +178,12 @@ Result<ScheduleRule> SqliteScheduleRuleRepository::CreateWithFirstInstance(
     return Result<ScheduleRule>::Success(*inserted_rule.value);
 }
 
-Result<ScheduleRule> SqliteScheduleRuleRepository::UpdateAndRebuild(
-    const ScheduleRule& rule, const std::optional<Schedule>& first_instance) {
+Result<ScheduleRule> SqliteScheduleRuleRepository::UpdateAndRebuild(const ScheduleRule& rule,
+                                                                    const std::optional<Schedule>& first_instance) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!database_.IsOpen()) return Result<ScheduleRule>::Failure(ErrorCode::kUnavailable, "SQLite 数据库尚未打开");
-    if (rule.id <= 0 || rule.event.empty()) return Result<ScheduleRule>::Failure(ErrorCode::kInvalidArgument, "规则标识或名称无效");
+    if (rule.id <= 0 || rule.event.empty())
+        return Result<ScheduleRule>::Failure(ErrorCode::kInvalidArgument, "规则标识或名称无效");
 
     const Status begin = database_.BeginTransaction();
     if (!begin.ok()) return Result<ScheduleRule>::Failure(begin.code, begin.message);
@@ -277,7 +283,7 @@ Result<ScheduleRule> SqliteScheduleRuleRepository::UpdateAndRebuild(
 }
 
 Status SqliteScheduleRuleRepository::CancelRuleAndInstances(schedule::ScheduleRuleId id,
-                                                             int64_t& cancelled_instance_count) {
+                                                            int64_t& cancelled_instance_count) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!database_.IsOpen()) return DatabaseUnavailable();
     if (id <= 0) return Status::Error(ErrorCode::kInvalidArgument, "规则标识无效");
@@ -377,7 +383,8 @@ Result<std::optional<ScheduleException>> SqliteScheduleRuleRepository::FindByRul
     status = statement.BindInt64(2, original_start_time.time_since_epoch().count());
     if (!status.ok()) return Result<std::optional<ScheduleException>>::Failure(status.code, status.message);
     const Result<SqliteStep> stepped = statement.Step();
-    if (!stepped.ok()) return Result<std::optional<ScheduleException>>::Failure(stepped.status.code, stepped.status.message);
+    if (!stepped.ok())
+        return Result<std::optional<ScheduleException>>::Failure(stepped.status.code, stepped.status.message);
     if (*stepped.value != SqliteStep::kRow) return Result<std::optional<ScheduleException>>::Success(std::nullopt);
     const Result<ScheduleException> row = mapping::ReadScheduleException(statement);
     if (!row.ok()) return Result<std::optional<ScheduleException>>::Failure(row.status.code, row.status.message);
@@ -385,8 +392,10 @@ Result<std::optional<ScheduleException>> SqliteScheduleRuleRepository::FindByRul
 }
 
 Result<ScheduleException> SqliteScheduleRuleRepository::UpsertExceptionLocked(const ScheduleException& exception) {
-    if (!database_.IsOpen()) return Result<ScheduleException>::Failure(ErrorCode::kUnavailable, "SQLite 数据库尚未打开");
-    if (exception.rule_id <= 0) return Result<ScheduleException>::Failure(ErrorCode::kInvalidArgument, "例外规则标识无效");
+    if (!database_.IsOpen())
+        return Result<ScheduleException>::Failure(ErrorCode::kUnavailable, "SQLite 数据库尚未打开");
+    if (exception.rule_id <= 0)
+        return Result<ScheduleException>::Failure(ErrorCode::kInvalidArgument, "例外规则标识无效");
 
     ScheduleException normalized = exception;
     const DateTime now = Now();
@@ -401,7 +410,8 @@ Result<ScheduleException> SqliteScheduleRuleRepository::UpsertExceptionLocked(co
     if (!bound.ok()) return Result<ScheduleException>::Failure(bound.code, bound.message);
     const Result<SqliteStep> stepped = statement.Step();
     if (!stepped.ok()) return Result<ScheduleException>::Failure(stepped.status.code, stepped.status.message);
-    if (*stepped.value != SqliteStep::kDone) return Result<ScheduleException>::Failure(ErrorCode::kInternal, "写入例外未完成");
+    if (*stepped.value != SqliteStep::kDone)
+        return Result<ScheduleException>::Failure(ErrorCode::kInternal, "写入例外未完成");
 
     const Result<std::optional<ScheduleException>> found =
         FindByRuleAndTimeLocked(exception.rule_id, exception.original_start_time);
@@ -415,7 +425,8 @@ Result<ScheduleException> SqliteScheduleRuleRepository::Upsert(const ScheduleExc
     return UpsertExceptionLocked(exception);
 }
 
-Result<std::vector<ScheduleException>> SqliteScheduleRuleRepository::FindByRule(schedule::ScheduleRuleId rule_id) const {
+Result<std::vector<ScheduleException>> SqliteScheduleRuleRepository::FindByRule(
+    schedule::ScheduleRuleId rule_id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!database_.IsOpen()) {
         return Result<std::vector<ScheduleException>>::Failure(ErrorCode::kUnavailable, "SQLite 数据库尚未打开");
@@ -430,7 +441,8 @@ Result<std::vector<ScheduleException>> SqliteScheduleRuleRepository::FindByRule(
     std::vector<ScheduleException> exceptions;
     while (true) {
         const Result<SqliteStep> stepped = statement.Step();
-        if (!stepped.ok()) return Result<std::vector<ScheduleException>>::Failure(stepped.status.code, stepped.status.message);
+        if (!stepped.ok())
+            return Result<std::vector<ScheduleException>>::Failure(stepped.status.code, stepped.status.message);
         if (*stepped.value == SqliteStep::kDone) break;
         const Result<ScheduleException> row = mapping::ReadScheduleException(statement);
         if (!row.ok()) return Result<std::vector<ScheduleException>>::Failure(row.status.code, row.status.message);

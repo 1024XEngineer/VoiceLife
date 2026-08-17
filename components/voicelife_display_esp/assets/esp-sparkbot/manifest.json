@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "board_id": "esp-sparkbot",
+  "asset_kind": "mascot_gif_common_text_font",
+  "source": {
+    "upstream_repository": "78/xiaozhi-esp32",
+    "upstream_commit": "37d1aee793f99a9b865957acc3798d06335c3ad0",
+    "upstream_commit_subject": "feat: adapt SparkBot display and compact assets",
+    "upstream_dir": "main/boards/espressif/esp-sparkbot/emoji",
+    "copy_worktree": ".worktrees/esp-sparkbot-display-design",
+    "copy_source_dir": "assets/esp-sparkbot/mascot/gifs",
+    "license": "MIT",
+    "license_holders": [
+      "Shenzhen Xinzhi Future Technology Co., Ltd.",
+      "Project Contributors"
+    ],
+    "note": "官方 emoji 目录另有 neutral.gif 与 robot_2.gif，本轮未复制，不在本清单范围内。"
+  },
+  "loading": {
+    "mode": "embedded_manifest_only",
+    "allow_network_url": false,
+    "allow_arbitrary_path": false,
+    "allow_arbitrary_bytes": false
+  },
+  "budget": {
+    "gif_bytes": 142683,
+    "common_text_font_bytes": 885948,
+    "total_bytes": 1028631,
+    "assets_partition_bytes": 1048576,
+    "single_frame_rgb565_bytes": 18432,
+    "psram_decode_peak_bytes": null,
+    "psram_note": "GIF 解码峰值内存尚未测量；Renderer 移植时以真机 heap 证据补充。",
+    "assets_image_sha256": "bbb9c25b3812b60b74837176e267c147132ae0ff17185da123ad4514deb832af",
+    "assets_image_bytes": 1029149
+  },
+  "text_font": {
+    "file": "font_noto_sans_common_16_4.bin",
+    "source": "78/xiaozhi-fonts@2.0.0",
+    "size_px": 16,
+    "bpp": 4,
+    "line_height": 25,
+    "base_line": 9,
+    "size_bytes": 885948,
+    "sha256": "6c801b34ec686e6e31223eceedea2efe5b0cf294b3556d91087a683c86a54384"
+  },
+  "verification": {
+    "verified_on_device": false,
+    "note": "官方固件 xiaozhi 2.4.0 在实板显示过该素材；VoiceLife 侧尚无实板显示证据。"
+  },
+  "assets": [
+    {
+      "asset_id": "boot",
+      "file": "boot.gif",
+      "width": 96,
+      "height": 96,
+      "frame_count": 7,
+      "duration_ms": 2200,
+      "size_bytes": 22942,
+      "sha256": "3b4df97606e0fb92ffd9a6ca5880463fabe82659f2b664af664955e351408c69"
+    },
+    {
+      "asset_id": "connecting",
+      "file": "connecting.gif",
+      "width": 96,
+      "height": 96,
+      "frame_count": 4,
+      "duration_ms": 2880,
+      "size_bytes": 11385,
+      "sha256": "e32e2f91e1c8adab5e7e912ccf84c6a95a977df2d6ee98ee743abe3584523584"
+    },
+    {
+      "asset_id": "error",
+      "file": "error.gif",
+      "width": 96,
+      "height": 96,
+      "frame_count": 4,
+      "duration_ms": 1980,
+      "size_bytes": 10434,
+      "sha256": "230d5337e4063c89c478c007c7b1f1cc941a0f9fa8c5b5f014129de00669bec8"
+    },
+    {
+      "asset_id": "happy",
+      "file": "happy.gif",
+      "width": 96,
+      "height": 96,
+      "frame_count": 5,
+      "duration_ms": 3000,
+      "size_bytes": 14135,
+      "sha256": "1e460334267a6242e1f009670bbcb1a5748862e9f3a8c2c2f1d5667574d2164e"
+    },
+    {
+      "asset_id": "idle",
+      "file": "idle.gif",
+      "width": 96,
+      "height": 96,
+      "frame_count": 5,
+      "duration_ms": 2200,
+      "size_bytes": 13251,
+      "sha256": "187be038ad8573f490869d72699d4d6716e03f95cd72dac6cb4aac2c6201ed15"
+    },
+    {
+      "asset_id": "listening",
+      "file": "listening.gif",
+      "width": 96,
+      "height": 96,
+      "frame_count": 4,
+      "duration_ms": 2400,
+      "size_bytes": 11349,
+      "sha256": "96c907c4d6102f10db59aaef909cf05856debcf84bbd67fdcea0a63019921293"
+    },
+    {
+      "asset_id": "provisioning",
+      "file": "provisioning.gif",
+      "width": 96,
+      "height": 96,
+      "frame_count": 5,
+      "duration_ms": 2520,
+      "size_bytes": 11949,
+      "sha256": "bf555304e1f4a54264d8d8dd3731eefba17e0208b8f09ba8bec62f91e68a86e0"
+    },
+    {
+      "asset_id": "sleepy",
+      "file": "sleepy.gif",
+      "width": 96,
+      "height": 96,
+      "frame_count": 3,
+      "duration_ms": 2560,
+      "size_bytes": 7707,
+      "sha256": "9dc13038a4694cb493b767a3fd25d14cc457e0aa1d3528fec0cd83f13ac3205e"
+    },
+    {
+      "asset_id": "speaking",
+      "file": "speaking.gif",
+      "width": 96,
+      "height": 96,
+      "frame_count": 7,
+      "duration_ms": 2240,
+      "size_bytes": 19782,
+      "sha256": "29cf447c14c5f95a5804cca346df05cf051fbb742e0e57293d174d89037163d8"
+    },
+    {
+      "asset_id": "thinking",
+      "file": "thinking.gif",
+      "width": 96,
+      "height": 96,
+      "frame_count": 7,
+      "duration_ms": 2640,
+      "size_bytes": 19749,
+      "sha256": "abde245a113f0e307cfd245d8d32d348fb930a366e9177dad47d85f32c36ee75"
+    }
+  ]
+}

@@ -6,8 +6,8 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 #include <variant>
+#include <vector>
 
 #include "voicelife/contracts/json.h"
 #include "voicelife/contracts/status.h"
@@ -36,6 +36,7 @@ using ToolOutputObject = std::vector<std::pair<std::string, std::shared_ptr<Tool
 
 /// 工具返回的结构化 JSON 值。
 struct ToolOutputValue {
+    /** @brief 工具输出节点支持的运行时类型。 */
     enum class Kind { kNull, kBoolean, kInteger, kString, kArray, kObject };
 
     Kind kind = Kind::kNull;

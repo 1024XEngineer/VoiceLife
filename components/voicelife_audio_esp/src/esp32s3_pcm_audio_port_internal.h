@@ -78,8 +78,14 @@ class Esp32s3PcmAudioPorts::Impl final {
         Impl& owner_;
     };
 
-    Impl(AudioBoardProfile profile, AudioPortOptions options)
-        : profile_(std::move(profile)), options_(options), input_port_(*this), output_port_(*this) {}
+    using AmplifierCallback = std::function<void(bool)>;
+
+    Impl(AudioBoardProfile profile, AudioPortOptions options, AmplifierCallback amplifier_callback)
+        : profile_(std::move(profile)),
+          options_(options),
+          input_port_(*this),
+          output_port_(*this),
+          amplifier_callback_(std::move(amplifier_callback)) {}
 
     ~Impl();
 
@@ -87,7 +93,7 @@ class Esp32s3PcmAudioPorts::Impl final {
     OutputPort& output() { return output_port_; }
 
     AudioPortStats stats() const;
-    void SetOutputVolume(uint8_t volume) { output_volume_.store(volume > 100 ? 100 : volume); }
+    void SetOutputVolume(uint8_t volume);
     uint8_t output_volume() const { return output_volume_.load(); }
 
    private:
@@ -123,6 +129,12 @@ class Esp32s3PcmAudioPorts::Impl final {
     AudioPortOptions options_;
     InputPort input_port_;
     OutputPort output_port_;
+    /** @brief 功放请求回调（经板级仲裁，不得直接写 GPIO）。 */
+    std::function<void(bool)> amplifier_callback_;
+    /** @brief ES8311 是否已初始化（duplex 首次打开时）。 */
+    [[maybe_unused]] bool codec_initialized_ = false;
+    /** @brief ES8311 Codec 设备句柄（归属本 AudioPorts，Close 时释放）。 */
+    [[maybe_unused]] void* codec_dev_ = nullptr;
     mutable std::mutex mutex_;
     std::condition_variable input_cv_;
     std::condition_variable output_cv_;
@@ -153,6 +165,19 @@ class Esp32s3PcmAudioPorts::Impl final {
     std::atomic<std::size_t> input_high_watermark_{0};
     std::atomic<std::size_t> output_high_watermark_{0};
     std::atomic<uint8_t> output_volume_{70};
+    std::atomic<uint64_t> input_pcm_bytes_{0};
+    std::atomic<uint64_t> output_pcm_bytes_{0};
+    std::atomic<uint64_t> input_samples_{0};
+    std::atomic<uint64_t> input_sum_squares_{0};
+    std::atomic<uint64_t> output_samples_{0};
+    std::atomic<uint64_t> output_sum_squares_{0};
+    std::atomic<uint16_t> input_peak_{0};
+    std::atomic<uint16_t> output_peak_{0};
+    std::atomic<uint64_t> input_zero_periods_{0};
+    std::atomic<uint64_t> output_zero_periods_{0};
+    std::atomic<uint64_t> output_clipped_samples_{0};
+    std::atomic<uint64_t> input_i2s_errors_{0};
+    std::atomic<uint64_t> output_i2s_errors_{0};
 
 #ifdef ESP_PLATFORM
     i2s_chan_handle_t tx_channel_ = nullptr;

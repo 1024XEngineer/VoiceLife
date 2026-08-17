@@ -1,0 +1,6 @@
+{
+  "userId": "user-fixture",
+  "deviceId": "device-fixture",
+  "allowedPlatforms": ["wechat_official"],
+  "expiresInMinutes": 5
+}

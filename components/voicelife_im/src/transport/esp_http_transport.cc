@@ -103,8 +103,13 @@ ImHttpResponse EspHttpTransport::Perform(const ImHttpRequest& request, esp_http_
         }
     }
 
-    const esp_err_t err = esp_http_client_perform(client);
-    if (err != ESP_OK) {
+    // 用 open → write → fetch_headers → read 序列读取响应体，而不是 perform()：
+    // perform() 会在 HTTP_EVENT_ON_DATA 状态下把 2xx 响应体内部读取并丢弃，
+    // 之后 esp_http_client_read() 读不到 body（#241 真机配对 201 响应被整段丢弃）。
+    // open() 发送请求行与请求头并建立连接，write() 发送 POST 请求体，
+    // fetch_headers() 只消费响应头（响应体仍留在传输层，由 read() 逐块取回）。
+    const esp_err_t open_err = esp_http_client_open(client, static_cast<int>(request.body.size()));
+    if (open_err != ESP_OK) {
         result.status_code = esp_http_client_get_status_code(client);
         if (result.status_code == 401 || result.status_code == 403) {
             result.status = ImTransportStatus::kCredentialRejected;
@@ -112,31 +117,52 @@ ImHttpResponse EspHttpTransport::Perform(const ImHttpRequest& request, esp_http_
             esp_http_client_cleanup(client);
             return result;
         }
-        ESP_LOGW(kTag, "HTTPS 提交失败：%s", esp_err_to_name(err));
+        ESP_LOGW(kTag, "HTTPS 连接/请求头提交失败：%s", esp_err_to_name(open_err));
         result.status = ImTransportStatus::kNetworkFailure;
-        result.message = esp_err_to_name(err);
+        result.message = esp_err_to_name(open_err);
         esp_http_client_cleanup(client);
         return result;
     }
-
+    if (method == HTTP_METHOD_POST && !request.body.empty()) {
+        const int written = esp_http_client_write(client, request.body.data(), static_cast<int>(request.body.size()));
+        if (written < 0 || static_cast<size_t>(written) != request.body.size()) {
+            ESP_LOGW(kTag, "POST 请求体提交失败：写入 %d/%u 字节", written, static_cast<unsigned>(request.body.size()));
+            result.status = ImTransportStatus::kNetworkFailure;
+            result.message = "POST 请求体提交失败";
+            esp_http_client_cleanup(client);
+            return result;
+        }
+    }
+    const int content_length = esp_http_client_fetch_headers(client);
+    if (content_length < 0) {
+        ESP_LOGW(kTag, "HTTP 头解析失败：%d", content_length);
+        result.status = ImTransportStatus::kNetworkFailure;
+        result.message = "HTTP 头解析失败";
+        esp_http_client_cleanup(client);
+        return result;
+    }
     result.status_code = esp_http_client_get_status_code(client);
     result.message = std::to_string(result.status_code);
-    EspResponseReader reader(client);
-    const bool complete_body = ReadResponseBody(reader, result.body, kMaxResponseBodyBytes);
+    if (result.status_code == 401 || result.status_code == 403) {
+        result.status = ImTransportStatus::kCredentialRejected;
+        esp_http_client_cleanup(client);
+        return result;
+    }
     if (result.status_code >= 200 && result.status_code < 300) {
         result.status = ImTransportStatus::kSuccess;
-        // 响应体提前 EOF、读取错误或超限截断都不得按成功受理处理：
-        // 不完整的 NotificationSubmission 无法提取可靠动作窗口，
-        // 按未确认处理由调用方重连重放。
-        if (!complete_body) {
-            ESP_LOGW(kTag, "受理结果响应不完整（读取错误或超过 %zu 字节上限），按未受理处理", kMaxResponseBodyBytes);
-            result.status = ImTransportStatus::kNetworkFailure;
-            result.message = "受理结果响应不完整";
-        }
-    } else if (result.status_code == 401 || result.status_code == 403) {
-        result.status = ImTransportStatus::kCredentialRejected;
     } else {
         result.status = ImTransportStatus::kHttpError;
+    }
+
+    EspResponseReader reader(client);
+    const bool complete_body = ReadResponseBody(reader, result.body, kMaxResponseBodyBytes);
+    // 响应体提前 EOF、读取错误或超限截断都不得按成功受理处理：
+    // 不完整的 NotificationSubmission 无法提取可靠动作窗口，
+    // 按未确认处理由调用方重连重放。
+    if (result.status == ImTransportStatus::kSuccess && !complete_body) {
+        ESP_LOGW(kTag, "受理结果响应不完整（读取错误或超过 %zu 字节上限），按未受理处理", kMaxResponseBodyBytes);
+        result.status = ImTransportStatus::kNetworkFailure;
+        result.message = "受理结果响应不完整";
     }
     if (!complete_body && result.status != ImTransportStatus::kNetworkFailure) result.body.clear();
     esp_http_client_cleanup(client);

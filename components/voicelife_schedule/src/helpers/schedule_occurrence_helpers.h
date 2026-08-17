@@ -15,8 +15,8 @@ namespace voicelife::schedule {
  * @param exception_schedule_id 单次例外中已经关联的日程标识；有值时优先按 ID 读取。
  * @return 已物化实例；不存在或关联 ID 已失效时 value 为空。
  */
-Result<std::optional<Schedule>> FindMaterializedScheduleOccurrence(
-    ScheduleRepository& repository, ScheduleRuleId rule_id, DateTime original_start_time,
-    std::optional<ScheduleId> exception_schedule_id);
+Result<std::optional<Schedule>> FindMaterializedScheduleOccurrence(ScheduleRepository& repository,
+                                                                   ScheduleRuleId rule_id, DateTime original_start_time,
+                                                                   std::optional<ScheduleId> exception_schedule_id);
 
 }  // namespace voicelife::schedule

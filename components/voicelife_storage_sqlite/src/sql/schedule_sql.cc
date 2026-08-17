@@ -67,8 +67,8 @@ std::string BuildScheduleFindSql(const schedule::QueryScheduleCommand& query) {
     return R"sql(
 SELECT id, event, start_time, end_time, location, notes, rule_id, status, created_at, updated_at
 FROM schedule
-)sql" +
-           BuildScheduleWhere() + R"sql(
+)sql" + BuildScheduleWhere() +
+           R"sql(
 ORDER BY
   CASE
     WHEN ?4 IS NOT NULL AND lower(event) = lower(?4) THEN 100
@@ -88,8 +88,7 @@ std::string BuildScheduleCountSql(const schedule::QueryScheduleCommand& query) {
     return R"sql(
 SELECT COUNT(*)
 FROM schedule
-)sql" +
-           BuildScheduleWhere();
+)sql" + BuildScheduleWhere();
 }
 
 }  // namespace voicelife::storage_sqlite::sql

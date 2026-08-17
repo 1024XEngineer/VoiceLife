@@ -40,6 +40,10 @@ Status ValidateEndpoint(const I2sEndpointProfile& endpoint) {
     if ((endpoint.wire_bits_per_sample == 16 && endpoint.pcm_shift_bits != 0) || endpoint.pcm_shift_bits > 16) {
         return Invalid("I2S PCM 对齐位数与 wire sample 不匹配");
     }
+    const uint8_t wire_slots = endpoint.wire_slot_count == 0 ? endpoint.format.channels : endpoint.wire_slot_count;
+    if (wire_slots == 0 || wire_slots > 2 || wire_slots < endpoint.format.channels) {
+        return Invalid("I2S 物理 slot 数必须覆盖逻辑 PCM 通道数且最多为双声道");
+    }
     return Status::Ok();
 }
 
@@ -75,7 +79,8 @@ Status AudioBoardProfile::Validate() const {
         if (capture_i2s.port != playback_i2s.port || capture_i2s.mclk != playback_i2s.mclk ||
             capture_i2s.bclk != playback_i2s.bclk || capture_i2s.ws != playback_i2s.ws ||
             capture_i2s.format.sample_rate_hz != playback_i2s.format.sample_rate_hz ||
-            capture_i2s.wire_bits_per_sample != playback_i2s.wire_bits_per_sample) {
+            capture_i2s.wire_bits_per_sample != playback_i2s.wire_bits_per_sample ||
+            capture_i2s.wire_slot_count != playback_i2s.wire_slot_count) {
             return Invalid("外部 Codec 双工端点必须共享 I2S port、时钟与 wire sample");
         }
         pins = {capture_i2s.mclk, capture_i2s.bclk, capture_i2s.ws, capture_i2s.data, playback_i2s.data};
@@ -99,10 +104,12 @@ Status AudioBoardProfile::Validate() const {
         if (control.addresses.es8311_8bit == 0 || (control.addresses.es8311_8bit & 1U) != 0) {
             return Invalid("ES8311 必须使用合法的 8-bit 偶数 I2C 地址");
         }
-        if (control.addresses.es7210_8bit == 0 || (control.addresses.es7210_8bit & 1U) != 0) {
+        // ES7210/PCA9557 为可选接线：地址为 0 表示未接线（ES8311-only 板型合法），
+        // 非零时仍校验合法性。
+        if (control.addresses.es7210_8bit != 0 && (control.addresses.es7210_8bit & 1U) != 0) {
             return Invalid("ES7210 必须使用合法的 8-bit 偶数 I2C 地址");
         }
-        if (control.addresses.pca9557_7bit == 0 || control.addresses.pca9557_7bit >= 0x80) {
+        if (control.addresses.pca9557_7bit != 0 && control.addresses.pca9557_7bit >= 0x80) {
             return Invalid("PCA9557 必须使用合法的 7-bit I2C 地址");
         }
         pins.push_back(control.i2c.sda);
@@ -190,6 +197,44 @@ AudioBoardProfile VoiceLifePcbEsp32s3Profile() {
                                    .frame_duration_ms = 10};
     profile.playback_i2s.wire_bits_per_sample = 32;
     profile.playback_i2s.pcm_shift_bits = 16;
+    profile.dma_desc_num = 6;
+    profile.dma_frame_num = 240;
+    profile.input_reference = false;
+    return profile;
+}
+
+AudioBoardProfile SparkBotEsp32s3AudioProfile() {
+    AudioBoardProfile profile;
+    profile.id = "esp32s3-esp-sparkbot";
+    profile.topology = AudioBoardTopology::kExternalCodecDuplex;
+    profile.capture_i2s.port = 0;
+    profile.capture_i2s.mclk = 45;
+    profile.capture_i2s.bclk = 39;
+    profile.capture_i2s.ws = 41;
+    profile.capture_i2s.data = 40;
+    profile.capture_i2s.format = {.codec = voice::AudioCodec::kPcmS16Le,
+                                  .sample_rate_hz = 16000,
+                                  .channels = 1,
+                                  .bits_per_sample = 16,
+                                  .frame_duration_ms = 20};
+    profile.capture_i2s.wire_slot_count = 2;
+    profile.playback_i2s.port = 0;
+    profile.playback_i2s.mclk = 45;
+    profile.playback_i2s.bclk = 39;
+    profile.playback_i2s.ws = 41;
+    profile.playback_i2s.data = 42;
+    profile.playback_i2s.format = {.codec = voice::AudioCodec::kPcmS16Le,
+                                   .sample_rate_hz = 16000,
+                                   .channels = 1,
+                                   .bits_per_sample = 16,
+                                   .frame_duration_ms = 20};
+    profile.playback_i2s.wire_slot_count = 2;
+    CodecControlProfile codec_control;
+    codec_control.i2c_port = 0;
+    codec_control.i2c.sda = 4;
+    codec_control.i2c.scl = 5;
+    codec_control.addresses.es8311_8bit = 0x30;  // ES8311 7bit 0x18 含读写位
+    profile.codec_control = codec_control;
     profile.dma_desc_num = 6;
     profile.dma_frame_num = 240;
     profile.input_reference = false;

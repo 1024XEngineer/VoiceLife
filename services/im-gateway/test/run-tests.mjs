@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import {
     ImGatewayError,
     createMockImGateway,
+    parseCreatePairingSessionRequest,
     parseNotificationIntent,
     parseReminderActionIntent,
     parseReminderActionResult,
@@ -71,12 +72,37 @@ async function submitFixture(gateway, body) {
 }
 
 async function runContractFixtureTests() {
+    const pairingRequest = await readFixture('pairing-create-request.json');
+    const minimalPairingRequest = await readFixture('pairing-create-request-minimal.json');
+    const expiredPairing = await readFixture('pairing-status-expired.json');
+    const cancelledPairing = await readFixture('pairing-status-cancelled.json');
     const scheduleReceipt = await readFixture('schedule-receipt.json');
     const strong = await readFixture('notification-strong.json');
     const replay = await readFixture('notification-strong-replay.json');
     const weak = await readFixture('notification-weak.json');
     const conflict = await readFixture('notification-conflict.json');
     const actionResult = await readFixture('reminder-action-result.json');
+
+    assert(
+        parseCreatePairingSessionRequest(pairingRequest).expiresInMinutes === 5,
+        'Pairing create request fixture did not preserve expiresInMinutes',
+    );
+    assert(
+        parseCreatePairingSessionRequest(minimalPairingRequest).deviceId === 'device-fixture',
+        'Minimal pairing create request fixture did not parse',
+    );
+    assert(
+        expiredPairing.status === 'expired' && cancelledPairing.status === 'cancelled',
+        'Pairing terminal fixtures must preserve the public status enum',
+    );
+    for (const name of ['pairing-create-request-invalid-expiry.json', 'pairing-create-request-invalid-platform.json']) {
+        const invalidPairingRequest = await readFixture(name);
+        await expectGatewayError(
+            () => Promise.resolve(parseCreatePairingSessionRequest(invalidPairingRequest)),
+            'invalid_contract',
+            `${name} was accepted by the runtime parser`,
+        );
+    }
 
     assert(
         parseScheduleReceiptIntent(scheduleReceipt).scheduleId === 'schedule-fixture',
@@ -357,10 +383,52 @@ async function runOutboundGenerationTests() {
     const submissionSpec = await readFixture('notification-submission.json');
     const weakSubmissionSpec = await readFixture('notification-submission-weak.json');
     const commandSpec = await readFixture('reminder-action-command.json');
+    const pairingRequest = await readFixture('pairing-create-request.json');
+    const pairingCreatedSpec = await readFixture('pairing-created.json');
+    const pendingPairingSpec = await readFixture('pairing-status.json');
+    const confirmedPairingSpec = await readFixture('pairing-status-confirmed.json');
 
     const strong = await readFixture('notification-strong.json');
     const weak = await readFixture('notification-weak.json');
     const { gateway } = await createBoundGateway();
+
+    const pairingGateway = createMockImGateway('device-fixture', new FixedClock());
+    const createdPairing = await pairingGateway.deviceApi.postPairingSession({
+        authorization: 'Bearer fixture-device-token',
+        body: pairingRequest,
+    });
+    assert(
+        JSON.stringify(createdPairing) === JSON.stringify(pairingCreatedSpec),
+        'CreatedPairingSession 生成与 pairing-created.json 不一致',
+    );
+    const pendingPairing = await pairingGateway.deviceApi.getPairingSession({
+        authorization: 'Bearer fixture-device-token',
+        pairingSessionId: createdPairing.session.id,
+    });
+    assert(
+        JSON.stringify(pendingPairing) === JSON.stringify(pendingPairingSpec),
+        'PairingSessionStatus 生成与 pairing-status.json 不一致',
+    );
+    const pairingChannel = await pairingGateway.application.channels.register({
+        platform: 'wechat_official',
+        tenantExternalId: 'fixture-account',
+        koishiBotId: 'fixture-bot',
+        credentialRef: 'secret://fixture-account',
+        connectionMode: 'webhook',
+    });
+    await pairingGateway.application.pairing.confirm({
+        displayCode: createdPairing.displayCode,
+        channelAccountId: pairingChannel.id,
+        externalUserId: 'fixture-open-id',
+    });
+    const confirmedPairing = await pairingGateway.deviceApi.getPairingSession({
+        authorization: 'Bearer fixture-device-token',
+        pairingSessionId: createdPairing.session.id,
+    });
+    assert(
+        JSON.stringify(confirmedPairing) === JSON.stringify(confirmedPairingSpec),
+        'Confirmed PairingSessionStatus 生成与 pairing-status-confirmed.json 不一致',
+    );
 
     const submission = await submitFixture(gateway, strong);
     assert(

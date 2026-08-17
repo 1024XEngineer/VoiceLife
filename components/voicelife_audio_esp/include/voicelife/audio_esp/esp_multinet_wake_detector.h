@@ -6,7 +6,7 @@
 
 namespace voicelife::audio_esp {
 
-/** @brief ESP-SR MultiNet7 的本地“你好牛牛”检测适配器。 */
+/** @brief ESP-SR MultiNet7 的本地唤醒和语音打断命令检测适配器。 */
 class EspMultiNetWakeDetector final : public voice::LocalWakeDetectorPort {
    public:
     /** @brief 创建尚未加载模型的检测器。 */
@@ -19,7 +19,7 @@ class EspMultiNetWakeDetector final : public voice::LocalWakeDetectorPort {
     /** @brief 检测器禁止赋值，避免重复持有模型资源。 */
     EspMultiNetWakeDetector& operator=(const EspMultiNetWakeDetector&) = delete;
 
-    /** @brief 启动检测并注册唯一命令“你好牛牛”。
+    /** @brief 启动检测并注册“你好牛牛”“牛牛”“别说了”三个本地命令。
      * @param sink 命中唤醒词后的回调。
      * @return 模型和命令初始化成功时返回成功。
      */

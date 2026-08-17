@@ -10,13 +10,14 @@
 
 using voicelife::ErrorCode;
 using voicelife::Result;
+using voicelife::schedule::CancelScheduleCommand;
 using voicelife::schedule::CreateScheduleCommand;
 using voicelife::schedule::DateTime;
-using voicelife::schedule::DeleteScheduleCommand;
 using voicelife::schedule::OperationId;
 using voicelife::schedule::OperationRecord;
 using voicelife::schedule::QueryScheduleCommand;
 using voicelife::schedule::Schedule;
+using voicelife::schedule::ScheduleId;
 using voicelife::schedule::ScheduleOperationRepository;
 using voicelife::schedule::ScheduleRepository;
 using voicelife::schedule::ScheduleService;
@@ -42,6 +43,106 @@ class FakeScheduleRepository final : public ScheduleRepository {
         ++find_all_calls;
         if (fail_find_all) return Result<std::vector<Schedule>>::Failure(ErrorCode::kUnavailable, "读取故障");
         return Result<std::vector<Schedule>>::Success(schedules);
+    }
+
+    /**
+     * @brief 返回预设日程或读取错误。
+     * @param query 查询条件。
+     * @return 匹配的日程或读取错误。
+     */
+    Result<std::vector<Schedule>> Find(const QueryScheduleCommand& query) const override {
+        ++find_calls;
+        if (fail_find_all) return Result<std::vector<Schedule>>::Failure(ErrorCode::kUnavailable, "读取故障");
+        std::vector<Schedule> matched;
+        for (const Schedule& schedule : schedules) {
+            if (query.schedule_id.has_value() && schedule.id != *query.schedule_id) continue;
+            if (query.status != ScheduleStatusFilter::kAll &&
+                schedule.status != static_cast<ScheduleStatus>(query.status))
+                continue;
+            if (query.start_from.has_value() &&
+                (!schedule.start_time.has_value() || *schedule.start_time < *query.start_from))
+                continue;
+            if (query.start_to.has_value() &&
+                (!schedule.start_time.has_value() || *schedule.start_time > *query.start_to))
+                continue;
+            matched.push_back(schedule);
+        }
+        std::sort(matched.begin(), matched.end(), [](const Schedule& left, const Schedule& right) {
+            if (left.start_time != right.start_time) {
+                if (!left.start_time.has_value()) return false;
+                if (!right.start_time.has_value()) return true;
+                return *left.start_time < *right.start_time;
+            }
+            return left.id < right.id;
+        });
+        const auto begin = std::min(static_cast<std::size_t>(query.offset), matched.size());
+        const auto count = std::min(static_cast<std::size_t>(query.limit), matched.size() - begin);
+        return Result<std::vector<Schedule>>::Success(
+            std::vector<Schedule>(matched.begin() + static_cast<std::ptrdiff_t>(begin),
+                                  matched.begin() + static_cast<std::ptrdiff_t>(begin + count)));
+    }
+
+    /**
+     * @brief 统计匹配查询条件的日程数量。
+     * @param query 查询条件。
+     * @return 匹配数量或读取错误。
+     */
+    Result<int64_t> Count(const QueryScheduleCommand& query) const override {
+        ++count_calls;
+        if (fail_find_all) return Result<int64_t>::Failure(ErrorCode::kUnavailable, "读取故障");
+        int64_t total = 0;
+        for (const Schedule& schedule : schedules) {
+            if (query.schedule_id.has_value() && schedule.id != *query.schedule_id) continue;
+            if (query.status != ScheduleStatusFilter::kAll &&
+                schedule.status != static_cast<ScheduleStatus>(query.status))
+                continue;
+            if (query.start_from.has_value() &&
+                (!schedule.start_time.has_value() || *schedule.start_time < *query.start_from))
+                continue;
+            if (query.start_to.has_value() &&
+                (!schedule.start_time.has_value() || *schedule.start_time > *query.start_to))
+                continue;
+            ++total;
+        }
+        return Result<int64_t>::Success(total);
+    }
+
+    /**
+     * @brief 按 ID 读取日程或返回读取错误。
+     * @param id 日程 ID。
+     * @return 日程或错误。
+     */
+    Result<Schedule> FindById(ScheduleId id) const override {
+        ++find_by_id_calls;
+        if (fail_find_all) return Result<Schedule>::Failure(ErrorCode::kUnavailable, "读取故障");
+        for (const Schedule& schedule : schedules) {
+            if (schedule.id == id) return Result<Schedule>::Success(schedule);
+        }
+        return Result<Schedule>::Failure(ErrorCode::kNotFound, "未找到指定日程");
+    }
+
+    /**
+     * @brief 返回可能重叠或临近的日程。
+     * @param start 窗口开始时间。
+     * @param end 窗口结束时间。
+     * @param exclude_id 排除的日程 ID。
+     * @return 匹配的日程或错误。
+     */
+    Result<std::vector<Schedule>> FindOverlapping(DateTime start, DateTime end,
+                                                  std::optional<ScheduleId> exclude_id) const override {
+        ++find_overlapping_calls;
+        if (fail_find_all) return Result<std::vector<Schedule>>::Failure(ErrorCode::kUnavailable, "读取故障");
+        std::vector<Schedule> matched;
+        for (const Schedule& schedule : schedules) {
+            if (schedule.status != ScheduleStatus::kActive || !schedule.start_time.has_value()) continue;
+            if (exclude_id.has_value() && schedule.id == *exclude_id) continue;
+            const DateTime schedule_start = *schedule.start_time;
+            const DateTime schedule_end = schedule.end_time.value_or(schedule_start);
+            if (schedule_start <= end && schedule_end >= start) matched.push_back(schedule);
+        }
+        std::sort(matched.begin(), matched.end(),
+                  [](const Schedule& left, const Schedule& right) { return *left.start_time < *right.start_time; });
+        return Result<std::vector<Schedule>>::Success(std::move(matched));
     }
 
     /**
@@ -101,6 +202,10 @@ class FakeScheduleRepository final : public ScheduleRepository {
     bool fail_update = false;
     int64_t next_id = 9001;
     mutable int find_all_calls = 0;
+    mutable int find_calls = 0;
+    mutable int count_calls = 0;
+    mutable int find_by_id_calls = 0;
+    mutable int find_overlapping_calls = 0;
     int insert_calls = 0;
     int update_calls = 0;
     int delete_calls = 0;
@@ -178,21 +283,22 @@ void CheckFindAllFailure() {
     FakeScheduleRepository repository;
     FakeScheduleOperationRepository operation_repository;
     repository.fail_find_all = true;
-    const ScheduleService service(repository, operation_repository);
+    const ScheduleService service(repository);
 
     const auto created = service.create_schedule(CreateScheduleCommand{.event = "读取失败",
-                                                                       .start_time = std::nullopt,
-                                                                       .end_time = std::nullopt,
+                                                                       .start_time = At(10),
+                                                                       .end_time = At(20),
                                                                        .location = std::nullopt,
                                                                        .notes = std::nullopt});
-    Check(created.status.code == ErrorCode::kUnavailable && created.error == "读取现有日程失败：读取故障",
+    Check(created.result.status.code == ErrorCode::kUnavailable && created.result.status.message == "读取故障",
           "创建应返回 Repository 读取错误");
     Check(repository.insert_calls == 0, "读取失败后不应继续写入");
 
     const auto queried = service.query_schedule({});
-    Check(queried.status.code == ErrorCode::kUnavailable && queried.error == "读取故障",
+    Check(queried.result.status.code == ErrorCode::kUnavailable && queried.result.status.message == "读取故障",
           "查询应返回 Repository 读取错误");
-    Check(repository.find_all_calls == 2, "创建和查询应分别调用一次 Repository");
+    Check(repository.find_overlapping_calls == 1 && repository.find_calls == 1,
+          "有时间创建和查询应分别使用 Repository 能力");
 }
 
 /**
@@ -203,16 +309,16 @@ void CheckInsertFailure() {
     FakeScheduleRepository repository;
     FakeScheduleOperationRepository operation_repository;
     repository.fail_insert = true;
-    const ScheduleService service(repository, operation_repository);
+    const ScheduleService service(repository);
 
     const auto result = service.create_schedule(CreateScheduleCommand{.event = "写入失败",
                                                                       .start_time = std::nullopt,
                                                                       .end_time = std::nullopt,
                                                                       .location = std::nullopt,
                                                                       .notes = std::nullopt});
-    Check(result.status.code == ErrorCode::kInternal && result.error == "保存日程失败：写入故障",
+    Check(result.result.status.code == ErrorCode::kInternal && result.result.status.message == "写入故障",
           "创建应返回 Repository 写入错误");
-    Check(repository.find_all_calls == 1 && repository.insert_calls == 1, "写入失败前应完成冲突读取和一次写入");
+    Check(repository.insert_calls == 1, "写入失败前应完成一次写入");
 }
 
 /**
@@ -223,7 +329,7 @@ void CheckConflictOrchestration() {
     FakeScheduleRepository repository;
     FakeScheduleOperationRepository operation_repository;
     repository.schedules.push_back(ExistingSchedule(1, 2'000, 3'000));
-    ScheduleService service(repository, operation_repository);
+    ScheduleService service(repository);
 
     CreateScheduleCommand command{
         .event = "冲突日程",
@@ -233,20 +339,21 @@ void CheckConflictOrchestration() {
         .notes = std::nullopt,
     };
     const auto rejected = service.create_schedule(command);
-    Check(rejected.status.code == ErrorCode::kConflict && rejected.conflicts.size() == 1,
+    Check(rejected.result.status.code == ErrorCode::kConflict && rejected.conflicts.size() == 1,
           "默认应拒绝 Repository 中的冲突日程");
     Check(repository.insert_calls == 0, "冲突拒绝分支不能写入");
 
     command.ignore_conflict = true;
     const auto ignored = service.create_schedule(command);
-    Check(ignored.status.ok() && ignored.schedule->id == repository.next_id && ignored.conflicts.size() == 1,
+    Check(ignored.result.ok() && ignored.result.value && ignored.result.value->id == repository.next_id &&
+              ignored.conflicts.size() == 1,
           "忽略冲突后应写入并保留冲突提示");
     Check(repository.insert_calls == 1, "忽略冲突应只写入一次");
 
     FakeScheduleRepository nearby_repository;
     FakeScheduleOperationRepository nearby_operation_repository;
     nearby_repository.schedules.push_back(ExistingSchedule(2, 4'000, 5'000));
-    ScheduleService nearby_service(nearby_repository, nearby_operation_repository);
+    ScheduleService nearby_service(nearby_repository);
     const auto nearby = nearby_service.create_schedule(CreateScheduleCommand{
         .event = "临近日程",
         .start_time = At(3'500),
@@ -255,7 +362,7 @@ void CheckConflictOrchestration() {
         .notes = std::nullopt,
     });
     Check(
-        nearby.status.ok() && nearby.nearby_schedules.size() == 1 && nearby.message == "日程创建成功，附近还有其他日程",
+        nearby.result.ok() && nearby.nearby_schedules.size() == 1 && nearby.message == "日程创建成功，附近还有其他日程",
         "Repository 数据应参与 Service 临近判断");
 }
 
@@ -282,16 +389,16 @@ void CheckRepositoryQuery() {
         },
     };
     FakeScheduleOperationRepository operation_repository;
-    const ScheduleService service(repository, operation_repository);
+    const ScheduleService service(repository);
     QueryScheduleCommand command;
     command.status = ScheduleStatusFilter::kAll;
     command.limit = 2;
     command.offset = 1;
 
     const auto result = service.query_schedule(command);
-    Check(result.status.ok() && result.total == 3 && result.schedules.size() == 2,
+    Check(result.result.ok() && result.total == 3 && result.result.value.size() == 2,
           "Repository 查询应在 Service 中应用分页");
-    Check(result.schedules[0].id == 3 && result.schedules[1].id == 2,
+    Check(result.result.value[0].id == 3 && result.result.value[1].id == 2,
           "Repository 查询应按时间排序并将无时间日程放在末尾");
 }
 
@@ -303,22 +410,23 @@ void CheckRepositoryUpdate() {
     FakeScheduleRepository repository;
     repository.schedules = {ExistingSchedule(7, 10'000, 11'000)};
     FakeScheduleOperationRepository operation_repository;
-    ScheduleService service(repository, operation_repository);
+    ScheduleService service(repository);
     UpdateScheduleCommand command;
     command.schedule_id = 7;
     command.event = " 更新后的日程 ";
 
     const auto updated = service.update_schedule(command);
-    Check(updated.status.ok() && updated.schedule.has_value() && updated.schedule->event == "更新后的日程",
+    Check(updated.result.ok() && updated.result.value.has_value() && updated.result.value->event == "更新后的日程",
           "修改应返回 Repository 保存后的日程");
-    Check(repository.find_all_calls == 1 && repository.update_calls == 1 &&
+    Check(repository.find_by_id_calls == 1 && repository.update_calls == 1 &&
               repository.schedules.front().event == "更新后的日程",
           "修改应读取并写回 Repository");
 
     repository.fail_update = true;
     command.event = "失败修改";
     const auto failed = service.update_schedule(command);
-    Check(failed.status.code == ErrorCode::kInternal && failed.error == "更新故障" && !failed.schedule.has_value(),
+    Check(failed.result.status.code == ErrorCode::kInternal && failed.result.status.message == "更新故障" &&
+              !failed.result.value.has_value(),
           "修改应保留 Repository 更新错误");
 }
 
@@ -330,20 +438,21 @@ void CheckRepositoryDelete() {
     FakeScheduleRepository repository;
     repository.schedules = {ExistingSchedule(8, 12'000, 13'000)};
     FakeScheduleOperationRepository operation_repository;
-    ScheduleService service(repository, operation_repository);
+    ScheduleService service(repository);
 
-    const auto deleted = service.delete_schedule(DeleteScheduleCommand{.schedule_id = 8});
-    Check(deleted.status.ok() && deleted.deleted && repository.delete_calls == 1 &&
+    const auto deleted = service.cancel_schedule(CancelScheduleCommand{.schedule_id = 8});
+    Check(deleted.result.ok() && deleted.result.value && repository.delete_calls == 1 &&
               repository.schedules.front().status == ScheduleStatus::kCancelled,
           "删除应把 Repository 中的日程标记为已取消");
 
-    const auto repeated = service.delete_schedule(DeleteScheduleCommand{.schedule_id = 8});
-    Check(repeated.status.code == ErrorCode::kConflict && !repeated.deleted &&
-              repeated.error == "日程已取消，不能重复删除",
+    const auto repeated = service.cancel_schedule(CancelScheduleCommand{.schedule_id = 8});
+    Check(repeated.result.status.code == ErrorCode::kConflict && !repeated.result.value &&
+              repeated.result.status.message == "日程已取消，不能重复删除",
           "重复删除已取消日程应返回冲突");
 
-    const auto missing = service.delete_schedule(DeleteScheduleCommand{.schedule_id = 9});
-    Check(missing.status.code == ErrorCode::kNotFound && !missing.deleted && missing.error == "未找到指定日程",
+    const auto missing = service.cancel_schedule(CancelScheduleCommand{.schedule_id = 9});
+    Check(missing.result.status.code == ErrorCode::kNotFound && !missing.result.value &&
+              missing.result.status.message == "未找到指定日程",
           "删除不存在的日程应返回未找到");
 }
 

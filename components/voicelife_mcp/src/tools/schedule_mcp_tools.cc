@@ -1,8 +1,8 @@
 #include "voicelife/mcp/schedule_mcp_tools.h"
 
 #include <chrono>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <optional>
 #include <string>
@@ -119,17 +119,15 @@ ParsedRepeat ParseRepeat(const std::optional<JsonValue>& repeat, bool require_an
     }
 
     const auto start_time_text = JsonString(*repeat, "start_time");
-    parsed.start_time = start_time_text.has_value()
-                            ? schedule_tool_output::ParseLocalTime(*start_time_text)
-                            : std::nullopt;
+    parsed.start_time =
+        start_time_text.has_value() ? schedule_tool_output::ParseLocalTime(*start_time_text) : std::nullopt;
     if (start_time_text.has_value() && !parsed.start_time.has_value()) {
         parsed.error = "repeat.start_time 格式必须是 HH:mm:ss";
         return parsed;
     }
 
     const auto end_time_text = JsonString(*repeat, "end_time");
-    parsed.end_time =
-        end_time_text.has_value() ? schedule_tool_output::ParseLocalTime(*end_time_text) : std::nullopt;
+    parsed.end_time = end_time_text.has_value() ? schedule_tool_output::ParseLocalTime(*end_time_text) : std::nullopt;
     if (end_time_text.has_value() && !parsed.end_time.has_value()) {
         parsed.error = "repeat.end_time 格式必须是 HH:mm:ss";
         return parsed;
@@ -144,8 +142,7 @@ ParsedRepeat ParseRepeat(const std::optional<JsonValue>& repeat, bool require_an
     }
 
     const auto end_date_text = JsonString(*repeat, "end_date");
-    parsed.end_date =
-        end_date_text.has_value() ? schedule_tool_output::ParseLocalDate(*end_date_text) : std::nullopt;
+    parsed.end_date = end_date_text.has_value() ? schedule_tool_output::ParseLocalDate(*end_date_text) : std::nullopt;
     if (end_date_text.has_value() && !parsed.end_date.has_value()) {
         parsed.error = "repeat.end_date 格式必须是 YYYY-MM-DD";
         return parsed;
@@ -171,8 +168,8 @@ ParsedRepeat ParseRepeat(const std::optional<JsonValue>& repeat, bool require_an
     const auto count = JsonInteger(*repeat, "occurrence_count");
     parsed.occurrence_count = count.has_value() ? std::optional<int32_t>{static_cast<int32_t>(*count)} : std::nullopt;
 
-    if (require_anchor && (!parsed.freq_type.has_value() || !parsed.start_time.has_value() ||
-                           !parsed.start_date.has_value())) {
+    if (require_anchor &&
+        (!parsed.freq_type.has_value() || !parsed.start_time.has_value() || !parsed.start_date.has_value())) {
         parsed.error = "repeat 必须包含 freq_type、start_date 和 start_time";
     }
     return parsed;
@@ -231,11 +228,11 @@ PropertyList RepeatProperties() {
             .with_description("周期间隔，例如 1 表示每天、每周、每月或每年一次"),
         Property("start_date", PropertyType::kString).with_description("周期规则开始日期，格式 YYYY-MM-DD"),
         Property("start_time", PropertyType::kString).with_description("周期日程每日开始时间，格式 HH:mm:ss"),
-        Property::Optional("end_time", PropertyType::kString)
-            .with_description("周期日程每日结束时间，格式 HH:mm:ss"),
+        Property::Optional("end_time", PropertyType::kString).with_description("周期日程每日结束时间，格式 HH:mm:ss"),
         Property::Optional("end_date", PropertyType::kString).with_description("周期规则结束日期，格式 YYYY-MM-DD"),
         Property::Optional("occurrence_count", PropertyType::kInteger).with_description("周期规则最多发生的次数"),
-        Property::Optional("weekdays_mask", PropertyType::kInteger).with_description("每周重复的星期掩码，weekly 模式使用"),
+        Property::Optional("weekdays_mask", PropertyType::kInteger)
+            .with_description("每周重复的星期掩码，weekly 模式使用"),
         Property::Optional("day_of_month", PropertyType::kInteger).with_description("每月重复的日期，monthly 模式使用"),
         Property::Optional("month_of_year", PropertyType::kInteger).with_description("每年重复的月份，yearly 模式使用"),
         Property::Optional("monthly_mode", PropertyType::kString)
@@ -341,8 +338,8 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
     // schedule.create 根据是否传入 repeat 拆成两条业务路径：
     // 一次性日程走 ScheduleService，周期日程走 ScheduleRuleService。
     Status status = server.add_tool(
-        "schedule.create", "创建一次性日程或周期日程。",
-        CreateProperties(), [&service, rule_service](const PropertyList& properties) {
+        "schedule.create", "创建一次性日程或周期日程。", CreateProperties(),
+        [&service, rule_service](const PropertyList& properties) {
             const auto repeat = properties.value<JsonValue>("repeat");
             const ParsedRepeat parsed_repeat = ParseRepeat(repeat, true);
             if (!parsed_repeat.ok()) return FailureOutput(parsed_repeat.error);
@@ -365,9 +362,8 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                     MakeToolOutput("status", ToolOutputValue::String("success")),
                     MakeToolOutput("message", ToolOutputValue::String("created success")),
                     MakeToolOutput("schedule", ToolOutputValue::Null()),
-                    MakeToolOutput("rule", result.rule.has_value()
-                                               ? schedule_tool_output::RuleOutput(*result.rule)
-                                               : ToolOutputValue::Null()),
+                    MakeToolOutput("rule", result.rule.has_value() ? schedule_tool_output::RuleOutput(*result.rule)
+                                                                   : ToolOutputValue::Null()),
                     MakeToolOutput("conflicts",
                                    ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.conflicts))),
                 };
@@ -418,8 +414,8 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
     if (!status.ok()) return status;
 
     status = server.add_tool(
-        "schedule.query", "按自然语言友好的条件查询当前相关日程。",
-        QueryProperties(), [&service, rule_service](const PropertyList& properties) {
+        "schedule.query", "按自然语言友好的条件查询当前相关日程。", QueryProperties(),
+        [&service, rule_service](const PropertyList& properties) {
             // query 是只读编排：先查已物化日程，再补充未来 occurrence 和周期例外，不写 schedule 表。
             const auto start = ParseDateStart(properties);
             const auto end = ParseDateEnd(properties);
@@ -487,9 +483,10 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
     if (!status.ok()) return status;
 
     status = server.add_tool(
-        "schedule.update", "更新日程、更新周期规则、取消或跳过某次日程。",
-        UpdateProperties(), [&service, rule_service](const PropertyList& properties) {
-            // update 根据定位参数识别目标：schedule_id 改实例，rule_id 改规则，rule_id + original_start_time 改未来单次。
+        "schedule.update", "更新日程、更新周期规则、取消或跳过某次日程。", UpdateProperties(),
+        [&service, rule_service](const PropertyList& properties) {
+            // update 根据定位参数识别目标：schedule_id 改实例，rule_id 改规则，rule_id + original_start_time
+            // 改未来单次。
             const bool has_schedule_id = properties.value<int64_t>("schedule_id").has_value();
             const bool has_rule_id = properties.value<int64_t>("rule_id").has_value();
             const bool has_original_start_time = properties.value<std::string>("original_start_time").has_value();
@@ -522,9 +519,11 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
 
                 schedule::UpdateScheduleCommand command;
                 command.schedule_id = *properties.value<int64_t>("schedule_id");
-                if (properties.value<std::string>("event").has_value()) command.event = *properties.value<std::string>("event");
+                if (properties.value<std::string>("event").has_value())
+                    command.event = *properties.value<std::string>("event");
                 if (properties.value<std::string>("start_time").has_value()) {
-                    const auto parsed = schedule_tool_output::ParseDateTime(*properties.value<std::string>("start_time"));
+                    const auto parsed =
+                        schedule_tool_output::ParseDateTime(*properties.value<std::string>("start_time"));
                     if (!parsed.has_value()) return FailureOutput("start_time 格式必须是 YYYY-MM-DD HH:mm:ss");
                     command.start_time = parsed;
                 }
@@ -533,8 +532,10 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                     if (!parsed.has_value()) return FailureOutput("end_time 格式必须是 YYYY-MM-DD HH:mm:ss");
                     command.end_time = parsed;
                 }
-                if (properties.value<std::string>("location").has_value()) command.location = *properties.value<std::string>("location");
-                if (properties.value<std::string>("notes").has_value()) command.notes = *properties.value<std::string>("notes");
+                if (properties.value<std::string>("location").has_value())
+                    command.location = *properties.value<std::string>("location");
+                if (properties.value<std::string>("notes").has_value())
+                    command.notes = *properties.value<std::string>("notes");
                 command.ignore_conflict = properties.value<bool>("ignore_conflict").value_or(false);
 
                 const auto result = service.update_schedule(command);
@@ -581,8 +582,8 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                         MakeToolOutput("schedule", ToolOutputValue::Null()),
                         MakeToolOutput("rule", ToolOutputValue::Null()),
                         MakeToolOutput("exception", result.exception.has_value()
-                                                       ? schedule_tool_output::ExceptionOutput(*result.exception)
-                                                       : ToolOutputValue::Null()),
+                                                        ? schedule_tool_output::ExceptionOutput(*result.exception)
+                                                        : ToolOutputValue::Null()),
                         MakeToolOutput("conflicts", ToolOutputValue::Array(ToolOutputArray{})),
                     });
                 }
@@ -591,9 +592,11 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                 schedule::UpdateScheduleOccurrenceCommand command;
                 command.rule_id = properties.value<int64_t>("rule_id").value_or(0);
                 command.original_start_time = *original;
-                if (properties.value<std::string>("event").has_value()) command.event = std::optional<std::string>{*properties.value<std::string>("event")};
+                if (properties.value<std::string>("event").has_value())
+                    command.event = std::optional<std::string>{*properties.value<std::string>("event")};
                 if (properties.value<std::string>("start_time").has_value()) {
-                    const auto parsed = schedule_tool_output::ParseDateTime(*properties.value<std::string>("start_time"));
+                    const auto parsed =
+                        schedule_tool_output::ParseDateTime(*properties.value<std::string>("start_time"));
                     if (!parsed.has_value()) return FailureOutput("start_time 格式必须是 YYYY-MM-DD HH:mm:ss");
                     command.start_time = std::optional<DateTime>{*parsed};
                 }
@@ -602,8 +605,10 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                     if (!parsed.has_value()) return FailureOutput("end_time 格式必须是 YYYY-MM-DD HH:mm:ss");
                     command.end_time = std::optional<DateTime>{*parsed};
                 }
-                if (properties.value<std::string>("location").has_value()) command.location = std::optional<std::string>{*properties.value<std::string>("location")};
-                if (properties.value<std::string>("notes").has_value()) command.notes = std::optional<std::string>{*properties.value<std::string>("notes")};
+                if (properties.value<std::string>("location").has_value())
+                    command.location = std::optional<std::string>{*properties.value<std::string>("location")};
+                if (properties.value<std::string>("notes").has_value())
+                    command.notes = std::optional<std::string>{*properties.value<std::string>("notes")};
                 command.ignore_conflict = properties.value<bool>("ignore_conflict").value_or(false);
                 const auto result = rule_service->update_schedule_occurrence(command);
                 if (!result.status.ok()) return FailureOutput(result.status.message);
@@ -613,8 +618,8 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                     MakeToolOutput("schedule", ToolOutputValue::Null()),
                     MakeToolOutput("rule", ToolOutputValue::Null()),
                     MakeToolOutput("exception", result.exception.has_value()
-                                                   ? schedule_tool_output::ExceptionOutput(*result.exception)
-                                                   : ToolOutputValue::Null()),
+                                                    ? schedule_tool_output::ExceptionOutput(*result.exception)
+                                                    : ToolOutputValue::Null()),
                     MakeToolOutput("conflicts", ToolOutputValue::Array(ToolOutputArray{})),
                 });
             }
@@ -645,9 +650,10 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
     if (!status.ok()) return status;
 
     return server.add_tool(
-        "schedule.delete", "删除单次日程、未来周期单次或整条周期规则。",
-        DeleteProperties(), [&service, rule_service](const PropertyList& properties) {
-            // delete 根据定位参数拆三条路径：schedule_id 删实例，rule_id 删规则，rule_id + original_start_time 跳过未来单次。
+        "schedule.delete", "删除单次日程、未来周期单次或整条周期规则。", DeleteProperties(),
+        [&service, rule_service](const PropertyList& properties) {
+            // delete 根据定位参数拆三条路径：schedule_id 删实例，rule_id 删规则，rule_id + original_start_time
+            // 跳过未来单次。
             const bool has_schedule_id = properties.value<int64_t>("schedule_id").has_value();
             const bool has_rule_id = properties.value<int64_t>("rule_id").has_value();
             const bool has_original_start_time = properties.value<std::string>("original_start_time").has_value();
@@ -696,8 +702,8 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                     MakeToolOutput("schedule", ToolOutputValue::Null()),
                     MakeToolOutput("rule", ToolOutputValue::Null()),
                     MakeToolOutput("exception", result.exception.has_value()
-                                                   ? schedule_tool_output::ExceptionOutput(*result.exception)
-                                                   : ToolOutputValue::Null()),
+                                                    ? schedule_tool_output::ExceptionOutput(*result.exception)
+                                                    : ToolOutputValue::Null()),
                 });
             }
 

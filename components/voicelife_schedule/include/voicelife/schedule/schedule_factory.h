@@ -8,7 +8,11 @@
 
 namespace voicelife::schedule {
 
-/** @brief 将本地时刻转换为当日 0 点起的秒数。 */
+/**
+ * @brief 将本地时刻转换为当日 0 点起的秒数。
+ * @param value 本地时刻。
+ * @return 当日 0 点起的秒数。
+ */
 std::int64_t LocalTimeToSeconds(const LocalTime& value);
 
 /** @brief 负责从命令或周期规则构造日程实例，并应用单次例外覆盖字段。 */

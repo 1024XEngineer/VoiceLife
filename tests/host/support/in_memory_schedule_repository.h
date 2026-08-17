@@ -1,10 +1,12 @@
 #pragma once
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -195,7 +197,8 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         std::lock_guard<std::mutex> lock(mutex_);
         const auto found = std::find_if(schedules_.begin(), schedules_.end(),
                                         [id](const schedule::Schedule& stored) { return stored.id == id; });
-        if (found == schedules_.end()) return Result<schedule::Schedule>::Failure(ErrorCode::kNotFound, "未找到指定日程");
+        if (found == schedules_.end())
+            return Result<schedule::Schedule>::Failure(ErrorCode::kNotFound, "未找到指定日程");
         return Result<schedule::Schedule>::Success(*found);
     }
 
@@ -207,20 +210,20 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
             if (!MatchesQueryLocked(schedule, query)) continue;
             matched.push_back(schedule);
         }
-        std::sort(matched.begin(), matched.end(), [&query](const schedule::Schedule& left,
-                                                           const schedule::Schedule& right) {
-            if (query.keyword.has_value() && !query.keyword->empty()) {
-                const int64_t left_score = schedule::ScoreScheduleKeyword(left.event, *query.keyword);
-                const int64_t right_score = schedule::ScoreScheduleKeyword(right.event, *query.keyword);
-                if (left_score != right_score) return left_score > right_score;
-            }
-            if (left.start_time != right.start_time) {
-                if (!left.start_time.has_value()) return false;
-                if (!right.start_time.has_value()) return true;
-                return *left.start_time < *right.start_time;
-            }
-            return left.id < right.id;
-        });
+        std::sort(matched.begin(), matched.end(),
+                  [&query](const schedule::Schedule& left, const schedule::Schedule& right) {
+                      if (query.keyword.has_value() && !query.keyword->empty()) {
+                          const int64_t left_score = schedule::ScoreScheduleKeyword(left.event, *query.keyword);
+                          const int64_t right_score = schedule::ScoreScheduleKeyword(right.event, *query.keyword);
+                          if (left_score != right_score) return left_score > right_score;
+                      }
+                      if (left.start_time != right.start_time) {
+                          if (!left.start_time.has_value()) return false;
+                          if (!right.start_time.has_value()) return true;
+                          return *left.start_time < *right.start_time;
+                      }
+                      return left.id < right.id;
+                  });
         const auto begin = std::min(static_cast<std::size_t>(query.offset), matched.size());
         const auto count = std::min(static_cast<std::size_t>(query.limit), matched.size() - begin);
         return Result<std::vector<schedule::Schedule>>::Success(
@@ -421,6 +424,25 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
     /** @brief 转换 Unix 秒。 @param seconds Unix 秒。 @return 日程时间。 */
     static schedule::DateTime At(int64_t seconds) { return schedule::DateTime{std::chrono::seconds{seconds}}; }
 
+    /** @brief 将关键词拆成空格分隔的词语。 @param keyword 原始关键词。 @return 规范化后的词语。 */
+    static bool MatchesKeywordLocked(std::string_view text, std::string_view keyword) {
+        std::string normalized_text(text);
+        std::string normalized_keyword(keyword);
+        std::transform(normalized_text.begin(), normalized_text.end(), normalized_text.begin(),
+                       [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+        std::transform(normalized_keyword.begin(), normalized_keyword.end(), normalized_keyword.begin(),
+                       [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+
+        std::istringstream stream{normalized_keyword};
+        std::string token;
+        while (stream >> token) {
+            if (!token.empty() && token.front() == '+') token.erase(0, 1);
+            if (token.empty()) continue;
+            if (normalized_text.find(token) == std::string::npos) return false;
+        }
+        return true;
+    }
+
     /**
      * @brief 计算下一条日程标识。
      * @param schedules 已有日程。
@@ -463,9 +485,9 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         }
         if (query.keyword.has_value() && !query.keyword->empty()) {
             const std::string& keyword = *query.keyword;
-            if (schedule.event.find(keyword) == std::string::npos &&
-                (!schedule.location.has_value() || schedule.location->find(keyword) == std::string::npos) &&
-                (!schedule.notes.has_value() || schedule.notes->find(keyword) == std::string::npos)) {
+            if (!MatchesKeywordLocked(schedule.event, keyword) &&
+                (!schedule.location.has_value() || !MatchesKeywordLocked(*schedule.location, keyword)) &&
+                (!schedule.notes.has_value() || !MatchesKeywordLocked(*schedule.notes, keyword))) {
                 return false;
             }
         }

@@ -16,6 +16,7 @@ namespace voicelife::schedule {
  */
 class ScheduleExceptionRepository {
    public:
+    /** @brief 允许通过接口类型释放仓储对象。 */
     virtual ~ScheduleExceptionRepository() = default;
 
     /**

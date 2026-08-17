@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <optional>
 #include <string>
@@ -133,6 +135,63 @@ inline bool IsValidIsoDateTime(const std::string& input) {
     const int max_day = (*month == 2 && leap_year) ? 29 : kDaysInMonth[*month - 1];
     return *day >= 1 && *day <= max_day && *hour <= 23 && *minute <= 59 && *second <= 59 && offset_hour <= 23 &&
            offset_minute <= 59;
+}
+
+// 输入已经通过 IsValidIsoDateTime 后，将含时区的时间归一化为 Unix 毫秒，供跨字段顺序校验。
+inline std::optional<int64_t> IsoDateTimeMillis(const std::string& input) {
+    if (!IsValidIsoDateTime(input)) return std::nullopt;
+    auto number = [&](size_t offset, size_t count) {
+        int value = 0;
+        for (size_t index = 0; index < count; ++index) value = value * 10 + (input[offset + index] - '0');
+        return value;
+    };
+    int year = number(0, 4);
+    const unsigned month = static_cast<unsigned>(number(5, 2));
+    const unsigned day = static_cast<unsigned>(number(8, 2));
+    year -= month <= 2;
+    const int era = (year >= 0 ? year : year - 399) / 400;
+    const unsigned year_of_era = static_cast<unsigned>(year - era * 400);
+    const unsigned shifted_month = static_cast<unsigned>(static_cast<int>(month) + (month > 2 ? -3 : 9));
+    const unsigned day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    const unsigned day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    const int64_t days = static_cast<int64_t>(era) * 146097 + static_cast<int64_t>(day_of_era) - 719468;
+    int64_t seconds = days * 86400 + number(11, 2) * 3600 + number(14, 2) * 60 + number(17, 2);
+    size_t pos = 19;
+    int64_t milliseconds = 0;
+    if (input[pos] == '.') {
+        ++pos;
+        unsigned fraction_digits = 0;
+        while (input[pos] >= '0' && input[pos] <= '9') {
+            if (fraction_digits < 3) milliseconds = milliseconds * 10 + (input[pos] - '0');
+            ++fraction_digits;
+            ++pos;
+        }
+        while (fraction_digits < 3) {
+            milliseconds *= 10;
+            ++fraction_digits;
+        }
+    }
+    if (input[pos] != 'Z') {
+        const int offset = number(pos + 1, 2) * 60 + number(pos + 4, 2);
+        seconds -= (input[pos] == '+' ? offset : -offset) * 60;
+    }
+    return seconds * 1000 + milliseconds;
+}
+
+inline bool HasOnlyFields(const JsonValue& value, std::initializer_list<std::string_view> allowed) {
+    if (!value.IsObject()) return false;
+    for (const auto& [key, child] : value.object) {
+        (void)child;
+        bool matched = false;
+        for (const std::string_view candidate : allowed) {
+            if (key == candidate) {
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) return false;
+    }
+    return true;
 }
 
 inline Status RequireIsoDateTime(const JsonValue& root, const char* key, std::string& out) {

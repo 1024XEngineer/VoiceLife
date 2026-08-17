@@ -49,8 +49,6 @@ CREATE INDEX operation_record_recent_idx
 
 }  // namespace
 
-Status ApplyV002CreateScheduleOperation(SqliteDatabase& database) {
-    return database.Execute(kCreateScheduleOperation);
-}
+Status ApplyV002CreateScheduleOperation(SqliteDatabase& database) { return database.Execute(kCreateScheduleOperation); }
 
 }  // namespace voicelife::storage_sqlite::schema::migrations

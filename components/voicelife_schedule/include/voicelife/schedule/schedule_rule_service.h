@@ -24,25 +24,53 @@ class ScheduleRuleService {
     ScheduleRuleService(ScheduleRuleRepository& rule_repository, ScheduleExceptionRepository& exception_repository,
                         ScheduleRepository& schedule_repository);
 
-    /** @brief 创建周期规则并物化首条实例。 */
+    /**
+     * @brief 创建周期规则并物化首条实例。
+     * @param command 创建周期规则命令。
+     * @return 创建结果。
+     */
     CreateScheduleRuleResult create_schedule_rule(const CreateScheduleRuleCommand& command) const;
 
-    /** @brief 查询周期规则及其例外与未来发生时间。 */
+    /**
+     * @brief 查询周期规则及其例外与未来发生时间。
+     * @param command 查询周期规则命令。
+     * @return 查询结果。
+     */
     QueryScheduleRulesResult query_schedule_rules(const QueryScheduleRulesCommand& command) const;
 
-    /** @brief 修改整条周期规则并重建未来实例。 */
+    /**
+     * @brief 修改整条周期规则并重建未来实例。
+     * @param command 修改周期规则命令。
+     * @return 修改结果。
+     */
     UpdateScheduleRuleResult update_schedule_rule(const UpdateScheduleRuleCommand& command);
 
-    /** @brief 取消整条周期规则及其未来实例。 */
+    /**
+     * @brief 取消整条周期规则及其未来实例。
+     * @param command 取消周期规则命令。
+     * @return 取消结果。
+     */
     CancelScheduleRuleResult cancel_schedule_rule(const CancelScheduleRuleCommand& command);
 
-    /** @brief 修改周期中的某一次。 */
+    /**
+     * @brief 修改周期中的某一次（已生成或未生成）。
+     * @param command 修改周期单次命令。
+     * @return 修改结果。
+     */
     UpdateScheduleOccurrenceResult update_schedule_occurrence(const UpdateScheduleOccurrenceCommand& command);
 
-    /** @brief 跳过周期中的某一次。 */
+    /**
+     * @brief 跳过周期中的某一次。
+     * @param command 跳过周期单次命令。
+     * @return 跳过结果。
+     */
     SkipScheduleOccurrenceResult skip_schedule_occurrence(const SkipScheduleOccurrenceCommand& command);
 
-    /** @brief 生成规则的下一条实例。 */
+    /**
+     * @brief 生成规则的下一条实例。
+     * @param command 生成下一条实例命令。
+     * @return 生成结果。
+     */
     GenerateNextScheduleInstanceResult generate_next_schedule_instance(
         const GenerateNextScheduleInstanceCommand& command);
 

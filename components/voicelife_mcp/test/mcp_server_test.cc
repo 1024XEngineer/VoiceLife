@@ -12,8 +12,8 @@ using voicelife::ErrorCode;
 using voicelife::JsonValue;
 using voicelife::MakeToolOutput;
 using voicelife::Status;
-using voicelife::ToolResult;
 using voicelife::ToolOutputValue;
+using voicelife::ToolResult;
 using voicelife::mcp::McpServer;
 using voicelife::mcp::Property;
 using voicelife::mcp::PropertyHandler;
@@ -30,17 +30,17 @@ namespace {
  * @return 工具注册状态。
  */
 Status RegisterTypedTool(McpServer& server, int64_t& captured_value) {
-    return server.add_tool("self.device.configure", "配置设备",
-                           PropertyList({
-                               Property("enabled", PropertyType::kBoolean, true).with_description("是否启用"),
-                               Property("level", PropertyType::kInteger, 0, 100).with_description("等级"),
-                               Property("label", PropertyType::kString, 1, 10, std::string("default"))
-                                   .with_description("标签"),
-                           }),
-                           [&captured_value](const PropertyList& properties) {
-                               captured_value = properties.value<int64_t>("level").value_or(-1);
-                               return ToolResult::Success(ToolOutputValue::Null());
-                           });
+    return server.add_tool(
+        "self.device.configure", "配置设备",
+        PropertyList({
+            Property("enabled", PropertyType::kBoolean, true).with_description("是否启用"),
+            Property("level", PropertyType::kInteger, 0, 100).with_description("等级"),
+            Property("label", PropertyType::kString, 1, 10, std::string("default")).with_description("标签"),
+        }),
+        [&captured_value](const PropertyList& properties) {
+            captured_value = properties.value<int64_t>("level").value_or(-1);
+            return ToolResult::Success(ToolOutputValue::Null());
+        });
 }
 
 /**
@@ -70,13 +70,13 @@ void TestPropertyList() {
           "无默认值的可选参数不应进入 required");
 
     PropertyList object;
-    object.add_property(Property::OptionalObject(
-        "settings",
-        PropertyList({
-            Property("brightness", PropertyType::kInteger, 0, 100).with_description("亮度"),
-            Property::Optional("label", PropertyType::kString).with_description("标签"),
-        }))
-                            .with_description("配置对象"));
+    object.add_property(
+        Property::OptionalObject("settings",
+                                 PropertyList({
+                                     Property("brightness", PropertyType::kInteger, 0, 100).with_description("亮度"),
+                                     Property::Optional("label", PropertyType::kString).with_description("标签"),
+                                 }))
+            .with_description("配置对象"));
     const auto object_schema = object.to_schema();
     Check(object_schema.required.empty() && object_schema.properties.contains("settings") &&
               object_schema.properties.at("settings").type == voicelife::mcp::ToolInputType::kObject,
@@ -87,8 +87,8 @@ void TestPropertyList() {
               settings_schema->required.size() == 1 && settings_schema->required.front() == "brightness",
           "对象参数应能递归生成内部字段 Schema");
 
-    const auto object_values = object.with_values(
-        {{"settings", JsonValue::Object({{"brightness", JsonValue::Number(80)}})}});
+    const auto object_values =
+        object.with_values({{"settings", JsonValue::Object({{"brightness", JsonValue::Number(80)}})}});
     const auto settings = object_values.value<JsonValue>("settings");
     Check(settings.has_value() && settings->IsObject() && settings->Get("brightness") != nullptr &&
               settings->Get("brightness")->number == 80,
@@ -101,9 +101,7 @@ void TestPropertyList() {
  */
 void TestRegistrationValidation() {
     McpServer server;
-    const PropertyHandler handler = [](const PropertyList&) {
-        return ToolResult::Success(ToolOutputValue::Null());
-    };
+    const PropertyHandler handler = [](const PropertyList&) { return ToolResult::Success(ToolOutputValue::Null()); };
 
     Check(server.add_tool("", "描述", {}, handler).code == ErrorCode::kInvalidArgument, "工具名称为空时应拒绝注册");
     Check(server.add_tool("invalid.description", "", {}, handler).code == ErrorCode::kInvalidArgument,
@@ -212,14 +210,15 @@ void TestToolCalls() {
           "未定义参数应被拒绝");
 
     Check(server
-              .add_tool("self.device.optional", "可选参数测试",
-                        PropertyList({Property::Optional("location", PropertyType::kString)}),
-                        [](const PropertyList& properties) {
-                            return ToolResult::Success(ToolOutputValue::Object({
-                                MakeToolOutput("location",
-                                               ToolOutputValue::String(properties.value<std::string>("location").value_or("none"))),
-                            }));
-                        })
+              .add_tool(
+                  "self.device.optional", "可选参数测试",
+                  PropertyList({Property::Optional("location", PropertyType::kString)}),
+                  [](const PropertyList& properties) {
+                      return ToolResult::Success(ToolOutputValue::Object({
+                          MakeToolOutput("location", ToolOutputValue::String(
+                                                         properties.value<std::string>("location").value_or("none"))),
+                      }));
+                  })
               .ok(),
           "无默认值的可选参数应能注册");
     Check(server.call({.request_id = "request-optional", .name = "self.device.optional", .arguments = {}}).status.ok(),
@@ -247,70 +246,65 @@ void TestToolCalls() {
               .status.ok(),
           "UTF-8 字符串长度应按字符数校验");
 
-    Check(server
-              .add_tool("self.device.object", "对象参数测试",
-                        PropertyList({Property::OptionalObject(
-                            "settings",
-                            PropertyList({
-                                Property("brightness", PropertyType::kInteger, 0, 100).with_description("亮度"),
-                                Property("enabled", PropertyType::kBoolean, true),
-                                Property::OptionalObject(
-                                    "network",
-                                    PropertyList({
-                                        Property("mode", PropertyType::kString).with_description("模式"),
-                                        Property::Optional("retry", PropertyType::kInteger),
-                                    })),
-                            }))}),
-                        [](const PropertyList& properties) {
-                            const auto settings = properties.value<JsonValue>("settings");
-                            const JsonValue* network = settings.has_value() ? settings->Get("network") : nullptr;
-                            return ToolResult::Success(ToolOutputValue::Object({
-                                MakeToolOutput("has_brightness",
-                                               ToolOutputValue::Boolean(settings.has_value() && settings->IsObject() &&
-                                                                         settings->Get("brightness") != nullptr)),
-                                MakeToolOutput("has_network",
-                                               ToolOutputValue::Boolean(network != nullptr && network->IsObject())),
-                            }));
-                        })
-              .ok(),
-          "对象参数应能注册");
+    Check(
+        server
+            .add_tool(
+                "self.device.object", "对象参数测试",
+                PropertyList({Property::OptionalObject(
+                    "settings", PropertyList({
+                                    Property("brightness", PropertyType::kInteger, 0, 100).with_description("亮度"),
+                                    Property("enabled", PropertyType::kBoolean, true),
+                                    Property::OptionalObject(
+                                        "network", PropertyList({
+                                                       Property("mode", PropertyType::kString).with_description("模式"),
+                                                       Property::Optional("retry", PropertyType::kInteger),
+                                                   })),
+                                }))}),
+                [](const PropertyList& properties) {
+                    const auto settings = properties.value<JsonValue>("settings");
+                    const JsonValue* network = settings.has_value() ? settings->Get("network") : nullptr;
+                    return ToolResult::Success(ToolOutputValue::Object({
+                        MakeToolOutput("has_brightness",
+                                       ToolOutputValue::Boolean(settings.has_value() && settings->IsObject() &&
+                                                                settings->Get("brightness") != nullptr)),
+                        MakeToolOutput("has_network",
+                                       ToolOutputValue::Boolean(network != nullptr && network->IsObject())),
+                    }));
+                })
+            .ok(),
+        "对象参数应能注册");
     Check(server
               .call({
                   .request_id = "request-object",
                   .name = "self.device.object",
-                  .arguments = {{"settings",
-                                 JsonValue::Object({
-                                     {"brightness", JsonValue::Number(64)},
-                                     {"network", JsonValue::Object({{"mode", JsonValue::String("wifi")}})},
-                                 })}},
+                  .arguments = {{"settings", JsonValue::Object({
+                                                 {"brightness", JsonValue::Number(64)},
+                                                 {"network", JsonValue::Object({{"mode", JsonValue::String("wifi")}})},
+                                             })}},
               })
               .status.ok(),
           "对象参数应通过校验并进入回调");
-    Check(server
-              .call({
-                  .request_id = "request-object-missing",
-                  .name = "self.device.object",
-                  .arguments = {{"settings", JsonValue::Object({{"enabled", JsonValue::Bool(true)}})}},
-              })
-              .status.code == ErrorCode::kInvalidArgument,
+    Check(server.call({
+                          .request_id = "request-object-missing",
+                          .name = "self.device.object",
+                          .arguments = {{"settings", JsonValue::Object({{"enabled", JsonValue::Bool(true)}})}},
+                      })
+                  .status.code == ErrorCode::kInvalidArgument,
           "对象参数缺少内部必填字段时应拒绝调用");
-    Check(server
-              .call({
-                  .request_id = "request-object-unknown",
-                  .name = "self.device.object",
-                  .arguments = {{"settings",
-                                 JsonValue::Object({{"brightness", JsonValue::Number(1)},
-                                                    {"unknown", JsonValue::Bool(true)}})}},
-              })
-              .status.code == ErrorCode::kInvalidArgument,
+    Check(server.call({
+                          .request_id = "request-object-unknown",
+                          .name = "self.device.object",
+                          .arguments = {{"settings", JsonValue::Object({{"brightness", JsonValue::Number(1)},
+                                                                        {"unknown", JsonValue::Bool(true)}})}},
+                      })
+                  .status.code == ErrorCode::kInvalidArgument,
           "对象参数包含未定义字段时应拒绝调用");
-    Check(server
-              .call({
-                  .request_id = "request-object-invalid",
-                  .name = "self.device.object",
-                  .arguments = {{"settings", std::string("not-an-object")}},
-              })
-              .status.code == ErrorCode::kInvalidArgument,
+    Check(server.call({
+                          .request_id = "request-object-invalid",
+                          .name = "self.device.object",
+                          .arguments = {{"settings", std::string("not-an-object")}},
+                      })
+                  .status.code == ErrorCode::kInvalidArgument,
           "对象参数传入字符串时应拒绝调用");
 }
 
@@ -330,9 +324,7 @@ void TestToolListing() {
     yyjson_doc_free(empty_document);
 
     Check(RegisterTypedTool(server, captured_value).ok(), "列表测试工具应注册成功");
-    const PropertyHandler handler = [](const PropertyList&) {
-        return ToolResult::Success(ToolOutputValue::Null());
-    };
+    const PropertyHandler handler = [](const PropertyList&) { return ToolResult::Success(ToolOutputValue::Null()); };
     Check(server
               .add_tool("self.device.boundary", "整数范围\"测试\\路径",
                         PropertyList({Property("value", PropertyType::kInteger, std::numeric_limits<int64_t>::min(),
@@ -340,21 +332,21 @@ void TestToolListing() {
                         handler)
               .ok(),
           "整数边界工具应注册成功");
-    Check(server
-              .add_tool("self.device.object", "对象参数测试",
-                        PropertyList({Property(
-                            "settings",
-                            PropertyList({
-                                Property("brightness", PropertyType::kInteger, 0, 100).with_description("亮度"),
-                                Property::OptionalObject(
-                                    "network",
-                                    PropertyList({
-                                        Property("mode", PropertyType::kString).with_description("模式"),
-                                    })),
-                            }))}),
-                        handler)
-              .ok(),
-          "对象参数工具应注册成功");
+    Check(
+        server
+            .add_tool(
+                "self.device.object", "对象参数测试",
+                PropertyList({Property(
+                    "settings", PropertyList({
+                                    Property("brightness", PropertyType::kInteger, 0, 100).with_description("亮度"),
+                                    Property::OptionalObject(
+                                        "network", PropertyList({
+                                                       Property("mode", PropertyType::kString).with_description("模式"),
+                                                   })),
+                                }))}),
+                handler)
+            .ok(),
+        "对象参数工具应注册成功");
 
     const auto listed = server.list_tools();
     Check(listed.total == 3 && listed.tools.front().name == "self.device.configure", "工具列表应返回注册结果");
@@ -399,8 +391,7 @@ void TestToolListing() {
     yyjson_val* object_schema = yyjson_obj_get(object, "inputSchema");
     yyjson_val* object_properties = yyjson_obj_get(object_schema, "properties");
     yyjson_val* settings = yyjson_obj_get(object_properties, "settings");
-    Check(yyjson_equals_str(yyjson_obj_get(settings, "type"), "object"),
-          "对象参数的 JSON Schema 类型应为 object");
+    Check(yyjson_equals_str(yyjson_obj_get(settings, "type"), "object"), "对象参数的 JSON Schema 类型应为 object");
     yyjson_val* settings_properties = yyjson_obj_get(settings, "properties");
     yyjson_val* brightness = yyjson_obj_get(settings_properties, "brightness");
     yyjson_val* network = yyjson_obj_get(settings_properties, "network");

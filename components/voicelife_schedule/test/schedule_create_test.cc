@@ -22,23 +22,25 @@ void CheckEventValidation(const ScheduleService& service) {
     CreateScheduleCommand no_time;
     no_time.event = "  阅读  ";
     const auto no_time_result = service.create_schedule(no_time);
-    Check(no_time_result.status.ok() && no_time_result.schedule->event == "阅读", "创建时应清理名称两端空白");
+    Check(no_time_result.result.ok() && no_time_result.result.value && no_time_result.result.value->event == "阅读",
+          "创建时应清理名称两端空白");
     Check(no_time_result.message == "日程创建成功", "无临近日程时应返回普通成功消息");
     Check(no_time_result.conflicts.empty() && no_time_result.nearby_schedules.empty(), "无时间日程不应产生时间提示");
 
     CreateScheduleCommand empty;
     empty.event = " \t\n ";
     const auto empty_result = service.create_schedule(empty);
-    Check(empty_result.status.code == ErrorCode::kInvalidArgument && !empty_result.error.empty(),
+    Check(empty_result.result.status.code == ErrorCode::kInvalidArgument && !empty_result.result.status.message.empty(),
           "空白日程名称应返回参数错误");
 
     CreateScheduleCommand too_long;
     too_long.event = std::string(101, 'a');
-    Check(service.create_schedule(too_long).status.code == ErrorCode::kInvalidArgument, "超过一百字符的名称应被拒绝");
+    Check(service.create_schedule(too_long).result.status.code == ErrorCode::kInvalidArgument,
+          "超过一百字符的名称应被拒绝");
 
     CreateScheduleCommand utf8_too_long;
     for (int index = 0; index < 101; ++index) utf8_too_long.event += "日";
-    Check(service.create_schedule(utf8_too_long).status.code == ErrorCode::kInvalidArgument,
+    Check(service.create_schedule(utf8_too_long).result.status.code == ErrorCode::kInvalidArgument,
           "中文名称应按字符数量执行一百字符限制");
 }
 
@@ -47,13 +49,14 @@ void CheckTimeValidation(const ScheduleService& service) {
     CreateScheduleCommand end_only;
     end_only.event = "结束时间非法";
     end_only.end_time = At(1'800'000'000);
-    Check(service.create_schedule(end_only).status.code == ErrorCode::kInvalidArgument, "只提供结束时间应被拒绝");
+    Check(service.create_schedule(end_only).result.status.code == ErrorCode::kInvalidArgument,
+          "只提供结束时间应被拒绝");
 
     CreateScheduleCommand invalid_range;
     invalid_range.event = "时间范围非法";
     invalid_range.start_time = At(1'800'000'100);
     invalid_range.end_time = At(1'800'000'100);
-    Check(service.create_schedule(invalid_range).status.code == ErrorCode::kInvalidArgument,
+    Check(service.create_schedule(invalid_range).result.status.code == ErrorCode::kInvalidArgument,
           "结束时间不晚于开始时间应被拒绝");
 }
 
@@ -64,26 +67,27 @@ void CheckIntervalConflicts(const ScheduleService& service) {
     conflict.start_time = At(1'800'000'600);
     conflict.end_time = At(1'800'001'200);
     const auto conflict_result = service.create_schedule(conflict);
-    Check(conflict_result.status.code == ErrorCode::kConflict && !conflict_result.schedule.has_value(),
+    Check(conflict_result.result.status.code == ErrorCode::kConflict && !conflict_result.result.value.has_value(),
           "默认应拒绝冲突日程");
-    Check(conflict_result.conflicts.size() == 1 && !conflict_result.error.empty(), "冲突结果应返回已有日程和错误信息");
+    Check(conflict_result.conflicts.size() == 1 && !conflict_result.result.status.message.empty(),
+          "冲突结果应返回已有日程和错误信息");
 
     conflict.ignore_conflict = true;
     const auto ignored_result = service.create_schedule(conflict);
-    Check(ignored_result.status.ok() && ignored_result.schedule.has_value() && ignored_result.conflicts.size() == 1,
+    Check(ignored_result.result.ok() && ignored_result.result.value.has_value() && ignored_result.conflicts.size() == 1,
           "忽略冲突时应创建并保留冲突提示");
 
     CreateScheduleCommand point_inside_interval;
     point_inside_interval.event = "区间内时间点";
     point_inside_interval.start_time = At(1'800'001'800);
-    Check(service.create_schedule(point_inside_interval).status.code == ErrorCode::kConflict,
+    Check(service.create_schedule(point_inside_interval).result.status.code == ErrorCode::kConflict,
           "落在已有区间内的单点日程应冲突");
 
     CreateScheduleCommand interval_over_point;
     interval_over_point.event = "覆盖时间点";
     interval_over_point.start_time = At(1'800'006'900);
     interval_over_point.end_time = At(1'800'007'500);
-    Check(service.create_schedule(interval_over_point).status.code == ErrorCode::kConflict,
+    Check(service.create_schedule(interval_over_point).result.status.code == ErrorCode::kConflict,
           "覆盖已有单点日程的时间区间应冲突");
 }
 
@@ -94,7 +98,7 @@ void CheckNearbySchedules(const ScheduleService& service, InMemoryScheduleReposi
     adjacent.start_time = At(1'800'003'600);
     adjacent.end_time = At(1'800'004'200);
     const auto adjacent_result = service.create_schedule(adjacent);
-    Check(adjacent_result.status.ok() && adjacent_result.conflicts.empty(), "首尾相接不应视为冲突");
+    Check(adjacent_result.result.ok() && adjacent_result.conflicts.empty(), "首尾相接不应视为冲突");
 
     // 围绕开始时间：新日程开始时间在已有日程开始时间 10 分钟前。
     repository.Reset(InMemoryScheduleRepository::DefaultSchedules());
@@ -103,7 +107,7 @@ void CheckNearbySchedules(const ScheduleService& service, InMemoryScheduleReposi
     ten_minutes.start_time = At(1'799'999'400);
     ten_minutes.end_time = At(1'799'999'700);
     const auto ten_result = service.create_schedule(ten_minutes);
-    Check(ten_result.status.ok() && ten_result.nearby_schedules.size() == 1,
+    Check(ten_result.result.ok() && ten_result.nearby_schedules.size() == 1,
           "开始时间相差十分钟的不冲突日程应作为临近日程返回");
 
     // 十五分钟边界。
@@ -113,7 +117,7 @@ void CheckNearbySchedules(const ScheduleService& service, InMemoryScheduleReposi
     fifteen_minutes.start_time = At(1'799'999'100);
     fifteen_minutes.end_time = At(1'799'999'400);
     const auto fifteen_result = service.create_schedule(fifteen_minutes);
-    Check(fifteen_result.status.ok() && fifteen_result.nearby_schedules.size() == 1,
+    Check(fifteen_result.result.ok() && fifteen_result.nearby_schedules.size() == 1,
           "开始时间相差十五分钟的不冲突日程应作为临近日程返回");
     Check(fifteen_result.message == "日程创建成功，附近还有其他日程", "临近日程应反映在成功消息中");
 
@@ -132,7 +136,8 @@ void CheckPointConflicts(const ScheduleService& service) {
     CreateScheduleCommand point_conflict;
     point_conflict.event = "同一时间点";
     point_conflict.start_time = At(1'800'007'200);
-    Check(service.create_schedule(point_conflict).status.code == ErrorCode::kConflict, "开始时间相同的单点日程应冲突");
+    Check(service.create_schedule(point_conflict).result.status.code == ErrorCode::kConflict,
+          "开始时间相同的单点日程应冲突");
 }
 
 }  // namespace
@@ -140,27 +145,27 @@ void CheckPointConflicts(const ScheduleService& service) {
 int main() {
     {
         InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
-        const ScheduleService service(repository, repository);
+        const ScheduleService service(repository);
         CheckEventValidation(service);
     }
     {
         InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
-        const ScheduleService service(repository, repository);
+        const ScheduleService service(repository);
         CheckTimeValidation(service);
     }
     {
         InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
-        const ScheduleService service(repository, repository);
+        const ScheduleService service(repository);
         CheckIntervalConflicts(service);
     }
     {
         InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
-        const ScheduleService service(repository, repository);
+        const ScheduleService service(repository);
         CheckNearbySchedules(service, repository);
     }
     {
         InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
-        const ScheduleService service(repository, repository);
+        const ScheduleService service(repository);
         CheckPointConflicts(service);
     }
     return 0;

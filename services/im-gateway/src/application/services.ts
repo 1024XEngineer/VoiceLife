@@ -192,7 +192,11 @@ export class DefaultPairingApplication implements PairingApplication {
                 expiresAt: this.clock.addMinutes(now, command.expiresInMinutes ?? DEFAULT_PAIRING_WINDOW_MINUTES),
                 createdAt: now,
             };
-            if (await this.unitOfWork.transaction((tx) => tx.pairingSessions.createPendingIfAbsent(session))) {
+            const created = await this.unitOfWork.transaction(async (tx) => {
+                await tx.pairingSessions.cancelPendingByDevice(command.deviceId);
+                return tx.pairingSessions.createPendingIfAbsent(session);
+            });
+            if (created) {
                 return { session, displayCode: code.displayCode };
             }
         }

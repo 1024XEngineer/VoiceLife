@@ -94,4 +94,17 @@ Result<ImProvisioningRequest> ParseImProvisioningRequest(std::span<const uint8_t
                                                    .user_id = ToString(user_id)});
 }
 
+Result<ImPairingTriggerRequest> ParseImPairingTrigger(std::span<const uint8_t> bytes) {
+    constexpr std::array<uint8_t, 4> kPairingMagic = {'V', 'L', 'P', '1'};
+    if (bytes.size() != kImPairingTriggerSize ||
+        !std::equal(kPairingMagic.begin(), kPairingMagic.end(), bytes.begin())) {
+        return Result<ImPairingTriggerRequest>::Failure(ErrorCode::kInvalidArgument, "IM pairing trigger 无效");
+    }
+    if (bytes[4] < 1 || bytes[4] > 10 ||
+        !std::all_of(bytes.begin() + 5, bytes.end(), [](uint8_t value) { return value == 0; })) {
+        return Result<ImPairingTriggerRequest>::Failure(ErrorCode::kInvalidArgument, "IM pairing trigger 参数越界");
+    }
+    return Result<ImPairingTriggerRequest>::Success({.expires_in_minutes = bytes[4]});
+}
+
 }  // namespace voicelife::im
