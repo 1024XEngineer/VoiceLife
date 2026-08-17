@@ -12,6 +12,7 @@ import type {
     PairingSessionId,
     ReminderTriggerId,
     RequestId,
+    UserId,
 } from '../contracts/ids.js';
 import type { NotificationIntent, ReminderActionCommand, ScheduleReceiptIntent } from '../contracts/device-gateway.js';
 import type { NormalizedImEvent } from '../contracts/platform-events.js';
@@ -279,6 +280,8 @@ export interface ActionTokenPort {
 /** 设备访问令牌认证得到的调用主体。 */
 export interface DevicePrincipal {
     readonly deviceId: DeviceId;
+    /** 与设备凭据绑定、不能由请求正文冒充的 VoiceLife 用户。 */
+    readonly userId: UserId;
 }
 
 /** 将授权信息认证为设备主体的端口。 */

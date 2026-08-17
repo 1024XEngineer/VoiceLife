@@ -1,10 +1,10 @@
 #include "linx_mcp_bridge.h"
 
-#include "voicelife/mcp/schedule_mcp_tools.h"
 #include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/mcp/mcp_server.h"
+#include "voicelife/mcp/schedule_mcp_tools.h"
 #include "voicelife/schedule/schedule_service.h"
 
 using voicelife::JsonValue;
@@ -57,8 +57,7 @@ int main() {
           "MCP 响应必须回传 Linx session_id");
     const auto& tools = listed.Get("result")->Get("tools")->array;
     Check(tools.size() == 4 && tools[0].Get("name")->string == "schedule.create" &&
-              tools[1].Get("name")->string == "schedule.query" &&
-              tools[2].Get("name")->string == "schedule.update" &&
+              tools[1].Get("name")->string == "schedule.query" && tools[2].Get("name")->string == "schedule.update" &&
               tools[3].Get("name")->string == "schedule.delete",
           "tools/list 必须返回稳定排序的一次性日程工具");
     const auto* create_schema = tools[0].Get("inputSchema");
@@ -79,23 +78,25 @@ int main() {
                   std::string::npos,
           "tools/call 必须返回 MCP text content");
     Check(called.Get("result")->Get("isError")->boolean == false, "成功 tools/call 必须明确声明 isError=false");
+    const auto successful_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"创建会议","start_time":1900000000}},"id":3})",
+        call);
+    Check(successful_outcome.success && successful_outcome.summary == "日程已创建",
+          "成功 MCP 机器结果不得进入用户可见会话/屏幕语义");
 
     const PropertyHandler object_handler = [](const PropertyList& properties) {
         const auto payload = properties.value<JsonValue>("payload");
         return voicelife::ToolResult::Success(ToolOutputValue::Object({
-            MakeToolOutput("has_enabled",
-                           ToolOutputValue::Boolean(payload.has_value() && payload->IsObject() &&
-                                                     payload->Get("enabled") != nullptr)),
+            MakeToolOutput("has_enabled", ToolOutputValue::Boolean(payload.has_value() && payload->IsObject() &&
+                                                                   payload->Get("enabled") != nullptr)),
         }));
     };
     Check(server
               .add_tool("object.echo", "读取对象参数",
-                        PropertyList({Property(
-                            "payload",
-                            PropertyList({
-                                Property("enabled", PropertyType::kBoolean),
-                                Property::Optional("count", PropertyType::kInteger),
-                            }))}),
+                        PropertyList({Property("payload", PropertyList({
+                                                              Property("enabled", PropertyType::kBoolean),
+                                                              Property::Optional("count", PropertyType::kInteger),
+                                                          }))}),
                         object_handler)
               .ok(),
           "对象参数工具应能注册");
@@ -119,5 +120,52 @@ int main() {
     Check(missing.ok(), "未知工具必须返回 JSON-RPC 错误响应");
     const auto& missing_result = ParseMcpEnvelope(*missing.value);
     Check(missing_result.Get("error")->Get("code")->number == -32601, "未知工具应回传 JSON-RPC method-not-found");
+    const auto missing_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"unknown.tool","arguments":{}},"id":4})", missing);
+    Check(!missing_outcome.success && missing_outcome.summary == "操作失败",
+          "合法 JSON-RPC 未知工具错误不得向用户泄露诊断信息");
+
+    const auto invalid_arguments = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":42}},"id":5})",
+        server);
+    Check(invalid_arguments.ok(), "非法工具参数必须回传 JSON-RPC 错误帧");
+    const auto invalid_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":42}},"id":5})",
+        invalid_arguments);
+    Check(!invalid_outcome.success && invalid_outcome.summary == "日程创建失败",
+          "非法参数错误不得进入用户可见 MCP 摘要");
+
+    const auto schedules_before_unavailable = service.query_schedule({
+        .schedule_id = std::nullopt,
+        .keyword = std::nullopt,
+        .start_from = std::nullopt,
+        .start_to = std::nullopt,
+        .status = voicelife::schedule::ScheduleStatusFilter::kAll,
+        .limit = 10,
+        .offset = 0,
+    });
+    const auto unavailable = voicelife::runtime::BuildLinxMcpUnavailableResponse(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"不应执行"}},"id":"busy-1"})",
+        "设备 MCP 正忙，请稍后重试", "remote-session");
+    Check(unavailable.ok(), "有界 worker 满载时必须能回传受控 JSON-RPC 错误");
+    const auto& unavailable_result = ParseMcpEnvelope(*unavailable.value);
+    Check(unavailable_result.Get("id")->string == "busy-1" &&
+              unavailable_result.Get("error")->Get("code")->number == -32001,
+          "MCP 忙响应必须保留请求 id 并使用稳定的 server-error code");
+    const auto schedules_after_unavailable = service.query_schedule({
+        .schedule_id = std::nullopt,
+        .keyword = std::nullopt,
+        .start_from = std::nullopt,
+        .start_to = std::nullopt,
+        .status = voicelife::schedule::ScheduleStatusFilter::kAll,
+        .limit = 10,
+        .offset = 0,
+    });
+    Check(schedules_after_unavailable.result.value.size() == schedules_before_unavailable.result.value.size(),
+          "构建 busy 响应不得执行任何日程工具");
+
+    const auto notification_busy = voicelife::runtime::BuildLinxMcpUnavailableResponse(
+        R"({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})", "ignored", "remote-session");
+    Check(notification_busy.ok() && notification_busy.value->empty(), "通知在 MCP worker 不可用时也不得错误回包");
     return 0;
 }

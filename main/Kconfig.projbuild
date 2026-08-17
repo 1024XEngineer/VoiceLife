@@ -1,5 +1,20 @@
 menu "VoiceLife"
 
+choice VOICELIFE_BOARD
+    prompt "Board assembly"
+    default VOICELIFE_BOARD_VOICELIFE_PCB
+    help
+        构建期选定板级装配：Runtime 只依赖 PlatformAssembly 接口，
+        不判断板型、不直接调用具体显示实现。
+
+config VOICELIFE_BOARD_VOICELIFE_PCB
+    bool "VoiceLife PCB（SSD1306 点阵屏）"
+
+config VOICELIFE_BOARD_ESP_SPARKBOT
+    bool "ESP-SparkBot（ST7789/LVGL 彩屏）"
+
+endchoice
+
 config VOICELIFE_IM_GATEWAY
     bool "Enable VoiceLife Gateway IM runtime"
     default n
@@ -23,6 +38,16 @@ config VOICELIFE_AUDIO_PORT_SMOKE
         Exercise the profile-driven PCM Audio Port with separate capture and
         playback tasks. This proves digital I2S and bounded queue behavior;
         it does not prove acoustic playback or a cloud voice session.
+
+config VOICELIFE_STATE_FLOW_TEST
+    bool "Enable SparkBot interaction state-flow diagnostic"
+    default n
+    depends on VOICELIFE_BOARD_ESP_SPARKBOT
+    help
+        Run a finite, low-priority diagnostic sequence through Runtime's
+        InteractionEventLoop and VoiceSession evidence inlet. It never calls
+        a renderer, presentation port, GPIO, or audio output directly. This
+        is a test-only build option and must remain disabled in production.
 
 if VOICELIFE_AUDIO_PROBE
 

@@ -9,16 +9,17 @@
 
 #include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
-#include "voicelife/schedule/schedule_service.h"
+#include "voicelife/schedule/schedule_operation_service.h"
 
 using voicelife::ErrorCode;
 using voicelife::schedule::DateTime;
 using voicelife::schedule::OperationRecord;
 using voicelife::schedule::RecordScheduleOperationCommand;
 using voicelife::schedule::Schedule;
+using voicelife::schedule::ScheduleOperationService;
 using voicelife::schedule::ScheduleOperationType;
-using voicelife::schedule::ScheduleService;
 using voicelife::schedule::ScheduleStatus;
+using voicelife::schedule::UndoOperationResult;
 using voicelife::schedule::UndoScheduleOperationCommand;
 using voicelife::test::Check;
 using voicelife::test::InMemoryScheduleRepository;
@@ -78,14 +79,14 @@ void ResetScenario(InMemoryScheduleRepository& repository, std::vector<Schedule>
 
 /**
  * @brief 通过服务记录一条测试操作并断言写入成功。
- * @param service 被测试的日程服务。
+ * @param service 被测试的日程操作服务。
  * @param type 操作类型。
  * @param schedule_id 日程 ID。
  * @param event 日程名称。
  * @param previous 操作前的日程状态。
  * @return 保存后带有 ID 和时间的操作记录。
  */
-OperationRecord RecordOperation(ScheduleService& service, ScheduleOperationType type, int64_t schedule_id,
+OperationRecord RecordOperation(ScheduleOperationService& service, ScheduleOperationType type, int64_t schedule_id,
                                 std::string event, std::optional<Schedule> previous) {
     const auto result = service.record_schedule_operation({
         .type = type,
@@ -93,82 +94,84 @@ OperationRecord RecordOperation(ScheduleService& service, ScheduleOperationType 
         .schedule_event = std::move(event),
         .previous = std::move(previous),
     });
-    Check(result.status.ok() && result.operation.has_value(), "测试操作记录应写入成功");
-    return *result.operation;
+    Check(result.result.ok() && result.result.value.has_value(), "测试操作记录应写入成功");
+    return *result.result.value;
 }
 
 /**
  * @brief 验证参数错误和不存在的操作不会改变任何状态。
- * @param service 被测试的日程服务。
+ * @param service 被测试的日程操作服务。
  * @param repository 被测试的内存仓储。
  * @return 无返回值；断言失败时终止测试。
  */
-void CheckInvalidAndMissingOperation(ScheduleService& service, InMemoryScheduleRepository& repository) {
+void CheckInvalidAndMissingOperation(ScheduleOperationService& service, InMemoryScheduleRepository& repository) {
     ResetScenario(repository, {});
 
     const auto invalid = service.undo_schedule_operation({.operation_id = 0});
-    Check(invalid.status.code == ErrorCode::kInvalidArgument && !invalid.undone && !invalid.operation.has_value() &&
-              !invalid.schedule.has_value() && !invalid.error.empty(),
+    Check(invalid.result.status.code == ErrorCode::kInvalidArgument && !invalid.result.value.has_value() &&
+              !invalid.result.error.empty(),
           "非正数操作 ID 应返回完整的参数错误结果");
 
     const auto missing = service.undo_schedule_operation({.operation_id = 9999});
-    Check(missing.status.code == ErrorCode::kNotFound && !missing.undone && !missing.operation.has_value() &&
-              !missing.schedule.has_value() && !missing.error.empty(),
+    Check(missing.result.status.code == ErrorCode::kNotFound && !missing.result.value.has_value() &&
+              !missing.result.error.empty(),
           "不存在的操作应返回未找到且不携带实体");
     Check(repository.ActiveOperations().empty(), "失败的撤销不应生成 undo 记录");
 }
 
 /**
  * @brief 验证撤销创建会删除日程，并可通过撤销 undo 恢复和再次删除。
- * @param service 被测试的日程服务。
+ * @param service 被测试的日程操作服务。
  * @param repository 被测试的内存仓储。
  * @return 无返回值；断言失败时终止测试。
  */
-void CheckCreateAndRecursiveUndo(ScheduleService& service, InMemoryScheduleRepository& repository) {
+void CheckCreateAndRecursiveUndo(ScheduleOperationService& service, InMemoryScheduleRepository& repository) {
     const Schedule created = MakeSchedule(7001, "新建项目周会");
     ResetScenario(repository, {created});
     const OperationRecord create =
         RecordOperation(service, ScheduleOperationType::kCreate, created.id, created.event, std::nullopt);
 
     const auto first = service.undo_schedule_operation({.operation_id = create.id});
-    Check(first.status.ok() && first.undone && first.operation.has_value() && first.operation->id == create.id &&
-              first.operation->type == ScheduleOperationType::kCreate && !first.schedule.has_value() &&
-              first.error.empty(),
+    Check(first.result.ok() && first.result.value.has_value() && first.result.value->operation.id == create.id &&
+              first.result.value->operation.type == ScheduleOperationType::kCreate &&
+              !first.result.value->schedule.has_value() && first.result.error.empty(),
           "撤销创建应返回原创建操作并删除日程");
     Check(!repository.FindSchedule(created.id).ok(), "撤销创建后内存仓储不应保留日程");
 
     const auto after_first = service.query_recent_schedule_operation();
-    Check(after_first.operations.size() == 1 && after_first.operations.front().type == ScheduleOperationType::kUndo &&
-              after_first.operations.front().previous.has_value() &&
-              SameSchedule(*after_first.operations.front().previous, created),
+    Check(after_first.result.value.size() == 1 &&
+              after_first.result.value.front().type == ScheduleOperationType::kUndo &&
+              after_first.result.value.front().previous.has_value() &&
+              SameSchedule(*after_first.result.value.front().previous, created),
           "成功撤销应隐藏原操作并记录携带撤销前快照的 undo");
 
     const auto repeated = service.undo_schedule_operation({.operation_id = create.id});
-    Check(repeated.status.code == ErrorCode::kNotFound && !repeated.undone, "原操作成功撤销后不应允许按原 ID 重复撤销");
+    Check(repeated.result.status.code == ErrorCode::kNotFound, "原操作成功撤销后不应允许按原 ID 重复撤销");
 
-    const auto second = service.undo_schedule_operation({.operation_id = after_first.operations.front().id});
-    Check(second.status.ok() && second.undone && second.operation.has_value() &&
-              second.operation->type == ScheduleOperationType::kUndo && second.schedule.has_value() &&
-              SameSchedule(*second.schedule, created),
+    const auto second = service.undo_schedule_operation({.operation_id = after_first.result.value.front().id});
+    Check(second.result.ok() && second.result.value.has_value() &&
+              second.result.value->operation.type == ScheduleOperationType::kUndo &&
+              second.result.value->schedule.has_value() && SameSchedule(*second.result.value->schedule, created),
           "撤销刚才的 undo 应恢复被删除的日程");
 
     const auto after_second = service.query_recent_schedule_operation();
-    Check(after_second.operations.size() == 1 && after_second.operations.front().type == ScheduleOperationType::kUndo &&
-              !after_second.operations.front().previous.has_value(),
+    Check(after_second.result.value.size() == 1 &&
+              after_second.result.value.front().type == ScheduleOperationType::kUndo &&
+              !after_second.result.value.front().previous.has_value(),
           "恢复日程产生的新 undo 应用空快照表达撤销前日程不存在");
 
-    const auto third = service.undo_schedule_operation({.operation_id = after_second.operations.front().id});
-    Check(third.status.ok() && third.undone && !third.schedule.has_value() && !repository.FindSchedule(created.id).ok(),
+    const auto third = service.undo_schedule_operation({.operation_id = after_second.result.value.front().id});
+    Check(third.result.ok() && !third.result.value->schedule.has_value() && !repository.FindSchedule(created.id).ok(),
           "空快照 undo 被撤销时应再次删除日程");
 }
 
 /**
  * @brief 验证撤销修改会完整恢复 previous，并记录撤销前的修改后状态。
- * @param service 被测试的日程服务。
+ * @param service 被测试的日程操作服务。
  * @param repository 被测试的内存仓储。
  * @return 无返回值；断言失败时终止测试。
  */
-void CheckUpdateUndo(ScheduleService& service, InMemoryScheduleRepository& repository) {
+void CheckUpdateUndo(ScheduleOperationService& service, InMemoryScheduleRepository& repository) {
     const Schedule previous = MakeSchedule(7101, "修改前");
     Schedule updated = MakeSchedule(7101, "修改后", ScheduleStatus::kCompleted);
     updated.location = std::nullopt;
@@ -179,24 +182,25 @@ void CheckUpdateUndo(ScheduleService& service, InMemoryScheduleRepository& repos
 
     const auto result = service.undo_schedule_operation({.operation_id = operation.id});
     const auto stored = repository.FindSchedule(previous.id);
-    Check(result.status.ok() && result.undone && result.schedule.has_value() &&
-              SameSchedule(*result.schedule, previous) && stored.ok() && SameSchedule(*stored.value, previous),
+    Check(result.result.ok() && result.result.value.has_value() && result.result.value->schedule.has_value() &&
+              SameSchedule(*result.result.value->schedule, previous) && stored.ok() &&
+              SameSchedule(*stored.value, previous),
           "撤销修改应完整恢复 previous 的全部字段");
 
     const auto recent = service.query_recent_schedule_operation();
-    Check(recent.operations.size() == 1 && recent.operations.front().type == ScheduleOperationType::kUndo &&
-              recent.operations.front().previous.has_value() &&
-              SameSchedule(*recent.operations.front().previous, updated),
+    Check(recent.result.value.size() == 1 && recent.result.value.front().type == ScheduleOperationType::kUndo &&
+              recent.result.value.front().previous.has_value() &&
+              SameSchedule(*recent.result.value.front().previous, updated),
           "修改撤销记录应保存撤销前的修改后状态");
 }
 
 /**
  * @brief 验证撤销删除会恢复日程，并可通过撤销 undo 回到已取消状态。
- * @param service 被测试的日程服务。
+ * @param service 被测试的日程操作服务。
  * @param repository 被测试的内存仓储。
  * @return 无返回值；断言失败时终止测试。
  */
-void CheckDeleteUndo(ScheduleService& service, InMemoryScheduleRepository& repository) {
+void CheckDeleteUndo(ScheduleOperationService& service, InMemoryScheduleRepository& repository) {
     const Schedule previous = MakeSchedule(7201, "被删除的日程");
     Schedule cancelled = previous;
     cancelled.status = ScheduleStatus::kCancelled;
@@ -206,27 +210,28 @@ void CheckDeleteUndo(ScheduleService& service, InMemoryScheduleRepository& repos
         RecordOperation(service, ScheduleOperationType::kDelete, previous.id, previous.event, previous);
 
     const auto restored = service.undo_schedule_operation({.operation_id = operation.id});
-    Check(restored.status.ok() && restored.undone && restored.schedule.has_value() &&
-              SameSchedule(*restored.schedule, previous),
+    Check(restored.result.ok() && restored.result.value.has_value() && restored.result.value->schedule.has_value() &&
+              SameSchedule(*restored.result.value->schedule, previous),
           "撤销删除应恢复删除前的完整日程");
 
-    const auto undo_records = service.query_recent_schedule_operation().operations;
+    const auto undo_records = service.query_recent_schedule_operation().result.value;
     Check(undo_records.size() == 1 && undo_records.front().previous.has_value() &&
               SameSchedule(*undo_records.front().previous, cancelled),
           "删除撤销产生的 undo 应保存已取消状态");
 
     const auto reverted = service.undo_schedule_operation({.operation_id = undo_records.front().id});
-    Check(reverted.status.ok() && reverted.schedule.has_value() && SameSchedule(*reverted.schedule, cancelled),
+    Check(reverted.result.ok() && reverted.result.value->schedule.has_value() &&
+              SameSchedule(*reverted.result.value->schedule, cancelled),
           "撤销删除对应的 undo 应恢复已取消状态");
 }
 
 /**
  * @brief 验证过期操作和日程逆操作失败都不会消费目标记录。
- * @param service 被测试的日程服务。
+ * @param service 被测试的日程操作服务。
  * @param repository 被测试的内存仓储。
  * @return 无返回值；断言失败时终止测试。
  */
-void CheckFailureDoesNotConsumeOperation(ScheduleService& service, InMemoryScheduleRepository& repository) {
+void CheckFailureDoesNotConsumeOperation(ScheduleOperationService& service, InMemoryScheduleRepository& repository) {
     const Schedule expired_schedule = MakeSchedule(7301, "过期日程");
     ResetScenario(repository, {expired_schedule});
     const DateTime now = Now();
@@ -243,7 +248,7 @@ void CheckFailureDoesNotConsumeOperation(ScheduleService& service, InMemorySched
     Check(expired.ok(), "过期场景操作记录应成功注入");
 
     const auto expired_result = service.undo_schedule_operation({.operation_id = expired.value->id});
-    Check(expired_result.status.code == ErrorCode::kConflict && !expired_result.undone &&
+    Check(expired_result.result.status.code == ErrorCode::kConflict && !expired_result.result.value.has_value() &&
               repository.FindSchedule(expired_schedule.id).ok() && repository.ActiveOperations().size() == 1,
           "过期操作应保持日程和原操作记录不变");
 
@@ -252,18 +257,18 @@ void CheckFailureDoesNotConsumeOperation(ScheduleService& service, InMemorySched
         RecordOperation(service, ScheduleOperationType::kCreate, 7302, "不存在的已创建日程", std::nullopt);
     const auto failed = service.undo_schedule_operation({.operation_id = missing_schedule.id});
     const auto operations = repository.ActiveOperations();
-    Check(failed.status.code == ErrorCode::kNotFound && !failed.undone && operations.size() == 1 &&
-              operations.front().id == missing_schedule.id,
+    Check(failed.result.status.code == ErrorCode::kNotFound && !failed.result.value.has_value() &&
+              operations.size() == 1 && operations.front().id == missing_schedule.id,
           "日程逆操作失败时不应失效目标或写入 undo 记录");
 }
 
 /**
  * @brief 验证原子撤销失败时不会修改日程或消费操作记录。
- * @param service 被测试的日程服务。
+ * @param service 被测试的日程操作服务。
  * @param repository 被测试的内存仓储。
  * @return 无返回值；断言失败时终止测试。
  */
-void CheckUndoCommitFailure(ScheduleService& service, InMemoryScheduleRepository& repository) {
+void CheckUndoCommitFailure(ScheduleOperationService& service, InMemoryScheduleRepository& repository) {
     const Schedule previous = MakeSchedule(7351, "提交失败前");
     Schedule updated = previous;
     updated.event = "提交失败后";
@@ -275,14 +280,14 @@ void CheckUndoCommitFailure(ScheduleService& service, InMemoryScheduleRepository
     const auto failed = service.undo_schedule_operation({.operation_id = operation.id});
     const auto stored = repository.FindSchedule(updated.id);
     const auto operations = repository.ActiveOperations();
-    Check(failed.status.code == ErrorCode::kInternal && !failed.undone && !failed.operation.has_value() &&
-              !failed.schedule.has_value() && failed.error == "模拟撤销记录提交失败" && stored.ok() &&
-              SameSchedule(*stored.value, updated) && operations.size() == 1 && operations.front().id == operation.id,
+    Check(failed.result.status.code == ErrorCode::kInternal && !failed.result.value.has_value() &&
+              failed.result.error == "模拟撤销记录提交失败" && stored.ok() && SameSchedule(*stored.value, updated) &&
+              operations.size() == 1 && operations.front().id == operation.id,
           "原子撤销失败应返回错误并保持日程及原操作记录不变");
 
     const auto retried = service.undo_schedule_operation({.operation_id = operation.id});
-    Check(retried.status.ok() && retried.undone && retried.schedule.has_value() &&
-              SameSchedule(*retried.schedule, previous),
+    Check(retried.result.ok() && retried.result.value.has_value() && retried.result.value->schedule.has_value() &&
+              SameSchedule(*retried.result.value->schedule, previous),
           "提交失败后仍应允许重新撤销原操作");
 }
 
@@ -323,11 +328,11 @@ void CheckUndoWindowBoundary(InMemoryScheduleRepository& repository) {
 
 /**
  * @brief 验证并发撤销同一操作时只有一个请求成功。
- * @param service 被测试的日程服务。
+ * @param service 被测试的日程操作服务。
  * @param repository 被测试的内存仓储。
  * @return 无返回值；断言失败时终止测试。
  */
-void CheckConcurrentUndo(ScheduleService& service, InMemoryScheduleRepository& repository) {
+void CheckConcurrentUndo(ScheduleOperationService& service, InMemoryScheduleRepository& repository) {
     for (int iteration = 0; iteration < 20; ++iteration) {
         const Schedule previous = MakeSchedule(7500 + iteration, "并发撤销前");
         Schedule updated = previous;
@@ -350,11 +355,12 @@ void CheckConcurrentUndo(ScheduleService& service, InMemoryScheduleRepository& r
         first.join();
         second.join();
 
-        const int successes = static_cast<int>(results[0].undone) + static_cast<int>(results[1].undone);
+        const int successes = static_cast<int>(results[0].result.value.has_value()) +
+                              static_cast<int>(results[1].result.value.has_value());
         const auto stored = repository.FindSchedule(previous.id);
         const auto recent = service.query_recent_schedule_operation();
-        Check(successes == 1 && stored.ok() && SameSchedule(*stored.value, previous) && recent.operations.size() == 1 &&
-                  recent.operations.front().type == ScheduleOperationType::kUndo,
+        Check(successes == 1 && stored.ok() && SameSchedule(*stored.value, previous) &&
+                  recent.result.value.size() == 1 && recent.result.value.front().type == ScheduleOperationType::kUndo,
               "并发撤销同一操作应恰好成功一次并保留一条一致的 undo 记录");
     }
 }
@@ -367,7 +373,7 @@ void CheckConcurrentUndo(ScheduleService& service, InMemoryScheduleRepository& r
  */
 int main() {
     InMemoryScheduleRepository repository;
-    ScheduleService service(repository, repository);
+    ScheduleOperationService service(repository);
     CheckInvalidAndMissingOperation(service, repository);
     CheckCreateAndRecursiveUndo(service, repository);
     CheckUpdateUndo(service, repository);

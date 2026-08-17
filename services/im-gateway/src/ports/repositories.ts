@@ -47,6 +47,12 @@ export interface ChannelAccountRepository {
 /** 配对会话的持久化与过期查询端口。 */
 export interface PairingSessionRepository {
     /**
+     * 取消设备已有的待确认会话，确保重试创建时旧展示码立即失效。
+     * @param deviceId 要清理待确认会话的设备。
+     * @returns 清理完成后兑现的 Promise。
+     */
+    cancelPendingByDevice(deviceId: DeviceId): Promise<void>;
+    /**
      * 仅当不存在相同展示码散列的待确认会话时创建会话。
      * @param session 待创建的配对会话。
      * @returns true 表示已创建；false 表示展示码与另一待确认会话冲突。

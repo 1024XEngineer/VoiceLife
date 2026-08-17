@@ -20,6 +20,7 @@ function fixtureEnvironment(overrides = {}) {
         GATEWAY_HOST: '127.0.0.1',
         GATEWAY_PORT: '3000',
         DEVICE_ID: 'device-fixture',
+        DEVICE_USER_ID: 'user-fixture',
         DEVICE_TOKEN: deviceToken,
         ACTION_TOKEN_SECRET: 'fixture-action-token-secret-with-32-bytes',
         IDENTITY_SECRET: 'fixture-identity-secret-with-at-least-32-bytes',
@@ -117,6 +118,7 @@ test('production configuration requires every secret without exposing its value'
     const config = readGatewayConfiguration(fixtureEnvironment());
     assert.equal(config.host, '127.0.0.1');
     assert.equal(config.port, 3000);
+    assert.equal(config.deviceUserId, 'user-fixture');
     assert.equal(config.wechat.channelAccountId, 'wechat-production');
     assert.equal(config.wechat.displayTimeZone, 'Asia/Shanghai');
     assert.equal(
@@ -135,6 +137,10 @@ test('production configuration requires every secret without exposing its value'
     assert.throws(
         () => readGatewayConfiguration(fixtureEnvironment({ ACTION_TOKEN_SECRET: 'too-short' })),
         /ACTION_TOKEN_SECRET must contain at least 32 bytes/u,
+    );
+    assert.throws(
+        () => readGatewayConfiguration(fixtureEnvironment({ DEVICE_USER_ID: '' })),
+        /DEVICE_USER_ID is required/u,
     );
 });
 

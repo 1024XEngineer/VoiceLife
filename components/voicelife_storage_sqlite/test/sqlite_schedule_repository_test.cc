@@ -12,9 +12,9 @@
 #include "voicelife/schedule/schedule_service.h"
 #include "voicelife/storage_sqlite/sqlite_database.h"
 
+using voicelife::schedule::CancelScheduleCommand;
 using voicelife::schedule::CreateScheduleCommand;
 using voicelife::schedule::DateTime;
-using voicelife::schedule::DeleteScheduleCommand;
 using voicelife::schedule::QueryScheduleCommand;
 using voicelife::schedule::ScheduleId;
 using voicelife::schedule::ScheduleService;
@@ -103,7 +103,7 @@ CrudResultIds CheckCrudThroughService(const std::filesystem::path& path) {
     CheckStatementRowIdIsolation(database);
     SqliteScheduleRepository repository(database);
     Check(repository.Initialize().ok(), "应成功创建日程表");
-    ScheduleService service(repository, repository);
+    ScheduleService service(repository);
 
     Check(database.BeginTransaction().ok(), "Database 层应成功开始事务");
     const auto created = service.create_schedule(CreateScheduleCommand{
@@ -114,7 +114,7 @@ CrudResultIds CheckCrudThroughService(const std::filesystem::path& path) {
         .notes = "由真实仓储写入",
         .ignore_conflict = false,
     });
-    Check(created.status.ok() && created.schedule.has_value() && created.schedule->id > 0,
+    Check(created.result.ok() && created.result.value.has_value() && created.result.value->id > 0,
           "服务应通过 SQLite 生成日程 ID");
     Check(database.Commit().ok(), "Database 层应成功提交事务");
 
@@ -126,52 +126,53 @@ CrudResultIds CheckCrudThroughService(const std::filesystem::path& path) {
         .notes = "删除后不应恢复",
         .ignore_conflict = false,
     });
-    Check(second.status.ok() && second.schedule.has_value() && second.schedule->id > created.schedule->id,
+    Check(second.result.ok() && second.result.value.has_value() && second.result.value->id > created.result.value->id,
           "第二条日程应通过 SQLite 获得独立标识");
 
     const auto queried = service.query_schedule({});
-    Check(queried.status.ok() && queried.total == 2 && queried.schedules.size() == 2,
+    Check(queried.result.ok() && queried.total == 2 && queried.result.value.size() == 2,
           "服务查询应读取两条刚写入的 SQLite 行");
-    const auto first = service.query_schedule(QueryScheduleCommand{.schedule_id = created.schedule->id});
-    Check(first.status.ok() && first.total == 1 && first.schedules.size() == 1, "按日程标识查询应命中真实 SQLite 行");
-    const auto& stored = first.schedules.front();
-    Check(stored.id == created.schedule->id && stored.event == "SQLite 连接验证" &&
+    const auto first = service.query_schedule(QueryScheduleCommand{.schedule_id = created.result.value->id});
+    Check(first.result.ok() && first.total == 1 && first.result.value.size() == 1,
+          "按日程标识查询应命中真实 SQLite 行");
+    const auto& stored = first.result.value.front();
+    Check(stored.id == created.result.value->id && stored.event == "SQLite 连接验证" &&
               stored.start_time == DateTime{std::chrono::seconds{2'000'000'000}} &&
               stored.end_time == DateTime{std::chrono::seconds{2'000'003'600}} && stored.location == "会议室 A" &&
               stored.notes == "由真实仓储写入",
           "SQLite 查询应完整还原已写入的日程字段");
 
     UpdateScheduleCommand update;
-    update.schedule_id = created.schedule->id;
+    update.schedule_id = created.result.value->id;
     update.event = "  SQLite 修改验证  ";
     update.start_time = std::optional<DateTime>{DateTime{std::chrono::seconds{2'000'020'000}}};
     update.end_time = std::optional<DateTime>{DateTime{std::chrono::seconds{2'000'021'800}}};
     update.location = std::optional<std::string>{};
     update.notes = std::optional<std::string>{"修改后的真实备注"};
     const auto updated = service.update_schedule(update);
-    Check(updated.status.ok() && updated.schedule.has_value() && updated.schedule->event == "SQLite 修改验证" &&
-              !updated.schedule->location.has_value() && updated.schedule->notes == "修改后的真实备注",
+    Check(updated.result.ok() && updated.result.value.has_value() && updated.result.value->event == "SQLite 修改验证" &&
+              !updated.result.value->location.has_value() && updated.result.value->notes == "修改后的真实备注",
           "服务修改应把全部字段及显式空值写入 SQLite");
 
-    const auto deleted = service.delete_schedule(DeleteScheduleCommand{.schedule_id = second.schedule->id});
-    Check(deleted.status.ok() && deleted.deleted, "服务删除应把 SQLite 日程标记为已取消");
+    const auto deleted = service.cancel_schedule(CancelScheduleCommand{.schedule_id = second.result.value->id});
+    Check(deleted.result.ok() && deleted.result.value, "服务删除应把 SQLite 日程标记为已取消");
 
     QueryScheduleCommand all;
     all.status = ScheduleStatusFilter::kAll;
     const auto after_changes = service.query_schedule(all);
-    Check(after_changes.status.ok() && after_changes.total == 2 && after_changes.schedules.size() == 2,
+    Check(after_changes.result.ok() && after_changes.total == 2 && after_changes.result.value.size() == 2,
           "修改和软删除后查询全部状态应保留两条历史日程");
     const auto cancelled = service.query_schedule(QueryScheduleCommand{
-        .schedule_id = second.schedule->id,
+        .schedule_id = second.result.value->id,
         .keyword = std::nullopt,
         .start_from = std::nullopt,
         .start_to = std::nullopt,
         .status = ScheduleStatusFilter::kCancelled,
     });
-    Check(cancelled.status.ok() && cancelled.total == 1 &&
-              cancelled.schedules.front().status == ScheduleStatus::kCancelled,
+    Check(cancelled.result.ok() && cancelled.total == 1 &&
+              cancelled.result.value.front().status == ScheduleStatus::kCancelled,
           "软删除后的日程应通过取消状态查询命中");
-    return {.updated_schedule_id = created.schedule->id, .cancelled_schedule_id = second.schedule->id};
+    return {.updated_schedule_id = created.result.value->id, .cancelled_schedule_id = second.result.value->id};
 }
 
 /**
@@ -200,8 +201,8 @@ void CheckRestartPersistence(const std::filesystem::path& path, const CrudResult
     const auto& updated = *updated_iter;
     Check(updated.event == "SQLite 修改验证" && updated.start_time == DateTime{std::chrono::seconds{2'000'020'000}} &&
               updated.end_time == DateTime{std::chrono::seconds{2'000'021'800}} && !updated.location.has_value() &&
-              updated.notes == "修改后的真实备注" && updated.rule_id == 88 &&
-              updated.status == ScheduleStatus::kCompleted,
+              updated.notes == "修改后的真实备注" && !updated.rule_id.has_value() &&
+              updated.status == ScheduleStatus::kActive,
           "数据库重连后应完整保留更新字段");
 }
 

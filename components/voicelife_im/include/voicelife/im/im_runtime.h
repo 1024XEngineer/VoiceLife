@@ -8,6 +8,7 @@
 
 #include "voicelife/contracts/status.h"
 #include "voicelife/im/im_credentials.h"
+#include "voicelife/im/im_pairing_client.h"
 #include "voicelife/im/im_reporting_channel.h"
 #include "voicelife/im/im_transport.h"
 
@@ -113,6 +114,15 @@ class ImRuntime {
      */
     [[nodiscard]] ImReportingChannel* reporting_channel() const { return reporting_.get(); }
 
+    /**
+     * @brief 返回 ready 状态下由 Runtime 持有的配对客户端。
+     * @return 未 ready 时为 nullptr；普通启动不会调用该客户端创建会话。
+     */
+    [[nodiscard]] ImPairingClient* pairing_client() const { return pairing_.get(); }
+
+    /** @brief 返回已加载的可选用户引用。 @return 不包含 Secret 的 userId。 */
+    [[nodiscard]] const std::optional<std::string>& user_id() const { return user_id_; }
+
    private:
     ImConfigProvider& config_;
     ImCredentialProvider& credentials_;
@@ -122,6 +132,8 @@ class ImRuntime {
     Status start_status_ = Status::Error(ErrorCode::kUnavailable, "IM Runtime 尚未启动");
     std::unique_ptr<ImTransport> transport_;
     std::unique_ptr<ImReportingChannel> reporting_;
+    std::unique_ptr<ImPairingClient> pairing_;
+    std::optional<std::string> user_id_;
 };
 
 }  // namespace voicelife::im

@@ -285,9 +285,13 @@ function optionalString(value: JsonObject, key: string, path: string): string | 
 function optionalPlatformArray(input: unknown, path: string): readonly ImPlatform[] | undefined {
     if (input === undefined) return undefined;
     if (!Array.isArray(input)) invalid(path, 'must be an array');
-    return input.map((platform, index) =>
+    const platforms = input.map((platform, index) =>
         enumAt(platform, ['wechat_official', 'wecom_aibot', 'feishu', 'dingtalk'] as const, `${path}[${index}]`),
     );
+    if (platforms.length === 0 || new Set(platforms).size !== platforms.length) {
+        invalid(path, 'must be non-empty and contain no duplicates');
+    }
+    return platforms;
 }
 
 function optionalPairingMinutes(input: unknown, path: string): number | undefined {

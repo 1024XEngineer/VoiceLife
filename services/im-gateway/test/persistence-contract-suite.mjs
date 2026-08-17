@@ -43,13 +43,26 @@ export async function sharedRepositoryContractSuite(makeUow) {
             await uow.transaction(async (ctx) => {
                 await ctx.pairingSessions.save(pairingSession());
                 await ctx.pairingSessions.save(
-                    pairingSession('pairing-confirmed', { status: 'confirmed', displayCodeHash: 'hash-confirmed' }),
+                    pairingSession('pairing-confirmed', {
+                        status: 'confirmed',
+                        displayCodeHash: 'hash-confirmed',
+                        confirmedAt: T1,
+                    }),
                 );
                 await ctx.pairingSessions.save(
-                    pairingSession('pairing-future', { displayCodeHash: 'hash-future', expiresAt: T2 }),
+                    pairingSession('pairing-future', {
+                        displayCodeHash: 'hash-future',
+                        deviceId: 'device-future',
+                        expiresAt: T2,
+                    }),
                 );
                 await ctx.pairingSessions.save(
-                    pairingSession('pairing-expired', { displayCodeHash: 'hash-expired', expiresAt: T0 }),
+                    pairingSession('pairing-expired', {
+                        displayCodeHash: 'hash-expired',
+                        deviceId: 'device-expired',
+                        createdAt: '2026-08-02T23:50:00.000Z',
+                        expiresAt: T0,
+                    }),
                 );
             });
             const found = await uow.transaction((ctx) => ctx.pairingSessions.findById('pairing-1'));
@@ -76,6 +89,25 @@ export async function sharedRepositoryContractSuite(makeUow) {
             assert.equal([first, second].filter(Boolean).length, 1);
             const found = await uow.transaction((ctx) => ctx.pairingSessions.findPendingByDisplayCodeHash('hash-1234'));
             assert.equal(found.id, first ? 'pairing-a' : 'pairing-b');
+        });
+    });
+
+    await test('pairing sessions cancel the previous pending session for a device', async () => {
+        await withUow(makeUow, async (uow) => {
+            await uow.transaction(async (ctx) => {
+                assert.equal(await ctx.pairingSessions.createPendingIfAbsent(pairingSession('pairing-old')), true);
+                await ctx.pairingSessions.cancelPendingByDevice('device-1');
+                assert.equal(
+                    await ctx.pairingSessions.createPendingIfAbsent(
+                        pairingSession('pairing-new', { displayCodeHash: 'hash-new' }),
+                    ),
+                    true,
+                );
+            });
+            const oldSession = await uow.transaction((ctx) => ctx.pairingSessions.findById('pairing-old'));
+            const newSession = await uow.transaction((ctx) => ctx.pairingSessions.findById('pairing-new'));
+            assert.equal(oldSession.status, 'cancelled');
+            assert.equal(newSession.status, 'pending');
         });
     });
 

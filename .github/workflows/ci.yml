@@ -196,6 +196,12 @@ jobs:
           esp_idf_version: v6.0.2
           target: esp32s3
           path: .
+      - name: 构建 Timing ESP Unity 测试固件
+        uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5 # v1.2.0
+        with:
+          esp_idf_version: v6.0.2
+          target: esp32s3
+          path: tests/board/timing_esp_unity
       - name: 构建 FATFS/WL + SQLite 存储 Profile
         uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5 # v1.2.0
         with:

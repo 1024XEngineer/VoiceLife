@@ -105,6 +105,18 @@ void TestEmptyBodyIsComplete() {
     Check(body.empty(), "空响应体不得包含字节");
 }
 
+// #241 回归：esp_http_client 对 chunked 响应把 content_length 置 0（而非 -1），
+// 但响应实际有 body。ContentLength()==0 不得被当作"0 字节即完整"，
+// 必须继续读取直到 EOF 才能判定完整，否则 201 创建响应体被整个丢弃。
+void TestZeroContentLengthWithBodyIsComplete() {
+    FakeReader reader;
+    reader.content_length = 0;    // chunked 时 esp_http_client_get_content_length 返回 0
+    reader.outcomes = {5, 5, 0};  // 两个分块后 EOF
+    std::string body;
+    Check(ReadInto(reader, body), "ContentLength 为 0 但有实际分块 body 必须读到 EOF 判定完整");
+    Check(body.size() == 10, "content_length==0 时也必须累积全部响应体字节");
+}
+
 void TestExactFitAtLimitIsComplete() {
     FakeReader reader;
     reader.content_length = 64;
@@ -124,6 +136,7 @@ int main() {
     TestChunkedReadErrorIsIncomplete();
     TestTruncatedOverLimitIsIncomplete();
     TestEmptyBodyIsComplete();
+    TestZeroContentLengthWithBodyIsComplete();
     TestExactFitAtLimitIsComplete();
     return 0;
 }

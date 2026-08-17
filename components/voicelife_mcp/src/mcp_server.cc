@@ -93,9 +93,8 @@ Status NormalizeAndValidateObject(const JsonValue& value, const ToolInputSchema&
             if (field.default_value.has_value()) {
                 if (field.type == ToolInputType::kObject && field.object_schema != nullptr) {
                     JsonValue child;
-                    const Status status =
-                        NormalizeAndValidateObject(ToolValueToJson(*field.default_value), *field.object_schema,
-                                                   child_path, child);
+                    const Status status = NormalizeAndValidateObject(ToolValueToJson(*field.default_value),
+                                                                     *field.object_schema, child_path, child);
                     if (!status.ok()) return status;
                     object.emplace(name, std::move(child));
                     continue;
@@ -110,7 +109,8 @@ Status NormalizeAndValidateObject(const JsonValue& value, const ToolInputSchema&
         }
         if (field.type == ToolInputType::kObject && field.object_schema != nullptr) {
             JsonValue child;
-            if (const Status status = NormalizeAndValidateObject(argument->second, *field.object_schema, child_path, child);
+            if (const Status status =
+                    NormalizeAndValidateObject(argument->second, *field.object_schema, child_path, child);
                 !status.ok()) {
                 return status;
             }
@@ -195,7 +195,8 @@ Status ValidatePropertyDefinition(const Property& property, const std::string& p
             return Status::Error(ErrorCode::kInvalidArgument, "只有对象参数可以定义内部字段：" + path);
         }
         for (const auto& child : *property.object_properties()) {
-            const Status status = ValidatePropertyDefinition(child, path.empty() ? child.name() : path + "." + child.name());
+            const Status status =
+                ValidatePropertyDefinition(child, path.empty() ? child.name() : path + "." + child.name());
             if (!status.ok()) return status;
         }
     }
@@ -256,6 +257,16 @@ Property& Property::with_object_properties(PropertyList object_properties) {
 }
 
 Property::~Property() = default;
+
+Property Property::WithIntegerRange(std::string name, int64_t minimum, int64_t maximum,
+                                    std::optional<ToolValue> default_value) {
+    Property property(std::move(name), PropertyType::kInteger);
+    property.default_value_ = std::move(default_value);
+    property.minimum_ = minimum;
+    property.maximum_ = maximum;
+    property.required_ = !property.default_value_.has_value();
+    return property;
+}
 
 Property Property::Optional(std::string name, PropertyType type) {
     Property property(std::move(name), type);
@@ -363,9 +374,8 @@ ToolResult McpServer::call(const ToolCall& call) const {
             if (field.default_value.has_value()) {
                 if (field.type == ToolInputType::kObject && field.object_schema != nullptr) {
                     JsonValue normalized;
-                    const Status status =
-                        NormalizeAndValidateObject(std::get<JsonValue>(*field.default_value), *field.object_schema, name,
-                                                   normalized);
+                    const Status status = NormalizeAndValidateObject(std::get<JsonValue>(*field.default_value),
+                                                                     *field.object_schema, name, normalized);
                     if (!status.ok()) return Failure(status);
                     normalized_call.arguments.emplace(name, std::move(normalized));
                 } else {
@@ -383,9 +393,8 @@ ToolResult McpServer::call(const ToolCall& call) const {
                 return Failure(Status::Error(ErrorCode::kInvalidArgument, "工具参数类型错误：" + name));
             }
             JsonValue normalized;
-            const Status status =
-                NormalizeAndValidateObject(std::get<JsonValue>(argument->second), *field.object_schema, name,
-                                           normalized);
+            const Status status = NormalizeAndValidateObject(std::get<JsonValue>(argument->second),
+                                                             *field.object_schema, name, normalized);
             if (!status.ok()) return Failure(status);
             normalized_call.arguments[name] = std::move(normalized);
         } else if (!MatchesType(argument->second, field.type)) {

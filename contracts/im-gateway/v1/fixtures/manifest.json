@@ -1,8 +1,50 @@
 {
   "schemaVersion": "1",
-  "versionless": ["notification-submission"],
-  "outbound": ["notification-submission", "reminder-action-command"],
+  "versionless": [
+    "notification-submission",
+    "pairing-create-request",
+    "pairing-created",
+    "pairing-status"
+  ],
+  "outbound": [
+    "notification-submission",
+    "pairing-created",
+    "pairing-status",
+    "reminder-action-command"
+  ],
   "contracts": {
+    "pairing-create-request": {
+      "valid": [
+        "pairing-create-request-minimal.json",
+        "pairing-create-request.json"
+      ],
+      "invalid": [
+        "pairing-create-request-invalid-expiry.json",
+        "pairing-create-request-invalid-platform.json"
+      ]
+    },
+    "pairing-created": {
+      "valid": [
+        "pairing-created.json"
+      ],
+      "invalid": [
+        "pairing-created-invalid-code.json",
+        "pairing-created-invalid-secret.json"
+      ]
+    },
+    "pairing-status": {
+      "valid": [
+        "pairing-status-cancelled.json",
+        "pairing-status-confirmed.json",
+        "pairing-status-expired.json",
+        "pairing-status.json"
+      ],
+      "invalid": [
+        "pairing-status-invalid-secret.json",
+        "pairing-status-invalid-status.json",
+        "pairing-status-invalid-time.json"
+      ]
+    },
     "notification": {
       "valid": [
         "notification-conflict.json",

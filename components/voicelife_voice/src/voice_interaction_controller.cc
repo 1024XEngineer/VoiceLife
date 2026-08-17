@@ -122,6 +122,16 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             state_ = VoiceInteractionState::kListening;
             transition.action = VoiceInteractionAction::kStartCapture;
             break;
+        case VoiceInteractionEvent::kInterruptAndAcknowledge:
+            // “别说了”不是静默终止：先隔离正在播放的旧回合，再经 Provider
+            // 合成一次“收到！”。TTS 结束后沿 kTtsStopped 正常进入聆听。
+            if (state_ != VoiceInteractionState::kListening && state_ != VoiceInteractionState::kThinking &&
+                state_ != VoiceInteractionState::kSpeaking && state_ != VoiceInteractionState::kFinalizing) {
+                return InvalidTransition(state_, event);
+            }
+            state_ = VoiceInteractionState::kListening;
+            transition.action = VoiceInteractionAction::kInterruptAndStartVoiceTurn;
+            break;
         case VoiceInteractionEvent::kInterruptRequested:
             if (state_ != VoiceInteractionState::kListening && state_ != VoiceInteractionState::kThinking &&
                 state_ != VoiceInteractionState::kSpeaking) {
@@ -146,10 +156,23 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             if (state_ == VoiceInteractionState::kBooting || state_ == VoiceInteractionState::kError) {
                 return InvalidTransition(state_, event);
             }
+            // 服务端在“牛牛走了～”等固定播报后可以有序结束 WebSocket。
+            // 此时本地命令检测仍可用，不能把空闲交互 UI 改成“重连中”；连接在
+            // transport 内部后台恢复即可。进行中的回合才需要向用户暴露连接恢复。
+            if (state_ == VoiceInteractionState::kStandby) {
+                transition.action = VoiceInteractionAction::kRestoreStandby;
+                break;
+            }
             state_ = VoiceInteractionState::kReconnecting;
             transition.action = VoiceInteractionAction::kRestoreStandby;
             break;
         case VoiceInteractionEvent::kTransportConnected:
+            // The provider hello may complete before the runtime posts
+            // kBootCompleted. It confirms transport readiness but must not
+            // bypass the boot -> standby transition or emit a false rejection.
+            if (state_ == VoiceInteractionState::kBooting) break;
+            // 后台重连完成，不应让空闲态产生一条无意义的非法状态迁移日志。
+            if (state_ == VoiceInteractionState::kStandby) break;
             if (state_ != VoiceInteractionState::kReconnecting) return InvalidTransition(state_, event);
             state_ = VoiceInteractionState::kStandby;
             transition.action = VoiceInteractionAction::kRestoreStandby;
