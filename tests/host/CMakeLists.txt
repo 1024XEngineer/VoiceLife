@@ -264,6 +264,14 @@ target_link_libraries(schedule_rule_mcp_tools_test PRIVATE mcp schedule)
 add_voicelife_test(schedule_rule_service_test "unit;schedule" schedule_rule_service_test.cc)
 target_link_libraries(schedule_rule_service_test PRIVATE schedule)
 
+add_voicelife_test(schedule_rule_service_helpers_test "unit;schedule" schedule_rule_service_helpers_test.cc)
+target_include_directories(schedule_rule_service_helpers_test PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src/service")
+target_link_libraries(schedule_rule_service_helpers_test PRIVATE schedule)
+
+add_voicelife_test(schedule_mcp_tools_input_test "unit;mcp;schedule;runtime" schedule_mcp_tools_input_test.cc)
+target_include_directories(schedule_mcp_tools_input_test PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src/tools")
+target_link_libraries(schedule_mcp_tools_input_test PRIVATE mcp schedule)
+
 add_voicelife_test(linx_mcp_bridge_test "unit;mcp;linx;runtime" linx_mcp_bridge_test.cc
     "${ROOT_DIR}/components/voicelife_runtime/src/linx_mcp_bridge.cc"
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
