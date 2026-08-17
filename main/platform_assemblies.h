@@ -30,6 +30,12 @@ class VoiceLifePcbAssembly : public PlatformAssembly {
     /** @brief 返回点阵显示端口。 @return Ssd1306PresentationAdapter。 */
     voicelife::voice::PresentationPort& presentation() override;
 
+    /**
+     * @brief 初始化 PCB SSD1306 面板。
+     * @return 面板初始化状态。
+     */
+    voicelife::Status Start() override;
+
     /** @brief 启动 PCB 物理输入到语义事件的映射。 */
     voicelife::Status StartBoardInput(BoardInputSink sink) override;
 

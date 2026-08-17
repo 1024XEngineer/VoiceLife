@@ -140,7 +140,8 @@ add_voicelife_library(board_esp voicelife_board_esp
     )
 target_link_libraries(board_esp PUBLIC contracts)
 add_voicelife_library(display_esp voicelife_display_esp
-    "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_presentation_adapter.cc")
+    "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_presentation_adapter.cc"
+    "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_status_display.cc")
 target_link_libraries(display_esp PUBLIC contracts voice)
 add_voicelife_library(display_sparkbot voicelife_display_sparkbot
     "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_lvgl_display.cc"

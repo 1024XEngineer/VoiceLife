@@ -2,8 +2,25 @@
 
 #include "platform_assemblies.h"
 #include "support/test_support.h"
+#include "voicelife/display_esp/ssd1306_presentation_adapter.h"
 
 using voicelife::test::Check;
+
+namespace {
+
+int g_display_initializations = 0;
+
+voicelife::Status InitializeDisplaySuccessfully() {
+    ++g_display_initializations;
+    return voicelife::Status::Ok();
+}
+
+voicelife::Status InitializeDisplayFailure() {
+    ++g_display_initializations;
+    return voicelife::Status::Error(voicelife::ErrorCode::kUnavailable, "display unavailable");
+}
+
+}  // namespace
 
 int main() {
     using voicelife::runtime::PlatformAssembly;
@@ -36,7 +53,15 @@ int main() {
     snapshot.status_text = "测试";
     Check(sparkbot_as_interface.presentation().Render(snapshot).ok(), "SparkBot Render 必须接受快照并入队");
 
-    // Start() 生命周期：VoiceLife PCB 默认空实现成功；SparkBot 的
+    // SSD1306 初始化是受控边界：必须实际调用面板初始化，并保留失败状态。
+    using voicelife::display_esp::Ssd1306PresentationAdapter;
+    Ssd1306PresentationAdapter initialized_display(&InitializeDisplaySuccessfully);
+    Check(initialized_display.Start().ok() && g_display_initializations == 1, "SSD1306 Start 必须调用面板初始化");
+    Ssd1306PresentationAdapter unavailable_display(&InitializeDisplayFailure);
+    Check(unavailable_display.Start().code == voicelife::ErrorCode::kUnavailable && g_display_initializations == 2,
+          "SSD1306 Start 必须传播面板初始化失败");
+
+    // Start() 生命周期：VoiceLife PCB 初始化 SSD1306；SparkBot 的
     // ST7789/LVGL 初始化与显示任务仅 ESP 构建启用，host 下返回
     // kUnavailable（不触碰硬件，不伪装成功）。
     Check(pcb_as_interface.Start().ok(), "VoiceLife PCB Assembly Start 必须成功（默认空实现）");
