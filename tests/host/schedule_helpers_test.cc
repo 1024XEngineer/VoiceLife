@@ -1,14 +1,13 @@
-#include "helpers/schedule_occurrence_helpers.h"
-#include "helpers/schedule_query_helpers.h"
-#include "helpers/schedule_rule_result_helpers.h"
-#include "rules/schedule_time_rules.h"
-
 #include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "helpers/schedule_occurrence_helpers.h"
+#include "helpers/schedule_query_helpers.h"
+#include "helpers/schedule_rule_result_helpers.h"
+#include "rules/schedule_time_rules.h"
 #include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_commands.h"
@@ -89,6 +88,28 @@ int main() {
     bad_rule.rule_id = int64_t{0};
     Check(ValidateQueryScheduleCommand(bad_rule).code == ErrorCode::kInvalidArgument, "规则 ID 必须大于 0");
 
+    QueryScheduleCommand bad_schedule;
+    bad_schedule.schedule_id = int64_t{0};
+    Check(ValidateQueryScheduleCommand(bad_schedule).code == ErrorCode::kInvalidArgument, "日程 ID 必须大于 0");
+
+    QueryScheduleCommand reversed;
+    reversed.start_from = At(2'000'000'100);
+    reversed.start_to = At(2'000'000'000);
+    Check(ValidateQueryScheduleCommand(reversed).code == ErrorCode::kInvalidArgument, "时间范围下限不能晚于上限");
+
+    QueryScheduleCommand bad_limit;
+    bad_limit.limit = 0;
+    Check(ValidateQueryScheduleCommand(bad_limit).code == ErrorCode::kInvalidArgument, "分页条数不能小于 1");
+    bad_limit.limit = 51;
+    Check(ValidateQueryScheduleCommand(bad_limit).code == ErrorCode::kInvalidArgument, "分页条数不能大于 50");
+
+    QueryScheduleCommand bad_offset;
+    bad_offset.offset = -1;
+    Check(ValidateQueryScheduleCommand(bad_offset).code == ErrorCode::kInvalidArgument, "分页偏移量不能小于 0");
+
+    QueryScheduleCommand valid_query;
+    Check(ValidateQueryScheduleCommand(valid_query).ok(), "默认查询条件应通过校验");
+
     // —— 查询匹配：按规则 ID 筛选无规则 ID 或规则 ID 不一致的日程 ——
     QueryScheduleCommand rule_filter;
     rule_filter.rule_id = int64_t{7};
@@ -97,6 +118,41 @@ int main() {
     Schedule other_rule = without_rule;
     other_rule.rule_id = int64_t{8};
     Check(!MatchesScheduleQuery(other_rule, rule_filter), "规则 ID 不一致的日程应不匹配规则筛选");
+
+    // —— 查询匹配：覆盖固定 ID、状态、关键词、时间范围和无开始时间分支 ——
+    QueryScheduleCommand id_filter;
+    id_filter.schedule_id = int64_t{42};
+    Check(!MatchesScheduleQuery(linked, id_filter), "日程 ID 不一致应不匹配");
+
+    QueryScheduleCommand status_filter;
+    status_filter.status = voicelife::schedule::ScheduleStatusFilter::kCancelled;
+    Check(!MatchesScheduleQuery(linked, status_filter), "活跃日程应不匹配取消状态筛选");
+    Check(MatchesScheduleQuery(cancelled, status_filter), "取消日程应匹配取消状态筛选");
+    status_filter.status = voicelife::schedule::ScheduleStatusFilter::kCompleted;
+    Check(!MatchesScheduleQuery(linked, status_filter), "活跃日程应不匹配完成状态筛选");
+
+    QueryScheduleCommand keyword_filter;
+    keyword_filter.keyword = "候选";
+    Check(MatchesScheduleQuery(candidate, keyword_filter), "单关键词命中应匹配");
+    keyword_filter.keyword = "不存在";
+    Check(!MatchesScheduleQuery(candidate, keyword_filter), "单关键词未命中应不匹配");
+    keyword_filter.keyword = "+候选 不存在";
+    Check(!MatchesScheduleQuery(candidate, keyword_filter), "多关键词必须全部命中");
+    keyword_filter.keyword = "+";
+    Check(MatchesScheduleQuery(candidate, keyword_filter), "空关键词应视为匹配");
+
+    QueryScheduleCommand time_filter;
+    time_filter.start_from = At(4'000'000'000);
+    Check(MatchesScheduleQuery(candidate, time_filter), "开始时间晚于下限应匹配");
+    time_filter.start_from = At(4'000'003'601);
+    Check(!MatchesScheduleQuery(candidate, time_filter), "开始时间早于下限应不匹配");
+    time_filter.start_from = std::nullopt;
+    time_filter.start_to = At(3'999'999'999);
+    Check(!MatchesScheduleQuery(candidate, time_filter), "开始时间晚于上限应不匹配");
+    time_filter.start_to = At(4'000'003'600);
+    Check(MatchesScheduleQuery(candidate, time_filter), "开始时间不晚于上限应匹配");
+    time_filter.start_to = At(4'000'003'600);
+    Check(!MatchesScheduleQuery(no_start, time_filter), "无开始时间应不匹配时间范围查询");
 
     // —— 查询规则失败结果构造 ——
     const auto failed = FailedQueryScheduleRulesResult(Status::Error(ErrorCode::kUnavailable, "仓储不可用"));
