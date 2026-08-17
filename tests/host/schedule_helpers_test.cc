@@ -130,10 +130,21 @@ int main() {
     Check(MatchesScheduleQuery(cancelled, status_filter), "取消日程应匹配取消状态筛选");
     status_filter.status = voicelife::schedule::ScheduleStatusFilter::kCompleted;
     Check(!MatchesScheduleQuery(linked, status_filter), "活跃日程应不匹配完成状态筛选");
+    status_filter.status = voicelife::schedule::ScheduleStatusFilter::kAll;
+    Check(MatchesScheduleQuery(linked, status_filter), "全状态筛选应匹配");
+    status_filter.status = voicelife::schedule::ScheduleStatusFilter::kActive;
+    Check(MatchesScheduleQuery(linked, status_filter), "活跃状态筛选应匹配活跃日程");
+    linked.status = ScheduleStatus::kCompleted;
+    Check(!MatchesScheduleQuery(linked, status_filter), "完成日程应不匹配活跃状态筛选");
+    linked.status = ScheduleStatus::kActive;
 
     QueryScheduleCommand keyword_filter;
     keyword_filter.keyword = "候选";
     Check(MatchesScheduleQuery(candidate, keyword_filter), "单关键词命中应匹配");
+    keyword_filter.keyword = "hOuXUAN";
+    Check(!MatchesScheduleQuery(candidate, keyword_filter), "英文关键词应按 ASCII 大小写归一化后匹配失败");
+    candidate.event = "HouXuan Schedule";
+    Check(MatchesScheduleQuery(candidate, keyword_filter), "英文关键词应按 ASCII 大小写归一化后匹配");
     keyword_filter.keyword = "不存在";
     Check(!MatchesScheduleQuery(candidate, keyword_filter), "单关键词未命中应不匹配");
     keyword_filter.keyword = "+候选 不存在";

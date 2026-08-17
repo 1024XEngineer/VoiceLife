@@ -12,6 +12,8 @@ using voicelife::ErrorCode;
 using voicelife::JsonValue;
 using voicelife::MakeToolOutput;
 using voicelife::Status;
+using voicelife::ToolOutputArray;
+using voicelife::ToolOutputObject;
 using voicelife::ToolOutputValue;
 using voicelife::ToolResult;
 using voicelife::mcp::McpServer;
@@ -19,6 +21,7 @@ using voicelife::mcp::Property;
 using voicelife::mcp::PropertyHandler;
 using voicelife::mcp::PropertyList;
 using voicelife::mcp::PropertyType;
+using voicelife::mcp::SerializeToolOutputValue;
 using voicelife::test::Check;
 
 namespace {
@@ -145,10 +148,11 @@ void TestRegistrationValidation() {
                           PropertyList({Property("label", PropertyType::kString, -1, 3)}), handler)
                   .code == ErrorCode::kInvalidArgument,
           "字符串长度不能为负数");
-    Check(server.add_tool("invalid.object_on_string", "描述",
-                          PropertyList({Property("label", PropertyType::kString).with_object_properties(
-                              PropertyList({Property("x", PropertyType::kString)}))}),
-                          handler)
+    Check(server.add_tool(
+                    "invalid.object_on_string", "描述",
+                    PropertyList({Property("label", PropertyType::kString)
+                                      .with_object_properties(PropertyList({Property("x", PropertyType::kString)}))}),
+                    handler)
                   .code == ErrorCode::kInvalidArgument,
           "非对象参数声明内部字段时应拒绝注册");
 }
@@ -325,16 +329,15 @@ void TestObjectDefaults() {
               .add_tool(
                   "self.device.defaults", "对象默认值测试",
                   PropertyList({Property::OptionalObject(
-                      "settings", PropertyList({
-                                      Property("count", PropertyType::kInteger, int64_t{5}).with_description("计数"),
-                                      Property("flag", PropertyType::kBoolean, true).with_description("开关"),
-                                      Property("name", PropertyType::kString, std::string("abc")).with_description("名称"),
-                                      Property("raw", PropertyType::kObject,
-                                               JsonValue::Object({{"a", JsonValue::Number(1)}}))
-                                          .with_description("原始对象"),
-                                      Property::OptionalObject(
-                                          "nested", PropertyList({Property("mode", PropertyType::kString)})),
-                                  }))}),
+                      "settings",
+                      PropertyList({
+                          Property("count", PropertyType::kInteger, int64_t{5}).with_description("计数"),
+                          Property("flag", PropertyType::kBoolean, true).with_description("开关"),
+                          Property("name", PropertyType::kString, std::string("abc")).with_description("名称"),
+                          Property("raw", PropertyType::kObject, JsonValue::Object({{"a", JsonValue::Number(1)}}))
+                              .with_description("原始对象"),
+                          Property::OptionalObject("nested", PropertyList({Property("mode", PropertyType::kString)})),
+                      }))}),
                   handler)
               .ok(),
           "带内部默认值的对象参数应能注册");
@@ -348,18 +351,18 @@ void TestObjectDefaults() {
           "空对象应通过内部字段默认值补齐");
 
     // 嵌套对象字段传入非对象值，覆盖 NormalizeAndValidateObject 的类型错误分支。
-    Check(server
-              .call({.request_id = "object-nested-bad",
-                     .name = "self.device.defaults",
-                     .arguments = {{"settings", JsonValue::Object({{"nested", JsonValue::String("bad")}})}}})
-              .status.code == ErrorCode::kInvalidArgument,
+    Check(server.call({.request_id = "object-nested-bad",
+                       .name = "self.device.defaults",
+                       .arguments = {{"settings", JsonValue::Object({{"nested", JsonValue::String("bad")}})}}})
+                  .status.code == ErrorCode::kInvalidArgument,
           "嵌套对象字段传入非对象值应被拒绝");
 
     // 提供无内部 Schema 的对象字段，覆盖 NormalizeAndValidateObject 的直接透传分支。
     Check(server
               .call({.request_id = "object-raw",
                      .name = "self.device.defaults",
-                     .arguments = {{"settings", JsonValue::Object({{"raw", JsonValue::Object({{"a", JsonValue::Number(1)}})}})}}})
+                     .arguments = {{"settings",
+                                    JsonValue::Object({{"raw", JsonValue::Object({{"a", JsonValue::Number(1)}})}})}}})
               .status.ok(),
           "无内部 Schema 的对象字段应透传");
 }
@@ -375,44 +378,40 @@ void TestNestedFieldValidation() {
               .add_tool(
                   "self.device.constrained", "嵌套字段校验测试",
                   PropertyList({Property::OptionalObject(
-                      "settings", PropertyList({
-                                      Property("count", PropertyType::kInteger, 0, 100, int64_t{5}).with_description("计数"),
-                                      Property("name", PropertyType::kString, 1, 10, std::string("abc")).with_description("名称"),
-                                      Property("flag", PropertyType::kBoolean, true).with_description("开关"),
-                                  }))}),
+                      "settings",
+                      PropertyList({
+                          Property("count", PropertyType::kInteger, 0, 100, int64_t{5}).with_description("计数"),
+                          Property("name", PropertyType::kString, 1, 10, std::string("abc")).with_description("名称"),
+                          Property("flag", PropertyType::kBoolean, true).with_description("开关"),
+                      }))}),
                   handler)
               .ok(),
           "带约束的对象参数应能注册");
 
-    Check(server
-              .call({.request_id = "nested-int-type",
-                     .name = "self.device.constrained",
-                     .arguments = {{"settings", JsonValue::Object({{"count", JsonValue::String("x")}})}}})
-              .status.code == ErrorCode::kInvalidArgument,
+    Check(server.call({.request_id = "nested-int-type",
+                       .name = "self.device.constrained",
+                       .arguments = {{"settings", JsonValue::Object({{"count", JsonValue::String("x")}})}}})
+                  .status.code == ErrorCode::kInvalidArgument,
           "内部整数字段类型错误应被拒绝");
-    Check(server
-              .call({.request_id = "nested-int-range",
-                     .name = "self.device.constrained",
-                     .arguments = {{"settings", JsonValue::Object({{"count", JsonValue::Number(101)}})}}})
-              .status.code == ErrorCode::kInvalidArgument,
+    Check(server.call({.request_id = "nested-int-range",
+                       .name = "self.device.constrained",
+                       .arguments = {{"settings", JsonValue::Object({{"count", JsonValue::Number(101)}})}}})
+                  .status.code == ErrorCode::kInvalidArgument,
           "内部整数字段超出范围应被拒绝");
-    Check(server
-              .call({.request_id = "nested-string-type",
-                     .name = "self.device.constrained",
-                     .arguments = {{"settings", JsonValue::Object({{"name", JsonValue::Number(1)}})}}})
-              .status.code == ErrorCode::kInvalidArgument,
+    Check(server.call({.request_id = "nested-string-type",
+                       .name = "self.device.constrained",
+                       .arguments = {{"settings", JsonValue::Object({{"name", JsonValue::Number(1)}})}}})
+                  .status.code == ErrorCode::kInvalidArgument,
           "内部字符串字段类型错误应被拒绝");
-    Check(server
-              .call({.request_id = "nested-string-length",
-                     .name = "self.device.constrained",
-                     .arguments = {{"settings", JsonValue::Object({{"name", JsonValue::String("01234567890")}})}}})
-              .status.code == ErrorCode::kInvalidArgument,
+    Check(server.call({.request_id = "nested-string-length",
+                       .name = "self.device.constrained",
+                       .arguments = {{"settings", JsonValue::Object({{"name", JsonValue::String("01234567890")}})}}})
+                  .status.code == ErrorCode::kInvalidArgument,
           "内部字符串字段超出长度应被拒绝");
-    Check(server
-              .call({.request_id = "nested-bool-type",
-                     .name = "self.device.constrained",
-                     .arguments = {{"settings", JsonValue::Object({{"flag", JsonValue::Number(1)}})}}})
-              .status.code == ErrorCode::kInvalidArgument,
+    Check(server.call({.request_id = "nested-bool-type",
+                       .name = "self.device.constrained",
+                       .arguments = {{"settings", JsonValue::Object({{"flag", JsonValue::Number(1)}})}}})
+                  .status.code == ErrorCode::kInvalidArgument,
           "内部布尔字段类型错误应被拒绝");
 }
 
@@ -511,6 +510,40 @@ void TestToolListing() {
     yyjson_doc_free(document);
 }
 
+/**
+ * @brief 验证工具输出值 JSON 序列化覆盖标量、数组、对象和空指针元素。
+ * @return 无。
+ */
+void TestToolOutputSerialization() {
+    ToolOutputArray array = {
+        MakeToolOutput(ToolOutputValue::Null()),
+        MakeToolOutput(ToolOutputValue::Boolean(true)),
+        MakeToolOutput(ToolOutputValue::Integer(42)),
+        MakeToolOutput(ToolOutputValue::String("text")),
+        nullptr,
+    };
+    ToolOutputObject object = {
+        MakeToolOutput("ok", ToolOutputValue::Boolean(false)),
+        MakeToolOutput("count", ToolOutputValue::Integer(7)),
+        MakeToolOutput("items", ToolOutputValue::Array(std::move(array))),
+        {"missing", nullptr},
+    };
+
+    const std::string json = SerializeToolOutputValue(ToolOutputValue::Object(std::move(object)));
+    yyjson_doc* document = yyjson_read(json.data(), json.size(), YYJSON_READ_NOFLAG);
+    Check(document != nullptr, "工具输出对象应序列化为合法 JSON");
+    yyjson_val* root = yyjson_doc_get_root(document);
+    Check(yyjson_is_obj(root), "工具输出对象根节点应为对象");
+    Check(yyjson_is_false(yyjson_obj_get(root, "ok")) && yyjson_is_null(yyjson_obj_get(root, "missing")),
+          "对象空指针成员应序列化为 null");
+    yyjson_val* items = yyjson_obj_get(root, "items");
+    Check(yyjson_is_arr(items) && yyjson_arr_size(items) == 5, "数组空指针元素应序列化为 null");
+    Check(yyjson_is_null(yyjson_arr_get(items, 0)) && yyjson_is_true(yyjson_arr_get(items, 1)) &&
+              yyjson_get_sint(yyjson_arr_get(items, 2)) == 42 && yyjson_is_null(yyjson_arr_get(items, 4)),
+          "数组标量与空指针序列化结果应正确");
+    yyjson_doc_free(document);
+}
+
 }  // namespace
 
 /**
@@ -524,5 +557,6 @@ int main() {
     TestObjectDefaults();
     TestNestedFieldValidation();
     TestToolListing();
+    TestToolOutputSerialization();
     return 0;
 }

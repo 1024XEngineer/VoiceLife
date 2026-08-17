@@ -84,7 +84,8 @@ void CheckUnavailableRepository(const std::filesystem::path& path) {
     Check(repository.Initialize().code == ErrorCode::kUnavailable, "未打开数据库不能初始化 Repository");
     Check(repository.Insert(CompleteSchedule()).status.code == ErrorCode::kUnavailable, "未打开数据库不能写入日程");
     Check(repository.FindAll().status.code == ErrorCode::kUnavailable, "未打开数据库不能查询日程");
-    Check(repository.Find(QueryScheduleCommand{}).status.code == ErrorCode::kUnavailable, "未打开数据库不能条件查询日程");
+    Check(repository.Find(QueryScheduleCommand{}).status.code == ErrorCode::kUnavailable,
+          "未打开数据库不能条件查询日程");
     Check(repository.Count(QueryScheduleCommand{}).status.code == ErrorCode::kUnavailable, "未打开数据库不能统计日程");
     Check(repository.FindOverlapping(At(2'100'000'000), At(2'100'003'600), std::nullopt).status.code ==
               ErrorCode::kUnavailable,
@@ -284,9 +285,7 @@ void CheckRepositoryErrorPropagation(const std::filesystem::path& path) {
 }
 
 /** @brief 返回当前秒级系统时间。 @return 当前日程时间。 */
-DateTime CurrentTime() {
-    return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
-}
+DateTime CurrentTime() { return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()); }
 
 /** @brief 构造仅含事件名的日程。 @param event 日程名称。 @return 最小日程。 */
 Schedule MinimalSchedule(const std::string& event) {
@@ -381,7 +380,8 @@ void CheckOperationRepository(const std::filesystem::path& path) {
     Check(recent.ok() && recent.value->size() >= 3, "应查询到窗口内操作");
 
     // UndoOperation 校验分支。
-    Check(repository.UndoOperation(0, CurrentTime()).status.code == ErrorCode::kInvalidArgument, "撤销非法标识应被拒绝");
+    Check(repository.UndoOperation(0, CurrentTime()).status.code == ErrorCode::kInvalidArgument,
+          "撤销非法标识应被拒绝");
     Check(repository.UndoOperation(999999, CurrentTime()).status.code == ErrorCode::kNotFound,
           "撤销不存在操作应被拒绝");
 
@@ -554,6 +554,46 @@ void CheckOperationFailureBranches() {
     }
 }
 
+/**
+ * @brief 验证操作记录表缺失时撤销事务中的编译、绑定和执行错误回滚路径。
+ * @return 无。
+ */
+void CheckUndoTransactionFailureBranches() {
+    {
+        // 删除操作表：撤销读取操作记录时 SQL 编译失败，应进入回滚失败组合分支。
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "撤销事务失败分支应打开数据库");
+        SqliteScheduleRepository repository(database);
+        Check(repository.Initialize().ok(), "撤销事务失败分支应初始化表结构");
+        Check(database.Execute("DROP TABLE operation_record").ok(), "应删除操作表制造读取操作记录 SQL 错误");
+        Check(repository.UndoOperation(1, CurrentTime()).status.code == ErrorCode::kInternal,
+              "撤销读取操作记录失败应透传内部错误");
+    }
+    {
+        // 保留操作表并插入操作记录，删除日程表使撤销读取目标日程失败并回滚。
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "撤销读取日程失败分支应打开数据库");
+        SqliteScheduleRepository repository(database);
+        Check(repository.Initialize().ok(), "撤销读取日程失败分支应初始化表结构");
+        Schedule base = MinimalSchedule("撤销读取日程失败目标");
+        base.start_time = At(2'100'000'000);
+        base.end_time = At(2'100'003'600);
+        const auto target = repository.Insert(base);
+        Check(target.ok(), "应创建撤销读取失败目标日程");
+        OperationRecord op;
+        op.type = ScheduleOperationType::kCreate;
+        op.schedule_id = target.value->id;
+        op.schedule_event = "撤销创建读取失败";
+        const auto saved = repository.InsertOperation(op);
+        Check(saved.ok(), "应保存撤销读取失败操作");
+        Check(database.Execute("DROP TABLE schedule").ok(), "应删除日程表制造读取目标日程 SQL 错误");
+        Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kInternal,
+              "撤销读取目标日程失败应透传内部错误");
+    }
+}
+
 }  // namespace
 
 /** @brief 执行 SQLite 日程 Repository 和 Mapper 单元测试。 @return 全部断言通过时返回 0。 */
@@ -573,5 +613,6 @@ int main() {
     const TemporaryDatabaseFile queries = MakeTemporaryDatabaseFile();
     CheckQueryBranches(queries.path);
     CheckOperationFailureBranches();
+    CheckUndoTransactionFailureBranches();
     return 0;
 }
