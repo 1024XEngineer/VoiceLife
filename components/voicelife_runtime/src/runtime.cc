@@ -1765,10 +1765,12 @@ class Runtime final {
             }
             if (item.listen_timeout) {
                 if (interaction_.state() == voice::VoiceInteractionState::kListening) {
-                    // 聆听总时限表示没有有效端点/回复，不应再伪造 PressUp
-                    // 进入最终 STT 等待；中止本轮即可确保本地唤醒门重新可用。
-                    ESP_LOGI(kTag, "LISTEN_TIMEOUT transition=listening->interrupting");
-                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kInterruptRequested);
+                    // 实机麦克风底噪可能让本地 VAD 未能识别静音端点，但此前
+                    // 已采集的语音仍必须以 listen.stop 交给服务端完成最终 STT。
+                    // 直接 abort 会无条件丢弃该回合，表现为“收到后不再回应”。
+                    ESP_LOGI(kTag, "LISTEN_TIMEOUT transition=listening->finalizing");
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kEndpointDetected);
+                    StartListenTimer(kFinalSttTimeoutMs);
                 } else if (interaction_.state() == voice::VoiceInteractionState::kFinalizing) {
                     ESP_LOGI(kTag, "FINALIZE_TIMEOUT transition=finalizing->standby");
                     if (session_) (void)session_->Interrupt();
