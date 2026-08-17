@@ -118,6 +118,8 @@ add_voicelife_library(linx_esp voicelife_linx_esp
 target_link_libraries(linx_esp PUBLIC contracts linx)
 add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/operation_row_mapper.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_exception_row_mapper.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_rule_row_mapper.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_row_mapper.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v001_create_schedule.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v002_create_schedule_operation.cc"
@@ -125,9 +127,12 @@ add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/sqlite_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/voicelife_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/operation_sql.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_exception_sql.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_rule_sql.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_sql.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_database.cc"
-    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_repository.cc")
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_repository.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_rule_repository.cc")
 target_include_directories(storage_sqlite PRIVATE "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
 target_link_libraries(storage_sqlite PUBLIC contracts schedule)
 if(TARGET SQLite3::SQLite3)
@@ -430,3 +435,7 @@ add_voicelife_test(sqlite_schedule_repository_unit_test "unit;storage;sqlite;sch
 target_include_directories(sqlite_schedule_repository_unit_test PRIVATE
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
 target_link_libraries(sqlite_schedule_repository_unit_test PRIVATE storage_sqlite schedule)
+
+add_voicelife_test(sqlite_schedule_rule_repository_test "integration;storage;sqlite;schedule"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_rule_repository_test.cc")
+target_link_libraries(sqlite_schedule_rule_repository_test PRIVATE storage_sqlite schedule)
