@@ -256,7 +256,10 @@ class Runtime final {
             ShowDisplay(voice::VoiceMood::kSad, "错误", "");
             return fail_startup(secret_store);
         }
-        auto connection = BootstrapLinxOtaConfig(assembly_->board_identity());
+        auto connection = BootstrapLinxOtaConfig(assembly_->board_identity(),
+                                                 [this](std::string_view title, std::string_view detail) {
+                                                     ShowDisplay(voice::VoiceMood::kConnecting, title, detail);
+                                                 });
         // Bootstrap 无论是下发连接配置还是返回“待控制台激活”，均可能已经
         // 完成 STA 关联。由 Runtime 把受控网络事实写入快照，Renderer 只显示
         // 语义而不触碰 ESP Wi-Fi API。
@@ -1813,6 +1816,12 @@ class Runtime final {
                     case BoardInputAction::kVolumeMute:
                         SetVolume(0);
                         break;
+                    case BoardInputAction::kStartWifiProvisioning: {
+                        ShowDisplay(voice::VoiceMood::kConnecting, "配网", "正在开启热点");
+                        const Status requested = RequestLinxWifiProvisioning();
+                        if (!requested.ok()) ShowDisplay(voice::VoiceMood::kSad, "配网失败", "");
+                        break;
+                    }
                 }
                 continue;
             }

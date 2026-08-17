@@ -18,6 +18,8 @@ enum class BoardInputAction : uint8_t {
     kVolumeDown,
     kVolumeMaximum,
     kVolumeMute,
+    /** Physical long-press request: reboot into local SoftAP Wi-Fi provisioning. */
+    kStartWifiProvisioning,
 };
 
 /** @brief Runtime 提供给板级输入适配器的非阻塞语义事件入口。 */

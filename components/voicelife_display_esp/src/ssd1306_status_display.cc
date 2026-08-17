@@ -664,7 +664,8 @@ Status Flush(DisplayState& state, std::string_view text) {
     if (error != ESP_OK) {
         return Status::Error(ErrorCode::kUnavailable, "OLED SSD1306 绘制失败");
     }
-    ESP_LOGI("VoiceLifeDisplay", "DISPLAY_DRAW=1 text=%.*s", static_cast<int>(text.size()), text.data());
+    // 屏幕可能显示配网口令或其他用户内容；串口只保留渲染事实，不回显文本。
+    ESP_LOGI("VoiceLifeDisplay", "DISPLAY_DRAW=1 bytes=%u", static_cast<unsigned>(text.size()));
     return Status::Ok();
 }
 

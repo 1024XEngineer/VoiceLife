@@ -5,6 +5,7 @@
 
 #include "voicelife/contracts/status.h"
 #include "voicelife/linx/linx_types.h"
+#include "wifi_provisioning.h"
 
 namespace voicelife::runtime {
 
@@ -30,6 +31,10 @@ bool LinxWifiStaConnected();
  * @brief 在已连接的 ESP STA 上拉取 Linx OTA 配置并受控写入 NVS。
  * @return 可用于创建 WSS Transport 的配置，或网络、激活、协议和安全存储错误。
  */
-Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig(std::string_view board_identity);
+Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig(
+    std::string_view board_identity, const WifiProvisioningStatusSink& provisioning_status_sink = {});
+
+/** Persist a physical re-provisioning request for the next boot without altering Wi-Fi credentials. */
+Status RequestLinxWifiProvisioning();
 
 }  // namespace voicelife::runtime

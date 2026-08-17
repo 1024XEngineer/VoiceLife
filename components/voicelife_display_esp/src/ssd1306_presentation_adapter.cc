@@ -1,5 +1,7 @@
 #include "voicelife/display_esp/ssd1306_presentation_adapter.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -24,6 +26,16 @@ constexpr voicelife::voice::DisplayCapabilities kSsd1306Capabilities{
     .refresh_budget_hz = 0,
 };
 
+constexpr std::size_t kContentLinePixels = 128 - 20;
+
+std::size_t Utf8CodepointBytes(std::uint8_t first_byte) {
+    if ((first_byte & 0x80) == 0) return 1;
+    if ((first_byte & 0xe0) == 0xc0) return 2;
+    if ((first_byte & 0xf0) == 0xe0) return 3;
+    if ((first_byte & 0xf8) == 0xf0) return 4;
+    return 1;
+}
+
 #ifdef ESP_PLATFORM
 constexpr const char* kTag = "ssd1306_adapter";
 /** @brief 滚动可见窗口宽度（字符数，旧行为：末尾留 6 字符）。 */
@@ -36,17 +48,7 @@ std::size_t CountCodepoints(std::string_view text) {
     std::size_t count = 0;
     for (std::size_t i = 0; i < text.size();) {
         const std::uint8_t b = static_cast<std::uint8_t>(text[i]);
-        std::size_t width = 1;
-        if ((b & 0x80) == 0) {
-            width = 1;
-        } else if ((b & 0xe0) == 0xc0) {
-            width = 2;
-        } else if ((b & 0xf0) == 0xe0) {
-            width = 3;
-        } else if ((b & 0xf8) == 0xf0) {
-            width = 4;
-        }
-        i += width;
+        i += std::min(Utf8CodepointBytes(b), text.size() - i);
         ++count;
     }
     return count;
@@ -84,6 +86,18 @@ std::size_t CountCodepoints(std::string_view text) {
 }
 
 }  // namespace
+
+bool Ssd1306ContentFitsLine(std::string_view content) {
+    std::size_t pixels = 0;
+    for (std::size_t index = 0; index < content.size();) {
+        const std::uint8_t first_byte = static_cast<std::uint8_t>(content[index]);
+        const std::size_t advance = (first_byte & 0x80) == 0 ? 9 : 17;
+        if (pixels + advance > kContentLinePixels) return false;
+        pixels += advance;
+        index += std::min(Utf8CodepointBytes(first_byte), content.size() - index);
+    }
+    return true;
+}
 
 Ssd1306PresentationAdapter::~Ssd1306PresentationAdapter() {
 #ifdef ESP_PLATFORM
@@ -131,7 +145,7 @@ void Ssd1306PresentationAdapter::RestartScrollTimer(const std::string& content) 
         }
         scroll_timer_ = timer;
     }
-    if (CountCodepoints(content) > kScrollWindow) {
+    if (!Ssd1306ContentFitsLine(content)) {
         esp_timer_start_periodic(static_cast<esp_timer_handle_t>(scroll_timer_), kScrollPeriodUs);
     }
 #else
@@ -143,11 +157,11 @@ void Ssd1306PresentationAdapter::ScrollEntry(void* arg) {
 #ifdef ESP_PLATFORM
     auto* self = static_cast<Ssd1306PresentationAdapter*>(arg);
     std::lock_guard<std::mutex> lock(self->state_mutex_);
-    const std::size_t codepoints = CountCodepoints(self->last_snapshot_.content_text);
-    if (codepoints <= kScrollWindow) {
+    if (Ssd1306ContentFitsLine(self->last_snapshot_.content_text)) {
         esp_timer_stop(static_cast<esp_timer_handle_t>(self->scroll_timer_));
         return;
     }
+    const std::size_t codepoints = CountCodepoints(self->last_snapshot_.content_text);
     ++self->scroll_offset_;
     // 末尾留 6 字符可见窗口后停止滚动（按码点，不用 UTF-8 字节数）。
     if (self->scroll_offset_ + kScrollWindow >= codepoints) {
