@@ -621,5 +621,47 @@ int main() {
         .arguments = {},
     });
     Check(active_query.status.ok() && active_query.output.IsObject(), "默认 active 状态的 query 应返回结果");
+
+    Schedule skippable_instance;
+    skippable_instance.id = 920;
+    skippable_instance.rule_id = int64_t{610};
+    skippable_instance.event = "可跳过实例";
+    skippable_instance.start_time = DateTime{std::chrono::seconds{UtcAtLocal(2099, 3, 31, 9)}};
+    skippable_instance.status = ScheduleStatus::kActive;
+    Check(schedules.Insert(skippable_instance).ok(), "应能预置可跳过实例");
+
+    const auto skip_materialized = server.call({
+        .request_id = "occurrence-skip-materialized",
+        .name = "schedule_occurrence.skip",
+        .arguments = {{"rule_id", int64_t{610}}, {"original_start_time", int64_t{UtcAtLocal(2099, 3, 31, 9)}}},
+    });
+    Check(!skip_materialized.status.ok(), "跳过已物化实例应返回冲突错误");
+
+    Schedule updatable_instance;
+    updatable_instance.id = 921;
+    updatable_instance.rule_id = int64_t{611};
+    updatable_instance.event = "可更新实例";
+    updatable_instance.start_time = DateTime{std::chrono::seconds{UtcAtLocal(2099, 6, 15, 12)}};
+    updatable_instance.status = ScheduleStatus::kActive;
+    Check(schedules.Insert(updatable_instance).ok(), "应能预置可更新实例");
+
+    const auto update_materialized = server.call({
+        .request_id = "occurrence-update-materialized",
+        .name = "schedule_occurrence.update",
+        .arguments =
+            {
+                {"rule_id", int64_t{611}},
+                {"original_start_time", int64_t{UtcAtLocal(2099, 6, 15, 12)}},
+                {"event", std::string("已物化实例更新")},
+            },
+    });
+    Check(!update_materialized.status.ok(), "更新已物化实例应返回冲突错误");
+
+    const auto generate_yearly = server.call({
+        .request_id = "rule-generate-yearly",
+        .name = "schedule_rule.generate_next",
+        .arguments = {{"rule_id", int64_t{611}}},
+    });
+    Check(generate_yearly.status.ok() && generate_yearly.output.IsObject(), "活跃年度规则应生成下一条实例");
     return 0;
 }
