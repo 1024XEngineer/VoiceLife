@@ -1037,6 +1037,16 @@ class Runtime final {
         return voice::VoiceMood::kSad;
     }
 
+    static std::string CurrentStandbyStatusText() {
+        const time_t now = time(nullptr);
+        if (now <= 1600000000) return "空闲";  // 2020-09-13 之前视为尚未同步时钟。
+        std::tm local{};
+        localtime_r(&now, &local);
+        char clock_text[8] = {};
+        std::snprintf(clock_text, sizeof(clock_text), "%02d:%02d", local.tm_hour, local.tm_min);
+        return clock_text;
+    }
+
     void CommitSnapshot() {
         if (snapshot_.revision == last_rendered_revision_) {
             return;
@@ -1128,15 +1138,12 @@ class Runtime final {
         // 会话阶段 → 显示模型快照：状态栏文本 + 表情由阶段派生。
         snapshot_.phase = interaction_.state();
         snapshot_.mood = PhaseMood(snapshot_.phase);
-        // 空闲态显示当前时间（若服务端时间已初始化，约 2020 年后），否则显示状态词。
-        const time_t now = time(nullptr);
-        const bool clock_synced = now > 1600000000;  // 2020-09-13 之后的真实时间
-        if (snapshot_.phase == voice::VoiceInteractionState::kStandby && clock_synced) {
-            std::tm local{};
-            localtime_r(&now, &local);
-            char clock_text[8] = {};
-            std::snprintf(clock_text, sizeof(clock_text), "%02d:%02d", local.tm_hour, local.tm_min);
-            snapshot_.status_text = clock_text;
+        if (snapshot_.phase != voice::VoiceInteractionState::kStandby && binding_terminal_display_active_) {
+            CancelBindingTerminalDisplay();
+        }
+        // 空闲态显示当前时间（若服务端时间已初始化），否则显示状态词。
+        if (snapshot_.phase == voice::VoiceInteractionState::kStandby) {
+            snapshot_.status_text = CurrentStandbyStatusText();
         } else {
             snapshot_.status_text = PhaseStatusText(snapshot_.phase);
         }
@@ -1173,6 +1180,14 @@ class Runtime final {
             snapshot_.mood = voice::VoiceMood::kNeutral;
             snapshot_.status_text = binding_status_text_;
             snapshot_.content_text = binding_content_text_;
+            snapshot_.role = voice::VoiceContentRole::kSystem;
+        }
+        // 冗余 standby_ready 不得让绑定终态一闪而过；进入任何活跃状态
+        // 会在上方取消租约，使新交互立即接管显示。
+        if (snapshot_.phase == voice::VoiceInteractionState::kStandby && binding_terminal_display_active_) {
+            snapshot_.mood = binding_terminal_mood_;
+            snapshot_.status_text = binding_terminal_status_text_;
+            snapshot_.content_text = binding_terminal_content_text_;
             snapshot_.role = voice::VoiceContentRole::kSystem;
         }
         ++snapshot_.revision;
@@ -1560,6 +1575,41 @@ class Runtime final {
         event_cv_.notify_one();
     }
 
+    void CancelBindingTerminalDisplay() {
+        binding_terminal_display_active_ = false;
+        binding_terminal_resume_listening_ = false;
+        binding_terminal_until_us_ = 0;
+        binding_terminal_status_text_.clear();
+        binding_terminal_content_text_.clear();
+    }
+
+    void ClearExpiredBindingTerminalDisplay() {
+        if (!binding_terminal_display_active_ || binding_terminal_until_us_ == 0 ||
+            esp_timer_get_time() < binding_terminal_until_us_) {
+            return;
+        }
+        const bool resume_listening = binding_terminal_resume_listening_;
+        CancelBindingTerminalDisplay();
+        deferred_binding_speech_.clear();
+        if (interaction_.state() != voice::VoiceInteractionState::kStandby) return;
+        if (resume_listening) {
+            ESP_LOGI(kTag, "IM_BINDING_TERMINAL_DISPLAY_EXPIRED=1 next=listening");
+            snapshot_.content_text.clear();
+            snapshot_.role = voice::VoiceContentRole::kNone;
+            (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kToggleChat);
+            return;
+        }
+        snapshot_.phase = voice::VoiceInteractionState::kStandby;
+        snapshot_.mood = voice::VoiceMood::kIdle;
+        snapshot_.status_text = CurrentStandbyStatusText();
+        snapshot_.content_text.clear();
+        snapshot_.role = voice::VoiceContentRole::kNone;
+        ++snapshot_.revision;
+        overlay_active_ = false;
+        CommitSnapshot();
+        ESP_LOGI(kTag, "IM_BINDING_TERMINAL_DISPLAY_EXPIRED=1");
+    }
+
     void CommitBindingPresentation(const BindingPresentation& presentation) {
         snapshot_.mood =
             presentation.content_text == "绑定成功" ? voice::VoiceMood::kHappy : voice::VoiceMood::kNeutral;
@@ -1569,6 +1619,17 @@ class Runtime final {
         ++snapshot_.revision;
         overlay_active_ = false;
         CommitSnapshot();
+        if (presentation.display_duration_ms > 0) {
+            binding_terminal_display_active_ = true;
+            binding_terminal_mood_ = snapshot_.mood;
+            binding_terminal_status_text_ = presentation.status_text;
+            binding_terminal_content_text_ = presentation.content_text;
+            binding_terminal_resume_listening_ = presentation.resume_listening;
+            binding_terminal_until_us_ =
+                esp_timer_get_time() + static_cast<int64_t>(presentation.display_duration_ms) * 1000;
+        } else {
+            CancelBindingTerminalDisplay();
+        }
     }
 
     void QueueDeferredBindingSpeechIfStandby() {
@@ -1682,6 +1743,7 @@ class Runtime final {
                 if (event_queue_.empty()) {
                     // 超时轮询：处理短暂显示的到期刷新（不依赖 timer 直接提交）。
                     ClearExpiredWakeAck();
+                    ClearExpiredBindingTerminalDisplay();
                     if (overlay_expired_.exchange(false)) {
                         if (overlay_active_) {
                             snapshot_ = overlay_base_snapshot_;
@@ -1695,6 +1757,8 @@ class Runtime final {
                 item = std::move(event_queue_.front());
                 event_queue_.pop_front();
             }
+            // provider_error 等事件持续占满队列时，终态租约仍必须按时收口。
+            ClearExpiredBindingTerminalDisplay();
             if (item.display_only) {
                 // 纯显示刷新：仅当控制器处于 kSpeaking 时应用（迟到的 TTS 丢弃）。
                 if (interaction_.state() == voice::VoiceInteractionState::kSpeaking && !item.display_text.empty()) {
@@ -1754,11 +1818,12 @@ class Runtime final {
                     deferred_binding_presentation_.reset();
                     deferred_binding_speech_.clear();
                     binding_turn_awaiting_tts_completion_ = false;
+                    CancelBindingTerminalDisplay();
                     // 重绑/重启策略不允许旧 origin 的绑定码或成功提示留在屏幕上。
                     // 非空闲回合会由紧随其后的交互事件接管显示；空闲时立即收口。
                     if (interaction_.state() == voice::VoiceInteractionState::kStandby) {
                         snapshot_.mood = voice::VoiceMood::kIdle;
-                        snapshot_.status_text = "空闲";
+                        snapshot_.status_text = CurrentStandbyStatusText();
                         snapshot_.content_text.clear();
                         snapshot_.role = voice::VoiceContentRole::kNone;
                         ++snapshot_.revision;
@@ -1840,6 +1905,13 @@ class Runtime final {
     // 本轮是否为终止回合（用户说“再见/拜拜”等）：播报结束后不进入 follow-up。
     bool terminal_turn_ = false;
     bool binding_turn_awaiting_tts_completion_ = false;
+    // 绑定成功/失败等终态页面的独立显示租约；只由事件循环读写。
+    bool binding_terminal_display_active_ = false;
+    bool binding_terminal_resume_listening_ = false;
+    voice::VoiceMood binding_terminal_mood_ = voice::VoiceMood::kNeutral;
+    std::string binding_terminal_status_text_;
+    std::string binding_terminal_content_text_;
+    int64_t binding_terminal_until_us_ = 0;
     // 最近唤醒词与其发生时刻（抑制唤醒词被服务端回传为 STT）。
     std::string last_wake_word_;
     int64_t last_wake_at_ = 0;

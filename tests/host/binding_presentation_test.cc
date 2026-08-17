@@ -10,6 +10,7 @@ using voicelife::im::BindingState;
 using voicelife::runtime::BindingPresentation;
 using voicelife::runtime::IsCurrentBindingResult;
 using voicelife::runtime::kBindingSystemSpeechCapacity;
+using voicelife::runtime::kBindingTerminalDisplayDurationMs;
 using voicelife::runtime::PresentBindingResult;
 using voicelife::runtime::ShouldEndVoiceTurnAfterBindingResult;
 using voicelife::test::Check;
@@ -27,7 +28,7 @@ BindingResult Result(BindingState state, std::string code = {}, int expiry_minut
 void TestPendingShowsAndSpeaksTheSameCodeOnce() {
     const BindingPresentation presentation = PresentBindingResult(Result(BindingState::kPending, "123456", 10));
     Check(presentation.keep_visible && presentation.announce && presentation.status_text == "10分钟内有效" &&
-              presentation.content_text == "绑定 123456" &&
+              presentation.display_duration_ms == 0 && presentation.content_text == "绑定 123456" &&
               presentation.speech_text == "请在微信公众号发送：绑定 123456",
           "pending 必须在 OLED 与 TTS 中使用同一六位码，并明确有效期");
 }
@@ -35,29 +36,34 @@ void TestPendingShowsAndSpeaksTheSameCodeOnce() {
 void TestAlreadyActiveKeepsTheCodeWithoutRepeatingSpeech() {
     const BindingPresentation presentation = PresentBindingResult(Result(BindingState::kAlreadyActive, "123456", 5));
     Check(presentation.keep_visible && !presentation.announce && presentation.status_text == "5分钟内有效" &&
-              presentation.content_text == "绑定 123456" && presentation.speech_text.empty(),
+              presentation.display_duration_ms == 0 && presentation.content_text == "绑定 123456" &&
+              presentation.speech_text.empty(),
           "重复命令应恢复当前绑定码显示，但不得重复播报");
 }
 
 void TestTerminalStatesPromptTheUser() {
     const BindingPresentation confirmed = PresentBindingResult(Result(BindingState::kConfirmed));
-    Check(!confirmed.keep_visible && confirmed.announce && confirmed.content_text == "绑定成功" &&
-              confirmed.speech_text == "微信公众号绑定成功",
-          "confirmed 必须显示并播报成功");
+    Check(!confirmed.keep_visible && confirmed.announce &&
+              confirmed.display_duration_ms == kBindingTerminalDisplayDurationMs && confirmed.resume_listening &&
+              confirmed.content_text == "绑定成功" && confirmed.speech_text == "微信公众号绑定成功",
+          "confirmed 必须显示并播报成功，随后进入聆听");
 
     const BindingPresentation expired = PresentBindingResult(Result(BindingState::kExpired));
-    Check(!expired.keep_visible && expired.announce && expired.content_text == "绑定已过期" &&
-              expired.speech_text == "绑定已过期，请重新获取绑定码",
+    Check(!expired.keep_visible && expired.announce &&
+              expired.display_duration_ms == kBindingTerminalDisplayDurationMs && !expired.resume_listening &&
+              expired.content_text == "绑定已过期" && expired.speech_text == "绑定已过期，请重新获取绑定码",
           "expired 必须提示用户重新获取绑定码");
 
     const BindingPresentation cancelled = PresentBindingResult(Result(BindingState::kCancelled));
-    Check(!cancelled.keep_visible && cancelled.announce && cancelled.content_text == "绑定已取消" &&
-              cancelled.speech_text == "绑定已取消，请重新获取绑定码",
+    Check(!cancelled.keep_visible && cancelled.announce &&
+              cancelled.display_duration_ms == kBindingTerminalDisplayDurationMs && !cancelled.resume_listening &&
+              cancelled.content_text == "绑定已取消" && cancelled.speech_text == "绑定已取消，请重新获取绑定码",
           "cancelled 不得伪装成自然过期");
 
     const BindingPresentation timed_out = PresentBindingResult(Result(BindingState::kTimedOut));
-    Check(!timed_out.keep_visible && timed_out.announce && timed_out.content_text == "等待超时" &&
-              timed_out.speech_text == "等待确认超时，请重新获取绑定码",
+    Check(!timed_out.keep_visible && timed_out.announce &&
+              timed_out.display_duration_ms == kBindingTerminalDisplayDurationMs && !timed_out.resume_listening &&
+              timed_out.content_text == "等待超时" && timed_out.speech_text == "等待确认超时，请重新获取绑定码",
           "timed_out 必须明确是本地等待截止");
 }
 
@@ -65,7 +71,9 @@ void TestFailureStatesGiveSafeDeviceFeedback() {
     for (const BindingState state : {BindingState::kUnavailable, BindingState::kFailed,
                                      BindingState::kCredentialRejected, BindingState::kNotFound}) {
         const BindingPresentation presentation = PresentBindingResult(Result(state));
-        Check(!presentation.keep_visible && presentation.announce && !presentation.status_text.empty() &&
+        Check(!presentation.keep_visible && presentation.announce &&
+                  presentation.display_duration_ms == kBindingTerminalDisplayDurationMs &&
+                  !presentation.resume_listening && !presentation.status_text.empty() &&
                   !presentation.content_text.empty() && !presentation.speech_text.empty(),
               "创建或轮询失败必须有脱敏的 OLED/TTS 反馈，不能只留在 MCP 返回中");
     }

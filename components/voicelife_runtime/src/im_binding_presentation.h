@@ -10,6 +10,8 @@ namespace voicelife::runtime {
 
 /// BoardRequest 为绑定系统播报预留的 UTF-8 字节数（含结尾空字符）。
 constexpr std::size_t kBindingSystemSpeechCapacity = 96;
+/// 绑定成功/失败等终态在 OLED 上的固定可见时长；不得依赖 TTS 完成事件清理。
+constexpr uint32_t kBindingTerminalDisplayDurationMs = 3000;
 
 /** 绑定状态映射出的纯用户呈现语义，不包含任何显示或语音硬件句柄。 */
 struct BindingPresentation {
@@ -17,6 +19,10 @@ struct BindingPresentation {
     bool keep_visible = false;
     /** true 时仅请求一次系统播报。 */
     bool announce = false;
+    /** 大于零时终态页面到期后应独立退场，不依赖语音链路。 */
+    uint32_t display_duration_ms = 0;
+    /** true 时终态页面退场后开始采集，进入后续聆听。 */
+    bool resume_listening = false;
     std::string status_text;
     std::string content_text;
     std::string speech_text;
