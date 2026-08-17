@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/1024XEngineer/XE6-15/config/adapter-profile.schema.json",
+  "$id": "https://github.com/1024XEngineer/VoiceLife/config/adapter-profile.schema.json",
   "title": "VoiceLife Adapter Profile",
   "type": "object",
   "additionalProperties": false,

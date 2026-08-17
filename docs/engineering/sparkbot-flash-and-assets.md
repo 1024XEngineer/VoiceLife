@@ -2,7 +2,7 @@
 
 本清单定义 ESP-SparkBot 固件、显示资源与 MultiNet 语音模型的刷写范围。
 **分区迁移前不得写入任何区域；迁移必须有明确人工授权，且不得擦除或读取 NVS
-中的敏感内容。**
+中的敏感内容。** 串口采集与公开证据的边界见[硬件调试与串口日志规则](hardware-debugging.md)：本地日志保持完整明文，公开时仅排除秘密和隐私。
 
 ## 1. 分区表（官方实板布局）
 
@@ -40,8 +40,9 @@
 MultiNet 模型 `0x400000`。不得写 bootloader、NVS、otadata、phy_init 或未知区域。
 
 ```bash
-# 仅在明确授权的首次迁移中执行，实际端口以已连接设备为准。
-esptool.py --port /dev/cu.usbmodem14101 write_flash \
+# 仅在明确授权的首次迁移中执行；以已连接设备的实际串口替换 PORT。
+PORT=/dev/cu.usbmodemXXXX
+esptool.py --port "$PORT" write_flash \
   0x8000 build/esp32s3-esp-sparkbot/partition_table/partition-table.bin \
   0x10000 build/esp32s3-esp-sparkbot/voicelife.bin \
   0x300000 build/esp32s3-esp-sparkbot/sparkbot_assets.bin \
@@ -51,7 +52,8 @@ esptool.py --port /dev/cu.usbmodem14101 write_flash \
 后续已迁移且分区表哈希、偏移和大小均一致的设备，授权范围可仅为应用、assets、model：
 
 ```bash
-esptool.py --port /dev/cu.usbmodem14101 write_flash \
+PORT=/dev/cu.usbmodemXXXX
+esptool.py --port "$PORT" write_flash \
   0x10000 build/esp32s3-esp-sparkbot/voicelife.bin \
   0x300000 build/esp32s3-esp-sparkbot/sparkbot_assets.bin \
   0x400000 build/esp32s3-esp-sparkbot/srmodels/srmodels.bin
