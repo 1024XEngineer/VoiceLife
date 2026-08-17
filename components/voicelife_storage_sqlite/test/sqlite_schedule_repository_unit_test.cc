@@ -512,6 +512,48 @@ void CheckQueryBranches(const std::filesystem::path& path) {
     Check(repository.Delete(inserted_a.value->id).code == ErrorCode::kConflict, "重复删除应冲突");
 }
 
+/**
+ * @brief 验证操作查询与撤销在表缺失或目标失效时透传 SQL 错误并回滚。
+ * @return 无。
+ */
+void CheckOperationFailureBranches() {
+    {
+        // 删除操作表后：近期操作查询与撤销应透传 SQL 编译错误。
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "操作表失败分支应打开数据库");
+        SqliteScheduleRepository repository(database);
+        Check(repository.Initialize().ok(), "操作表失败分支应初始化表结构");
+        Check(database.Execute("DROP TABLE operation_record").ok(), "应删除操作表制造 SQL 错误");
+        Check(repository.FindRecentOperations(CurrentTime()).status.code == ErrorCode::kInternal,
+              "FindRecentOperations 应透传操作表缺失错误");
+        Check(repository.UndoOperation(1, CurrentTime()).status.code == ErrorCode::kInternal,
+              "UndoOperation 应透传操作表缺失错误");
+    }
+    {
+        // 删除日程表后：撤销操作在读取目标日程时失败应回滚。
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "日程表失败分支应打开数据库");
+        SqliteScheduleRepository repository(database);
+        Check(repository.Initialize().ok(), "日程表失败分支应初始化表结构");
+        Schedule base = MinimalSchedule("撤销目标日程");
+        base.start_time = At(2'100'000'000);
+        base.end_time = At(2'100'003'600);
+        const auto target = repository.Insert(base);
+        Check(target.ok(), "应创建撤销目标日程");
+        OperationRecord op;
+        op.type = ScheduleOperationType::kCreate;
+        op.schedule_id = target.value->id;
+        op.schedule_event = "撤销创建";
+        const auto saved = repository.InsertOperation(op);
+        Check(saved.ok(), "应保存创建操作");
+        Check(database.Execute("DROP TABLE schedule").ok(), "应删除日程表制造 SQL 错误");
+        Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kInternal,
+              "撤销操作读取目标日程失败应回滚");
+    }
+}
+
 }  // namespace
 
 /** @brief 执行 SQLite 日程 Repository 和 Mapper 单元测试。 @return 全部断言通过时返回 0。 */
@@ -530,5 +572,6 @@ int main() {
     CheckOperationRepository(operations.path);
     const TemporaryDatabaseFile queries = MakeTemporaryDatabaseFile();
     CheckQueryBranches(queries.path);
+    CheckOperationFailureBranches();
     return 0;
 }
