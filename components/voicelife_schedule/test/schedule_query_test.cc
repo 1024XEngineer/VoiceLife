@@ -118,5 +118,14 @@ int main() {
     CheckValidation(service);
     CheckKeywordNormalization(service);
     CheckKeywordScore();
+
+    // 仓储失败路径：查询时 Count 失败应透传底层错误。
+    {
+        InMemoryScheduleRepository repository(InMemoryScheduleRepository::QuerySchedules());
+        ScheduleService service(repository);
+        repository.FailNextCount(voicelife::Status::Error(ErrorCode::kUnavailable, "计数查询失败"));
+        QueryScheduleCommand command;
+        Check(service.query_schedule(command).result.status.code == ErrorCode::kUnavailable, "query 应透传 Count 错误");
+    }
     return 0;
 }

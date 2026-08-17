@@ -95,5 +95,15 @@ int main() {
     InMemoryScheduleRepository repository;
     ScheduleOperationService service(repository);
     CheckServiceQuery(service);
+
+    // 仓储失败路径：最近操作查询失败时应透传底层错误。
+    {
+        InMemoryScheduleRepository failure_repository;
+        ScheduleOperationService failure_service(failure_repository);
+        failure_repository.FailNextFindRecentOperations(
+            voicelife::Status::Error(voicelife::ErrorCode::kUnavailable, "操作查询失败"));
+        Check(failure_service.query_recent_schedule_operation().result.status.code == voicelife::ErrorCode::kUnavailable,
+              "query_recent 应透传 FindRecentOperations 错误");
+    }
     return 0;
 }

@@ -137,5 +137,16 @@ int main() {
         ScheduleService service(repository);
         CheckInvalidInputs(service);
     }
+    {
+        // 仓储失败路径：冲突检测读取现有日程失败时应透传底层错误。
+        InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
+        ScheduleService service(repository);
+        UpdateScheduleCommand command;
+        command.schedule_id = 1001;
+        command.event = std::optional<std::string>{"更新标题"};
+        repository.FailNextFindOverlapping(voicelife::Status::Error(ErrorCode::kUnavailable, "读取现有日程失败"));
+        Check(service.update_schedule(command).result.status.code == ErrorCode::kUnavailable,
+              "update 应透传 FindOverlapping 错误");
+    }
     return 0;
 }

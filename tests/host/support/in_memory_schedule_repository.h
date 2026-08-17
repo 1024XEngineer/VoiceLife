@@ -116,6 +116,11 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
     [[nodiscard]] Result<std::vector<schedule::Schedule>> Find(
         const schedule::QueryScheduleCommand& query) const override {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (next_find_failure_.has_value()) {
+            Status failure = std::move(*next_find_failure_);
+            next_find_failure_.reset();
+            return Result<std::vector<schedule::Schedule>>::Failure(failure.code, failure.message);
+        }
         std::vector<schedule::Schedule> matched;
         for (const schedule::Schedule& schedule : schedules_) {
             if (!in_memory_schedule_repository_helpers::MatchesQuery(schedule, query)) continue;
@@ -144,6 +149,11 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
 
     [[nodiscard]] Result<int64_t> Count(const schedule::QueryScheduleCommand& query) const override {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (next_count_failure_.has_value()) {
+            Status failure = std::move(*next_count_failure_);
+            next_count_failure_.reset();
+            return Result<int64_t>::Failure(failure.code, failure.message);
+        }
         int64_t total = 0;
         for (const schedule::Schedule& schedule : schedules_) {
             if (in_memory_schedule_repository_helpers::MatchesQuery(schedule, query)) ++total;
@@ -155,6 +165,11 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         schedule::DateTime start, schedule::DateTime end,
         std::optional<schedule::ScheduleId> exclude_id) const override {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (next_find_overlapping_failure_.has_value()) {
+            Status failure = std::move(*next_find_overlapping_failure_);
+            next_find_overlapping_failure_.reset();
+            return Result<std::vector<schedule::Schedule>>::Failure(failure.code, failure.message);
+        }
         std::vector<schedule::Schedule> matched;
         for (const schedule::Schedule& schedule : schedules_) {
             if (schedule.status != schedule::ScheduleStatus::kActive || !schedule.start_time.has_value()) continue;
@@ -176,6 +191,11 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
      */
     Result<schedule::OperationRecord> InsertOperation(const schedule::OperationRecord& input) override {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (next_insert_operation_failure_.has_value()) {
+            Status failure = std::move(*next_insert_operation_failure_);
+            next_insert_operation_failure_.reset();
+            return Result<schedule::OperationRecord>::Failure(failure.code, failure.message);
+        }
         return Result<schedule::OperationRecord>::Success(AppendOperationLocked(input, Now()));
     }
 
@@ -187,6 +207,11 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
     [[nodiscard]] Result<std::vector<schedule::OperationRecord>> FindRecentOperations(
         schedule::DateTime now) const override {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (next_find_recent_failure_.has_value()) {
+            Status failure = std::move(*next_find_recent_failure_);
+            next_find_recent_failure_.reset();
+            return Result<std::vector<schedule::OperationRecord>>::Failure(failure.code, failure.message);
+        }
         std::vector<schedule::OperationRecord> result;
         for (const StoredOperation& stored : operations_) {
             if (stored.active && in_memory_schedule_repository_helpers::IsWithinUndoWindow(stored.operation, now))
@@ -257,6 +282,11 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         next_schedule_id_ = in_memory_schedule_repository_helpers::NextScheduleId(schedules_);
         next_operation_id_ = 1;
         next_undo_failure_.reset();
+        next_find_overlapping_failure_.reset();
+        next_find_failure_.reset();
+        next_count_failure_.reset();
+        next_insert_operation_failure_.reset();
+        next_find_recent_failure_.reset();
     }
 
     /**
@@ -317,6 +347,56 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
     void FailNextUndo(Status status) {
         std::lock_guard<std::mutex> lock(mutex_);
         next_undo_failure_ = std::move(status);
+    }
+
+    /**
+     * @brief 注入下一次 FindOverlapping 失败状态。
+     * @param status 下一次 FindOverlapping 返回的错误。
+     * @return 无。
+     */
+    void FailNextFindOverlapping(Status status) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        next_find_overlapping_failure_ = std::move(status);
+    }
+
+    /**
+     * @brief 注入下一次 Find 失败状态。
+     * @param status 下一次 Find 返回的错误。
+     * @return 无。
+     */
+    void FailNextFind(Status status) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        next_find_failure_ = std::move(status);
+    }
+
+    /**
+     * @brief 注入下一次 Count 失败状态。
+     * @param status 下一次 Count 返回的错误。
+     * @return 无。
+     */
+    void FailNextCount(Status status) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        next_count_failure_ = std::move(status);
+    }
+
+    /**
+     * @brief 注入下一次 InsertOperation 失败状态。
+     * @param status 下一次 InsertOperation 返回的错误。
+     * @return 无。
+     */
+    void FailNextInsertOperation(Status status) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        next_insert_operation_failure_ = std::move(status);
+    }
+
+    /**
+     * @brief 注入下一次 FindRecentOperations 失败状态。
+     * @param status 下一次 FindRecentOperations 返回的错误。
+     * @return 无。
+     */
+    void FailNextFindRecentOperations(Status status) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        next_find_recent_failure_ = std::move(status);
     }
 
    private:
@@ -455,6 +535,11 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
     schedule::ScheduleId next_schedule_id_ = 1;
     schedule::OperationId next_operation_id_ = 1;
     std::optional<Status> next_undo_failure_;
+    mutable std::optional<Status> next_find_overlapping_failure_;
+    mutable std::optional<Status> next_find_failure_;
+    mutable std::optional<Status> next_count_failure_;
+    std::optional<Status> next_insert_operation_failure_;
+    mutable std::optional<Status> next_find_recent_failure_;
 };
 
 }  // namespace voicelife::test

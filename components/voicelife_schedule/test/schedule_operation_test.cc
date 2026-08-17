@@ -191,5 +191,20 @@ int main() {
     CheckPreviousStateRules(service);
     CheckInvalidArguments(service);
     CheckOperationStorageHasNoCountLimit(service, repository);
+
+    // 仓储失败路径：记录操作写入失败时应透传底层错误。
+    {
+        InMemoryScheduleRepository failure_repository;
+        ScheduleOperationService failure_service(failure_repository);
+        failure_repository.FailNextInsertOperation(voicelife::Status::Error(ErrorCode::kInternal, "操作写入失败"));
+        RecordScheduleOperationCommand command{
+            .type = ScheduleOperationType::kCreate,
+            .schedule_id = 9001,
+            .schedule_event = "写入失败",
+            .previous = std::nullopt,
+        };
+        Check(failure_service.record_schedule_operation(command).result.status.code == ErrorCode::kInternal,
+              "record 应透传 InsertOperation 错误");
+    }
     return 0;
 }

@@ -273,6 +273,10 @@ add_voicelife_test(schedule_rule_service_helpers_test "unit;schedule" schedule_r
 target_include_directories(schedule_rule_service_helpers_test PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src/service")
 target_link_libraries(schedule_rule_service_helpers_test PRIVATE schedule)
 
+add_voicelife_test(schedule_helpers_test "unit;schedule" schedule_helpers_test.cc)
+target_include_directories(schedule_helpers_test PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
+target_link_libraries(schedule_helpers_test PRIVATE schedule)
+
 add_voicelife_test(schedule_mcp_tools_input_test "unit;mcp;schedule;runtime" schedule_mcp_tools_input_test.cc)
 target_include_directories(schedule_mcp_tools_input_test PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src/tools")
 target_link_libraries(schedule_mcp_tools_input_test PRIVATE mcp schedule)
@@ -438,4 +442,6 @@ target_link_libraries(sqlite_schedule_repository_unit_test PRIVATE storage_sqlit
 
 add_voicelife_test(sqlite_schedule_rule_repository_test "integration;storage;sqlite;schedule"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_rule_repository_test.cc")
+target_include_directories(sqlite_schedule_rule_repository_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
 target_link_libraries(sqlite_schedule_rule_repository_test PRIVATE storage_sqlite schedule)

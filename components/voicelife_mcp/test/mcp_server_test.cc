@@ -145,6 +145,12 @@ void TestRegistrationValidation() {
                           PropertyList({Property("label", PropertyType::kString, -1, 3)}), handler)
                   .code == ErrorCode::kInvalidArgument,
           "字符串长度不能为负数");
+    Check(server.add_tool("invalid.object_on_string", "描述",
+                          PropertyList({Property("label", PropertyType::kString).with_object_properties(
+                              PropertyList({Property("x", PropertyType::kString)}))}),
+                          handler)
+                  .code == ErrorCode::kInvalidArgument,
+          "非对象参数声明内部字段时应拒绝注册");
 }
 
 /**
@@ -309,6 +315,108 @@ void TestToolCalls() {
 }
 
 /**
+ * @brief 验证对象参数内部字段的默认值补齐与嵌套对象类型错误处理。
+ * @return 无。
+ */
+void TestObjectDefaults() {
+    McpServer server;
+    const PropertyHandler handler = [](const PropertyList&) { return ToolResult::Success(ToolOutputValue::Null()); };
+    Check(server
+              .add_tool(
+                  "self.device.defaults", "对象默认值测试",
+                  PropertyList({Property::OptionalObject(
+                      "settings", PropertyList({
+                                      Property("count", PropertyType::kInteger, int64_t{5}).with_description("计数"),
+                                      Property("flag", PropertyType::kBoolean, true).with_description("开关"),
+                                      Property("name", PropertyType::kString, std::string("abc")).with_description("名称"),
+                                      Property("raw", PropertyType::kObject,
+                                               JsonValue::Object({{"a", JsonValue::Number(1)}}))
+                                          .with_description("原始对象"),
+                                      Property::OptionalObject(
+                                          "nested", PropertyList({Property("mode", PropertyType::kString)})),
+                                  }))}),
+                  handler)
+              .ok(),
+          "带内部默认值的对象参数应能注册");
+
+    // 提供空对象：内部字段全部缺失，走默认值补齐分支，覆盖 bool/int/string/JsonValue 默认值序列化。
+    Check(server
+              .call({.request_id = "object-defaults",
+                     .name = "self.device.defaults",
+                     .arguments = {{"settings", JsonValue::Object({})}}})
+              .status.ok(),
+          "空对象应通过内部字段默认值补齐");
+
+    // 嵌套对象字段传入非对象值，覆盖 NormalizeAndValidateObject 的类型错误分支。
+    Check(server
+              .call({.request_id = "object-nested-bad",
+                     .name = "self.device.defaults",
+                     .arguments = {{"settings", JsonValue::Object({{"nested", JsonValue::String("bad")}})}}})
+              .status.code == ErrorCode::kInvalidArgument,
+          "嵌套对象字段传入非对象值应被拒绝");
+
+    // 提供无内部 Schema 的对象字段，覆盖 NormalizeAndValidateObject 的直接透传分支。
+    Check(server
+              .call({.request_id = "object-raw",
+                     .name = "self.device.defaults",
+                     .arguments = {{"settings", JsonValue::Object({{"raw", JsonValue::Object({{"a", JsonValue::Number(1)}})}})}}})
+              .status.ok(),
+          "无内部 Schema 的对象字段应透传");
+}
+
+/**
+ * @brief 验证对象参数内部字段的类型、范围和长度错误处理。
+ * @return 无。
+ */
+void TestNestedFieldValidation() {
+    McpServer server;
+    const PropertyHandler handler = [](const PropertyList&) { return ToolResult::Success(ToolOutputValue::Null()); };
+    Check(server
+              .add_tool(
+                  "self.device.constrained", "嵌套字段校验测试",
+                  PropertyList({Property::OptionalObject(
+                      "settings", PropertyList({
+                                      Property("count", PropertyType::kInteger, 0, 100, int64_t{5}).with_description("计数"),
+                                      Property("name", PropertyType::kString, 1, 10, std::string("abc")).with_description("名称"),
+                                      Property("flag", PropertyType::kBoolean, true).with_description("开关"),
+                                  }))}),
+                  handler)
+              .ok(),
+          "带约束的对象参数应能注册");
+
+    Check(server
+              .call({.request_id = "nested-int-type",
+                     .name = "self.device.constrained",
+                     .arguments = {{"settings", JsonValue::Object({{"count", JsonValue::String("x")}})}}})
+              .status.code == ErrorCode::kInvalidArgument,
+          "内部整数字段类型错误应被拒绝");
+    Check(server
+              .call({.request_id = "nested-int-range",
+                     .name = "self.device.constrained",
+                     .arguments = {{"settings", JsonValue::Object({{"count", JsonValue::Number(101)}})}}})
+              .status.code == ErrorCode::kInvalidArgument,
+          "内部整数字段超出范围应被拒绝");
+    Check(server
+              .call({.request_id = "nested-string-type",
+                     .name = "self.device.constrained",
+                     .arguments = {{"settings", JsonValue::Object({{"name", JsonValue::Number(1)}})}}})
+              .status.code == ErrorCode::kInvalidArgument,
+          "内部字符串字段类型错误应被拒绝");
+    Check(server
+              .call({.request_id = "nested-string-length",
+                     .name = "self.device.constrained",
+                     .arguments = {{"settings", JsonValue::Object({{"name", JsonValue::String("01234567890")}})}}})
+              .status.code == ErrorCode::kInvalidArgument,
+          "内部字符串字段超出长度应被拒绝");
+    Check(server
+              .call({.request_id = "nested-bool-type",
+                     .name = "self.device.constrained",
+                     .arguments = {{"settings", JsonValue::Object({{"flag", JsonValue::Number(1)}})}}})
+              .status.code == ErrorCode::kInvalidArgument,
+          "内部布尔字段类型错误应被拒绝");
+}
+
+/**
  * @brief 验证工具列表和 JSON Schema 序列化结果。
  * @return 无。
  */
@@ -413,6 +521,8 @@ int main() {
     TestPropertyList();
     TestRegistrationValidation();
     TestToolCalls();
+    TestObjectDefaults();
+    TestNestedFieldValidation();
     TestToolListing();
     return 0;
 }

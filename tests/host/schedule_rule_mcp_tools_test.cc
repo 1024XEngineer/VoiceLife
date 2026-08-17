@@ -22,6 +22,7 @@ using voicelife::schedule::ExceptionType;
 using voicelife::schedule::Frequency;
 using voicelife::schedule::LocalDate;
 using voicelife::schedule::LocalTime;
+using voicelife::schedule::MonthlyMode;
 using voicelife::schedule::Schedule;
 using voicelife::schedule::ScheduleException;
 using voicelife::schedule::ScheduleRule;
@@ -331,5 +332,294 @@ int main() {
         .arguments = {{"rule_id", int64_t{600}}},
     });
     Check(cancelled.status.ok() && cancelled.output.IsObject(), "schedule_rule.cancel 应返回取消结果");
+
+    // —— 失败路径与可选字段分支覆盖 ——
+
+    // create：非法开始时间。
+    const auto bad_start_time = server.call({
+        .request_id = "rule-create-bad-time",
+        .name = "schedule_rule.create",
+        .arguments =
+            {
+                {"event", std::string("坏时间")},
+                {"freq_type", std::string("daily")},
+                {"start_time", std::string("9点")},
+            },
+    });
+    Check(!bad_start_time.status.ok(), "非法开始时间应返回参数错误");
+
+    // create：非法周期间隔（字段校验失败）。
+    const auto bad_interval = server.call({
+        .request_id = "rule-create-bad-interval",
+        .name = "schedule_rule.create",
+        .arguments =
+            {
+                {"event", std::string("坏间隔")},
+                {"freq_type", std::string("daily")},
+                {"start_time", std::string("09:00:00")},
+                {"interval_val", int64_t{0}},
+            },
+    });
+    Check(!bad_interval.status.ok(), "非法周期间隔应返回参数错误");
+
+    // create：失效日期早于当前，无法计算首个发生时间。
+    const auto no_first = server.call({
+        .request_id = "rule-create-no-first",
+        .name = "schedule_rule.create",
+        .arguments =
+            {
+                {"event", std::string("无发生")},
+                {"freq_type", std::string("daily")},
+                {"start_time", std::string("09:00:00")},
+                {"end_date", std::string("2020-01-01")},
+            },
+    });
+    Check(!no_first.status.ok(), "无法计算首个发生时间应返回错误");
+
+    // create：携带全部可选字段（weekly），命中解析与输出分支。
+    const auto full_create = server.call({
+        .request_id = "rule-create-full",
+        .name = "schedule_rule.create",
+        .arguments =
+            {
+                {"event", std::string("全字段规则")},
+                {"freq_type", std::string("weekly")},
+                {"start_time", std::string("09:30:00")},
+                {"end_time", std::string("10:30:00")},
+                {"location", std::string("A座")},
+                {"notes", std::string("备注")},
+                {"interval_val", int64_t{2}},
+                {"weekdays_mask", int64_t{3}},
+                {"monthly_mode", std::string("specific_day")},
+                {"day_of_month", int64_t{15}},
+                {"month_of_year", int64_t{6}},
+                {"end_date", std::string("2099-12-31")},
+                {"ignore_conflict", bool{true}},
+            },
+    });
+    Check(full_create.status.ok() && full_create.output.IsObject(), "全可选字段的 create 应成功");
+
+    // create：monthly/yearly/非法频率与 last_day/非法月模式，命中解析分支。
+    const auto monthly_create = server.call({
+        .request_id = "rule-create-monthly",
+        .name = "schedule_rule.create",
+        .arguments =
+            {
+                {"event", std::string("月度规则")},
+                {"freq_type", std::string("monthly")},
+                {"start_time", std::string("09:00:00")},
+                {"monthly_mode", std::string("last_day")},
+            },
+    });
+    Check(monthly_create.status.ok(), "月度规则 create 应成功");
+
+    const auto yearly_create = server.call({
+        .request_id = "rule-create-yearly",
+        .name = "schedule_rule.create",
+        .arguments =
+            {
+                {"event", std::string("年度规则")},
+                {"freq_type", std::string("yearly")},
+                {"start_time", std::string("09:00:00")},
+                {"month_of_year", int64_t{6}},
+                {"day_of_month", int64_t{15}},
+            },
+    });
+    Check(yearly_create.status.ok(), "年度规则 create 应成功");
+
+    const auto bad_freq = server.call({
+        .request_id = "rule-create-bad-freq",
+        .name = "schedule_rule.create",
+        .arguments =
+            {
+                {"event", std::string("非法频率")},
+                {"freq_type", std::string("hourly")},
+                {"start_time", std::string("09:00:00")},
+            },
+    });
+    Check(bad_freq.status.ok(), "非法频率应回退为 daily 并成功创建");
+
+    const auto bad_mode = server.call({
+        .request_id = "rule-create-bad-mode",
+        .name = "schedule_rule.create",
+        .arguments =
+            {
+                {"event", std::string("非法月模式")},
+                {"freq_type", std::string("daily")},
+                {"start_time", std::string("09:00:00")},
+                {"monthly_mode", std::string("invalid")},
+                {"ignore_conflict", bool{true}},
+            },
+    });
+    Check(bad_mode.status.ok(), "非法月模式应被忽略并成功创建");
+
+    // update：规则标识非法。
+    const auto bad_rule_id = server.call({
+        .request_id = "rule-update-bad-id",
+        .name = "schedule_rule.update",
+        .arguments = {{"rule_id", int64_t{0}}},
+    });
+    Check(!bad_rule_id.status.ok(), "非法规则标识的 update 应返回错误");
+
+    // update：携带全部可选字段（含 occurrence_count），命中解析分支后由字段校验拒绝。
+    const auto full_update_rejected = server.call({
+        .request_id = "rule-update-full-rejected",
+        .name = "schedule_rule.update",
+        .arguments =
+            {
+                {"rule_id", int64_t{600}},
+                {"event", std::string("改")},
+                {"location", std::string("L")},
+                {"notes", std::string("N")},
+                {"freq_type", std::string("daily")},
+                {"interval_val", int64_t{2}},
+                {"weekdays_mask", int64_t{1}},
+                {"monthly_mode", std::string("specific_day")},
+                {"day_of_month", int64_t{15}},
+                {"month_of_year", int64_t{6}},
+                {"start_time", std::string("08:00:00")},
+                {"end_time", std::string("09:00:00")},
+                {"end_date", std::string("2099-12-31")},
+                {"occurrence_count", int64_t{3}},
+            },
+    });
+    Check(!full_update_rejected.status.ok(), "携带 occurrence_count 的 update 应被字段校验拒绝");
+
+    // occurrence.update：携带全部可选字段（未物化实例）。
+    const auto occurrence_updated = server.call({
+        .request_id = "occ-update-full",
+        .name = "schedule_occurrence.update",
+        .arguments =
+            {
+                {"rule_id", int64_t{600}},
+                {"original_start_time", int64_t{UtcAtLocal(2099, 1, 5, 9)}},
+                {"event", std::string("改事件")},
+                {"start_time", int64_t{UtcAtLocal(2099, 1, 5, 10)}},
+                {"end_time", int64_t{UtcAtLocal(2099, 1, 5, 11)}},
+                {"location", std::string("L")},
+                {"notes", std::string("N")},
+                {"ignore_conflict", bool{false}},
+            },
+    });
+    Check(occurrence_updated.status.ok() && occurrence_updated.output.IsObject(),
+          "occurrence.update 应返回含例外的成功结果");
+
+    // occurrence.update：未提供任何修改字段。
+    const auto occurrence_no_field = server.call({
+        .request_id = "occ-update-no-field",
+        .name = "schedule_occurrence.update",
+        .arguments =
+            {
+                {"rule_id", int64_t{600}},
+                {"original_start_time", int64_t{UtcAtLocal(2099, 1, 6, 9)}},
+            },
+    });
+    Check(!occurrence_no_field.status.ok(), "未提供修改字段的 occurrence.update 应返回错误");
+
+    // occurrence.update：非法规则标识。
+    const auto occurrence_bad_id = server.call({
+        .request_id = "occ-update-bad-id",
+        .name = "schedule_occurrence.update",
+        .arguments =
+            {
+                {"rule_id", int64_t{0}},
+                {"original_start_time", int64_t{UtcAtLocal(2099, 1, 6, 9)}},
+                {"event", std::string("x")},
+            },
+    });
+    Check(!occurrence_bad_id.status.ok(), "非法规则标识的 occurrence.update 应返回错误");
+
+    // skip：非法规则标识。
+    const auto skip_bad_id = server.call({
+        .request_id = "occ-skip-bad-id",
+        .name = "schedule_occurrence.skip",
+        .arguments = {{"rule_id", int64_t{0}}, {"original_start_time", int64_t{UtcAtLocal(2099, 1, 7, 9)}}},
+    });
+    Check(!skip_bad_id.status.ok(), "非法规则标识的 skip 应返回错误");
+
+    // cancel：非法规则标识与不存在规则。
+    const auto cancel_bad_id = server.call({
+        .request_id = "rule-cancel-bad-id",
+        .name = "schedule_rule.cancel",
+        .arguments = {{"rule_id", int64_t{0}}},
+    });
+    Check(!cancel_bad_id.status.ok(), "非法规则标识的 cancel 应返回错误");
+    const auto cancel_missing = server.call({
+        .request_id = "rule-cancel-missing",
+        .name = "schedule_rule.cancel",
+        .arguments = {{"rule_id", int64_t{999999}}},
+    });
+    Check(!cancel_missing.status.ok(), "取消不存在规则应返回错误");
+
+    // generate_next：非法规则标识与不存在规则。
+    const auto generate_bad_id = server.call({
+        .request_id = "rule-generate-bad-id",
+        .name = "schedule_rule.generate_next",
+        .arguments = {{"rule_id", int64_t{0}}},
+    });
+    Check(!generate_bad_id.status.ok(), "非法规则标识的 generate_next 应返回错误");
+    const auto generate_missing = server.call({
+        .request_id = "rule-generate-missing",
+        .name = "schedule_rule.generate_next",
+        .arguments = {{"rule_id", int64_t{999999}}},
+    });
+    Check(!generate_missing.status.ok(), "生成不存在规则的下一条实例应返回错误");
+
+    // 预置全字段规则与例外，命中 RuleOutput/ExceptionOutput 的可选字段分支。
+    ScheduleRule monthly_rule;
+    monthly_rule.id = 610;
+    monthly_rule.event = "月度全字段";
+    monthly_rule.location = "月度地点";
+    monthly_rule.notes = "月度备注";
+    monthly_rule.freq_type = Frequency::kMonthly;
+    monthly_rule.interval_val = 1;
+    monthly_rule.weekdays_mask = 7;
+    monthly_rule.day_of_month = 20;
+    monthly_rule.month_of_year = 5;
+    monthly_rule.monthly_mode = MonthlyMode::kLastDay;
+    monthly_rule.start_time = LocalTime{9, 0, 0};
+    monthly_rule.end_time = LocalTime{10, 0, 0};
+    monthly_rule.start_date = LocalDate{2099, 1, 1};
+    monthly_rule.end_date = LocalDate{2099, 12, 31};
+    monthly_rule.occurrence_count = 5;
+    monthly_rule.status = ScheduleStatus::kActive;
+    rules.rules.push_back(monthly_rule);
+
+    ScheduleRule yearly_rule;
+    yearly_rule.id = 611;
+    yearly_rule.event = "年度规则";
+    yearly_rule.freq_type = Frequency::kYearly;
+    yearly_rule.interval_val = 1;
+    yearly_rule.month_of_year = 6;
+    yearly_rule.day_of_month = 15;
+    yearly_rule.start_time = LocalTime{12, 0, 0};
+    yearly_rule.start_date = LocalDate{2099, 1, 1};
+    yearly_rule.status = ScheduleStatus::kActive;
+    rules.rules.push_back(yearly_rule);
+
+    ScheduleException full_exception;
+    full_exception.id = 800;
+    full_exception.rule_id = 610;
+    full_exception.original_start_time = DateTime{std::chrono::seconds{UtcAtLocal(2099, 2, 28, 9)}};
+    full_exception.schedule_id = 900;
+    full_exception.type = ExceptionType::kModify;
+    full_exception.override_start_time = DateTime{std::chrono::seconds{UtcAtLocal(2099, 2, 28, 10)}};
+    full_exception.override_end_time = DateTime{std::chrono::seconds{UtcAtLocal(2099, 2, 28, 11)}};
+    full_exception.override_event = "覆盖事件";
+    exceptions.exceptions.push_back(full_exception);
+
+    const auto filtered_query = server.call({
+        .request_id = "rule-query-filtered",
+        .name = "schedule_rule.query",
+        .arguments = {{"rule_id", int64_t{610}}, {"keyword", std::string("月度")}},
+    });
+    Check(filtered_query.status.ok() && filtered_query.output.IsObject(), "带筛选条件的 query 应返回全字段规则");
+
+    const auto active_query = server.call({
+        .request_id = "rule-query-active",
+        .name = "schedule_rule.query",
+        .arguments = {},
+    });
+    Check(active_query.status.ok() && active_query.output.IsObject(), "默认 active 状态的 query 应返回结果");
     return 0;
 }

@@ -7,10 +7,13 @@
 #include <string>
 #include <system_error>
 
+#include "mapping/schedule_exception_row_mapper.h"
+#include "mapping/schedule_rule_row_mapper.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_types.h"
 #include "voicelife/storage_sqlite/sqlite_database.h"
 
+using voicelife::ErrorCode;
 using voicelife::schedule::DateTime;
 using voicelife::schedule::ExceptionType;
 using voicelife::schedule::Frequency;
@@ -24,6 +27,8 @@ using voicelife::schedule::ScheduleStatus;
 using voicelife::storage_sqlite::SqliteDatabase;
 using voicelife::storage_sqlite::SqliteScheduleRuleRepository;
 using voicelife::test::Check;
+
+namespace mapping = voicelife::storage_sqlite::mapping;
 
 namespace {
 
@@ -74,6 +79,304 @@ Schedule FirstInstance(ScheduleRuleId rule_id) {
     schedule.notes = "复盘";
     schedule.rule_id = rule_id;
     return schedule;
+}
+
+/**
+ * @brief 验证规则与例外 Mapper 的绑定错误和非法结果行拒绝分支。
+ * @param path 临时数据库路径。
+ * @return 无。
+ */
+void CheckRuleMapperValidation(const std::filesystem::path& path) {
+    SqliteDatabase database(path.string());
+    Check(database.Open().ok(), "规则 Mapper 测试应打开数据库");
+
+    auto no_parameters = database.Prepare("SELECT 1");
+    Check(no_parameters.ok(), "应创建无参数语句");
+    const auto rule_bind = mapping::BindScheduleRule(*no_parameters.value, DailyRule());
+    Check(rule_bind.code == ErrorCode::kInternal && rule_bind.message.find("event") != std::string::npos,
+          "规则 Mapper 应为 event 绑定错误补充字段名");
+
+    ScheduleException exception;
+    exception.rule_id = 1;
+    exception.original_start_time = DateTime{std::chrono::seconds{4'071'258'000}};
+    exception.type = ExceptionType::kModify;
+    const auto exception_bind = mapping::BindScheduleException(*no_parameters.value, exception);
+    Check(exception_bind.code == ErrorCode::kInternal &&
+              exception_bind.message.find("rule_id") != std::string::npos,
+          "例外 Mapper 应为 rule_id 绑定错误补充字段名");
+
+    auto bad_freq = database.Prepare(
+        "SELECT 1, '规则', NULL, NULL, 99, 1, NULL, NULL, NULL, NULL, 0, NULL, 0, NULL, NULL, 1, 0, 0");
+    Check(bad_freq.ok() && bad_freq.value->Step().ok(), "应构造非法频率结果行");
+    Check(mapping::ReadScheduleRule(*bad_freq.value).status.code == ErrorCode::kInternal,
+          "规则 Mapper 应拒绝非法频率");
+
+    auto bad_status = database.Prepare(
+        "SELECT 1, '规则', NULL, NULL, 1, 1, NULL, NULL, NULL, NULL, 0, NULL, 0, NULL, NULL, 99, 0, 0");
+    Check(bad_status.ok() && bad_status.value->Step().ok(), "应构造非法状态结果行");
+    Check(mapping::ReadScheduleRule(*bad_status.value).status.code == ErrorCode::kInternal,
+          "规则 Mapper 应拒绝非法状态");
+
+    auto null_name = database.Prepare(
+        "SELECT 1, NULL, NULL, NULL, 1, 1, NULL, NULL, NULL, NULL, 0, NULL, 0, NULL, NULL, 1, 0, 0");
+    Check(null_name.ok() && null_name.value->Step().ok(), "应构造空名称结果行");
+    Check(mapping::ReadScheduleRule(*null_name.value).status.code == ErrorCode::kInternal,
+          "规则 Mapper 应拒绝空名称");
+
+    auto bad_mode = database.Prepare(
+        "SELECT 1, '规则', NULL, NULL, 1, 1, NULL, NULL, NULL, 99, 0, NULL, 0, NULL, NULL, 1, 0, 0");
+    Check(bad_mode.ok() && bad_mode.value->Step().ok(), "应构造非法月模式结果行");
+    Check(mapping::ReadScheduleRule(*bad_mode.value).status.code == ErrorCode::kInternal,
+          "规则 Mapper 应拒绝非法月模式");
+
+    auto bad_type = database.Prepare("SELECT 1, 1, 0, NULL, 99, NULL, NULL, NULL, NULL, NULL, 0, 0");
+    Check(bad_type.ok() && bad_type.value->Step().ok(), "应构造非法例外类型结果行");
+    Check(mapping::ReadScheduleException(*bad_type.value).status.code == ErrorCode::kInternal,
+          "例外 Mapper 应拒绝非法类型");
+
+    auto override_times = database.Prepare(
+        "SELECT 1, 1, 4071258000, NULL, 1, 4071258000, 4071261600, '改标题', NULL, NULL, 2000000000, 2000000100");
+    Check(override_times.ok() && override_times.value->Step().ok(), "应构造带覆盖时间的例外结果行");
+    const auto read_override = mapping::ReadScheduleException(*override_times.value);
+    Check(read_override.ok() && read_override.value->override_start_time.has_value() &&
+              read_override.value->override_end_time.has_value(),
+          "例外 Mapper 应还原非空覆盖时间");
+}
+
+/**
+ * @brief 验证规则仓储的空字段、无首条实例和非法标识等分支。
+ * @param path 临时数据库路径。
+ * @return 无。
+ */
+void CheckRuleRepositoryBranches(const std::filesystem::path& path) {
+    SqliteDatabase database(path.string());
+    Check(database.Open().ok(), "规则分支测试应打开数据库");
+    SqliteScheduleRuleRepository repository(database);
+    Check(repository.Initialize().ok(), "规则分支测试应初始化表结构");
+
+    ScheduleRule empty = DailyRule();
+    empty.event = "";
+    Check(repository.Insert(empty).status.code == ErrorCode::kInvalidArgument, "空规则名 Insert 应被拒绝");
+    Check(repository.CreateWithFirstInstance(empty, FirstInstance(0)).status.code == ErrorCode::kInvalidArgument,
+          "空规则名 CreateWithFirstInstance 应被拒绝");
+
+    const auto rule_no_first = repository.CreateWithFirstInstance(DailyRule(), std::nullopt);
+    Check(rule_no_first.ok() && rule_no_first.value->id > 0, "无首条实例的创建应成功");
+    const ScheduleRuleId rule_id = rule_no_first.value->id;
+
+    ScheduleRule updated = *rule_no_first.value;
+    updated.event = "无实例更新";
+    Check(repository.UpdateAndRebuild(updated, std::nullopt).ok(), "无首条实例的更新应成功");
+
+    // Insert / Update 单独调用（不涉及实例重建）。
+    ScheduleRule inserted = DailyRule();
+    inserted.event = "单独插入";
+    const auto insert_result = repository.Insert(inserted);
+    Check(insert_result.ok() && insert_result.value->id > 0, "Insert 应成功插入规则");
+
+    ScheduleRule direct_update = *rule_no_first.value;
+    direct_update.event = "直接更新";
+    Check(repository.Update(direct_update).ok(), "Update 应成功更新规则");
+
+    ScheduleException bad_exception;
+    bad_exception.rule_id = 0;
+    Check(repository.Upsert(bad_exception).status.code == ErrorCode::kInvalidArgument, "例外非法规则标识应被拒绝");
+
+    const auto missing_exception =
+        repository.FindByRuleAndTime(rule_id, DateTime{std::chrono::seconds{123}});
+    Check(missing_exception.ok() && !missing_exception.value->has_value(), "未命中例外应返回空值");
+
+    const auto empty_list = repository.FindByRule(rule_id);
+    Check(empty_list.ok() && empty_list.value->empty(), "无例外的规则应返回空列表");
+
+    Schedule bad_instance = FirstInstance(rule_id);
+    bad_instance.event = "";
+    Check(repository.CreateNextInstance(bad_instance, std::nullopt).status.code == ErrorCode::kInvalidArgument,
+          "空实例名应被拒绝");
+    Schedule no_rule_instance = FirstInstance(0);
+    Check(repository.CreateNextInstance(no_rule_instance, std::nullopt).status.code == ErrorCode::kInvalidArgument,
+          "无规则标识实例应被拒绝");
+
+    const auto next = repository.CreateNextInstance(FirstInstance(rule_id), std::nullopt);
+    Check(next.ok() && next.value->id > 0, "无关联例外的实例创建应成功");
+
+    int64_t cancelled = 0;
+    Check(repository.CancelRuleAndInstances(0, cancelled).code == ErrorCode::kInvalidArgument,
+          "取消非法规则标识应被拒绝");
+    Check(repository.CancelRuleAndInstances(999999, cancelled).code == ErrorCode::kNotFound,
+          "取消不存在规则应返回未找到");
+    Check(repository.CancelRuleAndInstances(rule_id, cancelled).ok() && cancelled >= 1, "取消规则应成功");
+
+    ScheduleRule bad_id = DailyRule();
+    bad_id.id = 0;
+    Check(repository.Update(bad_id).code == ErrorCode::kInvalidArgument, "更新无标识规则应被拒绝");
+    Check(repository.UpdateAndRebuild(bad_id, std::nullopt).status.code == ErrorCode::kInvalidArgument,
+          "重建无标识规则应被拒绝");
+}
+
+/**
+ * @brief 验证数据库未打开时各仓储方法的不可用分支。
+ * @param path 临时数据库路径。
+ * @return 无。
+ */
+void CheckClosedDatabaseBranches(const std::filesystem::path& path) {
+    SqliteDatabase database(path.string());
+    SqliteScheduleRuleRepository repository(database);
+    Check(!database.IsOpen(), "未打开的数据库应处于关闭状态");
+
+    const ScheduleRule rule = DailyRule();
+    Check(repository.Initialize().code == ErrorCode::kUnavailable, "关闭数据库时 Initialize 应不可用");
+    Check(repository.Insert(rule).status.code == ErrorCode::kUnavailable, "关闭数据库时 Insert 应不可用");
+    Check(repository.Update(rule).code == ErrorCode::kUnavailable, "关闭数据库时 Update 应不可用");
+    Check(repository.FindAll().status.code == ErrorCode::kUnavailable, "关闭数据库时 FindAll 应不可用");
+    Check(repository.FindById(1).status.code == ErrorCode::kUnavailable, "关闭数据库时 FindById 应不可用");
+    Check(repository.CreateWithFirstInstance(rule, std::nullopt).status.code == ErrorCode::kUnavailable,
+          "关闭数据库时 CreateWithFirstInstance 应不可用");
+    Check(repository.UpdateAndRebuild(rule, std::nullopt).status.code == ErrorCode::kUnavailable,
+          "关闭数据库时 UpdateAndRebuild 应不可用");
+    int64_t cancelled = 0;
+    Check(repository.CancelRuleAndInstances(1, cancelled).code == ErrorCode::kUnavailable,
+          "关闭数据库时 CancelRuleAndInstances 应不可用");
+    Check(repository.CreateNextInstance(FirstInstance(1), std::nullopt).status.code == ErrorCode::kUnavailable,
+          "关闭数据库时 CreateNextInstance 应不可用");
+    ScheduleException exception;
+    exception.rule_id = 1;
+    Check(repository.Upsert(exception).status.code == ErrorCode::kUnavailable, "关闭数据库时 Upsert 应不可用");
+    Check(repository.FindByRule(1).status.code == ErrorCode::kUnavailable, "关闭数据库时 FindByRule 应不可用");
+    Check(repository.FindByRuleAndTime(1, DateTime{}).status.code == ErrorCode::kUnavailable,
+          "关闭数据库时 FindByRuleAndTime 应不可用");
+    Check(repository.DeleteFuture(1, DateTime{}).code == ErrorCode::kUnavailable,
+          "关闭数据库时 DeleteFuture 应不可用");
+}
+
+/**
+ * @brief 验证规则仓储事务中各步骤违反 SQLite 约束时回滚并透传错误。
+ * @param path 临时数据库路径。
+ * @return 无。
+ */
+void CheckRuleRepositoryRollbackBranches(const std::filesystem::path& path) {
+    SqliteDatabase database(path.string());
+    Check(database.Open().ok(), "回滚分支测试应打开数据库");
+    SqliteScheduleRuleRepository repository(database);
+    Check(repository.Initialize().ok(), "回滚分支测试应初始化表结构");
+
+    // 规则插入违反 CHECK 约束（非法频率）→ 事务回滚。
+    ScheduleRule bad_freq = DailyRule();
+    bad_freq.freq_type = static_cast<Frequency>(99);
+    Check(repository.CreateWithFirstInstance(bad_freq, std::nullopt).status.code == ErrorCode::kAlreadyExists,
+          "规则插入违反约束时应回滚并返回约束冲突");
+
+    // 首条实例插入违反 CHECK 约束（非法状态）→ 事务回滚。
+    Schedule bad_first = FirstInstance(0);
+    bad_first.status = static_cast<ScheduleStatus>(99);
+    Check(repository.CreateWithFirstInstance(DailyRule(), bad_first).status.code == ErrorCode::kAlreadyExists,
+          "首条实例插入违反约束时应回滚并返回约束冲突");
+
+    const auto created = repository.CreateWithFirstInstance(DailyRule(), std::nullopt);
+    Check(created.ok() && created.value->id > 0, "回滚分支测试应创建基准规则");
+    const ScheduleRuleId rule_id = created.value->id;
+
+    // 更新规则违反 CHECK 约束（事件过长）→ 事务回滚。
+    ScheduleRule too_long = *created.value;
+    too_long.event = std::string(101, 'x');
+    Check(repository.UpdateAndRebuild(too_long, std::nullopt).status.code == ErrorCode::kAlreadyExists,
+          "更新规则违反约束时应回滚并返回约束冲突");
+
+    // 更新不存在的规则：影响行数非 1 → 事务回滚并返回未找到。
+    ScheduleRule missing = DailyRule();
+    missing.id = 999999;
+    Check(repository.UpdateAndRebuild(missing, std::nullopt).status.code == ErrorCode::kNotFound,
+          "更新不存在规则应回滚并返回未找到");
+
+    // 更新重建时首条实例插入违反约束 → 事务回滚。
+    ScheduleRule valid_update = *created.value;
+    valid_update.event = "更新实例失败";
+    Schedule bad_rebuild_first = FirstInstance(rule_id);
+    bad_rebuild_first.status = static_cast<ScheduleStatus>(99);
+    Check(repository.UpdateAndRebuild(valid_update, bad_rebuild_first).status.code == ErrorCode::kAlreadyExists,
+          "更新重建首条实例违反约束时应回滚并返回约束冲突");
+
+    // 创建下一条实例违反约束（非法状态）→ 事务回滚。
+    Schedule bad_next = FirstInstance(rule_id);
+    bad_next.status = static_cast<ScheduleStatus>(99);
+    Check(repository.CreateNextInstance(bad_next, std::nullopt).status.code == ErrorCode::kAlreadyExists,
+          "创建下一条实例违反约束时应回滚并返回约束冲突");
+
+    // 关联例外写入违反约束（非法类型）→ 事务回滚。
+    Schedule valid_next = FirstInstance(rule_id);
+    ScheduleException bad_linked;
+    bad_linked.rule_id = rule_id;
+    bad_linked.original_start_time = DateTime{std::chrono::seconds{4'071'258'000}};
+    bad_linked.type = static_cast<ExceptionType>(99);
+    Check(repository.CreateNextInstance(valid_next, bad_linked).status.code == ErrorCode::kAlreadyExists,
+          "关联例外写入违反约束时应回滚并返回约束冲突");
+}
+
+/**
+ * @brief 验证规则仓储在表结构缺失时透传 SQL 编译错误。
+ * @return 无。
+ */
+void CheckRuleRepositorySqlFailures() {
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "规则表失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "规则表失败分支应初始化表结构");
+        Check(database.Execute("DROP TABLE schedule_rule").ok(), "应删除规则表制造 SQL 错误");
+        Check(repository.FindAll().status.code == ErrorCode::kInternal, "FindAll 应透传规则表缺失错误");
+        Check(repository.FindById(1).status.code == ErrorCode::kInternal, "FindById 应透传规则表缺失错误");
+        ScheduleRule fake = DailyRule();
+        fake.id = 1;
+        Check(repository.UpdateAndRebuild(fake, std::nullopt).status.code == ErrorCode::kInternal,
+              "UpdateAndRebuild 应透传规则表缺失错误");
+    }
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "例外表失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "例外表失败分支应初始化表结构");
+        Check(database.Execute("DROP TABLE schedule_rule_exception").ok(), "应删除例外表制造 SQL 错误");
+        Check(repository.FindByRule(1).status.code == ErrorCode::kInternal, "FindByRule 应透传例外表缺失错误");
+        Check(repository.FindByRuleAndTime(1, DateTime{}).status.code == ErrorCode::kInternal,
+              "FindByRuleAndTime 应透传例外表缺失错误");
+    }
+}
+
+/**
+ * @brief 验证更新重建时删除未来实例/例外语句的 SQL 错误回滚分支。
+ * @return 无。
+ */
+void CheckRuleRepositoryDeleteFailures() {
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "删除日程失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "删除日程失败分支应初始化表结构");
+        const auto created = repository.CreateWithFirstInstance(DailyRule(), std::nullopt);
+        Check(created.ok(), "应创建基准规则");
+        ScheduleRule update = *created.value;
+        update.event = "删除日程失败";
+        Check(database.Execute("DROP TABLE schedule").ok(), "应删除日程表制造 DELETE 错误");
+        Check(repository.UpdateAndRebuild(update, std::nullopt).status.code == ErrorCode::kInternal,
+              "UpdateAndRebuild 应透传删除未来实例语句错误");
+    }
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "删除例外失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "删除例外失败分支应初始化表结构");
+        const auto created = repository.CreateWithFirstInstance(DailyRule(), std::nullopt);
+        Check(created.ok(), "应创建基准规则");
+        ScheduleRule update = *created.value;
+        update.event = "删除例外失败";
+        Check(database.Execute("DROP TABLE schedule_rule_exception").ok(), "应删除例外表制造 DELETE 错误");
+        Check(repository.UpdateAndRebuild(update, std::nullopt).status.code == ErrorCode::kInternal,
+              "UpdateAndRebuild 应透传删除未来例外语句错误");
+    }
 }
 
 }  // namespace
@@ -159,5 +462,16 @@ int main() {
     Check(cancelled.ok() && cancelled.value->status == ScheduleStatus::kCancelled, "取消后的规则状态应持久化为已取消");
 
     Check(repository.Update(DailyRule()).code == voicelife::ErrorCode::kInvalidArgument, "更新无效规则应返回参数错误");
+
+    const TemporaryDatabaseFile mapper_file = MakeTemporaryDatabaseFile();
+    CheckRuleMapperValidation(mapper_file.path);
+    const TemporaryDatabaseFile branches_file = MakeTemporaryDatabaseFile();
+    CheckRuleRepositoryBranches(branches_file.path);
+    const TemporaryDatabaseFile closed_file = MakeTemporaryDatabaseFile();
+    CheckClosedDatabaseBranches(closed_file.path);
+    const TemporaryDatabaseFile rollback_file = MakeTemporaryDatabaseFile();
+    CheckRuleRepositoryRollbackBranches(rollback_file.path);
+    CheckRuleRepositorySqlFailures();
+    CheckRuleRepositoryDeleteFailures();
     return 0;
 }
