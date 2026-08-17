@@ -592,6 +592,81 @@ void CheckUndoTransactionFailureBranches() {
         Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kInternal,
               "撤销读取目标日程失败应透传内部错误");
     }
+    {
+        // 撤销逆操作成功后，停用原操作记录的 UPDATE 执行失败，应回滚并透传错误。
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "撤销停用失败分支应打开数据库");
+        SqliteScheduleRepository repository(database);
+        Check(repository.Initialize().ok(), "撤销停用失败分支应初始化表结构");
+        Schedule base = MinimalSchedule("撤销停用失败目标");
+        base.start_time = At(2'100'000'000);
+        base.end_time = At(2'100'003'600);
+        const auto target = repository.Insert(base);
+        Check(target.ok(), "应创建撤销停用失败目标日程");
+        OperationRecord op;
+        op.type = ScheduleOperationType::kCreate;
+        op.schedule_id = target.value->id;
+        op.schedule_event = "撤销停用失败操作";
+        const auto saved = repository.InsertOperation(op);
+        Check(saved.ok(), "应保存撤销停用失败操作");
+        Check(database.Execute("CREATE TRIGGER reject_operation_update BEFORE UPDATE ON operation_record "
+                               "BEGIN SELECT RAISE(ABORT, 'operation update blocked'); END")
+                  .ok(),
+              "应创建操作记录更新拒绝触发器");
+        Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kAlreadyExists,
+              "撤销停用原操作失败应透传执行错误");
+    }
+    {
+        // 停用原操作记录影响行数为 0，应回滚并返回冲突。
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "撤销停用无变化分支应打开数据库");
+        SqliteScheduleRepository repository(database);
+        Check(repository.Initialize().ok(), "撤销停用无变化分支应初始化表结构");
+        Schedule base = MinimalSchedule("撤销停用无变化目标");
+        base.start_time = At(2'100'000'000);
+        base.end_time = At(2'100'003'600);
+        const auto target = repository.Insert(base);
+        Check(target.ok(), "应创建撤销停用无变化目标日程");
+        OperationRecord op;
+        op.type = ScheduleOperationType::kCreate;
+        op.schedule_id = target.value->id;
+        op.schedule_event = "撤销停用无变化操作";
+        const auto saved = repository.InsertOperation(op);
+        Check(saved.ok(), "应保存撤销停用无变化操作");
+        Check(database.Execute("CREATE TRIGGER ignore_operation_update BEFORE UPDATE ON operation_record "
+                               "BEGIN SELECT RAISE(IGNORE); END")
+                  .ok(),
+              "应创建操作记录更新忽略触发器");
+        Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kConflict,
+              "停用原操作无变化应返回冲突");
+    }
+    {
+        // 撤销逆操作成功后，写入 undo 操作记录失败，应回滚并透传错误。
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "撤销写入记录失败分支应打开数据库");
+        SqliteScheduleRepository repository(database);
+        Check(repository.Initialize().ok(), "撤销写入记录失败分支应初始化表结构");
+        Schedule base = MinimalSchedule("撤销写入记录失败目标");
+        base.start_time = At(2'100'000'000);
+        base.end_time = At(2'100'003'600);
+        const auto target = repository.Insert(base);
+        Check(target.ok(), "应创建撤销写入记录失败目标日程");
+        OperationRecord op;
+        op.type = ScheduleOperationType::kCreate;
+        op.schedule_id = target.value->id;
+        op.schedule_event = "撤销写入记录失败操作";
+        const auto saved = repository.InsertOperation(op);
+        Check(saved.ok(), "应保存撤销写入记录失败操作");
+        Check(database.Execute("CREATE TRIGGER reject_operation_insert BEFORE INSERT ON operation_record "
+                               "BEGIN SELECT RAISE(ABORT, 'operation insert blocked'); END")
+                  .ok(),
+              "应创建操作记录插入拒绝触发器");
+        Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kAlreadyExists,
+              "撤销写入 undo 记录失败应透传执行错误");
+    }
 }
 
 }  // namespace

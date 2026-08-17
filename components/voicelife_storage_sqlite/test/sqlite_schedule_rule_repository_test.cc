@@ -69,6 +69,34 @@ ScheduleRule DailyRule() {
     return rule;
 }
 
+/** @brief 构造包含全部可空字段和年结束日期的规则。 @return 完整月规则。 */
+ScheduleRule FullRuleWithEndDate() {
+    ScheduleRule rule = DailyRule();
+    rule.event = "完整月规则";
+    rule.freq_type = Frequency::kMonthly;
+    rule.interval_val = 2;
+    rule.weekdays_mask = uint8_t{1};
+    rule.day_of_month = uint8_t{15};
+    rule.month_of_year = uint8_t{6};
+    rule.monthly_mode = voicelife::schedule::MonthlyMode::kSpecificDay;
+    rule.start_time = LocalTime{8, 30, 15};
+    rule.end_time = LocalTime{9, 15, 45};
+    rule.start_date = LocalDate{2099, 6, 15};
+    rule.end_date = LocalDate{2099, 12, 31};
+    return rule;
+}
+
+/** @brief 构造包含发生次数且无结束日期的规则。 @return 完整次数规则。 */
+ScheduleRule FullRuleWithCount() {
+    ScheduleRule rule = FullRuleWithEndDate();
+    rule.event = "完整次数规则";
+    rule.monthly_mode = voicelife::schedule::MonthlyMode::kLastDay;
+    rule.day_of_month = std::nullopt;
+    rule.end_date = std::nullopt;
+    rule.occurrence_count = 8;
+    return rule;
+}
+
 /** @brief 构造待物化的首条实例。 @param rule_id 规则标识。 @return 日程实例。 */
 Schedule FirstInstance(ScheduleRuleId rule_id) {
     Schedule schedule;
@@ -147,6 +175,40 @@ void CheckRuleMapperValidation(const std::filesystem::path& path) {
     Check(read_override.ok() && read_override.value->override_start_time.has_value() &&
               read_override.value->override_end_time.has_value(),
           "例外 Mapper 应还原非空覆盖时间");
+}
+
+/**
+ * @brief 验证规则 Mapper 能完整往返全部可空字段的两种合法组合。
+ * @param path 临时数据库路径。
+ * @return 无。
+ */
+void CheckFullRuleRoundTrip(const std::filesystem::path& path) {
+    SqliteDatabase database(path.string());
+    Check(database.Open().ok(), "完整规则测试应打开数据库");
+    SqliteScheduleRuleRepository repository(database);
+    Check(repository.Initialize().ok(), "完整规则测试应初始化表结构");
+
+    const auto with_end_date = repository.Insert(FullRuleWithEndDate());
+    Check(with_end_date.ok() && with_end_date.value->id > 0, "带结束日期的完整规则应插入成功");
+    const auto loaded_end_date = repository.FindById(with_end_date.value->id);
+    Check(loaded_end_date.ok() && loaded_end_date.value->location == "会议室" && loaded_end_date.value->notes == "复盘" &&
+              loaded_end_date.value->weekdays_mask == uint8_t{1} &&
+              loaded_end_date.value->day_of_month == uint8_t{15} &&
+              loaded_end_date.value->month_of_year == uint8_t{6} &&
+              loaded_end_date.value->monthly_mode == voicelife::schedule::MonthlyMode::kSpecificDay &&
+              loaded_end_date.value->end_time.has_value() && loaded_end_date.value->end_time->hour == 9 &&
+              loaded_end_date.value->end_time->minute == 15 && loaded_end_date.value->end_time->second == 45 &&
+              loaded_end_date.value->end_date.has_value() && loaded_end_date.value->end_date->year == 2099 &&
+              loaded_end_date.value->end_date->month == 12 && loaded_end_date.value->end_date->day == 31,
+          "带结束日期的完整规则应还原全部可空字段");
+
+    const auto with_count = repository.Insert(FullRuleWithCount());
+    Check(with_count.ok() && with_count.value->id > 0, "带发生次数的完整规则应插入成功");
+    const auto loaded_count = repository.FindById(with_count.value->id);
+    Check(loaded_count.ok() && !loaded_count.value->day_of_month.has_value() &&
+              loaded_count.value->monthly_mode == voicelife::schedule::MonthlyMode::kLastDay &&
+              !loaded_count.value->end_date.has_value() && loaded_count.value->occurrence_count == 8,
+          "带发生次数的完整规则应还原空结束日期和次数");
 }
 
 /**
@@ -582,6 +644,43 @@ void CheckRuleRepositoryStepFailures() {
         Check(repository.CancelRuleAndInstances(created.value->id, cancelled).code == ErrorCode::kAlreadyExists,
               "CancelRuleAndInstances 应透传取消实例执行错误");
     }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "删除未来日程执行失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "删除未来日程执行失败分支应初始化表结构");
+        const auto created = repository.CreateWithFirstInstance(DailyRule(), FirstInstance(0));
+        Check(created.ok(), "删除未来日程执行失败分支应创建基准规则");
+        Check(database.Execute("CREATE TRIGGER reject_schedule_delete BEFORE DELETE ON schedule "
+                               "BEGIN SELECT RAISE(ABORT, 'schedule delete blocked'); END")
+                  .ok(),
+              "应创建日程删除拒绝触发器");
+        ScheduleRule update = *created.value;
+        update.event = "删除未来日程触发失败";
+        Check(repository.UpdateAndRebuild(update, std::nullopt).status.code == ErrorCode::kAlreadyExists,
+              "UpdateAndRebuild 应透传删除未来日程执行错误");
+    }
+
+    {
+        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
+        SqliteDatabase database(file.path.string());
+        Check(database.Open().ok(), "删除未来例外执行失败分支应打开数据库");
+        SqliteScheduleRuleRepository repository(database);
+        Check(repository.Initialize().ok(), "删除未来例外执行失败分支应初始化表结构");
+        const auto created = repository.CreateWithFirstInstance(DailyRule(), std::nullopt);
+        Check(created.ok(), "删除未来例外执行失败分支应创建基准规则");
+        Check(repository.Upsert(ModifyException(created.value->id)).ok(), "删除未来例外执行失败分支应写入例外");
+        Check(database.Execute("CREATE TRIGGER reject_future_exception_delete BEFORE DELETE ON schedule_rule_exception "
+                               "BEGIN SELECT RAISE(ABORT, 'future exception delete blocked'); END")
+                  .ok(),
+              "应创建未来例外删除拒绝触发器");
+        ScheduleRule update = *created.value;
+        update.event = "删除未来例外触发失败";
+        Check(repository.UpdateAndRebuild(update, std::nullopt).status.code == ErrorCode::kAlreadyExists,
+              "UpdateAndRebuild 应透传删除未来例外执行错误");
+    }
 }
 
 }  // namespace
@@ -670,6 +769,8 @@ int main() {
 
     const TemporaryDatabaseFile mapper_file = MakeTemporaryDatabaseFile();
     CheckRuleMapperValidation(mapper_file.path);
+    const TemporaryDatabaseFile full_rule_file = MakeTemporaryDatabaseFile();
+    CheckFullRuleRoundTrip(full_rule_file.path);
     const TemporaryDatabaseFile branches_file = MakeTemporaryDatabaseFile();
     CheckRuleRepositoryBranches(branches_file.path);
     const TemporaryDatabaseFile closed_file = MakeTemporaryDatabaseFile();
