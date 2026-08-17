@@ -33,7 +33,8 @@ enum class TransportState {
 
 /** 配置 ESP WebSocket 传输的容量、超时和安全策略。 */
 struct EspWebSocketTransportOptions {
-    size_t max_message_bytes = 16 * 1024;
+    // 上限只在分片重组时按实际消息长度占用；64 KiB 可容纳较长的下行控制/文本帧。
+    size_t max_message_bytes = 64 * 1024;
     // A single envelope owns up to 4 KiB of frame data. 32 entries absorb
     // short STT/TTS bursts without allowing unbounded protocol backlog.
     size_t event_queue_capacity = 32;

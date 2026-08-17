@@ -746,7 +746,7 @@ Status InitializeStatusDisplay() {
         esp_lcd_panel_disp_on_off(state.panel, true) != ESP_OK) {
         return Status::Error(ErrorCode::kUnavailable, "OLED SSD1306 上电失败");
     }
-    // Match the bread-compact-wifi board orientation used by 小智.
+    // 实板面板需要双轴镜像，才能使正常装配方向下的文字正向显示。
     if (esp_lcd_panel_mirror(state.panel, true, true) != ESP_OK ||
         esp_lcd_panel_invert_color(state.panel, false) != ESP_OK) {
         return Status::Error(ErrorCode::kUnavailable, "OLED SSD1306 显示方向配置失败");

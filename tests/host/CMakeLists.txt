@@ -140,7 +140,8 @@ add_voicelife_library(board_esp voicelife_board_esp
     )
 target_link_libraries(board_esp PUBLIC contracts)
 add_voicelife_library(display_esp voicelife_display_esp
-    "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_presentation_adapter.cc")
+    "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_presentation_adapter.cc"
+    "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_status_display.cc")
 target_link_libraries(display_esp PUBLIC contracts voice)
 add_voicelife_library(display_sparkbot voicelife_display_sparkbot
     "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_lvgl_display.cc"
@@ -355,6 +356,18 @@ add_voicelife_test(im_binding_mcp_tools_test "unit;mcp;im;runtime" im_binding_mc
     "${ROOT_DIR}/components/voicelife_runtime/src/im_binding_mcp_tools.cc")
 target_include_directories(im_binding_mcp_tools_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
 target_link_libraries(im_binding_mcp_tools_test PRIVATE mcp im)
+
+add_voicelife_test(binding_presentation_test "unit;im;runtime;binding" binding_presentation_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime/src/im_binding_presentation.cc")
+target_include_directories(binding_presentation_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_link_libraries(binding_presentation_test PRIVATE im)
+
+add_voicelife_test(binding_polling_lease_test "unit;im;runtime;binding" binding_polling_lease_test.cc)
+target_include_directories(binding_polling_lease_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+
+add_voicelife_test(mcp_worker_policy_test "unit;mcp;im;runtime" mcp_worker_policy_test.cc)
+target_include_directories(mcp_worker_policy_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_link_libraries(mcp_worker_policy_test PRIVATE im)
 
 add_voicelife_test(im_runtime_test "unit;im;runtime" im_runtime_test.cc)
 target_link_libraries(im_runtime_test PRIVATE im contracts)

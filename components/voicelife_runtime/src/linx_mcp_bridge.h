@@ -14,7 +14,7 @@ namespace voicelife::runtime {
 /** @brief 已解析的 MCP tools/call 用户可见语义结果。 */
 struct LinxMcpToolOutcome {
     bool success = false;
-    std::string summary = "日程操作失败";
+    std::string summary = "操作失败";
 };
 
 /** @brief 处理 Linx MCP JSON-RPC payload，并返回带会话标识的 type=mcp 响应。 */
@@ -39,5 +39,8 @@ Result<std::string> BuildLinxMcpUnavailableResponse(std::string_view payload, st
  * 只解析受控信封，不调用工具、Provider 或显示端口。
  */
 LinxMcpToolOutcome InspectLinxMcpToolOutcome(std::string_view request_payload, const Result<std::string>& response);
+
+/** @brief 绑定工具已有独立 OLED 呈现，通用 MCP 结果层不得再覆盖它。 */
+bool IsBindingMcpToolSummary(std::string_view summary);
 
 }  // namespace voicelife::runtime

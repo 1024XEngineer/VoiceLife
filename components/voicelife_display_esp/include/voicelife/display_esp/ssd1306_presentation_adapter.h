@@ -4,6 +4,7 @@
 #include <string>
 
 #include "voicelife/contracts/status.h"
+#include "voicelife/display_esp/ssd1306_status_display.h"
 #include "voicelife/voice/voice_ports.h"
 
 namespace voicelife::display_esp {
@@ -19,9 +20,15 @@ namespace voicelife::display_esp {
  */
 class Ssd1306PresentationAdapter : public voicelife::voice::PresentationPort {
    public:
-    /** @brief 构造函数。 */
-    /** @brief 构造函数。 */
-    Ssd1306PresentationAdapter() = default;
+    /** @brief 显示初始化函数类型；用于把硬件启动路径置于可测边界。 */
+    using InitializeFunction = voicelife::Status (*)();
+
+    /**
+     * @brief 构造函数。
+     * @param initialize 底层 SSD1306 初始化函数。
+     */
+    explicit Ssd1306PresentationAdapter(InitializeFunction initialize = &InitializeStatusDisplay)
+        : initialize_(initialize) {}
     /** @brief 析构函数：释放滚动定时器。 */
     ~Ssd1306PresentationAdapter() override;
 
@@ -35,6 +42,12 @@ class Ssd1306PresentationAdapter : public voicelife::voice::PresentationPort {
      * @return 显示能力引用。
      */
     [[nodiscard]] const voicelife::voice::DisplayCapabilities& capabilities() const override;
+
+    /**
+     * @brief 初始化 SSD1306 面板，使后续 Render 能真正提交像素。
+     * @return 底层面板初始化状态。
+     */
+    voicelife::Status Start();
 
     /**
      * @brief 将显示快照映射为点阵屏文本界面并提交给旧渲染实现。
@@ -61,6 +74,8 @@ class Ssd1306PresentationAdapter : public voicelife::voice::PresentationPort {
     [[maybe_unused]] void* scroll_timer_ = nullptr;
     /** @brief 滚动窗口起始字符。 */
     [[maybe_unused]] std::size_t scroll_offset_ = 0;
+    /** @brief 受控的底层面板初始化入口。 */
+    InitializeFunction initialize_;
 };
 
 }  // namespace voicelife::display_esp

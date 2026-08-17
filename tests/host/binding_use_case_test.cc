@@ -207,6 +207,45 @@ void TestRebindClearsSessionAndTerminalAllowsRestart() {
     Check(use_case.Start().state == BindingState::kPending, "终态后应允许显式开始下一次绑定");
 }
 
+void TestRebindInvalidatesResultsFromThePreviousRuntime() {
+    FakePairingPort first;
+    FakePairingPort second;
+    FakeClock clock;
+    Prepare(first);
+    Prepare(second);
+    first.queried = {Query("confirmed")};
+    BindingUseCase use_case(first, clock);
+    use_case.set_user_id("user-fixture");
+
+    const auto started = use_case.Start();
+    Check(started.generation != 0 && started.expires_in_minutes == 10,
+          "创建会话必须生成可用于丢弃旧结果的代次并保留有效期");
+    clock.Advance(3000);
+    const auto terminal = use_case.Poll();
+    use_case.Bind(second, clock, "user-fixture");
+
+    Check(terminal.state == BindingState::kConfirmed && terminal.generation != use_case.generation(),
+          "Runtime 重绑后，旧会话的终态结果必须能由其旧代次识别并丢弃");
+    const auto restarted = use_case.Start(5);
+    Check(restarted.state == BindingState::kPending && restarted.generation == use_case.generation() &&
+              restarted.expires_in_minutes == 5,
+          "重启策略必须清理本地会话并要求下一次显式开始，新的会话使用新代次");
+}
+
+void TestAbortingThePendingSessionAllowsARecoveryStart() {
+    FakePairingPort port;
+    FakeClock clock;
+    Prepare(port);
+    BindingUseCase use_case(port, clock);
+    use_case.set_user_id("user-fixture");
+
+    const auto pending = use_case.Start();
+    const auto aborted = use_case.AbortPending(pending.generation);
+    Check(aborted.state == BindingState::kFailed && aborted.generation == pending.generation && !use_case.active(),
+          "轮询任务无法创建时必须终止本地 pending，不能留下无轮询的绑定码");
+    Check(use_case.Start().state == BindingState::kPending, "终止后用户的下一次明确命令必须可以重新开始绑定");
+}
+
 void TestRejectsOutOfRangeExpiry() {
     {
         FakePairingPort port;
@@ -290,6 +329,8 @@ int main() {
     TestObservesWaitingNotFoundAndTimedOut();
     TestPollAfterTerminalStaysIdle();
     TestRebindClearsSessionAndTerminalAllowsRestart();
+    TestRebindInvalidatesResultsFromThePreviousRuntime();
+    TestAbortingThePendingSessionAllowsARecoveryStart();
     TestRejectsOutOfRangeExpiry();
     TestRejectsMalformedDisplayCode();
     TestConcurrentBindAndStart();

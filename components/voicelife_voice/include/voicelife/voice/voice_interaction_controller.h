@@ -25,8 +25,8 @@ enum class VoiceInteractionEvent {
     kEndpointDetected,
     /** 最终 STT 超时：kFinalizing → kStandby，中止残留服务端回合并恢复待机。 */
     kFinalizationTimedOut,
-    /** 告别（再见/拜拜）回复播报完成：kSpeaking → kStandby，恢复待机。 */
-    kFarewellCompleted,
+    /** 无需 follow-up 的终结型回复播报完成：kSpeaking → kStandby，恢复待机。 */
+    kTerminalResponseCompleted,
     kIntentReceived,
     kTtsStarted,
     kTtsStopped,

@@ -99,6 +99,8 @@ const voicelife::voice::DisplayCapabilities& Ssd1306PresentationAdapter::capabil
     return kSsd1306Capabilities;
 }
 
+voicelife::Status Ssd1306PresentationAdapter::Start() { return initialize_(); }
+
 voicelife::Status Ssd1306PresentationAdapter::Render(const voicelife::voice::DisplaySnapshot& snapshot) {
     std::lock_guard<std::mutex> lock(state_mutex_);
     last_snapshot_ = snapshot;

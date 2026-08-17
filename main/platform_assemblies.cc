@@ -51,6 +51,8 @@ VoiceLifePcbAssembly::VoiceLifePcbAssembly() : audio_ports_(audio_esp::VoiceLife
 
 voicelife::voice::PresentationPort& VoiceLifePcbAssembly::presentation() { return ssd1306_adapter_; }
 
+voicelife::Status VoiceLifePcbAssembly::Start() { return ssd1306_adapter_.Start(); }
+
 void VoiceLifePcbAssembly::BoardInputTaskEntry(void* context) {
     static_cast<VoiceLifePcbAssembly*>(context)->BoardInputTask();
 }
