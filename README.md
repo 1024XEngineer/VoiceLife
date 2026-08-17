@@ -151,7 +151,7 @@ VoiceLife/
 └── third_party/       # 第三方源码和许可证
 ```
 
-README 只保留项目入口和跨模块信息。语音架构、语音迁移研究、官方资料核对和实板细节分别维护在对应文档与研究目录中，避免把某一个模块的过程材料当成整个项目的产品说明。
+README 只保留项目入口和跨模块信息。当前维护文档按[文档导航](./docs/README.md)组织；研究、阶段草稿和一次性证据留在对应 Issue、PR 或 Git 历史，避免把某一个模块的过程材料当成整个项目的产品说明。
 
 ## 相关入口
 
@@ -159,6 +159,9 @@ README 只保留项目入口和跨模块信息。语音架构、语音迁移研�
 - [ADR 0001：组件化模块单体与 Ports/Adapters](./docs/adr/0001-component-modular-hexagonal.md)
 - [ADR 0002：能力驱动的适配器 Profile](./docs/adr/0002-capability-driven-adapters.md)
 - [SQLite 实板验证与 Flash 恢复手册](./docs/engineering/board-storage-validation.md)
+- [硬件调试与串口日志规则](./docs/engineering/hardware-debugging.md)
+- [SparkBot 显示组件说明](./docs/components/sparkbot-display.md)
+- [IM Gateway 运行手册](./docs/services/im-gateway.md)
 - [协同开发规范](./docs/engineering/collaboration.md)
 - [提交描述规范](./docs/engineering/commit-convention.md)
 - [参与开发](./CONTRIBUTING.md)

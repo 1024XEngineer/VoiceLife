@@ -1,4 +1,6 @@
-# ESP32-S3 实板变更与恢复
+# 历史归档：ESP32-S3 PCB 实板变更与恢复（2026-08-04）
+
+> 本记录只说明当时 PCB、分区和验证结果，不能直接套用到当前板卡。当前日志规则见[硬件调试与串口日志](../../engineering/hardware-debugging.md)，当前 SQLite 恢复操作见[SQLite 实板验证与恢复](../../engineering/board-storage-validation.md)；归档原因见 Issue [#264](https://github.com/1024XEngineer/VoiceLife/issues/264)。
 
 这份守则把一次真实断流事故变成固定流程：关键读取与写入统一使用已经验证稳定的 115200，测试固件只进入非活动 OTA 槽，任何切换前都要能恢复原数据分区和 OTA 元数据。#111 的纯 I2S 验证也把 PCM 削波比例列为必留证据。
 下一步动作：涉及分区、烧录、OTA 或数据库实测的 PR，必须按本文留下脱敏的尺寸、哈希、启动槽和恢复结果；缺一项就不能把“固件可构建”写成“实板可用”。

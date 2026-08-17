@@ -64,7 +64,7 @@ VoiceSession -> Application / MCP（只交稳定语义）
 
 本轮 #109 先落下 `voicelife_audio_esp` 的第一阶段，#111 再把 `AudioBoardProfile` 扩展为外部 Codec duplex 与纯 I2S simplex 两种拓扑，并加入独立 RX/TX 端点、wire slot 与 PCM 对齐字段。`Esp32s3AudioProbe` 在 `esp32s3-voicelife-pcb-pcm` Profile 下完成 I2S channel 生命周期、19200 B 采集、960 B 静音写入和 960 B 有界回放；最低空闲堆为 369528 B。探针不会初始化 ES8311/ES7210 寄存器，也不会打开 PCA9557 的功放位，因此这些结果只证明数字 PCM 输入和总线级回放，不替代 Codec 或声学录放验收。主机测试明确拒绝把主机当成真机探针。
 
-来源与当前状态见 [旧 MVP 迁移入口](./xiaozhi-migration.md)、[ESP32-S3 实板变更与恢复](../engineering/esp32-hardware-validation.md) 和 [语音原始研究资料归档 Issue #150](https://github.com/1024XEngineer/VoiceLife/issues/150)。
+来源与当前状态见[语音原始研究资料归档 Issue #150](https://github.com/1024XEngineer/VoiceLife/issues/150)、[硬件调试与串口日志规则](../engineering/hardware-debugging.md)和[文档收敛 Issue #264](https://github.com/1024XEngineer/VoiceLife/issues/264)。
 
 ### 2.3 证据不能跨层复用
 
@@ -189,7 +189,7 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 - [Linx 开源文档仓库](https://github.com/qiniu/Xrobot-docs/blob/main/docs/xrobot/platform/websocket.md)
 - [Linx 小智固件接入指南](https://linx.qiniu.com/docs/xrobot/guide/xiaozhi-firmware)
 - [语音原始研究资料归档 Issue #150](https://github.com/1024XEngineer/VoiceLife/issues/150)
-- [ESP32-S3 实板变更与恢复](../engineering/esp32-hardware-validation.md)
+- [硬件调试与串口日志规则](../engineering/hardware-debugging.md)
 
 ### 4.2 ESP-IDF Transport 当前实现
 
@@ -201,7 +201,7 @@ Storage Profile 必须同时记录 SQLite 版本、VFS、文件系统、介质�
 - `WebSocketFragmentAssembler` 在主机和 ESP32-S3 共用，处理 text/binary/continuation、非法 offset、消息大小上限、连接关闭清理和 generation 隔离；完整消息才交给 `LinxTransportSink`。
 - Transport 显式上报 connected/disconnected；Provider 在每次 connected 后发送一次 hello。超时、未配置的编码变化或 Transport error 都以 `Status`/`VoiceEvent` 返回，不把半连接状态交给 `VoiceSession`。
 
-这层现在是“可构建、可单测、纯 I2S 数字 PCM 已完成受控启动和回退、未完成云端闭环”的状态。物理板身份、16 MB Flash、8 MB PSRAM、双 OTA 与数据分区已经在 115200 下读取并备份；测试固件只写入过 `ota_1@0x410000`，每轮均在结束后恢复 `otadata` 并确认原固件从 `ota_0` 启动，SQLite 仍加载 7 个事件、8 个提醒、0 条笔记。真实 Linx 凭据、WSS、ASR、TTS、Codec 录放、AFE、Opus 和外部听感证据仍是下一步。详细守则见 [ESP32-S3 实板变更与恢复](../engineering/esp32-hardware-validation.md)。
+这层现在是“可构建、可单测、纯 I2S 数字 PCM 已完成受控启动和回退、未完成云端闭环”的状态。真实 Linx 凭据、WSS、ASR、TTS、Codec 录放、AFE、Opus 和外部听感证据仍是下一步。新的板级验证必须按[硬件调试与串口日志规则](../engineering/hardware-debugging.md)保留连续本地明文日志，并在公开记录中给出足以支撑结论的非敏感输出。
 
 ## 5. 小智迁移边界
 

@@ -39,8 +39,8 @@ body:
   - type: textarea
     id: evidence
     attributes:
-      label: 脱敏证据
-      description: 日志、截图或测试；请先移除凭据、用户日程和设备身份。
+      label: 证据
+      description: 提供可搜索的日志、截图或测试。普通错误与应用文本保持明文；只替换凭据、用户日程和其他秘密/隐私字段，并标明替换位置。
   - type: textarea
     id: regression
     attributes:
