@@ -1095,6 +1095,7 @@ class Runtime final {
                 // A fresh user turn must never inherit a farewell decision
                 // from a disconnected or cancelled preceding turn.
                 terminal_turn_ = false;
+                binding_turn_awaiting_tts_completion_ = false;
                 break;
             case voice::VoiceInteractionEvent::kInterruptRequested:
             case voice::VoiceInteractionEvent::kTransportDisconnected:
@@ -1102,6 +1103,7 @@ class Runtime final {
                 // These paths invalidate the current remote turn before its
                 // normal TTS completion can safely decide the next UI state.
                 terminal_turn_ = false;
+                binding_turn_awaiting_tts_completion_ = false;
                 break;
             default:
                 break;
@@ -1346,11 +1348,12 @@ class Runtime final {
                 ESP_LOGI(kTag, "TTS_STOPPED_STALE state=%d 丢弃迟到结束事件", static_cast<int>(interaction_.state()));
                 return;
             }
-            if (terminal_turn_) {
-                // 终止回合（再见/拜拜）：告别播报完成走状态机 kFarewellCompleted
-                // （kSpeaking→kStandby）恢复待机，不直接 QueueStandbyRecovery。
+            if (terminal_turn_ || binding_turn_awaiting_tts_completion_) {
+                // 告别或绑定码播报完成后直接恢复待机。绑定码页面会在
+                // HandleInteractionEvent 的待机呈现规则中立即恢复。
                 terminal_turn_ = false;
-                (void)EnqueueEvent(voice::VoiceInteractionEvent::kFarewellCompleted);
+                binding_turn_awaiting_tts_completion_ = false;
+                (void)EnqueueEvent(voice::VoiceInteractionEvent::kTerminalResponseCompleted);
             } else {
                 // 事件化：kTtsStopped 由事件循环唯一执行状态迁移。
                 EnqueueEvent(voice::VoiceInteractionEvent::kTtsStopped);
@@ -1573,6 +1576,11 @@ class Runtime final {
         const BindingPresentation presentation = PresentBindingResult(result);
         if (!presentation.keep_visible && !presentation.announce) return;
 
+        if (ShouldEndVoiceTurnAfterBindingResult(result,
+                                                 interaction_.state() != voice::VoiceInteractionState::kStandby)) {
+            binding_turn_awaiting_tts_completion_ = true;
+        }
+
         binding_display_active_ = presentation.keep_visible;
         binding_display_generation_ = result.generation;
         if (presentation.keep_visible) {
@@ -1595,9 +1603,8 @@ class Runtime final {
         if (interaction_.state() == voice::VoiceInteractionState::kStandby) {
             if (!QueueSystemSpeech(presentation.speech_text)) deferred_binding_speech_ = presentation.speech_text;
         } else {
-            // 终态可能在用户正常对话期间抵达。保留提示，待当前回合回待机后
-            // 再播报，避免轮询任务打断唤醒、按键和普通语音。
-            deferred_binding_speech_ = presentation.speech_text;
+            // 活跃 MCP 回合的响应已携带 speak_text，由 Provider 播报一次。
+            // 不再延迟本地重复播报；该播报结束后会直接回待机显示绑定码。
         }
     }
 
@@ -1724,6 +1731,7 @@ class Runtime final {
                     binding_content_text_.clear();
                     deferred_binding_presentation_.reset();
                     deferred_binding_speech_.clear();
+                    binding_turn_awaiting_tts_completion_ = false;
                     // 重绑/重启策略不允许旧 origin 的绑定码或成功提示留在屏幕上。
                     // 非空闲回合会由紧随其后的交互事件接管显示；空闲时立即收口。
                     if (interaction_.state() == voice::VoiceInteractionState::kStandby) {
@@ -1807,6 +1815,7 @@ class Runtime final {
     // 下行内容滚动窗口起始字符（0=从头）；滚动迁移至 Ssd1306PresentationAdapter。
     // 本轮是否为终止回合（用户说“再见/拜拜”等）：播报结束后不进入 follow-up。
     bool terminal_turn_ = false;
+    bool binding_turn_awaiting_tts_completion_ = false;
     // 最近唤醒词与其发生时刻（抑制唤醒词被服务端回传为 STT）。
     std::string last_wake_word_;
     int64_t last_wake_at_ = 0;

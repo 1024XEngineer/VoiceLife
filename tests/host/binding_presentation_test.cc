@@ -11,6 +11,7 @@ using voicelife::runtime::BindingPresentation;
 using voicelife::runtime::IsCurrentBindingResult;
 using voicelife::runtime::kBindingSystemSpeechCapacity;
 using voicelife::runtime::PresentBindingResult;
+using voicelife::runtime::ShouldEndVoiceTurnAfterBindingResult;
 using voicelife::test::Check;
 
 namespace {
@@ -86,6 +87,17 @@ void TestStaleRuntimeResultsAreRejectedBeforePresentation() {
     Check(IsCurrentBindingResult(old_result, old_result.generation), "同代次结果必须可被呈现");
 }
 
+void TestBindingCodeEndsOnlyItsActiveVoiceTurn() {
+    Check(ShouldEndVoiceTurnAfterBindingResult(Result(BindingState::kPending, "123456", 10), true),
+          "活跃语音回合生成绑定码后，播报结束必须直接回待机");
+    Check(ShouldEndVoiceTurnAfterBindingResult(Result(BindingState::kAlreadyActive, "123456", 10), true),
+          "活跃语音回合恢复现有绑定码后也不得进入 follow-up 聆听");
+    Check(!ShouldEndVoiceTurnAfterBindingResult(Result(BindingState::kPending, "123456", 10), false),
+          "待机期间的绑定结果不得伪造语音回合收尾");
+    Check(!ShouldEndVoiceTurnAfterBindingResult(Result(BindingState::kConfirmed), true),
+          "后台确认结果不得错误终止用户正在进行的其他语音回合");
+}
+
 void TestDeviceBindingSpeechNeverRequiresTruncation() {
     for (const BindingState state :
          {BindingState::kPending, BindingState::kConfirmed, BindingState::kExpired, BindingState::kCancelled,
@@ -107,6 +119,7 @@ int main() {
     TestFailureStatesGiveSafeDeviceFeedback();
     TestPollingStatesDoNotLeakOrSpamTheDisplay();
     TestStaleRuntimeResultsAreRejectedBeforePresentation();
+    TestBindingCodeEndsOnlyItsActiveVoiceTurn();
     TestDeviceBindingSpeechNeverRequiresTruncation();
     return 0;
 }

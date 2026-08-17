@@ -85,4 +85,9 @@ bool IsCurrentBindingResult(const im::BindingResult& result, uint64_t current_ge
     return result.generation == current_generation;
 }
 
+bool ShouldEndVoiceTurnAfterBindingResult(const im::BindingResult& result, bool active_voice_turn) {
+    return active_voice_turn &&
+           (result.state == im::BindingState::kPending || result.state == im::BindingState::kAlreadyActive);
+}
+
 }  // namespace voicelife::runtime

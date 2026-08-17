@@ -31,4 +31,7 @@ BindingPresentation PresentBindingResult(const im::BindingResult& result);
 /** @brief 仅当前 Runtime/会话代次的结果才允许进入设备呈现。 */
 bool IsCurrentBindingResult(const im::BindingResult& result, uint64_t current_generation);
 
+/** @brief 活跃语音回合返回绑定码后，播报结束应直接回待机，不进入 follow-up 聆听。 */
+bool ShouldEndVoiceTurnAfterBindingResult(const im::BindingResult& result, bool active_voice_turn);
+
 }  // namespace voicelife::runtime
