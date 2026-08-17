@@ -285,6 +285,10 @@ add_voicelife_test(mcp_json_writer_coverage_test "unit;mcp" mcp_json_writer_cove
 target_include_directories(mcp_json_writer_coverage_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
 target_link_libraries(mcp_json_writer_coverage_test PRIVATE mcp)
 
+add_voicelife_test(mcp_server_coverage_test "unit;mcp" mcp_server_coverage_test.cc)
+target_include_directories(mcp_server_coverage_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
+target_link_libraries(mcp_server_coverage_test PRIVATE mcp)
+
 add_voicelife_test(schedule_mcp_tools_input_test "unit;mcp;schedule;runtime" schedule_mcp_tools_input_test.cc)
 target_include_directories(schedule_mcp_tools_input_test PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src/tools")
 target_link_libraries(schedule_mcp_tools_input_test PRIVATE mcp schedule)
