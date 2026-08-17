@@ -277,6 +277,14 @@ add_voicelife_test(schedule_helpers_test "unit;schedule" schedule_helpers_test.c
 target_include_directories(schedule_helpers_test PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule_helpers_test PRIVATE schedule)
 
+add_voicelife_test(schedule_helpers_coverage_test "unit;schedule" schedule_helpers_coverage_test.cc)
+target_include_directories(schedule_helpers_coverage_test PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
+target_link_libraries(schedule_helpers_coverage_test PRIVATE schedule)
+
+add_voicelife_test(mcp_json_writer_coverage_test "unit;mcp" mcp_json_writer_coverage_test.cc)
+target_include_directories(mcp_json_writer_coverage_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
+target_link_libraries(mcp_json_writer_coverage_test PRIVATE mcp)
+
 add_voicelife_test(schedule_mcp_tools_input_test "unit;mcp;schedule;runtime" schedule_mcp_tools_input_test.cc)
 target_include_directories(schedule_mcp_tools_input_test PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src/tools")
 target_link_libraries(schedule_mcp_tools_input_test PRIVATE mcp schedule)
@@ -445,6 +453,12 @@ add_voicelife_test(sqlite_schedule_repository_unit_test "unit;storage;sqlite;sch
 target_include_directories(sqlite_schedule_repository_unit_test PRIVATE
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
 target_link_libraries(sqlite_schedule_repository_unit_test PRIVATE storage_sqlite schedule)
+
+add_voicelife_test(sqlite_schedule_repository_rollback_coverage_test "unit;storage;sqlite;schedule;repository"
+    sqlite_schedule_repository_rollback_coverage_test.cc)
+target_include_directories(sqlite_schedule_repository_rollback_coverage_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
+target_link_libraries(sqlite_schedule_repository_rollback_coverage_test PRIVATE storage_sqlite schedule)
 
 add_voicelife_test(sqlite_schedule_rule_repository_test "integration;storage;sqlite;schedule"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_rule_repository_test.cc")
