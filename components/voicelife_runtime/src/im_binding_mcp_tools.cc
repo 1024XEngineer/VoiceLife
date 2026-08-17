@@ -133,22 +133,24 @@ Status RegisterImBindingMcpTools(mcp::McpServer& server, im::BindingUseCase& use
             // 每次语音命令都把脱敏结果交给 Runtime：already_active 可以恢复被普通
             // 对话覆盖的绑定码，创建失败也必须在设备侧给出确定反馈。
             if (on_result) on_result(result);
-            ToolResult output{.status = Status::Ok(), .output = {}};
-            output.output["status"] = BindingStatusName(result.state);
-            output.output["reason"] = BindingReasonCode(result.state);
-            output.output["retryable"] = BindingRetryable(result.state) ? "true" : "false";
-            output.output["message"] = BindingMessage(result.state);
+            ToolOutputObject fields{
+                MakeToolOutput("status", ToolOutputValue::String(BindingStatusName(result.state))),
+                MakeToolOutput("reason", ToolOutputValue::String(BindingReasonCode(result.state))),
+                MakeToolOutput("retryable", ToolOutputValue::String(BindingRetryable(result.state) ? "true" : "false")),
+                MakeToolOutput("message", ToolOutputValue::String(BindingMessage(result.state))),
+            };
             if (!result.display_code.empty()) {
-                output.output["display_code"] = result.display_code;
+                fields.emplace_back(MakeToolOutput("display_code", ToolOutputValue::String(result.display_code)));
                 if (result.state == im::BindingState::kPending) {
                     // 确定性播报指令：直接给出「绑定 + 六位码」完整句子，不让模型临场发挥。
-                    output.output["speak_text"] = "请在微信公众号发送：绑定 " + result.display_code;
+                    fields.emplace_back(MakeToolOutput(
+                        "speak_text", ToolOutputValue::String("请在微信公众号发送：绑定 " + result.display_code)));
                 }
             }
             if (!result.expires_at.empty()) {
-                output.output["expires_at"] = result.expires_at;
+                fields.emplace_back(MakeToolOutput("expires_at", ToolOutputValue::String(result.expires_at)));
             }
-            return output;
+            return ToolResult{.status = Status::Ok(), .output = ToolOutputValue::Object(std::move(fields))};
         });
 }
 
