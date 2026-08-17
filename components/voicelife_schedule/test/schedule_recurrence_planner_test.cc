@@ -74,5 +74,27 @@ int main() {
     const auto capped = PlanOccurrences(daily, At(UtcAtLocal(2026, 8, 1, 9)), At(UtcAtLocal(2026, 8, 20, 0)), 10000);
     Check(capped.size() == 10, "PlanOccurrences 显式数量超过上限时应收敛到 10");
 
+    ScheduleRule weekly = BaseRule();
+    weekly.freq_type = Frequency::kWeekly;
+    weekly.weekdays_mask = 1;  // 周一
+    const std::optional<DateTime> weekly_next = NextOccurrence(weekly, At(UtcAtLocal(2026, 8, 3, 12)));
+    Check(weekly_next.has_value() && weekly_next->time_since_epoch().count() == UtcAtLocal(2026, 8, 10, 9),
+          "每周规则应命中周一的下一发生时间");
+
+    ScheduleRule monthly_specific = BaseRule();
+    monthly_specific.freq_type = Frequency::kMonthly;
+    monthly_specific.monthly_mode = MonthlyMode::kSpecificDay;
+    monthly_specific.day_of_month = 31;
+    const std::optional<DateTime> short_month = NextOccurrence(monthly_specific, At(UtcAtLocal(2026, 2, 27, 10)));
+    Check(short_month.has_value() && short_month->time_since_epoch().count() == UtcAtLocal(2026, 8, 31, 9),
+          "每月指定日应跳过短月");
+
+    ScheduleRule inactive = BaseRule();
+    inactive.status = ScheduleStatus::kCancelled;
+    Check(!NextOccurrence(inactive, At(UtcAtLocal(2026, 8, 1, 0))).has_value(), "非活动规则不应生成发生时间");
+
+    const auto zero_limit = PlanOccurrences(daily, At(UtcAtLocal(2026, 8, 1, 9)), At(UtcAtLocal(2026, 8, 20, 0)), 0);
+    Check(zero_limit.empty(), "PlanOccurrences limit 为 0 时应返回空结果");
+
     return 0;
 }

@@ -49,6 +49,21 @@ int main() {
               parsed.monthly_mode == MonthlyMode::kSpecificDay && parsed.occurrence_count == 7,
           "ParseRepeat 应解析完整 repeat 对象");
 
+    const auto daily =
+        ParseRepeat(std::optional<JsonValue>{JsonValue::Object({{"freq_type", JsonValue::String("daily")}})}, false);
+    Check(daily.ok() && daily.freq_type == Frequency::kDaily, "daily 频率应解析成功");
+    const auto monthly =
+        ParseRepeat(std::optional<JsonValue>{JsonValue::Object({{"freq_type", JsonValue::String("monthly")}})}, false);
+    Check(monthly.ok() && monthly.freq_type == Frequency::kMonthly, "monthly 频率应解析成功");
+    const auto yearly =
+        ParseRepeat(std::optional<JsonValue>{JsonValue::Object({{"freq_type", JsonValue::String("yearly")}})}, false);
+    Check(yearly.ok() && yearly.freq_type == Frequency::kYearly, "yearly 频率应解析成功");
+    const auto last_day = ParseRepeat(
+        std::optional<JsonValue>{JsonValue::Object({{"monthly_mode", JsonValue::String("last_day")}})}, false);
+    Check(last_day.ok() && last_day.monthly_mode == MonthlyMode::kLastDay, "last_day 月模式应解析成功");
+    const auto empty_repeat = ParseRepeat(std::nullopt, false);
+    Check(empty_repeat.ok(), "无 repeat 参数应保持成功状态");
+
     const auto missing_anchor = ParseRepeat(std::optional<JsonValue>{JsonValue::Object({})}, true);
     Check(!missing_anchor.ok(), "创建周期规则缺少 anchor 字段应失败");
 
@@ -67,6 +82,12 @@ int main() {
 
     const auto non_object = ParseRepeat(std::optional<JsonValue>{JsonValue::String("bad")}, false);
     Check(!non_object.ok(), "非对象 repeat 应失败");
+    const auto bad_end_time =
+        ParseRepeat(std::optional<JsonValue>{JsonValue::Object({{"end_time", JsonValue::String("99:00:00")}})}, false);
+    Check(!bad_end_time.ok(), "无效 end_time 应失败");
+    const auto bad_end_date = ParseRepeat(
+        std::optional<JsonValue>{JsonValue::Object({{"end_date", JsonValue::String("2099-00-01")}})}, false);
+    Check(!bad_end_date.ok(), "无效 end_date 应失败");
 
     PropertyList create_properties;
     const auto create = CreateRuleCommand(create_properties, parsed);
