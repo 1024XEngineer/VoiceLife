@@ -14,6 +14,7 @@ namespace voicelife::mcp {
 /// MCP 工具参数支持的数据类型。
 enum class ToolInputType { kString, kInteger, kBoolean, kObject };
 
+/// MCP 工具输入参数的 JSON Schema 前向声明。
 struct ToolInputSchema;
 
 /// MCP 工具的单个输入字段定义。
@@ -54,6 +55,7 @@ struct ListToolsResult {
 /// 工具参数支持的类型。
 enum class PropertyType { kBoolean, kInteger, kString, kObject };
 
+/// 面向业务代码的 MCP 参数集合前向声明。
 class PropertyList;
 
 /// 面向业务代码的单个工具参数声明。
@@ -106,6 +108,7 @@ class Property {
      */
     Property& with_object_properties(PropertyList object_properties);
 
+    /** @brief 释放参数声明占用的资源。 */
     ~Property();
 
     /**

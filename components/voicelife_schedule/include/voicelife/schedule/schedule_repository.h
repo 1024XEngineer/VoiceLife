@@ -61,7 +61,11 @@ class ScheduleRepository {
         return Result<std::vector<Schedule>>::Failure(ErrorCode::kUnavailable, "当前仓储不支持条件查询日程");
     }
 
-    /** @brief 按筛选条件统计总数，不受 limit/offset 影响。 */
+    /**
+     * @brief 按筛选条件统计总数，不受 limit/offset 影响。
+     * @param query 日程查询条件。
+     * @return 命中条件的日程总数。
+     */
     [[nodiscard]] virtual Result<int64_t> Count(const QueryScheduleCommand& query) const {
         (void)query;
         return Result<int64_t>::Failure(ErrorCode::kUnavailable, "当前仓储不支持统计日程");

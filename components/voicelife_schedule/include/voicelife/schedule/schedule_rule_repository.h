@@ -17,6 +17,7 @@ namespace voicelife::schedule {
  */
 class ScheduleRuleRepository {
    public:
+    /** @brief 允许通过接口类型释放仓储对象。 */
     virtual ~ScheduleRuleRepository() = default;
 
     /** @brief 插入一条周期规则。 @param rule 待插入规则；id 为零时由仓储生成标识和时间戳。 @return 保存后的完整规则。

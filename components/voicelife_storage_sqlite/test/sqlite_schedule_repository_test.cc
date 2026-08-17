@@ -132,7 +132,13 @@ CrudResultIds CheckCrudThroughService(const std::filesystem::path& path) {
     const auto queried = service.query_schedule({});
     Check(queried.result.ok() && queried.total == 2 && queried.result.value.size() == 2,
           "服务查询应读取两条刚写入的 SQLite 行");
-    const auto first = service.query_schedule(QueryScheduleCommand{.schedule_id = created.result.value->id});
+    const auto first = service.query_schedule(QueryScheduleCommand{
+        .schedule_id = created.result.value->id,
+        .rule_id = std::nullopt,
+        .keyword = std::nullopt,
+        .start_from = std::nullopt,
+        .start_to = std::nullopt,
+    });
     Check(first.result.ok() && first.total == 1 && first.result.value.size() == 1,
           "按日程标识查询应命中真实 SQLite 行");
     const auto& stored = first.result.value.front();
@@ -164,6 +170,7 @@ CrudResultIds CheckCrudThroughService(const std::filesystem::path& path) {
           "修改和软删除后查询全部状态应保留两条历史日程");
     const auto cancelled = service.query_schedule(QueryScheduleCommand{
         .schedule_id = second.result.value->id,
+        .rule_id = std::nullopt,
         .keyword = std::nullopt,
         .start_from = std::nullopt,
         .start_to = std::nullopt,

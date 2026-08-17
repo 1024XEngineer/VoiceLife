@@ -3,18 +3,32 @@
 #include "voicelife/contracts/status.h"
 
 namespace voicelife::schedule {
+/// 提供一次性日程服务能力。
 class ScheduleService;
+/// 提供周期日程规则服务能力。
 class ScheduleRuleService;
 }  // namespace voicelife::schedule
 
 namespace voicelife::mcp {
 
+/// 用于注册日程 MCP 工具的 MCP Server 前向声明。
 class McpServer;
 
-/** @brief 向 MCP Server 注册当前日程工具。 */
+/**
+ * @brief 向 MCP Server 注册当前日程工具。
+ * @param server 要注册工具的 MCP Server。
+ * @param service 一次性日程服务。
+ * @return 注册结果。
+ */
 Status RegisterScheduleMcpTools(McpServer& server, schedule::ScheduleService& service);
 
-/** @brief 向 MCP Server 注册包含周期日程能力的日程工具。 */
+/**
+ * @brief 向 MCP Server 注册包含周期日程能力的日程工具。
+ * @param server 要注册工具的 MCP Server。
+ * @param service 一次性日程服务。
+ * @param rule_service 周期日程规则服务。
+ * @return 注册结果。
+ */
 Status RegisterScheduleMcpTools(McpServer& server, schedule::ScheduleService& service,
                                 schedule::ScheduleRuleService& rule_service);
 

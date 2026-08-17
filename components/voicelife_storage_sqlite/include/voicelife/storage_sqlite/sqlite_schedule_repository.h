@@ -59,7 +59,13 @@ class SqliteScheduleRepository final : public schedule::ScheduleRepository,
     /** @brief 按条件统计日程总数。 @param query 查询条件。 @return 总数。 */
     [[nodiscard]] Result<int64_t> Count(const schedule::QueryScheduleCommand& query) const override;
 
-    /** @brief 查询与时间窗口可能重叠的有效日程。 */
+    /**
+     * @brief 查询与时间窗口可能重叠的有效日程。
+     * @param start 窗口起点。
+     * @param end 窗口终点；单点日程应传同一时间。
+     * @param exclude_id 排除的日程标识。
+     * @return 可能重叠的有效日程集合。
+     */
     [[nodiscard]] Result<std::vector<schedule::Schedule>> FindOverlapping(
         schedule::DateTime start, schedule::DateTime end,
         std::optional<schedule::ScheduleId> exclude_id) const override;
