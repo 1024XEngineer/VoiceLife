@@ -4,7 +4,7 @@ namespace voicelife::application {
 
 Status InteractionOrchestrator::Handle(InteractionEvent event, InteractionActionSink& actions) {
     const auto transition = controller_.Handle(event.voice_event);
-    if (!transition.ok() || !transition.value.has_value()) {
+    if (!transition.ok()) {
         return transition.status;
     }
     return actions.Submit({.source = event.voice_event,
