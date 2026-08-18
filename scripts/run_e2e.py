@@ -10,7 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from e2e_evidence import EvidenceValidationError, EvidenceWriteError, write_evidence
-from e2e_example_adapters import HilLifecycleExampleAdapter, HostImGatewayE2EAdapter, HostLifecycleExampleAdapter
+from e2e_example_adapters import (
+    HilLifecycleExampleAdapter,
+    HostImGatewayE2EAdapter,
+    HostImGatewayRecoveryE2EAdapter,
+    HostLifecycleExampleAdapter,
+)
 from e2e_runner import ExitCode, FailureCategory, RunnerConfig, RunnerResult, exit_code_for, run_e2e
 
 PROFILES = {"host": frozenset({"host"}), "hil": frozenset({"sparkbot", "pcb"})}
@@ -40,9 +45,11 @@ def validated_profile(layer: str, profile: str) -> str:
     return profile
 
 
-def build_adapter(layer: str, journey: str) -> object:
+def build_adapter(layer: str, journey: str, artifact_directory: Path | None = None) -> object:
     if journey == "im-gateway-strong-reminder" and layer == "host":
         return HostImGatewayE2EAdapter()
+    if journey == "im-gateway-recovery" and layer == "host":
+        return HostImGatewayRecoveryE2EAdapter(artifact_directory or Path("."))
     if journey != "lifecycle-example":
         raise ValueError("unknown journey")
     if layer == "host":
@@ -154,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
             cleanup_timeout_s=min(5.0, args.timeout),
             retries=args.retries,
         )
-        adapter = build_adapter(args.layer, args.journey)
+        adapter = build_adapter(args.layer, args.journey, args.artifact_dir)
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return int(ExitCode.CONFIGURATION)

@@ -12,6 +12,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "docs:check": "node --test scripts/check-public-api-docs.test.mjs && node scripts/check-public-api-docs.mjs",
     "e2e:host": "pnpm run build && node scripts/run-host-e2e.mjs",
+    "e2e:recovery": "pnpm run build && node scripts/run-recovery-e2e.mjs",
     "dev:wechat": "pnpm run build && node --env-file=../../.env scripts/run-wechat-dev-harness.mjs",
     "device": "node scripts/run-device-cli.mjs",
     "start": "pnpm run build && node --env-file-if-exists=../../.env scripts/start-gateway.mjs",

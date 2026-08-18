@@ -69,6 +69,12 @@ class ExampleAdapterTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             RUN_E2E.validated_profile("hil", "host")
 
+    def test_recovery_journey_uses_dedicated_host_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = RUN_E2E.build_adapter("host", "im-gateway-recovery", Path(directory))
+            self.assertIsInstance(adapter, ADAPTERS.HostImGatewayRecoveryE2EAdapter)
+            self.assertEqual(adapter.artifact_directory, Path(directory))
+
 
 class RunE2eCliTest(unittest.TestCase):
     def run_cli(self, *arguments: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:

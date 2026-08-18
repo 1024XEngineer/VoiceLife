@@ -15,6 +15,8 @@ export interface ReminderActionStreamHttpOptions {
     readonly requestId: string;
     readonly encodedDeviceId: string;
     readonly correlationIdObserved: (correlationId: string) => void;
+    /** 可选的 SSE 心跳间隔，供基础设施层确定性验证使用。 */
+    readonly heartbeatIntervalMs?: number;
 }
 
 /**
@@ -42,11 +44,12 @@ export async function streamReminderActions(options: ReminderActionStreamHttpOpt
     });
     options.response.writeHead(200, { ...SSE_RESPONSE_HEADERS, Connection: 'keep-alive' });
     options.response.flushHeaders();
+    const heartbeatIntervalMs = positiveInterval(options.heartbeatIntervalMs ?? SSE_HEARTBEAT_INTERVAL_SECONDS * 1000);
     const heartbeat = setInterval(() => {
         if (!options.response.destroyed && !options.response.writableNeedDrain) {
             options.response.write(': heartbeat\n\n');
         }
-    }, SSE_HEARTBEAT_INTERVAL_SECONDS * 1000);
+    }, heartbeatIntervalMs);
     heartbeat.unref();
     try {
         for await (const event of events) {
@@ -68,6 +71,11 @@ export async function streamReminderActions(options: ReminderActionStreamHttpOpt
         clearInterval(heartbeat);
         options.response.end();
     }
+}
+
+function positiveInterval(value: number): number {
+    if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError('Invalid SSE heartbeat interval');
+    return value;
 }
 
 function writeWithBackpressure(response: ServerResponse, chunk: string): Promise<boolean> {
