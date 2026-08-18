@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <string>
 
 #include "voicelife/contracts/status.h"
 #include "voicelife/im/im_binding_use_case.h"
@@ -17,6 +18,13 @@ namespace voicelife::runtime {
 
 /** @brief 绑定状态 → 稳定机器可读名称（pending/confirmed/expired/...）。 */
 const char* BindingStatusName(im::BindingState state);
+
+/** @brief 返回绑定状态的稳定原因码。 @param state 绑定状态。 @return 机器可读原因码。 */
+const char* BindingReasonCode(im::BindingState state);
+/** @brief 判断绑定状态是否允许稍后重试。 @param state 绑定状态。 @return 可重试时返回 true。 */
+bool BindingRetryable(im::BindingState state);
+/** @brief 返回绑定状态的中文播报消息。 @param state 绑定状态。 @return 面向用户的消息。 */
+std::string BindingMessage(im::BindingState state);
 
 /// 每次 Start 的脱敏结果回调；Runtime 据此投递设备呈现语义，并仅对 pending 启动轮询。
 using BindingResultHook = std::function<void(const im::BindingResult&)>;

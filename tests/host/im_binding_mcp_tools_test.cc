@@ -189,6 +189,43 @@ void TestReturnsSpeakableUnavailableResult() {
           "IM 未 ready 时必须投递可呈现 unavailable，而非只返回 MCP 文本");
 }
 
+void TestCoversBindingStatusMappings() {
+    using voicelife::im::BindingState;
+    const std::vector<std::pair<BindingState, const char*>> states{
+        {BindingState::kIdle, "idle"},           {BindingState::kUnavailable, "unavailable"},
+        {BindingState::kPending, "pending"},     {BindingState::kWaiting, "waiting"},
+        {BindingState::kRetrying, "retrying"},   {BindingState::kAlreadyActive, "already_active"},
+        {BindingState::kConfirmed, "confirmed"}, {BindingState::kExpired, "expired"},
+        {BindingState::kCancelled, "cancelled"}, {BindingState::kNotFound, "not_found"},
+        {BindingState::kTimedOut, "timed_out"},  {BindingState::kCredentialRejected, "credential_rejected"},
+        {BindingState::kFailed, "failed"},
+    };
+    for (const auto& [state, expected] : states) {
+        Check(std::string(voicelife::runtime::BindingStatusName(state)) == expected,
+              "每个绑定状态都必须映射到稳定的状态名");
+        Check(!std::string(voicelife::runtime::BindingReasonCode(state)).empty() &&
+                  !voicelife::runtime::BindingMessage(state).empty(),
+              "每个绑定状态都必须有稳定原因码和可播报消息");
+    }
+
+    for (const auto& [create_status, expected_status] : std::vector<std::pair<PairingClientStatus, std::string>>{
+             {PairingClientStatus::kCredentialRejected, "credential_rejected"},
+             {PairingClientStatus::kRejected, "failed"},
+         }) {
+        FakePairingPort port;
+        FakeClock clock;
+        port.created = {.status = create_status, .value = std::nullopt, .message = "create failed"};
+        BindingUseCase use_case(port, clock);
+        use_case.set_user_id("user-fixture");
+        McpServer server;
+        Check(voicelife::runtime::RegisterImBindingMcpTools(server, use_case).ok(), "绑定工具应可注册");
+        const auto result = server.call({.request_id = "bind-status", .name = "im.binding.start", .arguments = {}});
+        Check(result.status.ok() && OutputString(result.output, "status") == expected_status &&
+                  OutputContains(result.output, "reason") && OutputContains(result.output, "message"),
+              "创建失败结果必须返回稳定状态、原因和可播报消息");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -197,5 +234,6 @@ int main() {
     TestRejectsOutOfRangeExpiryAtBoundary();
     TestInvokesResultHookAndCarriesFields();
     TestReturnsSpeakableUnavailableResult();
+    TestCoversBindingStatusMappings();
     return 0;
 }

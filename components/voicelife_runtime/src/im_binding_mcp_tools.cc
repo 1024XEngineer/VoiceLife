@@ -7,8 +7,6 @@
 #include "voicelife/mcp/mcp_server.h"
 
 namespace voicelife::runtime {
-namespace {
-
 const char* BindingReasonCode(im::BindingState state) {
     switch (state) {
         case im::BindingState::kPending:
@@ -85,8 +83,6 @@ std::string BindingMessage(im::BindingState state) {
     }
     return "绑定失败，请稍后再试";
 }
-
-}  // namespace
 
 const char* BindingStatusName(im::BindingState state) {
     switch (state) {

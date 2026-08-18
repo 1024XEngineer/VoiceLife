@@ -15,7 +15,7 @@ coverage:
       cpp:
         flags:
           - cpp
-        target: 79%
+        target: 80%
         threshold: 0%
         paths:
           - "components/**"
