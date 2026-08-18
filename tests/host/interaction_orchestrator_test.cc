@@ -1,8 +1,10 @@
 #include "voicelife/application/interaction_orchestrator.h"
 
+#include <type_traits>
 #include <vector>
 
 #include "support/test_support.h"
+#include "voicelife/runtime_esp/esp_interaction_task_host.h"
 
 namespace {
 
@@ -24,7 +26,10 @@ class TraceSink final : public InteractionActionSink {
 }  // namespace
 
 int main() {
-    const InteractionOrchestrator orchestrator;
+    static_assert(std::is_constructible_v<voicelife::runtime_esp::EspInteractionTaskHost, InteractionOrchestrator&>);
+    static_assert(!std::is_constructible_v<voicelife::runtime_esp::EspInteractionTaskHost, InteractionOrchestrator&&>);
+    InteractionOrchestrator orchestrator;
+    const voicelife::runtime_esp::EspInteractionTaskHost host(orchestrator);
     const std::vector<InteractionEvent> events = {
         {.kind = InteractionEventKind::kBootstrapRequested},
         {.kind = InteractionEventKind::kBoardInputArrived},
@@ -41,8 +46,8 @@ int main() {
     TraceSink first_trace;
     TraceSink second_trace;
     for (const InteractionEvent event : events) {
-        orchestrator.Handle(event, first_trace);
-        orchestrator.Handle(event, second_trace);
+        host.Submit(event, first_trace);
+        host.Submit(event, second_trace);
     }
 
     Check(first_trace.trace == expected_trace, "编排器必须为固定事件序列生成预期动作轨迹");

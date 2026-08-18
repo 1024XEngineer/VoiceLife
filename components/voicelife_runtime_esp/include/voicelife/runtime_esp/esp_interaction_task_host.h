@@ -12,8 +12,8 @@ namespace voicelife::runtime_esp {
  */
 class EspInteractionTaskHost {
    public:
-    /** @brief 创建使用指定应用服务的 ESP 交互任务宿主。 @param orchestrator 平台无关的交互编排器。 */
-    explicit EspInteractionTaskHost(const application::InteractionOrchestrator& orchestrator);
+    /** @brief 创建使用指定应用服务的 ESP 交互任务宿主。 @param orchestrator 生命周期覆盖宿主的编排器。 */
+    explicit EspInteractionTaskHost(application::InteractionOrchestrator& orchestrator);
 
     /**
      * @brief 将 ESP 侧已归一化的事件交给平台无关的编排器。
@@ -23,7 +23,7 @@ class EspInteractionTaskHost {
     void Submit(application::InteractionEvent event, application::InteractionActionSink& actions) const;
 
    private:
-    const application::InteractionOrchestrator& orchestrator_;
+    application::InteractionOrchestrator& orchestrator_;
 };
 
 }  // namespace voicelife::runtime_esp

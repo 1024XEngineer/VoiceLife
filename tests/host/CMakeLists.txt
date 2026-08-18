@@ -328,7 +328,10 @@ add_voicelife_test(voice_interaction_controller_test "unit;voice;interaction;con
 target_link_libraries(voice_interaction_controller_test PRIVATE voice)
 
 add_voicelife_test(interaction_orchestrator_test "unit;application;interaction;contract"
-    interaction_orchestrator_test.cc)
+    interaction_orchestrator_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime_esp/src/esp_interaction_task_host.cc")
+target_include_directories(interaction_orchestrator_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_runtime_esp/include")
 target_link_libraries(interaction_orchestrator_test PRIVATE application)
 
 add_voicelife_test(linx_provider_contract_test "unit;voice;linx;contract" linx_provider_contract_test.cc)
