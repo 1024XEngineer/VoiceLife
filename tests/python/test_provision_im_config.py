@@ -16,9 +16,7 @@ class ProvisionImConfigTest(unittest.TestCase):
         self.assertIsNone(PROVISION.provisioning_failure_code(b"unrelated log line\r\n"))
 
     def test_payload_matches_vli1_wire_format(self):
-        payload = PROVISION.request_payload(
-            "https://gateway.example", "device-test", TOKEN, "user-test"
-        )
+        payload = PROVISION.request_payload("https://gateway.example", "device-test", TOKEN, "user-test")
 
         self.assertIsInstance(payload, bytearray)
         self.assertEqual(payload[:4], b"VLI1")

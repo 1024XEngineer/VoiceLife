@@ -19,7 +19,9 @@ class ImWifiCredentialIsolationTest(unittest.TestCase):
 
     def test_network_provisioning_cannot_overwrite_or_erase_im_credentials(self):
         wifi_storage = WIFI_SOURCE[
-            WIFI_SOURCE.index("Status StoreWifiCredentials") : WIFI_SOURCE.index("Result<WifiCredentials> LoadWifiCredentials")
+            WIFI_SOURCE.index("Status StoreWifiCredentials") : WIFI_SOURCE.index(
+                "Result<WifiCredentials> LoadWifiCredentials"
+            )
         ]
         for im_key in ("gateway_origin", "device_id", "device_token", "user_id", "kImNamespace"):
             self.assertNotIn(im_key, wifi_storage)
@@ -35,7 +37,9 @@ class ImWifiCredentialIsolationTest(unittest.TestCase):
 
     def test_im_provisioning_writes_all_four_credentials_only_in_im_namespace(self):
         im_storage = IM_SOURCE[
-            IM_SOURCE.index("Status StoreProvisioningRequest") : IM_SOURCE.index("ConsoleCommandResult ReadImConsoleCommand")
+            IM_SOURCE.index("Status StoreProvisioningRequest") : IM_SOURCE.index(
+                "ConsoleCommandResult ReadImConsoleCommand"
+            )
         ]
         for im_key in ("gateway_origin", "device_id", "device_token", "user_id", "kImNamespace"):
             self.assertIn(im_key, im_storage)
