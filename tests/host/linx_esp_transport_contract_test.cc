@@ -41,8 +41,9 @@ WebSocketFragment Chunk(uint64_t generation, WebSocketOpcode opcode, std::string
 int main() {
     Check(voicelife::linx_esp::EspWebSocketTransportOptions{}.max_message_bytes == 64 * 1024,
           "Linx WebSocket 默认消息上限必须为 64 KiB");
-    Check(voicelife::linx_esp::EspWebSocketTransportOptions{}.network_timeout_ms == 1000,
-          "Linx 默认同步写超时必须限制在 1 秒，避免 generation 切换拖慢本地打断");
+    const voicelife::linx_esp::EspWebSocketTransportOptions defaults{};
+    Check(defaults.network_timeout_ms == 10000, "Linx 网络超时必须保留 10 秒，避免慢速下行分片被错误重连");
+    Check(defaults.tx_timeout_ms == 1000, "Linx 默认同步写超时必须限制在 1 秒，避免 generation 切换拖慢本地打断");
     Check(SelectLinxTextTxLane("{\"type\":\"listen\",\"state\":\"stop\"}") == LinxTextTxLane::kMediaOrdered,
           "listen.stop 必须排在已经入队的 PCM 之后，不能由控制队列越过尾音");
     Check(SelectLinxTextTxLane("{\"type\":\"listen\",\"state\":\"start\"}") == LinxTextTxLane::kControl &&

@@ -123,7 +123,7 @@ void EspWebSocketTransport::Impl::TxEntry(void* argument) {
 
 void EspWebSocketTransport::Impl::TxLoop() {
     // 唯一 TX 任务：按队列顺序发送文本/音频，TLS 只在本任务运行。
-    // 短超时（network_timeout_ms 已配置，通常 ≤1s）避免写阻塞拖垮采集。
+    // 独立的短 TX 超时避免写阻塞拖垮采集；网络接收仍使用其正常预算。
     while (running_.load()) {
         detail::LinxTxItem* item = nullptr;
         // 控制命令优先；作为音频结束边界的 listen.stop 已进入媒体 FIFO，
@@ -146,10 +146,10 @@ void EspWebSocketTransport::Impl::TxLoop() {
             sent = item->kind == detail::LinxTxItem::Kind::kText
                        ? esp_websocket_client_send_text(client_, reinterpret_cast<const char*>(item->payload.data()),
                                                         static_cast<int>(item->payload.size()),
-                                                        pdMS_TO_TICKS(options_.network_timeout_ms))
+                                                        pdMS_TO_TICKS(options_.tx_timeout_ms))
                        : esp_websocket_client_send_bin(client_, reinterpret_cast<const char*>(item->payload.data()),
                                                        static_cast<int>(item->payload.size()),
-                                                       pdMS_TO_TICKS(options_.network_timeout_ms));
+                                                       pdMS_TO_TICKS(options_.tx_timeout_ms));
         });
         const size_t want = item->payload.size();
         delete item;

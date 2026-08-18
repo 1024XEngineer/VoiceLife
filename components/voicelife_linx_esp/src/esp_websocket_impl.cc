@@ -274,7 +274,7 @@ Status EspWebSocketTransport::Impl::Close() {
         // `esp_websocket_client_send_*` may still be executing after the
         // receive worker has drained. Wait for TxLoop to leave that call before
         // destroying the client handle it uses.
-        const uint32_t wait_ms = options_.network_timeout_ms + 1000U;
+        const uint32_t wait_ms = options_.tx_timeout_ms + 1000U;
         if (xSemaphoreTake(tx_stopped_, pdMS_TO_TICKS(wait_ms)) != pdTRUE) {
             state_ = TransportState::kFailed;
             return status.ok() ? Status::Error(ErrorCode::kUnavailable, "等待 ESP Linx TX 任务退出超时") : status;
