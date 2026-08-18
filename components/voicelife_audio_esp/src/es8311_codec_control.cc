@@ -31,6 +31,20 @@ struct Es8311ControlHandle {
     i2c_master_bus_handle_t i2c_bus = nullptr;
 };
 
+void ReleaseEs8311Resources(esp_codec_dev_handle_t device, const audio_codec_if_t* codec_if,
+                            const audio_codec_ctrl_if_t* ctrl_if, const audio_codec_gpio_if_t* gpio_if,
+                            const audio_codec_data_if_t* data_if, i2c_master_bus_handle_t i2c_bus) {
+    if (device != nullptr) {
+        (void)esp_codec_dev_close(device);
+        esp_codec_dev_delete(device);
+    }
+    if (codec_if != nullptr) audio_codec_delete_codec_if(codec_if);
+    if (ctrl_if != nullptr) audio_codec_delete_ctrl_if(ctrl_if);
+    if (gpio_if != nullptr) audio_codec_delete_gpio_if(gpio_if);
+    if (data_if != nullptr) audio_codec_delete_data_if(data_if);
+    if (i2c_bus != nullptr) (void)i2c_del_master_bus(i2c_bus);
+}
+
 /** @brief 读回并打印关键寄存器（时钟/格式/启动证据）。 */
 void LogKeyRegisters(const audio_codec_ctrl_if_t* ctrl_if) {
     // REG16 is the microphone PGA setting. Keeping it in the allowlisted
@@ -92,6 +106,7 @@ voicelife::Result<void*> InitializeEs8311(const Es8311ControlConfig& config) {
     // 软件复位（官方 ResetCodec：REG00=0x1F + 5ms）。
     uint8_t reset_value = 0x1F;
     if (ctrl_if->write_reg(ctrl_if, 0x00, 1, &reset_value, 1) != ESP_OK) {
+        ReleaseEs8311Resources(nullptr, nullptr, ctrl_if, nullptr, nullptr, bus);
         return voicelife::Result<void*>::Failure(voicelife::ErrorCode::kInternal, "ES8311 软件复位失败");
     }
     vTaskDelay(pdMS_TO_TICKS(5));
@@ -103,9 +118,14 @@ voicelife::Result<void*> InitializeEs8311(const Es8311ControlConfig& config) {
     i2s_cfg.tx_handle = config.tx_channel;
     const audio_codec_data_if_t* data_if = audio_codec_new_i2s_data(&i2s_cfg);
     if (data_if == nullptr) {
+        ReleaseEs8311Resources(nullptr, nullptr, ctrl_if, nullptr, nullptr, bus);
         return voicelife::Result<void*>::Failure(voicelife::ErrorCode::kInternal, "创建 ES8311 I2S 数据接口失败");
     }
     const audio_codec_gpio_if_t* gpio_if = audio_codec_new_gpio();
+    if (gpio_if == nullptr) {
+        ReleaseEs8311Resources(nullptr, nullptr, ctrl_if, nullptr, data_if, bus);
+        return voicelife::Result<void*>::Failure(voicelife::ErrorCode::kInternal, "创建 ES8311 GPIO 接口失败");
+    }
 
     // ES8311 Codec（PA 不接管，由 GPIO46 板级仲裁）。
     es8311_codec_cfg_t codec_cfg = {};
@@ -118,6 +138,7 @@ voicelife::Result<void*> InitializeEs8311(const Es8311ControlConfig& config) {
     codec_cfg.hw_gain.codec_dac_voltage = 3.3;
     const audio_codec_if_t* codec_if = es8311_codec_new(&codec_cfg);
     if (codec_if == nullptr) {
+        ReleaseEs8311Resources(nullptr, nullptr, ctrl_if, gpio_if, data_if, bus);
         return voicelife::Result<void*>::Failure(voicelife::ErrorCode::kInternal, "创建 ES8311 Codec 失败");
     }
 
@@ -128,6 +149,7 @@ voicelife::Result<void*> InitializeEs8311(const Es8311ControlConfig& config) {
     dev_cfg.data_if = data_if;
     esp_codec_dev_handle_t dev = esp_codec_dev_new(&dev_cfg);
     if (dev == nullptr) {
+        ReleaseEs8311Resources(nullptr, codec_if, ctrl_if, gpio_if, data_if, bus);
         return voicelife::Result<void*>::Failure(voicelife::ErrorCode::kInternal, "创建 ESP Codec 设备失败");
     }
     esp_codec_dev_sample_info_t fs = {};
@@ -138,6 +160,7 @@ voicelife::Result<void*> InitializeEs8311(const Es8311ControlConfig& config) {
     fs.mclk_multiple = 0;
     const esp_err_t open_err = esp_codec_dev_open(dev, &fs);
     if (open_err != ESP_OK) {
+        ReleaseEs8311Resources(dev, codec_if, ctrl_if, gpio_if, data_if, bus);
         return voicelife::Result<void*>::Failure(voicelife::ErrorCode::kInternal,
                                                  std::string("ES8311 打开失败: ") + esp_err_to_name(open_err));
     }
@@ -148,13 +171,7 @@ voicelife::Result<void*> InitializeEs8311(const Es8311ControlConfig& config) {
     constexpr float kSparkBotMicGainDb = 30.0F;
     const esp_err_t gain_err = esp_codec_dev_set_in_gain(dev, kSparkBotMicGainDb);
     if (gain_err != ESP_OK) {
-        (void)esp_codec_dev_close(dev);
-        esp_codec_dev_delete(dev);
-        audio_codec_delete_codec_if(codec_if);
-        audio_codec_delete_ctrl_if(ctrl_if);
-        audio_codec_delete_gpio_if(gpio_if);
-        audio_codec_delete_data_if(data_if);
-        (void)i2c_del_master_bus(bus);
+        ReleaseEs8311Resources(dev, codec_if, ctrl_if, gpio_if, data_if, bus);
         return voicelife::Result<void*>::Failure(
             voicelife::ErrorCode::kInternal,
             std::string("ES8311 设置 30dB 麦克风增益失败: ") + esp_err_to_name(gain_err));
@@ -165,13 +182,7 @@ voicelife::Result<void*> InitializeEs8311(const Es8311ControlConfig& config) {
     constexpr uint8_t kSparkBotDefaultOutputVolume = 70;
     const esp_err_t volume_err = esp_codec_dev_set_out_vol(dev, kSparkBotDefaultOutputVolume);
     if (volume_err != ESP_OK) {
-        (void)esp_codec_dev_close(dev);
-        esp_codec_dev_delete(dev);
-        audio_codec_delete_codec_if(codec_if);
-        audio_codec_delete_ctrl_if(ctrl_if);
-        audio_codec_delete_gpio_if(gpio_if);
-        audio_codec_delete_data_if(data_if);
-        (void)i2c_del_master_bus(bus);
+        ReleaseEs8311Resources(dev, codec_if, ctrl_if, gpio_if, data_if, bus);
         return voicelife::Result<void*>::Failure(
             voicelife::ErrorCode::kInternal,
             std::string("ES8311 设置默认播放音量失败: ") + esp_err_to_name(volume_err));
@@ -261,13 +272,8 @@ voicelife::Status DeinitializeEs8311(void* dev_handle) {
         return voicelife::Status::Ok();
     }
     auto* handle = static_cast<Es8311ControlHandle*>(dev_handle);
-    (void)esp_codec_dev_close(handle->device);
-    esp_codec_dev_delete(handle->device);
-    audio_codec_delete_codec_if(handle->codec_if);
-    audio_codec_delete_ctrl_if(handle->ctrl_if);
-    audio_codec_delete_gpio_if(handle->gpio_if);
-    audio_codec_delete_data_if(handle->data_if);
-    (void)i2c_del_master_bus(handle->i2c_bus);
+    ReleaseEs8311Resources(handle->device, handle->codec_if, handle->ctrl_if, handle->gpio_if, handle->data_if,
+                           handle->i2c_bus);
     delete handle;
     return voicelife::Status::Ok();
 #else
