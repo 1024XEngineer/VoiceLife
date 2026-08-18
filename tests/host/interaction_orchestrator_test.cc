@@ -38,16 +38,17 @@ int main() {
     InteractionOrchestrator orchestrator;
     TraceSink trace;
     const std::vector<InteractionEvent> events = {
-        {.voice_event = VoiceInteractionEvent::kBootCompleted},
+        {.voice_event = VoiceInteractionEvent::kBootCompleted, .wake_word = {}},
         {.voice_event = VoiceInteractionEvent::kWakeDetected, .wake_word = "hello"},
         {.voice_event = VoiceInteractionEvent::kInterruptAndAcknowledge, .wake_word = "stop"},
-        {.voice_event = VoiceInteractionEvent::kEndpointDetected},
-        {.voice_event = VoiceInteractionEvent::kFinalizationTimedOut},
+        {.voice_event = VoiceInteractionEvent::kEndpointDetected, .wake_word = {}},
+        {.voice_event = VoiceInteractionEvent::kFinalizationTimedOut, .wake_word = {}},
     };
     const std::vector<InteractionAction> expected_trace = {
         {.source = VoiceInteractionEvent::kBootCompleted,
          .state = VoiceInteractionState::kStandby,
-         .directive = VoiceInteractionAction::kRestoreStandby},
+         .directive = VoiceInteractionAction::kRestoreStandby,
+         .wake_word = {}},
         {.source = VoiceInteractionEvent::kWakeDetected,
          .state = VoiceInteractionState::kListening,
          .directive = VoiceInteractionAction::kStartVoiceTurn,
@@ -58,10 +59,12 @@ int main() {
          .wake_word = "stop"},
         {.source = VoiceInteractionEvent::kEndpointDetected,
          .state = VoiceInteractionState::kFinalizing,
-         .directive = VoiceInteractionAction::kStopVoiceTurn},
+         .directive = VoiceInteractionAction::kStopVoiceTurn,
+         .wake_word = {}},
         {.source = VoiceInteractionEvent::kFinalizationTimedOut,
          .state = VoiceInteractionState::kStandby,
-         .directive = VoiceInteractionAction::kRestoreStandby},
+         .directive = VoiceInteractionAction::kRestoreStandby,
+         .wake_word = {}},
     };
 
     for (const InteractionEvent event : events) {
@@ -82,10 +85,12 @@ int main() {
     Submit(tts_orchestrator, tts_trace, VoiceInteractionEvent::kTtsStopped);
     Check(tts_trace.trace.back() == InteractionAction{.source = VoiceInteractionEvent::kTtsStopped,
                                                       .state = VoiceInteractionState::kListening,
-                                                      .directive = VoiceInteractionAction::kStartCapture},
+                                                      .directive = VoiceInteractionAction::kStartCapture,
+                                                      .wake_word = {}},
           "TTS 结束后必须恢复 follow-up 聆听");
 
-    const voicelife::Status rejected = orchestrator.Handle({.voice_event = VoiceInteractionEvent::kTtsStopped}, trace);
+    const voicelife::Status rejected =
+        orchestrator.Handle({.voice_event = VoiceInteractionEvent::kTtsStopped, .wake_word = {}}, trace);
     Check(!rejected.ok(), "乱序事件必须被拒绝且不产生动作");
     return 0;
 }

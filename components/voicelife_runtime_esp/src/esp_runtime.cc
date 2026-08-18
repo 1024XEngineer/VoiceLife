@@ -1,4 +1,5 @@
 #include "esp_runtime_internal.h"
+#include "voicelife/runtime/runtime.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
@@ -259,11 +260,11 @@ Runtime& Instance() {
     return runtime;
 }
 
-Status StartEspImpl(PlatformAssembly& assembly) { return Instance().Start(assembly); }
-Status RequestInterruptEspImpl() { return Instance().RequestInterrupt(); }
+Status Start(PlatformAssembly& assembly) { return Instance().Start(assembly); }
+Status RequestInterrupt() { return Instance().RequestInterrupt(); }
 }  // namespace voicelife::runtime
 
 namespace voicelife::runtime_esp {
-Status Start(runtime::PlatformAssembly& assembly) { return runtime::StartEspImpl(assembly); }
-Status RequestInterrupt() { return runtime::RequestInterruptEspImpl(); }
+Status Start(runtime::PlatformAssembly& assembly) { return runtime::Start(assembly); }
+Status RequestInterrupt() { return runtime::RequestInterrupt(); }
 }  // namespace voicelife::runtime_esp

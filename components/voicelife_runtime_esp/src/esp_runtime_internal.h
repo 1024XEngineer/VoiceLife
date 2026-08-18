@@ -301,7 +301,5 @@ class Runtime final : public application::InteractionActionSink {
 };
 
 Runtime& Instance();
-Status StartEspImpl(PlatformAssembly& assembly);
-Status RequestInterruptEspImpl();
 
 }  // namespace voicelife::runtime
