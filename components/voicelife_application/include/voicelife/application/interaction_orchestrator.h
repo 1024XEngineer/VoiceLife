@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <string_view>
+
 #include "voicelife/contracts/status.h"
 #include "voicelife/voice/voice_interaction_controller.h"
 
@@ -8,6 +11,7 @@ namespace voicelife::application {
 /** @brief 一次交互编排请求的稳定输入模型，不携带 ESP-IDF 或 FreeRTOS 类型。 */
 struct InteractionEvent {
     voice::VoiceInteractionEvent voice_event = voice::VoiceInteractionEvent::kBootCompleted;
+    std::string_view wake_word;
 };
 
 /** @brief 一次合法状态迁移产生的、可由平台适配器执行的语义动作。 */
@@ -15,9 +19,11 @@ struct InteractionAction {
     voice::VoiceInteractionEvent source = voice::VoiceInteractionEvent::kBootCompleted;
     voice::VoiceInteractionState state = voice::VoiceInteractionState::kBooting;
     voice::VoiceInteractionAction directive = voice::VoiceInteractionAction::kNone;
+    std::string wake_word;
 
-    friend constexpr bool operator==(InteractionAction lhs, InteractionAction rhs) {
-        return lhs.source == rhs.source && lhs.state == rhs.state && lhs.directive == rhs.directive;
+    friend bool operator==(const InteractionAction& lhs, const InteractionAction& rhs) {
+        return lhs.source == rhs.source && lhs.state == rhs.state && lhs.directive == rhs.directive &&
+               lhs.wake_word == rhs.wake_word;
     }
 };
 

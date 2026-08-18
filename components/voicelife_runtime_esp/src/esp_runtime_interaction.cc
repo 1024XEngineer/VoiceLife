@@ -130,12 +130,10 @@ void Runtime::ClearExpiredWakeAck() {
 }
 
 Status Runtime::HandleInteractionEvent(voice::VoiceInteractionEvent event, std::string_view wake_word) {
-    active_wake_word_.assign(wake_word);
-    const Status status = interaction_task_host_.Submit({.voice_event = event}, *this);
+    const Status status = interaction_task_host_.Submit({.voice_event = event, .wake_word = wake_word}, *this);
     if (!status.ok()) {
         ESP_LOGW(kTag, "忽略乱序板端交互事件=%d: %s", static_cast<int>(event), status.message.c_str());
     }
-    active_wake_word_.clear();
     return status;
 }
 
@@ -231,10 +229,10 @@ Status Runtime::Submit(application::InteractionAction transition) {
             QueueCaptureStart();
             return Status::Ok();
         case voice::VoiceInteractionAction::kStartVoiceTurn:
-            if (active_wake_word_.empty()) {
+            if (transition.wake_word.empty()) {
                 return Status::Error(ErrorCode::kInvalidArgument, "本地唤醒词不能为空");
             }
-            QueueVoiceTurn(active_wake_word_);
+            QueueVoiceTurn(transition.wake_word);
             return Status::Ok();
         case voice::VoiceInteractionAction::kStopVoiceTurn:
             QueueCaptureStop();
@@ -243,10 +241,10 @@ Status Runtime::Submit(application::InteractionAction transition) {
             QueueInterruptAndCapture();
             return Status::Ok();
         case voice::VoiceInteractionAction::kInterruptAndStartVoiceTurn:
-            if (active_wake_word_.empty()) {
+            if (transition.wake_word.empty()) {
                 return Status::Error(ErrorCode::kInvalidArgument, "本地打断词不能为空");
             }
-            QueueInterruptAndVoiceTurn(active_wake_word_);
+            QueueInterruptAndVoiceTurn(transition.wake_word);
             return Status::Ok();
         case voice::VoiceInteractionAction::kRestoreStandby:
             // transport_disconnected 必须停在 kReconnecting；物理唤醒门可恢复，

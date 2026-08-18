@@ -296,7 +296,6 @@ class Runtime final : public application::InteractionActionSink {
 #endif
     application::InteractionOrchestrator interaction_orchestrator_;
     runtime_esp::EspInteractionTaskHost interaction_task_host_{interaction_orchestrator_};
-    std::string active_wake_word_;
     std::unique_ptr<voice::SpeechProviderAdapter> provider_;
     std::unique_ptr<voice::VoiceSession> session_;
 };
