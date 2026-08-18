@@ -4,7 +4,7 @@ coverage:
       cpp:
         flags:
           - cpp
-        target: 70%
+        target: 80%
         threshold: 0%
       typescript:
         flags:
@@ -15,7 +15,7 @@ coverage:
       cpp:
         flags:
           - cpp
-        target: 70%
+        target: 80%
         threshold: 0%
         paths:
           - "components/**"
