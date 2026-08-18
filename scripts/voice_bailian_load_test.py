@@ -31,6 +31,8 @@ ASR_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-g
 
 @dataclass
 class Result:
+    conversation_index: int = 0
+    turn_index: int = 0
     tts_ms: float = 0.0
     tts_first_package_ms: float | None = None
     stt_ms: float = 0.0
@@ -48,7 +50,9 @@ def percentile(values: list[float], percentage: int) -> float | None:
     return round(ordered[index], 2)
 
 
-def summarize(results: list[Result], model: str, asr_model: str, concurrency: int) -> dict[str, Any]:
+def summarize(
+    results: list[Result], model: str, asr_model: str, concurrency: int, conversations: int, turns_per_conversation: int
+) -> dict[str, Any]:
     successful = [result for result in results if result.error is None]
 
     def metrics(name: str, values: list[float]) -> dict[str, float | None]:
@@ -61,9 +65,21 @@ def summarize(results: list[Result], model: str, asr_model: str, concurrency: in
             "mean_ms": round(statistics.mean(values), 2) if values else None,
         }
 
+    conversation_durations = []
+    for conversation_index in range(conversations):
+        turns = [result for result in results if result.conversation_index == conversation_index]
+        if len(turns) == turns_per_conversation and all(result.error is None for result in turns):
+            conversation_durations.append(sum(result.end_to_end_ms for result in turns))
+
     return {
         "tts_model": model,
         "stt_model": asr_model,
+        "conversations": {
+            "requested": conversations,
+            "completed": len(conversation_durations),
+            "failed": conversations - len(conversation_durations),
+            "turns_per_conversation": turns_per_conversation,
+        },
         "requested": len(results),
         "concurrency": concurrency,
         "successful": len(successful),
@@ -81,6 +97,7 @@ def summarize(results: list[Result], model: str, asr_model: str, concurrency: in
             ),
             metrics("stt", [result.stt_ms for result in successful]),
             metrics("end_to_end", [result.end_to_end_ms for result in successful]),
+            metrics("conversation_end_to_end", conversation_durations),
         ],
         "errors": dict(sorted(Counter(result.error for result in results if result.error is not None).items())),
     }
@@ -147,7 +164,14 @@ def classify_error(error: Exception) -> str:
     return type(error).__name__
 
 
-def run_one(api_key: str, args: argparse.Namespace, stt_audio: bytes | None, stt_mime_type: str | None) -> Result:
+def run_one(
+    api_key: str,
+    args: argparse.Namespace,
+    stt_audio: bytes | None,
+    stt_mime_type: str | None,
+    conversation_index: int,
+    turn_index: int,
+) -> Result:
     stage = "tts"
     try:
         started = time.monotonic()
@@ -159,6 +183,8 @@ def run_one(api_key: str, args: argparse.Namespace, stt_audio: bytes | None, stt
             audio, tts_ms, first_package_ms = synthesize(args.tts_model, args.voice, args.text)
         if args.mode == "tts":
             return Result(
+                conversation_index=conversation_index,
+                turn_index=turn_index,
                 tts_ms=round(tts_ms, 2),
                 tts_first_package_ms=first_package_ms,
                 end_to_end_ms=round((time.monotonic() - started) * 1000, 2),
@@ -169,6 +195,8 @@ def run_one(api_key: str, args: argparse.Namespace, stt_audio: bytes | None, stt
             api_key, args.stt_model, audio, stt_mime_type or "audio/mpeg", args.timeout_seconds
         )
         return Result(
+            conversation_index=conversation_index,
+            turn_index=turn_index,
             tts_ms=round(tts_ms, 2),
             tts_first_package_ms=round(first_package_ms, 2) if first_package_ms is not None else None,
             stt_ms=round(stt_ms, 2),
@@ -177,13 +205,39 @@ def run_one(api_key: str, args: argparse.Namespace, stt_audio: bytes | None, stt
             transcript_matches=normalize(transcript) == normalize(args.text),
         )
     except Exception as error:  # Network/service errors are intentionally sanitized.
-        return Result(error=f"{stage}:{classify_error(error)}")
+        return Result(
+            conversation_index=conversation_index,
+            turn_index=turn_index,
+            error=f"{stage}:{classify_error(error)}",
+        )
+
+
+def run_conversation(
+    api_key: str,
+    args: argparse.Namespace,
+    stt_audio: bytes | None,
+    stt_mime_type: str | None,
+    conversation_index: int,
+) -> list[Result]:
+    """Run one virtual conversation serially so a later turn observes prior-turn load."""
+    return [
+        run_one(api_key, args, stt_audio, stt_mime_type, conversation_index, turn_index)
+        for turn_index in range(args.turns_per_conversation)
+    ]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--requests", type=int, default=10, help="Total TTS-to-STT turns; must be positive.")
-    parser.add_argument("--concurrency", type=int, default=2, help="Concurrent turns; must be positive.")
+    parser.add_argument("--requests", type=int, default=10, help="Virtual conversations; must be positive.")
+    parser.add_argument(
+        "--turns-per-conversation",
+        type=int,
+        default=1,
+        help="Strictly serial speech turns within each virtual conversation; must be positive.",
+    )
+    parser.add_argument(
+        "--concurrency", type=int, default=2, help="Concurrent virtual conversations; must be positive."
+    )
     parser.add_argument("--timeout-seconds", type=int, default=90, help="Per-STT HTTP timeout.")
     parser.add_argument("--tts-model", default="cosyvoice-v3-flash")
     parser.add_argument("--stt-model", default="qwen3-asr-flash")
@@ -203,8 +257,14 @@ def parse_args() -> argparse.Namespace:
         help="Print local readiness without making a network request or exposing credentials.",
     )
     args = parser.parse_args()
-    if args.requests <= 0 or args.concurrency <= 0 or args.timeout_seconds <= 0 or not args.text.strip():
-        parser.error("requests、concurrency、timeout-seconds 和 text 必须有效")
+    if (
+        args.requests <= 0
+        or args.turns_per_conversation <= 0
+        or args.concurrency <= 0
+        or args.timeout_seconds <= 0
+        or not args.text.strip()
+    ):
+        parser.error("requests、turns-per-conversation、concurrency、timeout-seconds 和 text 必须有效")
     if args.mode == "stt" and not args.stt_audio_path:
         parser.error("--mode stt 需要 --stt-audio-path")
     return args
@@ -246,8 +306,18 @@ def main() -> int:
             return 2
         stt_mime_type = mimetypes.guess_type(args.stt_audio_path)[0] or "audio/wav"
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as executor:
-        results = list(executor.map(lambda _: run_one(api_key, args, stt_audio, stt_mime_type), range(args.requests)))
-    report = summarize(results, args.tts_model, args.stt_model, args.concurrency)
+        conversations = list(
+            executor.map(
+                lambda conversation_index: run_conversation(
+                    api_key, args, stt_audio, stt_mime_type, conversation_index
+                ),
+                range(args.requests),
+            )
+        )
+    results = [result for conversation in conversations for result in conversation]
+    report = summarize(
+        results, args.tts_model, args.stt_model, args.concurrency, args.requests, args.turns_per_conversation
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if args.result_json:
         with open(args.result_json, "w", encoding="utf-8") as output:

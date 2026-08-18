@@ -184,6 +184,9 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
     return detail::Unavailable("ESP32-S3 PCM Audio Port 只能在 ESP-IDF 目标运行");
 #else
     std::lock_guard<std::mutex> lock(mutex_);
+    if (output_closing_) {
+        return Status::Error(ErrorCode::kConflict, "输出端口正在关闭，请等待关闭完成后重开");
+    }
     if (output_open_) {
         return playback_format_.has_value() && detail::SameFormat(*playback_format_, format, true)
                    ? Status::Ok()
@@ -509,7 +512,15 @@ bool Esp32s3PcmAudioPorts::Impl::OutputIdle() const {
 Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
 #ifdef ESP_PLATFORM
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (output_closing_) {
+            const bool closed =
+                done_cv_.wait_for(lock, std::chrono::milliseconds(500), [this]() { return !output_closing_; });
+            return closed ? Status::Ok() : detail::Unavailable("等待已有 I2S 播放关闭完成超时");
+        }
+        if (!output_open_) {
+            return Status::Ok();
+        }
         output_closing_ = true;
         if (output_writing_) {
             amplifier_disable_pending_ = true;
@@ -549,6 +560,7 @@ Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
     if (!input_open_) {
         DestroyChannelsLocked();
     }
+    done_cv_.notify_all();
     return Status::Ok();
 #else
     output_open_ = false;

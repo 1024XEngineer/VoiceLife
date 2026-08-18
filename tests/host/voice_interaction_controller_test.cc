@@ -140,5 +140,43 @@ int main() {
     Check(settled_failure.ok() && settled_failure.value->action == VoiceInteractionAction::kNone &&
               controller.state() == VoiceInteractionState::kError,
           "重复待机故障不得无限排队");
+
+    VoiceInteractionController multi_turn_controller;
+    CheckTransition(multi_turn_controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "多轮测试应先进入待机");
+    for (int turn = 0; turn < 24; ++turn) {
+        CheckTransition(multi_turn_controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
+                        VoiceInteractionAction::kStartVoiceTurn, "每轮都必须能从待机开始语音会话");
+        if (turn % 3 == 0) {
+            CheckTransition(multi_turn_controller, VoiceInteractionEvent::kEndpointDetected,
+                            VoiceInteractionState::kFinalizing, VoiceInteractionAction::kStopVoiceTurn,
+                            "端点检测应在连续多轮中可靠收口采集");
+            CheckTransition(multi_turn_controller, VoiceInteractionEvent::kFinalizationTimedOut,
+                            VoiceInteractionState::kStandby, VoiceInteractionAction::kRestoreStandby,
+                            "最终识别超时后下一轮仍必须可开始");
+        } else {
+            CheckTransition(multi_turn_controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
+                            VoiceInteractionAction::kNone, "连续多轮中服务端可直接开始播报");
+            if (turn % 3 == 1) {
+                CheckTransition(multi_turn_controller, VoiceInteractionEvent::kTtsStopped,
+                                VoiceInteractionState::kListening, VoiceInteractionAction::kStartCapture,
+                                "播报结束后应为追问重新打开采集");
+                CheckTransition(multi_turn_controller, VoiceInteractionEvent::kEndpointDetected,
+                                VoiceInteractionState::kFinalizing, VoiceInteractionAction::kStopVoiceTurn,
+                                "追问端点应结束本轮采集");
+                CheckTransition(multi_turn_controller, VoiceInteractionEvent::kFinalizationTimedOut,
+                                VoiceInteractionState::kStandby, VoiceInteractionAction::kRestoreStandby,
+                                "追问超时后必须回到下一轮起点");
+            } else {
+                CheckTransition(multi_turn_controller, VoiceInteractionEvent::kInterruptRequested,
+                                VoiceInteractionState::kInterrupting, VoiceInteractionAction::kInterruptSession,
+                                "连续播报打断必须取消当前会话");
+                CheckTransition(multi_turn_controller, VoiceInteractionEvent::kInterruptCompleted,
+                                VoiceInteractionState::kStandby, VoiceInteractionAction::kRestoreStandby,
+                                "打断完成后不能遗留上一轮播报状态");
+            }
+        }
+    }
+    Check(multi_turn_controller.state() == VoiceInteractionState::kStandby, "连续多轮结束后控制器必须回到待机");
     return 0;
 }
