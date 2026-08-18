@@ -23,6 +23,20 @@ Status EspError(const char* operation, esp_err_t error) {
 
 }  // namespace
 
+EspWebSocketTransport::Impl::~Impl() {
+    Close();
+    // TX 任务栈（PSRAM）与 TCB（内部 RAM）常驻，随 Transport 析构释放；task 已由
+    // Close()→CleanupWorker 删除，此处仅归还内存缓冲。
+    if (tx_stack_ != nullptr) {
+        heap_caps_free(tx_stack_);
+        tx_stack_ = nullptr;
+    }
+    if (tx_tcb_ != nullptr) {
+        heap_caps_free(tx_tcb_);
+        tx_tcb_ = nullptr;
+    }
+}
+
 Status EspWebSocketTransport::Impl::Connect(const linx::LinxConnectionConfig& config, linx::LinxTransportSink sink) {
     std::unique_lock<std::recursive_mutex> lifecycle_lock(lifecycle_mutex_);
     const bool secure = config.websocket_url.rfind("wss://", 0) == 0;
@@ -155,7 +169,12 @@ Status EspWebSocketTransport::Impl::SendText(std::string_view message) {
     auto* item = new detail::LinxTxItem();
     item->kind = detail::LinxTxItem::Kind::kText;
     item->payload.assign(message.begin(), message.end());
-    if (xQueueSend(target, &item, 0) != pdTRUE) {
+    // 非控制文本（工具结果、状态等协议消息）可短暂等待 TX 队列空位再入队：音频帧或
+    // 慢网络占满队列时若 0 超时立即失败，会把 provider_error 打到 phase=9 打断交互
+    // （实测：工具执行成功后的结果回传频繁撞满队列，增删改查确认链不稳）。控制帧
+    // （listen.stop/abort）保持非阻塞，确保可随时打断。
+    const TickType_t wait_ticks = is_control ? 0 : pdMS_TO_TICKS(150);
+    if (xQueueSend(target, &item, wait_ticks) != pdTRUE) {
         delete item;
         return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列已满");
     }
@@ -338,7 +357,26 @@ bool EspWebSocketTransport::Impl::PrepareWorker() {
         CleanupWorker();
         return false;
     }
-    if (tx_queue_ == nullptr || xTaskCreate(&TxEntry, "linx_ws_tx", 16384, this, 5, &tx_task_) != pdPASS) {
+    // TX 任务栈放 PSRAM（一次性分配、跨连接复用），TCB 在内部 RAM：
+    // 16384B 动态任务栈常占内部 RAM，交互期断线重连时内部 RAM 最大连续块
+    // 常 <16KB 导致重连任务创建失败（曾卡死聆听）；栈挪 PSRAM 腾出 16KB 头寸。
+    constexpr uint32_t kTxStackWords = 16384 / sizeof(StackType_t);
+    if (tx_stack_ == nullptr || tx_tcb_ == nullptr) {
+        tx_stack_ = static_cast<StackType_t*>(
+            heap_caps_malloc(sizeof(StackType_t) * kTxStackWords, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        tx_tcb_ =
+            static_cast<StaticTask_t*>(heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        if (tx_stack_ == nullptr || tx_tcb_ == nullptr) {
+            heap_caps_free(tx_stack_);
+            heap_caps_free(tx_tcb_);
+            tx_stack_ = nullptr;
+            tx_tcb_ = nullptr;
+            CleanupWorker();
+            return false;
+        }
+    }
+    if (tx_queue_ == nullptr ||
+        xTaskCreateStatic(&TxEntry, "linx_ws_tx", kTxStackWords, this, 5, tx_stack_, tx_tcb_) == nullptr) {
         CleanupWorker();
         return false;
     }

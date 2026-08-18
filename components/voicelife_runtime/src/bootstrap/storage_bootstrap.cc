@@ -12,7 +12,9 @@
 #include "voicelife/storage_sqlite/voicelife_schema.h"
 
 #ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #endif
 
 namespace voicelife::runtime {
@@ -70,11 +72,17 @@ class StorageBootstrap::Impl final {
 #if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_STORAGE_FATFS_RUNTIME
         if (ready_) return Status::Ok();
 
+        ESP_LOGI(kStorageTag, "HEAP_TRACE before_mount free_internal=%u free_total=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                 (unsigned)esp_get_free_heap_size());
         Status status = volume_.Mount();
         if (!status.ok()) {
             ESP_LOGE(kStorageTag, "STORAGE_MOUNT_FAILED: %s", status.message.c_str());
             return WithStage("挂载持久化数据卷失败", status);
         }
+        ESP_LOGI(kStorageTag, "HEAP_TRACE after_mount free_internal=%u free_total=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                 (unsigned)esp_get_free_heap_size());
 
         status = database_.Open();
         if (!status.ok()) {
@@ -82,6 +90,9 @@ class StorageBootstrap::Impl final {
             (void)volume_.Unmount();
             return WithStage("打开持久化 SQLite 失败", status);
         }
+        ESP_LOGI(kStorageTag, "HEAP_TRACE after_open free_internal=%u free_total=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                 (unsigned)esp_get_free_heap_size());
 
         status = storage_sqlite::VoiceLifeSchema::Initialize(database_);
         if (!status.ok()) {
@@ -90,6 +101,9 @@ class StorageBootstrap::Impl final {
             (void)volume_.Unmount();
             return WithStage("检查持久化 SQLite Schema 失败", status);
         }
+        ESP_LOGI(kStorageTag, "HEAP_TRACE after_schema free_internal=%u free_total=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                 (unsigned)esp_get_free_heap_size());
 
         const auto schema_version = storage_sqlite::SqliteSchema::ReadVersion(database_);
         if (!schema_version.ok() || !schema_version.value.has_value()) {

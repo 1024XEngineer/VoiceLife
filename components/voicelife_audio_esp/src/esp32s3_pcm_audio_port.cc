@@ -5,6 +5,7 @@
 #include "es8311_codec_control.h"
 #include "esp32s3_pcm_audio_port_internal.h"
 #ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #endif
 
@@ -272,7 +273,36 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
         input_cv_.notify_all();
         return detail::Unavailable("创建 I2S 采集任务失败");
     }
-    if (xTaskCreate(&DeliveryTaskEntry, "voice_audio_sink", 16384, this, 4, &delivery_task_) != pdPASS) {
+    // 投递任务栈常驻 PSRAM、TCB 在内部 RAM：待机恢复时内部 RAM 最大连续块
+    // 常 <16KB，16384B 动态栈创建必然失败。xTaskCreateStatic 的栈可放 PSRAM
+    // （xPortCheckValidStackMem 允许外部 RAM），但 TCB 必须内部 RAM
+    // （xPortCheckValidTCBMem 断言，调度器临界区依赖内部寻址）。一次性分配、
+    // 跨采集周期复用，不释放（PSRAM 8MB 充裕，随 AudioPorts 生命周期）。
+    constexpr uint32_t kDeliveryStackWords = 16384 / sizeof(StackType_t);
+    if (delivery_stack_ == nullptr || delivery_tcb_ == nullptr) {
+        delivery_stack_ = static_cast<StackType_t*>(
+            heap_caps_malloc(sizeof(StackType_t) * kDeliveryStackWords, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        delivery_tcb_ =
+            static_cast<StaticTask_t*>(heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        if (delivery_stack_ == nullptr || delivery_tcb_ == nullptr) {
+            heap_caps_free(delivery_stack_);
+            heap_caps_free(delivery_tcb_);
+            delivery_stack_ = nullptr;
+            delivery_tcb_ = nullptr;
+            input_running_ = false;
+            if (profile_.topology != AudioBoardTopology::kExternalCodecDuplex) i2s_channel_disable(rx_channel_);
+            input_cv_.notify_all();
+            const bool capture_stopped =
+                done_cv_.wait_for(lock, std::chrono::milliseconds(500), [this]() { return capture_task_ == nullptr; });
+            if (!capture_stopped) {
+                return detail::Unavailable("等待 I2S 采集任务退出超时");
+            }
+            return detail::Unavailable("PSRAM 分配 I2S 音频投递任务失败");
+        }
+    }
+    TaskHandle_t delivery_task = xTaskCreateStatic(&DeliveryTaskEntry, "voice_audio_sink", kDeliveryStackWords, this, 4,
+                                                   delivery_stack_, delivery_tcb_);
+    if (delivery_task == nullptr) {
         input_running_ = false;
         if (profile_.topology != AudioBoardTopology::kExternalCodecDuplex) i2s_channel_disable(rx_channel_);
         input_cv_.notify_all();
@@ -283,6 +313,7 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
         }
         return detail::Unavailable("创建 I2S 音频投递任务失败");
     }
+    delivery_task_ = delivery_task;
     return Status::Ok();
 #endif
 }

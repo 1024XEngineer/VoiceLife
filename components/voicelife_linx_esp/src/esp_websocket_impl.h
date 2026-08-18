@@ -60,7 +60,7 @@ class EspWebSocketTransport::Impl final {
     Impl(SecretResolverPort& secrets, EspWebSocketTransportOptions options)
         : secrets_(secrets), options_(std::move(options)), assembler_(options_.max_message_bytes) {}
 
-    ~Impl() { Close(); }
+    ~Impl();
 
     Status Connect(const linx::LinxConnectionConfig& config, linx::LinxTransportSink sink);
     Status SendText(std::string_view message);
@@ -97,6 +97,13 @@ class EspWebSocketTransport::Impl final {
     QueueHandle_t tx_control_queue_ = nullptr;
     bool tx_queue_uses_caps_ = false;
     TaskHandle_t tx_task_ = nullptr;
+    // linx_ws_tx 任务栈常驻 PSRAM、TCB 在内部 RAM（一次性分配、跨连接复用，随
+    // Transport 生命周期）：交互（采集+音频流）期间内部 RAM 最大连续块常 <16KB，
+    // 16384B 动态任务栈在 WS 断线重连时创建会失败（重连窗口内部 RAM 最紧），把栈
+    // 挪到 PSRAM 腾出 16KB 内部头寸，保证 esp_websocket_client 内建重连任务
+    // （~4KB 栈）能分配。TCB 必须内部 RAM（xPortCheckValidTCBMem 断言）。
+    StackType_t* tx_stack_ = nullptr;
+    StaticTask_t* tx_tcb_ = nullptr;
     EventGroupHandle_t state_events_ = nullptr;
     SemaphoreHandle_t worker_stopped_ = nullptr;
     TaskHandle_t worker_ = nullptr;
