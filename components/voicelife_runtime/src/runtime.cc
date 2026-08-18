@@ -9,6 +9,7 @@
 #include <utility>
 
 #ifdef ESP_PLATFORM
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -632,7 +633,7 @@ class Runtime final {
         InteractionEventItem item{};
         item.board_input = true;
         item.board_action = action;
-        EnqueueInteractionItem(std::move(item));
+        EnqueueInteractionItem(item);
     }
 
     void SetVolume(int volume) {
@@ -911,6 +912,14 @@ class Runtime final {
         }
     }
 
+    /** @brief WakeTask 是板级请求的唯一消费者，恢复时不可向自身队列回投。 */
+    void RestoreStandbyFromWakeTask(bool settle_controller = true) {
+        BoardRequest request{};
+        request.kind = BoardRequestKind::kRestoreStandby;
+        request.settle_controller = settle_controller;
+        RestoreStandby(request);
+    }
+
     static void WakeTaskEntry(void* context) { static_cast<Runtime*>(context)->WakeTask(); }
 
     void WakeTask() {
@@ -922,22 +931,30 @@ class Runtime final {
                 continue;
             }
             if (request.kind == BoardRequestKind::kInterruptAndWakeWord) {
-                if (!session_ || !provider_) continue;
+                if (!session_ || !provider_) {
+                    ESP_LOGW(kTag, "打断确认请求不可用");
+                    RestoreStandbyFromWakeTask();
+                    continue;
+                }
                 const Status acknowledge = session_->InterruptAndNotifyLocalWakeWord(request.wake_word, "收到！");
                 if (!acknowledge.ok()) {
                     ESP_LOGW(kTag, "打断确认请求失败: %s", acknowledge.message.c_str());
-                    QueueStandbyRecovery();
+                    RestoreStandbyFromWakeTask();
                 }
                 continue;
             }
             if (request.kind == BoardRequestKind::kInterrupt) {
-                if (!session_) continue;
+                if (!session_) {
+                    ESP_LOGW(kTag, "板端打断不可用");
+                    RestoreStandbyFromWakeTask();
+                    continue;
+                }
                 const Status interrupt = session_->Interrupt();
                 if (request.system_speech[0] != '\0') {
                     const Status speak = interrupt.ok() ? session_->Speak(request.system_speech) : interrupt;
                     if (!speak.ok()) {
                         ESP_LOGW(kTag, "系统播报请求失败: %s", speak.message.c_str());
-                        QueueStandbyRecovery();
+                        RestoreStandbyFromWakeTask();
                     }
                     continue;
                 }
@@ -945,11 +962,11 @@ class Runtime final {
                     if (interaction_.state() == voice::VoiceInteractionState::kInterrupting) {
                         (void)EnqueueEvent(voice::VoiceInteractionEvent::kInterruptCompleted);
                     } else {
-                        QueueStandbyRecovery();
+                        RestoreStandbyFromWakeTask();
                     }
                 } else {
                     ESP_LOGW(kTag, "板端打断失败: %s", interrupt.message.c_str());
-                    QueueStandbyRecovery();
+                    RestoreStandbyFromWakeTask();
                 }
                 continue;
             }
@@ -981,13 +998,17 @@ class Runtime final {
                     // kFinalizing 表示本轮还在等最终 STT/TTS，不能提前回待机。
                     // 其余（聆听正常结束、超时、按键停止）恢复待机。
                     if (interaction_.state() != voice::VoiceInteractionState::kFinalizing) {
-                        QueueStandbyRecovery();
+                        RestoreStandbyFromWakeTask();
                     }
                 }
                 continue;
             }
             if (request.kind == BoardRequestKind::kInterruptAndStartCapture) {
-                if (!session_) continue;
+                if (!session_) {
+                    ESP_LOGW(kTag, "板级打断后开始采集不可用");
+                    RestoreStandbyFromWakeTask();
+                    continue;
+                }
                 const Status interrupt = session_->Interrupt();
                 const Status capture = interrupt.ok() ? session_->BeginCapture() : interrupt;
                 if (!capture.ok()) {
@@ -997,7 +1018,11 @@ class Runtime final {
                 }
                 continue;
             }
-            if (!session_ || !provider_) continue;
+            if (!session_ || !provider_) {
+                ESP_LOGW(kTag, "本地唤醒确认请求不可用");
+                RestoreStandbyFromWakeTask();
+                continue;
+            }
             // Linx 官方协议支持 listen.detect.text_response：服务端真实合成
             // “收到！”并下发协商 PCM，tts.stop 后 Controller 才开始聆听。
             const Status acknowledge = session_->NotifyLocalWakeWord(request.wake_word, "收到！");
@@ -1530,6 +1555,22 @@ class Runtime final {
         bool board_input = false;
         BoardInputAction board_action = BoardInputAction::kToggleChat;
     };
+    enum class EmergencyEvidenceKind : uint8_t {
+        kCaptureStarted = 0,
+        kInterruptAcknowledged = 1,
+    };
+    static constexpr std::size_t kInteractionEventCount =
+        static_cast<std::size_t>(voice::VoiceInteractionEvent::kFailure) + 1U;
+    struct EmergencyStateEvent {
+        bool pending = false;
+        uint64_t sequence = 0;
+        std::string wake_word;
+    };
+    struct EmergencyEvidenceEvent {
+        bool pending = false;
+        uint64_t sequence = 0;
+        voice::VoiceEvidence evidence;
+    };
     // State-driving events must never be evicted by display text or telemetry.
     // Both queues are bounded: the event loop owns all state mutation, while
     // producers remain non-blocking on real-time callback paths.
@@ -1537,6 +1578,11 @@ class Runtime final {
     static constexpr std::size_t kBestEffortEventQueueCapacity = 4;
     std::deque<InteractionEventItem> control_event_queue_;
     std::deque<InteractionEventItem> best_effort_event_queue_;
+    // 满载时不分配、不等待的状态事实通道。按类型合并重复事件，保留最新
+    // wake word/evidence；正常队列恢复后由事件循环按投递顺序优先消费。
+    std::array<EmergencyStateEvent, kInteractionEventCount> emergency_state_events_{};
+    std::array<EmergencyEvidenceEvent, 2> emergency_evidence_events_{};
+    uint64_t emergency_event_sequence_ = 0;
     std::atomic<uint32_t> dropped_control_events_{0};
     std::atomic<uint32_t> dropped_best_effort_events_{0};
     std::atomic<uint32_t> dropped_board_requests_{0};
@@ -1566,8 +1612,89 @@ class Runtime final {
                item.evidence.event == "stopped";
     }
 
+    [[nodiscard]] static std::optional<EmergencyEvidenceKind> EmergencyEvidenceKindFor(
+        const voice::VoiceEvidence& evidence) {
+        if (evidence.event == "capture_started") return EmergencyEvidenceKind::kCaptureStarted;
+        if (evidence.event == "interrupt_ack_requested") return EmergencyEvidenceKind::kInterruptAcknowledged;
+        return std::nullopt;
+    }
+
+    [[nodiscard]] bool HasEmergencyEventLocked() const {
+        return std::any_of(emergency_state_events_.begin(), emergency_state_events_.end(),
+                           [](const EmergencyStateEvent& item) { return item.pending; }) ||
+               std::any_of(emergency_evidence_events_.begin(), emergency_evidence_events_.end(),
+                           [](const EmergencyEvidenceEvent& item) { return item.pending; });
+    }
+
+    bool EnqueueEmergencyEvent(voice::VoiceInteractionEvent event, std::string wake_word) {
+        const std::size_t index = static_cast<std::size_t>(event);
+        if (index >= emergency_state_events_.size()) return false;
+        {
+            std::lock_guard<std::mutex> lock(event_mutex_);
+            auto& item = emergency_state_events_[index];
+            item.pending = true;
+            item.sequence = ++emergency_event_sequence_;
+            item.wake_word = std::move(wake_word);
+        }
+        event_cv_.notify_one();
+        return true;
+    }
+
+    bool EnqueueEmergencyEvidence(InteractionEventItem item) {
+        const auto kind = EmergencyEvidenceKindFor(item.evidence);
+        if (!kind.has_value()) return false;
+        {
+            std::lock_guard<std::mutex> lock(event_mutex_);
+            auto& pending = emergency_evidence_events_[static_cast<std::size_t>(*kind)];
+            pending.pending = true;
+            pending.sequence = ++emergency_event_sequence_;
+            pending.evidence = std::move(item.evidence);
+        }
+        event_cv_.notify_one();
+        return true;
+    }
+
+    bool PopEmergencyEventLocked(InteractionEventItem* destination) {
+        std::optional<std::size_t> state_index;
+        std::optional<std::size_t> evidence_index;
+        uint64_t earliest_sequence = UINT64_MAX;
+        for (std::size_t index = 0; index < emergency_state_events_.size(); ++index) {
+            const auto& pending = emergency_state_events_[index];
+            if (pending.pending && pending.sequence < earliest_sequence) {
+                state_index = index;
+                evidence_index.reset();
+                earliest_sequence = pending.sequence;
+            }
+        }
+        for (std::size_t index = 0; index < emergency_evidence_events_.size(); ++index) {
+            const auto& pending = emergency_evidence_events_[index];
+            if (pending.pending && pending.sequence < earliest_sequence) {
+                state_index.reset();
+                evidence_index = index;
+                earliest_sequence = pending.sequence;
+            }
+        }
+        if (state_index.has_value()) {
+            auto& pending = emergency_state_events_[*state_index];
+            destination->event = static_cast<voice::VoiceInteractionEvent>(*state_index);
+            destination->wake_word = std::move(pending.wake_word);
+            pending.pending = false;
+            pending.sequence = 0;
+            return true;
+        }
+        if (evidence_index.has_value()) {
+            auto& pending = emergency_evidence_events_[*evidence_index];
+            destination->voice_evidence = true;
+            destination->evidence = std::move(pending.evidence);
+            pending.pending = false;
+            pending.sequence = 0;
+            return true;
+        }
+        return false;
+    }
+
     /** @brief 非阻塞投递：控制事件独立于显示/诊断背压，并优先被消费。 */
-    bool EnqueueInteractionItem(InteractionEventItem item) {
+    bool EnqueueInteractionItem(InteractionEventItem& item) {
         const bool best_effort = IsBestEffortEvent(item);
         {
             std::lock_guard<std::mutex> lock(event_mutex_);
@@ -1594,7 +1721,8 @@ class Runtime final {
         InteractionEventItem item{};
         item.event = event;
         item.wake_word = std::string(wake_word);
-        return EnqueueInteractionItem(std::move(item));
+        if (EnqueueInteractionItem(item)) return true;
+        return EnqueueEmergencyEvent(event, std::move(item.wake_word));
     }
 
     /** @brief 投递纯显示刷新（TTS 文本等，事件循环内应用，不触发状态机）。 */
@@ -1602,7 +1730,7 @@ class Runtime final {
         InteractionEventItem item{};
         item.display_only = true;
         item.display_text = std::move(detail);
-        EnqueueInteractionItem(std::move(item));
+        EnqueueInteractionItem(item);
     }
 
     /** @brief 投递启动/错误/overlay 等系统语义；不携带硬件资源或原始数据。 */
@@ -1613,21 +1741,21 @@ class Runtime final {
         item.display_mood = mood;
         item.display_status = std::string(status);
         item.display_content = std::string(content);
-        EnqueueInteractionItem(std::move(item));
+        EnqueueInteractionItem(item);
     }
 
     void EnqueueBindingResult(const im::BindingResult& result) {
         InteractionEventItem item{};
         item.binding_result = true;
         item.binding = result;
-        EnqueueInteractionItem(std::move(item));
+        EnqueueInteractionItem(item);
     }
 
     void EnqueueBindingReset(uint64_t generation) {
         InteractionEventItem item{};
         item.binding_reset = true;
         item.binding_generation = generation;
-        EnqueueInteractionItem(std::move(item));
+        EnqueueInteractionItem(item);
     }
 
     void CancelBindingTerminalDisplay() {
@@ -1749,20 +1877,23 @@ class Runtime final {
         InteractionEventItem item{};
         item.voice_evidence = true;
         item.evidence = evidence;
-        EnqueueInteractionItem(std::move(item));
+        if (EnqueueInteractionItem(item)) return;
+        if (!EnqueueEmergencyEvidence(std::move(item))) {
+            ESP_LOGW(kTag, "VOICE_EVIDENCE_DROPPED event=%s", evidence.event.c_str());
+        }
     }
 
     void EnqueueListenTimeout() {
         InteractionEventItem item{};
         item.listen_timeout = true;
-        EnqueueInteractionItem(std::move(item));
+        EnqueueInteractionItem(item);
     }
 
     void EnqueueNetworkState(bool connected) {
         InteractionEventItem item{};
         item.network_update = true;
         item.network_connected = connected;
-        EnqueueInteractionItem(std::move(item));
+        EnqueueInteractionItem(item);
     }
 
     /** @brief 事件循环任务入口（唯一调用 HandleInteractionEvent 的线程）。 */
@@ -1776,12 +1907,15 @@ class Runtime final {
             {
                 std::unique_lock<std::mutex> lock(event_mutex_);
                 event_cv_.wait_for(lock, std::chrono::milliseconds(200), [this] {
-                    return event_loop_stop_ || !control_event_queue_.empty() || !best_effort_event_queue_.empty();
+                    return event_loop_stop_ || HasEmergencyEventLocked() || !control_event_queue_.empty() ||
+                           !best_effort_event_queue_.empty();
                 });
-                if (event_loop_stop_ && control_event_queue_.empty() && best_effort_event_queue_.empty()) {
+                if (event_loop_stop_ && !HasEmergencyEventLocked() && control_event_queue_.empty() &&
+                    best_effort_event_queue_.empty()) {
                     break;
                 }
-                if (control_event_queue_.empty() && best_effort_event_queue_.empty()) {
+                const bool has_emergency_event = PopEmergencyEventLocked(&item);
+                if (!has_emergency_event && control_event_queue_.empty() && best_effort_event_queue_.empty()) {
                     // 超时轮询：处理短暂显示的到期刷新（不依赖 timer 直接提交）。
                     ClearExpiredWakeAck();
                     ClearExpiredBindingTerminalDisplay();
@@ -1795,9 +1929,11 @@ class Runtime final {
                     }
                     continue;
                 }
-                auto& queue = !control_event_queue_.empty() ? control_event_queue_ : best_effort_event_queue_;
-                item = std::move(queue.front());
-                queue.pop_front();
+                if (!has_emergency_event) {
+                    auto& queue = !control_event_queue_.empty() ? control_event_queue_ : best_effort_event_queue_;
+                    item = std::move(queue.front());
+                    queue.pop_front();
+                }
             }
             // provider_error 等事件持续占满队列时，终态租约仍必须按时收口。
             ClearExpiredBindingTerminalDisplay();
