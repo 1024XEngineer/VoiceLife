@@ -685,6 +685,35 @@ void CheckRuleRepositoryStepFailures() {
     }
 }
 
+/**
+ * @brief 验证删除未来例外时不会误删历史例外。
+ * @param path 临时数据库路径。
+ * @return 无。
+ */
+void CheckDeleteFutureKeepsPastException(const std::filesystem::path& path) {
+    SqliteDatabase database(path.string());
+    Check(database.Open().ok(), "DeleteFuture 测试应打开数据库");
+    SqliteScheduleRuleRepository repository(database);
+    Check(repository.Initialize().ok(), "DeleteFuture 测试应初始化表结构");
+
+    const auto created = repository.Insert(DailyRule());
+    Check(created.ok(), "DeleteFuture 测试应创建规则");
+    const ScheduleRuleId rule_id = created.value->id;
+    const DateTime cutoff = DateTime{std::chrono::seconds{4'071'258'000}};
+
+    ScheduleException past = ModifyException(rule_id);
+    past.original_start_time = DateTime{std::chrono::seconds{4'071'254'400}};
+    ScheduleException future = ModifyException(rule_id);
+    future.original_start_time = cutoff;
+    Check(repository.Upsert(past).ok() && repository.Upsert(future).ok(), "DeleteFuture 测试应写入前后两个例外");
+
+    Check(repository.DeleteFuture(rule_id, cutoff).ok(), "DeleteFuture 应成功删除截止时间之后的例外");
+    const auto remaining = repository.FindByRule(rule_id);
+    Check(remaining.ok() && remaining.value->size() == 1 &&
+              remaining.value->front().original_start_time == past.original_start_time,
+          "DeleteFuture 不应删除截止时间之前的历史例外");
+}
+
 }  // namespace
 
 /**
@@ -782,5 +811,7 @@ int main() {
     CheckRuleRepositorySqlFailures();
     CheckRuleRepositoryDeleteFailures();
     CheckRuleRepositoryStepFailures();
+    const TemporaryDatabaseFile delete_future_file = MakeTemporaryDatabaseFile();
+    CheckDeleteFutureKeepsPastException(delete_future_file.path);
     return 0;
 }
