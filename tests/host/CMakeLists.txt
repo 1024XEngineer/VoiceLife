@@ -145,6 +145,9 @@ endif()
 add_voicelife_library(storage_fatfs voicelife_storage_fatfs
     "${ROOT_DIR}/components/voicelife_storage_fatfs/src/fatfs_volume.cc")
 target_link_libraries(storage_fatfs PUBLIC contracts)
+add_voicelife_library(storage_memory voicelife_storage_memory
+    "${ROOT_DIR}/components/voicelife_storage_memory/src/memory_schedule_repository.cc")
+target_link_libraries(storage_memory PUBLIC contracts schedule Threads::Threads)
 add_voicelife_library(audio_esp voicelife_audio_esp
     "${ROOT_DIR}/components/voicelife_audio_esp/src/audio_board_profile.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_audio_probe.cc"
@@ -254,6 +257,10 @@ target_link_libraries(timing_esp_runtime_contract_test PRIVATE timing_esp)
 add_voicelife_test(fatfs_volume_contract_test "unit;storage;fatfs"
     "${ROOT_DIR}/components/voicelife_storage_fatfs/test/fatfs_volume_contract_test.cc")
 target_link_libraries(fatfs_volume_contract_test PRIVATE storage_fatfs)
+
+add_voicelife_test(memory_schedule_repository_test "unit;storage;memory"
+    "${ROOT_DIR}/components/voicelife_storage_memory/test/memory_schedule_repository_test.cc")
+target_link_libraries(memory_schedule_repository_test PRIVATE storage_memory schedule)
 
 add_voicelife_test(mcp_server_test "unit;mcp"
     "${ROOT_DIR}/components/voicelife_mcp/test/mcp_server_test.cc")
