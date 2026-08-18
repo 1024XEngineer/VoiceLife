@@ -49,7 +49,9 @@
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
 #include "mcp_worker_policy.h"
+#include "voicelife/application/interaction_orchestrator.h"
 #include "voicelife/mcp/schedule_mcp_tools.h"
+#include "voicelife/runtime_esp/esp_interaction_task_host.h"
 #include "voicelife/voice/display_snapshot.h"
 #include "voicelife/voice/voice_interaction_controller.h"
 #include "voicelife/voice/voice_ports.h"
@@ -1962,6 +1964,9 @@ class Runtime final {
     ScaffoldAudioInput audio_input_;
     ScaffoldAudioOutput audio_output_;
 #endif
+    // 仅完成依赖装配，现有事件循环尚未迁移到该路径。
+    application::InteractionOrchestrator interaction_orchestrator_;
+    runtime_esp::EspInteractionTaskHost interaction_task_host_{interaction_orchestrator_};
     voice::VoiceInteractionController interaction_;
     std::unique_ptr<voice::SpeechProviderAdapter> provider_;
     std::unique_ptr<voice::VoiceSession> session_;
