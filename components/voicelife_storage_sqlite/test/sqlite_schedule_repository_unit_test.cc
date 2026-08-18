@@ -610,8 +610,9 @@ void CheckUndoTransactionFailureBranches() {
         op.schedule_event = "撤销停用失败操作";
         const auto saved = repository.InsertOperation(op);
         Check(saved.ok(), "应保存撤销停用失败操作");
-        Check(database.Execute("CREATE TRIGGER reject_operation_update BEFORE UPDATE ON operation_record "
-                               "BEGIN SELECT RAISE(ABORT, 'operation update blocked'); END")
+        Check(database
+                  .Execute("CREATE TRIGGER reject_operation_update BEFORE UPDATE ON operation_record "
+                           "BEGIN SELECT RAISE(ABORT, 'operation update blocked'); END")
                   .ok(),
               "应创建操作记录更新拒绝触发器");
         Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kAlreadyExists,
@@ -635,8 +636,9 @@ void CheckUndoTransactionFailureBranches() {
         op.schedule_event = "撤销停用无变化操作";
         const auto saved = repository.InsertOperation(op);
         Check(saved.ok(), "应保存撤销停用无变化操作");
-        Check(database.Execute("CREATE TRIGGER ignore_operation_update BEFORE UPDATE ON operation_record "
-                               "BEGIN SELECT RAISE(IGNORE); END")
+        Check(database
+                  .Execute("CREATE TRIGGER ignore_operation_update BEFORE UPDATE ON operation_record "
+                           "BEGIN SELECT RAISE(IGNORE); END")
                   .ok(),
               "应创建操作记录更新忽略触发器");
         Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kConflict,
@@ -660,8 +662,9 @@ void CheckUndoTransactionFailureBranches() {
         op.schedule_event = "撤销写入记录失败操作";
         const auto saved = repository.InsertOperation(op);
         Check(saved.ok(), "应保存撤销写入记录失败操作");
-        Check(database.Execute("CREATE TRIGGER reject_operation_insert BEFORE INSERT ON operation_record "
-                               "BEGIN SELECT RAISE(ABORT, 'operation insert blocked'); END")
+        Check(database
+                  .Execute("CREATE TRIGGER reject_operation_insert BEFORE INSERT ON operation_record "
+                           "BEGIN SELECT RAISE(ABORT, 'operation insert blocked'); END")
                   .ok(),
               "应创建操作记录插入拒绝触发器");
         Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kAlreadyExists,

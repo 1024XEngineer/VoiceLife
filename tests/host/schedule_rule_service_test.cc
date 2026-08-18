@@ -527,49 +527,49 @@ int main() {
 
     // update_schedule_occurrence：非法规则标识。
     Check(service.update_schedule_occurrence({
-              .rule_id = 0,
-              .original_start_time = At(UtcAtLocal(2099, 1, 6, 9)),
-              .event = std::optional<std::string>{"x"},
-              .start_time = std::nullopt,
-              .end_time = std::nullopt,
-              .location = std::nullopt,
-              .notes = std::nullopt,
-          })
-              .status.code == ErrorCode::kInvalidArgument,
+                                                 .rule_id = 0,
+                                                 .original_start_time = At(UtcAtLocal(2099, 1, 6, 9)),
+                                                 .event = std::optional<std::string>{"x"},
+                                                 .start_time = std::nullopt,
+                                                 .end_time = std::nullopt,
+                                                 .location = std::nullopt,
+                                                 .notes = std::nullopt,
+                                             })
+                  .status.code == ErrorCode::kInvalidArgument,
           "非法规则标识的 occurrence.update 应被拒绝");
 
     // update_schedule_occurrence：不存在规则。
     Check(service.update_schedule_occurrence({
-              .rule_id = 999999,
-              .original_start_time = At(UtcAtLocal(2099, 1, 6, 9)),
-              .event = std::optional<std::string>{"x"},
-              .start_time = std::nullopt,
-              .end_time = std::nullopt,
-              .location = std::nullopt,
-              .notes = std::nullopt,
-          })
-              .status.code == ErrorCode::kNotFound,
+                                                 .rule_id = 999999,
+                                                 .original_start_time = At(UtcAtLocal(2099, 1, 6, 9)),
+                                                 .event = std::optional<std::string>{"x"},
+                                                 .start_time = std::nullopt,
+                                                 .end_time = std::nullopt,
+                                                 .location = std::nullopt,
+                                                 .notes = std::nullopt,
+                                             })
+                  .status.code == ErrorCode::kNotFound,
           "修改不存在规则的单次应返回未找到");
 
     // update_schedule_occurrence：未提供任何修改字段。
     Check(service.update_schedule_occurrence({
-              .rule_id = created.rule->id,
-              .original_start_time = At(UtcAtLocal(2099, 1, 6, 9)),
-              .event = std::nullopt,
-              .start_time = std::nullopt,
-              .end_time = std::nullopt,
-              .location = std::nullopt,
-              .notes = std::nullopt,
-          })
-              .status.code == ErrorCode::kInvalidArgument,
+                                                 .rule_id = created.rule->id,
+                                                 .original_start_time = At(UtcAtLocal(2099, 1, 6, 9)),
+                                                 .event = std::nullopt,
+                                                 .start_time = std::nullopt,
+                                                 .end_time = std::nullopt,
+                                                 .location = std::nullopt,
+                                                 .notes = std::nullopt,
+                                             })
+                  .status.code == ErrorCode::kInvalidArgument,
           "未提供修改字段的 occurrence.update 应被拒绝");
 
     // skip：非法规则标识。
     Check(service.skip_schedule_occurrence({
-              .rule_id = 0,
-              .original_start_time = At(UtcAtLocal(2099, 1, 7, 9)),
-          })
-              .status.code == ErrorCode::kInvalidArgument,
+                                               .rule_id = 0,
+                                               .original_start_time = At(UtcAtLocal(2099, 1, 7, 9)),
+                                           })
+                  .status.code == ErrorCode::kInvalidArgument,
           "非法规则标识的 skip 应被拒绝");
 
     // generate_next：非法规则标识与不存在规则。
@@ -672,125 +672,131 @@ int main() {
         // query：FindAll 失败。
         err_rules.fail_find_all_ = voicelife::Status::Error(ErrorCode::kUnavailable, "规则仓储不可用");
         Check(err_service
-                  .query_schedule_rules({.rule_id = std::nullopt, .keyword = std::nullopt,
-                                         .status = ScheduleStatusFilter::kAll, .limit = 10, .offset = 0})
-                  .status.code == ErrorCode::kUnavailable,
+                      .query_schedule_rules({.rule_id = std::nullopt,
+                                             .keyword = std::nullopt,
+                                             .status = ScheduleStatusFilter::kAll,
+                                             .limit = 10,
+                                             .offset = 0})
+                      .status.code == ErrorCode::kUnavailable,
               "query 应透传 FindAll 错误");
 
         // query：例外 FindByRule 失败。
         err_exceptions.fail_find_by_rule_ = voicelife::Status::Error(ErrorCode::kUnavailable, "例外仓储不可用");
         Check(err_service
-                  .query_schedule_rules({.rule_id = err_created.rule->id, .keyword = std::nullopt,
-                                         .status = ScheduleStatusFilter::kAll, .limit = 10, .offset = 0})
-                  .status.code == ErrorCode::kUnavailable,
+                      .query_schedule_rules({.rule_id = err_created.rule->id,
+                                             .keyword = std::nullopt,
+                                             .status = ScheduleStatusFilter::kAll,
+                                             .limit = 10,
+                                             .offset = 0})
+                      .status.code == ErrorCode::kUnavailable,
               "query 应透传例外 FindByRule 错误");
 
         // update：FindOverlapping 失败。
         err_schedules.FailNextFindOverlapping(voicelife::Status::Error(ErrorCode::kUnavailable, "读取现有日程失败"));
         Check(err_service
-                  .update_schedule_rule({.rule_id = err_created.rule->id,
-                                         .event = std::optional<std::string>{"改"},
-                                         .location = std::nullopt,
-                                         .notes = std::nullopt,
-                                         .freq_type = std::nullopt,
-                                         .interval_val = std::nullopt,
-                                         .weekdays_mask = std::nullopt,
-                                         .day_of_month = std::nullopt,
-                                         .month_of_year = std::nullopt,
-                                         .monthly_mode = std::nullopt,
-                                         .start_time = std::nullopt,
-                                         .start_date = std::nullopt,
-                                         .end_time = std::nullopt,
-                                         .end_date = std::nullopt,
-                                         .occurrence_count = std::nullopt})
-                  .status.code == ErrorCode::kUnavailable,
+                      .update_schedule_rule({.rule_id = err_created.rule->id,
+                                             .event = std::optional<std::string>{"改"},
+                                             .location = std::nullopt,
+                                             .notes = std::nullopt,
+                                             .freq_type = std::nullopt,
+                                             .interval_val = std::nullopt,
+                                             .weekdays_mask = std::nullopt,
+                                             .day_of_month = std::nullopt,
+                                             .month_of_year = std::nullopt,
+                                             .monthly_mode = std::nullopt,
+                                             .start_time = std::nullopt,
+                                             .start_date = std::nullopt,
+                                             .end_time = std::nullopt,
+                                             .end_date = std::nullopt,
+                                             .occurrence_count = std::nullopt})
+                      .status.code == ErrorCode::kUnavailable,
               "update 应透传 FindOverlapping 错误");
 
         // update：UpdateAndRebuild 失败。
         err_rules.fail_update_rebuild_ = voicelife::Status::Error(ErrorCode::kInternal, "重建事务失败");
         Check(err_service
-                  .update_schedule_rule({.rule_id = err_created.rule->id,
-                                         .event = std::optional<std::string>{"改"},
-                                         .location = std::nullopt,
-                                         .notes = std::nullopt,
-                                         .freq_type = std::nullopt,
-                                         .interval_val = std::nullopt,
-                                         .weekdays_mask = std::nullopt,
-                                         .day_of_month = std::nullopt,
-                                         .month_of_year = std::nullopt,
-                                         .monthly_mode = std::nullopt,
-                                         .start_time = std::nullopt,
-                                         .start_date = std::nullopt,
-                                         .end_time = std::nullopt,
-                                         .end_date = std::nullopt,
-                                         .occurrence_count = std::nullopt})
-                  .status.code == ErrorCode::kInternal,
+                      .update_schedule_rule({.rule_id = err_created.rule->id,
+                                             .event = std::optional<std::string>{"改"},
+                                             .location = std::nullopt,
+                                             .notes = std::nullopt,
+                                             .freq_type = std::nullopt,
+                                             .interval_val = std::nullopt,
+                                             .weekdays_mask = std::nullopt,
+                                             .day_of_month = std::nullopt,
+                                             .month_of_year = std::nullopt,
+                                             .monthly_mode = std::nullopt,
+                                             .start_time = std::nullopt,
+                                             .start_date = std::nullopt,
+                                             .end_time = std::nullopt,
+                                             .end_date = std::nullopt,
+                                             .occurrence_count = std::nullopt})
+                      .status.code == ErrorCode::kInternal,
               "update 应透传 UpdateAndRebuild 错误");
 
         // update_schedule_occurrence：例外 FindByRuleAndTime 失败。
         err_exceptions.fail_find_by_rule_and_time_ = voicelife::Status::Error(ErrorCode::kUnavailable, "例外查询失败");
         Check(err_service
-                  .update_schedule_occurrence({.rule_id = err_created.rule->id,
-                                               .original_start_time = At(UtcAtLocal(2099, 3, 2, 9)),
-                                               .event = std::optional<std::string>{"改"},
-                                               .start_time = std::nullopt,
-                                               .end_time = std::nullopt,
-                                               .location = std::nullopt,
-                                               .notes = std::nullopt,
-                                               .ignore_conflict = false})
-                  .status.code == ErrorCode::kUnavailable,
+                      .update_schedule_occurrence({.rule_id = err_created.rule->id,
+                                                   .original_start_time = At(UtcAtLocal(2099, 3, 2, 9)),
+                                                   .event = std::optional<std::string>{"改"},
+                                                   .start_time = std::nullopt,
+                                                   .end_time = std::nullopt,
+                                                   .location = std::nullopt,
+                                                   .notes = std::nullopt,
+                                                   .ignore_conflict = false})
+                      .status.code == ErrorCode::kUnavailable,
               "occurrence.update 应透传例外查询错误");
 
         // update_schedule_occurrence：物化实例查询失败。
         err_schedules.FailNextFind(voicelife::Status::Error(ErrorCode::kUnavailable, "日程查询失败"));
         Check(err_service
-                  .update_schedule_occurrence({.rule_id = err_created.rule->id,
-                                               .original_start_time = At(UtcAtLocal(2099, 3, 2, 9)),
-                                               .event = std::optional<std::string>{"改"},
-                                               .start_time = std::nullopt,
-                                               .end_time = std::nullopt,
-                                               .location = std::nullopt,
-                                               .notes = std::nullopt,
-                                               .ignore_conflict = false})
-                  .status.code == ErrorCode::kUnavailable,
+                      .update_schedule_occurrence({.rule_id = err_created.rule->id,
+                                                   .original_start_time = At(UtcAtLocal(2099, 3, 2, 9)),
+                                                   .event = std::optional<std::string>{"改"},
+                                                   .start_time = std::nullopt,
+                                                   .end_time = std::nullopt,
+                                                   .location = std::nullopt,
+                                                   .notes = std::nullopt,
+                                                   .ignore_conflict = false})
+                      .status.code == ErrorCode::kUnavailable,
               "occurrence.update 应透传物化实例查询错误");
 
         // update_schedule_occurrence：Upsert 失败。
         err_exceptions.fail_upsert_ = voicelife::Status::Error(ErrorCode::kInternal, "例外写入失败");
         Check(err_service
-                  .update_schedule_occurrence({.rule_id = err_created.rule->id,
-                                               .original_start_time = At(UtcAtLocal(2099, 3, 2, 9)),
-                                               .event = std::optional<std::string>{"改"},
-                                               .start_time = std::nullopt,
-                                               .end_time = std::nullopt,
-                                               .location = std::nullopt,
-                                               .notes = std::nullopt,
-                                               .ignore_conflict = false})
-                  .status.code == ErrorCode::kInternal,
+                      .update_schedule_occurrence({.rule_id = err_created.rule->id,
+                                                   .original_start_time = At(UtcAtLocal(2099, 3, 2, 9)),
+                                                   .event = std::optional<std::string>{"改"},
+                                                   .start_time = std::nullopt,
+                                                   .end_time = std::nullopt,
+                                                   .location = std::nullopt,
+                                                   .notes = std::nullopt,
+                                                   .ignore_conflict = false})
+                      .status.code == ErrorCode::kInternal,
               "occurrence.update 应透传 Upsert 错误");
 
         // skip：例外查询失败。
         err_exceptions.fail_find_by_rule_and_time_ = voicelife::Status::Error(ErrorCode::kUnavailable, "例外查询失败");
         Check(err_service
-                  .skip_schedule_occurrence({.rule_id = err_created.rule->id,
-                                             .original_start_time = At(UtcAtLocal(2099, 3, 4, 9))})
-                  .status.code == ErrorCode::kUnavailable,
+                      .skip_schedule_occurrence(
+                          {.rule_id = err_created.rule->id, .original_start_time = At(UtcAtLocal(2099, 3, 4, 9))})
+                      .status.code == ErrorCode::kUnavailable,
               "skip 应透传例外查询错误");
 
         // skip：物化实例查询失败。
         err_schedules.FailNextFind(voicelife::Status::Error(ErrorCode::kUnavailable, "日程查询失败"));
         Check(err_service
-                  .skip_schedule_occurrence({.rule_id = err_created.rule->id,
-                                             .original_start_time = At(UtcAtLocal(2099, 3, 4, 9))})
-                  .status.code == ErrorCode::kUnavailable,
+                      .skip_schedule_occurrence(
+                          {.rule_id = err_created.rule->id, .original_start_time = At(UtcAtLocal(2099, 3, 4, 9))})
+                      .status.code == ErrorCode::kUnavailable,
               "skip 应透传物化实例查询错误");
 
         // skip：Upsert 失败。
         err_exceptions.fail_upsert_ = voicelife::Status::Error(ErrorCode::kInternal, "例外写入失败");
         Check(err_service
-                  .skip_schedule_occurrence({.rule_id = err_created.rule->id,
-                                             .original_start_time = At(UtcAtLocal(2099, 3, 4, 9))})
-                  .status.code == ErrorCode::kInternal,
+                      .skip_schedule_occurrence(
+                          {.rule_id = err_created.rule->id, .original_start_time = At(UtcAtLocal(2099, 3, 4, 9))})
+                      .status.code == ErrorCode::kInternal,
               "skip 应透传 Upsert 错误");
 
         // generate_next：例外查询失败。
@@ -818,7 +824,8 @@ int main() {
         linked_exception.type = ExceptionType::kModify;
         linked_exception.schedule_id = 9001;
         err_exceptions.exceptions.push_back(linked_exception);
-        const auto generated_past_linked = err_service.generate_next_schedule_instance({.rule_id = err_created.rule->id});
+        const auto generated_past_linked =
+            err_service.generate_next_schedule_instance({.rule_id = err_created.rule->id});
         Check(generated_past_linked.status.ok() && generated_past_linked.schedule.has_value() &&
                   generated_past_linked.schedule->start_time == At(UtcAtLocal(2099, 3, 3, 9)),
               "generate_next 应跳过带 schedule_id 的例外并生成下一发生时间");

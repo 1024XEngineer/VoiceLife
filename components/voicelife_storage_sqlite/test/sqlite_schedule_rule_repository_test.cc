@@ -191,8 +191,8 @@ void CheckFullRuleRoundTrip(const std::filesystem::path& path) {
     const auto with_end_date = repository.Insert(FullRuleWithEndDate());
     Check(with_end_date.ok() && with_end_date.value->id > 0, "带结束日期的完整规则应插入成功");
     const auto loaded_end_date = repository.FindById(with_end_date.value->id);
-    Check(loaded_end_date.ok() && loaded_end_date.value->location == "会议室" && loaded_end_date.value->notes == "复盘" &&
-              loaded_end_date.value->weekdays_mask == uint8_t{1} &&
+    Check(loaded_end_date.ok() && loaded_end_date.value->location == "会议室" &&
+              loaded_end_date.value->notes == "复盘" && loaded_end_date.value->weekdays_mask == uint8_t{1} &&
               loaded_end_date.value->day_of_month == uint8_t{15} &&
               loaded_end_date.value->month_of_year == uint8_t{6} &&
               loaded_end_date.value->monthly_mode == voicelife::schedule::MonthlyMode::kSpecificDay &&
@@ -653,8 +653,9 @@ void CheckRuleRepositoryStepFailures() {
         Check(repository.Initialize().ok(), "删除未来日程执行失败分支应初始化表结构");
         const auto created = repository.CreateWithFirstInstance(DailyRule(), FirstInstance(0));
         Check(created.ok(), "删除未来日程执行失败分支应创建基准规则");
-        Check(database.Execute("CREATE TRIGGER reject_schedule_delete BEFORE DELETE ON schedule "
-                               "BEGIN SELECT RAISE(ABORT, 'schedule delete blocked'); END")
+        Check(database
+                  .Execute("CREATE TRIGGER reject_schedule_delete BEFORE DELETE ON schedule "
+                           "BEGIN SELECT RAISE(ABORT, 'schedule delete blocked'); END")
                   .ok(),
               "应创建日程删除拒绝触发器");
         ScheduleRule update = *created.value;
@@ -672,8 +673,9 @@ void CheckRuleRepositoryStepFailures() {
         const auto created = repository.CreateWithFirstInstance(DailyRule(), std::nullopt);
         Check(created.ok(), "删除未来例外执行失败分支应创建基准规则");
         Check(repository.Upsert(ModifyException(created.value->id)).ok(), "删除未来例外执行失败分支应写入例外");
-        Check(database.Execute("CREATE TRIGGER reject_future_exception_delete BEFORE DELETE ON schedule_rule_exception "
-                               "BEGIN SELECT RAISE(ABORT, 'future exception delete blocked'); END")
+        Check(database
+                  .Execute("CREATE TRIGGER reject_future_exception_delete BEFORE DELETE ON schedule_rule_exception "
+                           "BEGIN SELECT RAISE(ABORT, 'future exception delete blocked'); END")
                   .ok(),
               "应创建未来例外删除拒绝触发器");
         ScheduleRule update = *created.value;

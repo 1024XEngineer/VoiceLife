@@ -350,7 +350,8 @@ int main() {
         .name = "schedule.update",
         .arguments = {{"schedule_id", int64_t{1}}, {"event", std::string("评审 Linx（改）")}},
     });
-    Check(update_schedule.status.ok() && OutputString(update_schedule, "status") == "success", "按 schedule_id 更新应成功");
+    Check(update_schedule.status.ok() && OutputString(update_schedule, "status") == "success",
+          "按 schedule_id 更新应成功");
 
     // schedule.update：按 schedule_id 修改时非法开始时间应失败。
     const auto update_bad_start = server.call({
@@ -438,7 +439,8 @@ int main() {
         .name = "schedule.delete",
         .arguments = {{"schedule_id", int64_t{2}}},
     });
-    Check(delete_schedule.status.ok() && OutputString(delete_schedule, "status") == "success", "按 schedule_id 删除应成功");
+    Check(delete_schedule.status.ok() && OutputString(delete_schedule, "status") == "success",
+          "按 schedule_id 删除应成功");
 
     // schedule.delete：按 rule_id + original_start_time 删除未来单次。
     const auto delete_occurrence = server.call({
@@ -446,7 +448,8 @@ int main() {
         .name = "schedule.delete",
         .arguments = {{"rule_id", int64_t{600}}, {"original_start_time", std::string("2099-01-07 09:00:00")}},
     });
-    Check(delete_occurrence.status.ok() && OutputString(delete_occurrence, "status") == "success", "删除未来单次应成功");
+    Check(delete_occurrence.status.ok() && OutputString(delete_occurrence, "status") == "success",
+          "删除未来单次应成功");
 
     // schedule.delete：按 rule_id 取消整条规则。
     const auto delete_rule = server.call({
