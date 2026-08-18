@@ -300,9 +300,8 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
             return detail::Unavailable("PSRAM 分配 I2S 音频投递任务失败");
         }
     }
-    TaskHandle_t delivery_task =
-        xTaskCreateStatic(&DeliveryTaskEntry, "voice_audio_sink", kDeliveryStackWords, this, 4, delivery_stack_,
-                          delivery_tcb_);
+    TaskHandle_t delivery_task = xTaskCreateStatic(&DeliveryTaskEntry, "voice_audio_sink", kDeliveryStackWords, this, 4,
+                                                   delivery_stack_, delivery_tcb_);
     if (delivery_task == nullptr) {
         input_running_ = false;
         if (profile_.topology != AudioBoardTopology::kExternalCodecDuplex) i2s_channel_disable(rx_channel_);
