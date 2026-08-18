@@ -244,6 +244,12 @@ class Runtime final {
             ShowDisplay(voice::VoiceMood::kSad, "错误", "");
             return fail_startup(secret_store);
         }
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        // USB IM provisioning 不依赖 Wi-Fi；即使网络配置缺失并进入 SoftAP，也必须开放物理恢复窗口。
+        if (!StartImProvisioningTask()) {
+            ESP_LOGW(kTag, "IM_PROVISION_TASK_FAILED=1");
+        }
+#endif
         auto connection = BootstrapLinxOtaConfig(assembly_->board_identity(),
                                                  [this](std::string_view title, std::string_view detail) {
                                                      ShowDisplay(voice::VoiceMood::kConnecting, title, detail);
@@ -520,10 +526,6 @@ class Runtime final {
 
     void StartImRuntime() {
 #if CONFIG_VOICELIFE_IM_GATEWAY
-        // 物理 USB 窗口也用于显式轮换 Quick Tunnel URL 与设备 Token，因此即使已有配置也启动。
-        if (!StartImProvisioningTask()) {
-            ESP_LOGW(kTag, "IM_PROVISION_TASK_FAILED=1");
-        }
         bool expected = false;
         if (!im_lifecycle_started_.compare_exchange_strong(expected, true)) return;
         if (xTaskCreate(&Runtime::ImLifecycleTaskEntry, "voicelife_im_lifecycle", 8192, this, 3, &im_lifecycle_task_) !=
