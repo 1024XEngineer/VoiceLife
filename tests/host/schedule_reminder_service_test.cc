@@ -387,6 +387,7 @@ void CheckCompleteScheduleErrorPaths() {
     Fixture fixture({
         MakeSchedule(1, "可完成提醒", At(1'100), std::nullopt, 42),
         MakeSchedule(2, "已完成提醒", At(1'100), std::nullopt, std::nullopt, ScheduleStatus::kCompleted),
+        MakeSchedule(3, "无任务完成提醒", At(1'100)),
     });
 
     Check(!fixture.schedule_service.complete_schedule(0).ok(), "完成日程应拒绝非法 ID");
@@ -399,6 +400,12 @@ void CheckCompleteScheduleErrorPaths() {
     Check(completed.ok() && completed.value->status == ScheduleStatus::kCompleted &&
               !completed.value->reminder_task_id.has_value(),
           "完成后应更新状态并清空提醒任务标识");
+
+    Check(fixture.schedule_service.complete_schedule(3).ok(), "未传提醒任务标识时完成 Active 日程应成功");
+    const auto completed_without_expected_task = fixture.repository.FindById(3);
+    Check(completed_without_expected_task.ok() &&
+              completed_without_expected_task.value->status == ScheduleStatus::kCompleted,
+          "未传提醒任务标识时也应按普通完成路径更新状态");
 }
 
 void CheckRepositoryFailurePaths() {
@@ -432,6 +439,40 @@ void CheckRepositoryFailurePaths() {
     Fixture clear_fixture({MakeSchedule(3, "清理持久化失败", At(1'200), std::nullopt, 321)});
     clear_fixture.repository.FailNextUpdate(Status::Error(ErrorCode::kUnavailable, "清理失败"));
     Check(!clear_fixture.reminder.Start().ok(), "取消持久化提醒时清理更新失败应返回错误");
+}
+
+void CheckAdditionalReminderBranchCoverage() {
+    Fixture stop_fixture({MakeSchedule(1, "停止读取失败", At(1'200))});
+    Check(stop_fixture.reminder.Start().ok(), "停止读取失败测试应启动服务");
+    stop_fixture.timing.ProcessPendingCommands(Trigger(1'000));
+    stop_fixture.repository.FailNextFindAll(Status::Error(ErrorCode::kUnavailable, "Stop FindAll 失败"));
+    stop_fixture.reminder.Stop();
+
+    ScriptedFixture suspend_fixture({MakeSchedule(2, "撤销实例取消失败", At(1'200), 14)});
+    Check(suspend_fixture.reminder.Start().ok(), "撤销实例取消失败测试应启动服务");
+    suspend_fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;
+    Check(!suspend_fixture.reminder.SuspendRuleReminders(14).ok(), "撤销规则实例取消失败时应返回错误");
+
+    ScriptedFixture sync_fixture({MakeSchedule(3, "规则同步取消失败", At(1'200), 15)});
+    Check(sync_fixture.reminder.Start().ok(), "规则同步取消失败测试应启动服务");
+    sync_fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;
+    Check(!sync_fixture.reminder.SynchronizeRule(15).ok(), "同步规则实例取消失败时应返回错误");
+
+    ScriptedFixture retry_fixture({MakeSchedule(4, "重试非法回调", At(1'200), 16)});
+    retry_fixture.rules.rules.push_back(DailyRule(16));
+    retry_fixture.rules.fail_create_next_count = 1;
+    Check(retry_fixture.reminder.Start().ok(), "重试非法回调测试应启动服务");
+    const RegisterTaskCommand& first = retry_fixture.timing.register_commands.front();
+    const auto first_task_id = voicelife::timing::TaskId::Create(first.task_id.Value());
+    first.callback(*first_task_id, Trigger(1'200));
+    Check(retry_fixture.timing.register_calls == 2, "生成失败后应注册重试任务");
+
+    const RegisterTaskCommand& retry = retry_fixture.timing.register_commands.back();
+    const auto invalid_retry = voicelife::timing::TaskId::Create("not-a-number");
+    retry.callback(*invalid_retry, Trigger(1'260));
+    const auto wrong_retry = voicelife::timing::TaskId::Create("999");
+    retry.callback(*wrong_retry, Trigger(1'260));
+    Check(retry_fixture.rules.create_next_calls == 1, "非法或过期重试回调不应继续生成");
 }
 
 void CheckSuspendAndSynchronizeRule() {
@@ -629,6 +670,7 @@ int main() {
     CheckInvalidAndNotRunningPaths();
     CheckCompleteScheduleErrorPaths();
     CheckRepositoryFailurePaths();
+    CheckAdditionalReminderBranchCoverage();
     CheckSuspendAndSynchronizeRule();
     CheckSuspendRetryTaskAndStopCancelsTasks();
     CheckStopCancelsGenerationRetry();

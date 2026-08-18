@@ -380,6 +380,37 @@ void CheckOperationServiceOverloadWithoutReminder() {
     Check(created.status.ok() && OutputString(created, "status") == "success", "未接入提醒服务时创建日程仍应成功");
 }
 
+void CheckRuleReminderSuccessPaths() {
+    ReminderToolFixture fixture;
+    Check(fixture.reminder.Start().ok(), "规则提醒成功路径测试应启动服务");
+    Check(voicelife::mcp::RegisterScheduleMcpTools(fixture.server, fixture.service, fixture.rule_service,
+                                                   fixture.operation_service, &fixture.reminder)
+              .ok(),
+          "带提醒服务工具应注册成功");
+
+    const auto created = fixture.server.call({
+        .request_id = "create-rule-reminder-success",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("可同步规则")}, {"repeat", DailyRepeat("2099-01-01")}},
+    });
+    Check(created.status.ok() && OutputString(created, "status") == "success", "创建周期规则并同步提醒应成功");
+    const ScheduleRuleId rule_id = fixture.rules.rules.back().id;
+
+    const auto updated = fixture.server.call({
+        .request_id = "update-rule-reminder-success",
+        .name = "schedule.update",
+        .arguments = {{"rule_id", int64_t{rule_id}}, {"event", std::string("更新后的可同步规则")}},
+    });
+    Check(updated.status.ok() && OutputString(updated, "status") == "success", "更新周期规则并同步提醒应成功");
+
+    const auto deleted = fixture.server.call({
+        .request_id = "delete-rule-reminder-success",
+        .name = "schedule.delete",
+        .arguments = {{"rule_id", int64_t{rule_id}}},
+    });
+    Check(deleted.status.ok() && OutputString(deleted, "status") == "success", "删除周期规则并撤销提醒应成功");
+}
+
 void CheckRuleReminderSyncFailurePaths() {
     ReminderToolFixture create_fail_fixture;
     create_fail_fixture.timing.register_acceptance = CommandAcceptance::kUnavailable;
@@ -438,6 +469,7 @@ int main() {
     CheckOneShotReminderLifecycle();
     CheckReminderSyncFailurePaths();
     CheckOperationServiceOverloadWithoutReminder();
+    CheckRuleReminderSuccessPaths();
     CheckRuleReminderSyncFailurePaths();
     return 0;
 }
