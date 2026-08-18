@@ -83,6 +83,22 @@ jobs:
         run: pnpm --dir services/im-gateway install --frozen-lockfile
       - name: 检查格式、静态规则、类型与测试
         run: pnpm --dir services/im-gateway run ci
+      - name: 运行 Host 强提醒系统 E2E
+        run: |
+          mkdir -p artifacts/im-gateway-e2e
+          python3 scripts/run_e2e.py \
+            --layer host \
+            --journey im-gateway-strong-reminder \
+            --profile host \
+            --artifact-dir artifacts/im-gateway-e2e \
+            --timeout 60
+      - name: 上传 Host E2E 脱敏证据
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: im-gateway-host-e2e-evidence
+          path: artifacts/im-gateway-e2e
+          if-no-files-found: ignore
 
   coverage:
     name: 覆盖率（Codecov）
