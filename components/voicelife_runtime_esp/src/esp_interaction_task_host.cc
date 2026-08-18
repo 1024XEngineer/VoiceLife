@@ -4,13 +4,13 @@
 
 namespace voicelife::runtime_esp {
 
-EspInteractionTaskHost::EspInteractionTaskHost(const application::InteractionOrchestrator& orchestrator)
+EspInteractionTaskHost::EspInteractionTaskHost(application::InteractionOrchestrator& orchestrator)
     : orchestrator_(orchestrator) {}
 
-void EspInteractionTaskHost::Submit(application::InteractionEvent event,
-                                    application::InteractionActionSink& actions) const {
+Status EspInteractionTaskHost::Submit(application::InteractionEvent event,
+                                      application::InteractionActionSink& actions) {
     static_assert(configMAX_PRIORITIES > 0, "FreeRTOS task priorities must be configured");
-    orchestrator_.Handle(event, actions);
+    return orchestrator_.Handle(event, actions);
 }
 
 }  // namespace voicelife::runtime_esp

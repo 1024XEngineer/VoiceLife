@@ -110,6 +110,7 @@ add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_session_coordinator.cc")
 target_link_libraries(voice PUBLIC contracts)
+target_link_libraries(application PUBLIC contracts voice)
 add_voicelife_library(linx voicelife_linx
     "${ROOT_DIR}/components/voicelife_linx/src/linx_json_codec.cc"
     "${ROOT_DIR}/components/voicelife_linx/src/linx_ota.cc"
@@ -301,9 +302,9 @@ target_include_directories(schedule_mcp_tools_input_test PRIVATE "${ROOT_DIR}/co
 target_link_libraries(schedule_mcp_tools_input_test PRIVATE mcp schedule)
 
 add_voicelife_test(linx_mcp_bridge_test "unit;mcp;linx;runtime" linx_mcp_bridge_test.cc
-    "${ROOT_DIR}/components/voicelife_runtime/src/linx_mcp_bridge.cc"
+    "${ROOT_DIR}/components/voicelife_runtime_esp/src/linx_mcp_bridge.cc"
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
-target_include_directories(linx_mcp_bridge_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_include_directories(linx_mcp_bridge_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime_esp/src")
 target_link_libraries(linx_mcp_bridge_test PRIVATE contracts mcp schedule)
 
 add_voicelife_test(linx_ota_contract_test "unit;linx;contract" linx_ota_contract_test.cc)
@@ -419,20 +420,20 @@ add_voicelife_test(binding_use_case_test "unit;im;binding" binding_use_case_test
 target_link_libraries(binding_use_case_test PRIVATE im contracts Threads::Threads)
 
 add_voicelife_test(im_binding_mcp_tools_test "unit;mcp;im;runtime" im_binding_mcp_tools_test.cc
-    "${ROOT_DIR}/components/voicelife_runtime/src/im_binding_mcp_tools.cc")
-target_include_directories(im_binding_mcp_tools_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+    "${ROOT_DIR}/components/voicelife_runtime_esp/src/im_binding_mcp_tools.cc")
+target_include_directories(im_binding_mcp_tools_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime_esp/src")
 target_link_libraries(im_binding_mcp_tools_test PRIVATE mcp im)
 
 add_voicelife_test(binding_presentation_test "unit;im;runtime;binding" binding_presentation_test.cc
-    "${ROOT_DIR}/components/voicelife_runtime/src/im_binding_presentation.cc")
-target_include_directories(binding_presentation_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+    "${ROOT_DIR}/components/voicelife_runtime_esp/src/im_binding_presentation.cc")
+target_include_directories(binding_presentation_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime_esp/src")
 target_link_libraries(binding_presentation_test PRIVATE im)
 
 add_voicelife_test(binding_polling_lease_test "unit;im;runtime;binding" binding_polling_lease_test.cc)
-target_include_directories(binding_polling_lease_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_include_directories(binding_polling_lease_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime_esp/src")
 
 add_voicelife_test(mcp_worker_policy_test "unit;mcp;im;runtime" mcp_worker_policy_test.cc)
-target_include_directories(mcp_worker_policy_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_include_directories(mcp_worker_policy_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime_esp/src")
 target_link_libraries(mcp_worker_policy_test PRIVATE im)
 
 add_voicelife_test(im_runtime_test "unit;im;runtime" im_runtime_test.cc)
@@ -443,9 +444,9 @@ target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
 
 add_voicelife_test(wifi_provisioning_test "unit;runtime;wifi;provisioning"
     wifi_provisioning_test.cc
-    "${ROOT_DIR}/components/voicelife_runtime/src/wifi_provisioning.cc")
+    "${ROOT_DIR}/components/voicelife_runtime_esp/src/wifi_provisioning.cc")
 target_include_directories(wifi_provisioning_test PRIVATE
-    "${ROOT_DIR}/components/voicelife_runtime/src")
+    "${ROOT_DIR}/components/voicelife_runtime_esp/src")
 
 add_voicelife_test(sqlite_schedule_repository_test "integration;storage;sqlite;schedule"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_repository_test.cc")

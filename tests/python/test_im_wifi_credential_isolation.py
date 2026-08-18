@@ -3,9 +3,10 @@ import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-WIFI_SOURCE = (ROOT / "components/voicelife_runtime/src/linx_ota_bootstrap.cc").read_text()
-IM_SOURCE = (ROOT / "components/voicelife_runtime/src/im_runtime_bootstrap.cc").read_text()
-RUNTIME_SOURCE = (ROOT / "components/voicelife_runtime/src/runtime.cc").read_text()
+ESP_RUNTIME_ROOT = ROOT / "components/voicelife_runtime_esp/src"
+WIFI_SOURCE = (ESP_RUNTIME_ROOT / "linx_ota_bootstrap.cc").read_text()
+IM_SOURCE = (ESP_RUNTIME_ROOT / "im_runtime_bootstrap.cc").read_text()
+RUNTIME_SOURCE = (ESP_RUNTIME_ROOT / "esp_runtime.cc").read_text()
 
 
 class ImWifiCredentialIsolationTest(unittest.TestCase):
@@ -38,8 +39,8 @@ class ImWifiCredentialIsolationTest(unittest.TestCase):
 
     def test_im_usb_provisioning_starts_before_wifi_bootstrap_can_fail(self):
         startup = RUNTIME_SOURCE[
-            RUNTIME_SOURCE.index("Status Start(PlatformAssembly& assembly)") : RUNTIME_SOURCE.index(
-                "void StopEventLoop()"
+            RUNTIME_SOURCE.index("Status Runtime::Start(PlatformAssembly& assembly)") : RUNTIME_SOURCE.index(
+                "Status Runtime::RequestInterrupt()"
             )
         ]
         self.assertLess(startup.index("StartImProvisioningTask()"), startup.index("BootstrapLinxOtaConfig("))

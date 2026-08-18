@@ -2,23 +2,15 @@
 
 namespace voicelife::application {
 
-void InteractionOrchestrator::Handle(InteractionEvent event, InteractionActionSink& actions) const {
-    InteractionActionKind action = InteractionActionKind::kInitializeInteraction;
-    switch (event.kind) {
-        case InteractionEventKind::kBootstrapRequested:
-            action = InteractionActionKind::kInitializeInteraction;
-            break;
-        case InteractionEventKind::kBoardInputArrived:
-            action = InteractionActionKind::kDispatchBoardInput;
-            break;
-        case InteractionEventKind::kVoiceLifecycleChanged:
-            action = InteractionActionKind::kDispatchVoiceLifecycle;
-            break;
-        case InteractionEventKind::kConnectivityChanged:
-            action = InteractionActionKind::kRefreshConnectivity;
-            break;
+Status InteractionOrchestrator::Handle(InteractionEvent event, InteractionActionSink& actions) {
+    const auto transition = controller_.Handle(event.voice_event);
+    if (!transition.ok() || !transition.value.has_value()) {
+        return transition.status;
     }
-    actions.Submit({.kind = action});
+    return actions.Submit(
+        {.source = event.voice_event, .state = transition.value->state, .directive = transition.value->action});
 }
+
+voice::VoiceInteractionState InteractionOrchestrator::state() const { return controller_.state(); }
 
 }  // namespace voicelife::application

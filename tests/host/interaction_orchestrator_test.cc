@@ -7,45 +7,79 @@
 namespace {
 
 using voicelife::application::InteractionAction;
-using voicelife::application::InteractionActionKind;
 using voicelife::application::InteractionActionSink;
 using voicelife::application::InteractionEvent;
-using voicelife::application::InteractionEventKind;
 using voicelife::application::InteractionOrchestrator;
 using voicelife::test::Check;
+using voicelife::voice::VoiceInteractionAction;
+using voicelife::voice::VoiceInteractionEvent;
+using voicelife::voice::VoiceInteractionState;
 
 class TraceSink final : public InteractionActionSink {
    public:
-    void Submit(InteractionAction action) override { trace.push_back(action); }
+    voicelife::Status Submit(InteractionAction action) override {
+        trace.push_back(action);
+        return voicelife::Status::Ok();
+    }
 
     std::vector<InteractionAction> trace;
 };
 
+void Submit(InteractionOrchestrator& orchestrator, TraceSink& trace, VoiceInteractionEvent event) {
+    const voicelife::Status result = orchestrator.Handle({.voice_event = event}, trace);
+    Check(result.ok(), "合法交互事件必须被应用层接受");
+}
+
 }  // namespace
 
 int main() {
-    const InteractionOrchestrator orchestrator;
+    InteractionOrchestrator orchestrator;
+    TraceSink trace;
     const std::vector<InteractionEvent> events = {
-        {.kind = InteractionEventKind::kBootstrapRequested},
-        {.kind = InteractionEventKind::kBoardInputArrived},
-        {.kind = InteractionEventKind::kVoiceLifecycleChanged},
-        {.kind = InteractionEventKind::kConnectivityChanged},
+        {.voice_event = VoiceInteractionEvent::kBootCompleted},
+        {.voice_event = VoiceInteractionEvent::kWakeDetected},
+        {.voice_event = VoiceInteractionEvent::kInterruptAndAcknowledge},
+        {.voice_event = VoiceInteractionEvent::kEndpointDetected},
+        {.voice_event = VoiceInteractionEvent::kFinalizationTimedOut},
     };
     const std::vector<InteractionAction> expected_trace = {
-        {.kind = InteractionActionKind::kInitializeInteraction},
-        {.kind = InteractionActionKind::kDispatchBoardInput},
-        {.kind = InteractionActionKind::kDispatchVoiceLifecycle},
-        {.kind = InteractionActionKind::kRefreshConnectivity},
+        {.source = VoiceInteractionEvent::kBootCompleted,
+         .state = VoiceInteractionState::kStandby,
+         .directive = VoiceInteractionAction::kRestoreStandby},
+        {.source = VoiceInteractionEvent::kWakeDetected,
+         .state = VoiceInteractionState::kListening,
+         .directive = VoiceInteractionAction::kStartVoiceTurn},
+        {.source = VoiceInteractionEvent::kInterruptAndAcknowledge,
+         .state = VoiceInteractionState::kListening,
+         .directive = VoiceInteractionAction::kInterruptAndStartVoiceTurn},
+        {.source = VoiceInteractionEvent::kEndpointDetected,
+         .state = VoiceInteractionState::kFinalizing,
+         .directive = VoiceInteractionAction::kStopVoiceTurn},
+        {.source = VoiceInteractionEvent::kFinalizationTimedOut,
+         .state = VoiceInteractionState::kStandby,
+         .directive = VoiceInteractionAction::kRestoreStandby},
     };
 
-    TraceSink first_trace;
-    TraceSink second_trace;
     for (const InteractionEvent event : events) {
-        orchestrator.Handle(event, first_trace);
-        orchestrator.Handle(event, second_trace);
+        Submit(orchestrator, trace, event.voice_event);
     }
 
-    Check(first_trace.trace == expected_trace, "编排器必须为固定事件序列生成预期动作轨迹");
-    Check(second_trace.trace == first_trace.trace, "相同事件序列必须生成相同动作轨迹");
+    Check(trace.trace == expected_trace, "引导、唤醒、打断、超时必须保留状态和动作轨迹");
+    Check(orchestrator.state() == VoiceInteractionState::kStandby, "最终 STT 超时后必须恢复待机");
+
+    InteractionOrchestrator tts_orchestrator;
+    TraceSink tts_trace;
+    Submit(tts_orchestrator, tts_trace, VoiceInteractionEvent::kBootCompleted);
+    Submit(tts_orchestrator, tts_trace, VoiceInteractionEvent::kWakeDetected);
+    Submit(tts_orchestrator, tts_trace, VoiceInteractionEvent::kIntentReceived);
+    Submit(tts_orchestrator, tts_trace, VoiceInteractionEvent::kTtsStarted);
+    Submit(tts_orchestrator, tts_trace, VoiceInteractionEvent::kTtsStopped);
+    Check(tts_trace.trace.back() == InteractionAction{.source = VoiceInteractionEvent::kTtsStopped,
+                                                      .state = VoiceInteractionState::kListening,
+                                                      .directive = VoiceInteractionAction::kStartCapture},
+          "TTS 结束后必须恢复 follow-up 聆听");
+
+    const voicelife::Status rejected = orchestrator.Handle({.voice_event = VoiceInteractionEvent::kTtsStopped}, trace);
+    Check(!rejected.ok(), "乱序事件必须被拒绝且不产生动作");
     return 0;
 }
