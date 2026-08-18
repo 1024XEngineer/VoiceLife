@@ -62,6 +62,90 @@ class GatewayOriginTest(unittest.TestCase):
             provision_device.gateway_origin_from_base_url("http://voicelife.xengineer.cn")
 
 
+class EnvironmentConfigTest(unittest.TestCase):
+    def test_load_dotenv_parses_key_values(self) -> None:
+        env_file = Path("/tmp/provision-device-test.env")
+        env_file.write_text(
+            "# comment\n"
+            "PROVISION_SERVER=root@example.com\n"
+            "PROVISION_SERVER_DIR=/srv/voicelife\n"
+            "\n"
+            "PROVISION_GATEWAY_ORIGIN=https://gw.example.com\n"
+        )
+        try:
+            values = provision_device.load_dotenv(env_file)
+            self.assertEqual(values["PROVISION_SERVER"], "root@example.com")
+            self.assertEqual(values["PROVISION_SERVER_DIR"], "/srv/voicelife")
+            self.assertEqual(values["PROVISION_GATEWAY_ORIGIN"], "https://gw.example.com")
+            self.assertNotIn("comment", values)
+        finally:
+            env_file.unlink(missing_ok=True)
+
+    def test_load_dotenv_missing_file_returns_empty(self) -> None:
+        self.assertEqual(provision_device.load_dotenv(Path("/tmp/provision-device-missing.env")), {})
+
+    def test_resolve_server_config_from_dotenv(self) -> None:
+        env_file = Path("/tmp/provision-device-server.env")
+        env_file.write_text("PROVISION_SERVER=root@example.com\nPROVISION_SERVER_DIR=/srv/voicelife\n")
+        try:
+            server, server_dir = provision_device.resolve_server_config(None, None, {}, env_file)
+            self.assertEqual(server, "root@example.com")
+            self.assertEqual(server_dir, "/srv/voicelife")
+        finally:
+            env_file.unlink(missing_ok=True)
+
+    def test_resolve_server_config_requires_server(self) -> None:
+        env_file = Path("/tmp/provision-device-no-server.env")
+        env_file.write_text("PROVISION_SERVER_DIR=/srv/voicelife\n")
+        try:
+            with self.assertRaises(SystemExit):
+                provision_device.resolve_server_config(None, None, {}, env_file)
+        finally:
+            env_file.unlink(missing_ok=True)
+
+    def test_resolve_server_config_prefers_arguments_over_environment(self) -> None:
+        env_file = Path("/tmp/provision-device-priority.env")
+        env_file.write_text("PROVISION_SERVER=root@dotenv.example\nPROVISION_SERVER_DIR=/srv/dotenv\n")
+        try:
+            server, server_dir = provision_device.resolve_server_config(
+                "root@arg.example", "/srv/arg", {"PROVISION_SERVER": "root@env.example"}, env_file
+            )
+            self.assertEqual(server, "root@arg.example")
+            self.assertEqual(server_dir, "/srv/arg")
+        finally:
+            env_file.unlink(missing_ok=True)
+
+    def test_resolve_gateway_origin_prefers_explicit_then_provision_then_base_url(self) -> None:
+        env_file = Path("/tmp/provision-device-origin.env")
+        env_file.write_text("WECHAT_ACTION_UI_BASE_URL=https://base.example/voicelife/reminder-actions\n")
+        try:
+            self.assertEqual(
+                provision_device.resolve_gateway_origin("https://arg.example", {}, env_file),
+                "https://arg.example",
+            )
+            self.assertEqual(
+                provision_device.resolve_gateway_origin(
+                    None, {"PROVISION_GATEWAY_ORIGIN": "https://env.example"}, env_file
+                ),
+                "https://env.example",
+            )
+            self.assertEqual(
+                provision_device.resolve_gateway_origin(None, {}, env_file),
+                "https://base.example",
+            )
+        finally:
+            env_file.unlink(missing_ok=True)
+
+    def test_resolve_gateway_origin_requires_source(self) -> None:
+        env_file = Path("/tmp/provision-device-no-origin.env")
+        env_file.write_text("")
+        try:
+            with self.assertRaises(SystemExit):
+                provision_device.resolve_gateway_origin(None, {}, env_file)
+        finally:
+            env_file.unlink(missing_ok=True)
+
+
 class CredentialValidationTest(unittest.TestCase):
     def test_accepts_registered_device_credential(self) -> None:
         credential = {

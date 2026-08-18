@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import re
 import runpy
 import subprocess
@@ -25,9 +26,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PROVISION_SCRIPT = ROOT / "scripts" / "provision_im_config.py"
 PAIRING_SCRIPT = ROOT / "scripts" / "start_im_pairing.py"
 
-SERVER = "root@111.62.156.163"
-SERVER_DIR = "/root/XE6-15"
-DEFAULT_GATEWAY_ORIGIN = "https://voicelife.xengineer.cn"
+SERVER = None
+SERVER_DIR = None
+DEFAULT_GATEWAY_ORIGIN = None
 
 BOARD_CONFIGS: dict[str, dict] = {
     "sparkbot": {
@@ -58,9 +59,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="目标板型：sparkbot 或 pcb",
     )
     parser.add_argument("--port", help="本地串口设备；缺省自动探测 USB JTAG 串口")
-    parser.add_argument("--server", default=SERVER, help=f"Gateway 服务器 SSH 目标（默认 {SERVER}）")
-    parser.add_argument("--server-dir", default=SERVER_DIR, help="服务器仓库目录（默认 /root/XE6-15）")
-    parser.add_argument("--gateway-origin", help="Gateway HTTPS origin；缺省从 .env 的 WECHAT_ACTION_UI_BASE_URL 提取")
+    parser.add_argument("--server", help="Gateway 服务器 SSH 目标（缺省从 .env 的 PROVISION_SERVER 读取）")
+    parser.add_argument("--server-dir", help="服务器仓库目录（缺省从 .env 的 PROVISION_SERVER_DIR 读取）")
+    parser.add_argument(
+        "--gateway-origin", help="Gateway HTTPS origin（缺省 PROVISION_GATEWAY_ORIGIN 或 WECHAT_ACTION_UI_BASE_URL）"
+    )
     parser.add_argument("--user-id", help="内部 userId；缺省继承服务器上最新 active 设备的所有者")
     parser.add_argument("--idf-dir", help="ESP-IDF 安装目录（缺省 ~/esp/esp-idf）")
     parser.add_argument("--force", action="store_true", help="provisioning 时覆盖板子已有 IM 配置（VLI2）")
@@ -73,6 +76,40 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def load_dotenv(path: Path) -> dict[str, str]:
+    """解析 KEY=VALUE 的 .env 文件；忽略注释与空行，不做值展开。"""
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def resolve_server_config(
+    explicit_server: str | None,
+    explicit_dir: str | None,
+    environ: dict[str, str],
+    env_file: Path,
+) -> tuple[str, str]:
+    """解析服务器目标与目录：命令行参数 > 环境变量 > .env 文件。"""
+    dotenv_values = load_dotenv(env_file)
+    server = explicit_server or environ.get("PROVISION_SERVER") or dotenv_values.get("PROVISION_SERVER")
+    server_dir = (
+        explicit_dir
+        or environ.get("PROVISION_SERVER_DIR")
+        or dotenv_values.get("PROVISION_SERVER_DIR")
+        or "/root/XE6-15"
+    )
+    if not server:
+        raise SystemExit("缺少 PROVISION_SERVER；请在 .env 中配置或使用 --server 指定")
+    return server, server_dir
+
+
 def gateway_origin_from_base_url(base_url: str) -> str:
     """从 Action UI 基础 URL 提取 HTTPS origin，丢弃路径、查询与片段。"""
     if not base_url.startswith("https://"):
@@ -80,18 +117,28 @@ def gateway_origin_from_base_url(base_url: str) -> str:
     return base_url.split("/", 3)[0] + "//" + base_url.split("/", 3)[2]
 
 
-def resolve_gateway_origin(explicit: str | None, env_file: Path) -> str:
+def resolve_gateway_origin(
+    explicit: str | None,
+    environ: dict[str, str],
+    env_file: Path,
+) -> str:
+    """Gateway origin：--gateway-origin > PROVISION_GATEWAY_ORIGIN > WECHAT_ACTION_UI_BASE_URL。"""
     if explicit:
         if not explicit.startswith("https://") or "://" not in explicit:
             raise ValueError("--gateway-origin 必须是 HTTPS origin")
         return explicit
+    provision_origin = environ.get("PROVISION_GATEWAY_ORIGIN")
+    if provision_origin:
+        return provision_origin
     if env_file.is_file():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            if line.startswith("WECHAT_ACTION_UI_BASE_URL="):
-                base = line.split("=", 1)[1].strip()
-                if base:
-                    return gateway_origin_from_base_url(base)
-    return DEFAULT_GATEWAY_ORIGIN
+        values = load_dotenv(env_file)
+        provision_origin = values.get("PROVISION_GATEWAY_ORIGIN")
+        if provision_origin:
+            return provision_origin
+        base_url = values.get("WECHAT_ACTION_UI_BASE_URL")
+        if base_url:
+            return gateway_origin_from_base_url(base_url)
+    raise SystemExit("缺少 Gateway origin；请配置 PROVISION_GATEWAY_ORIGIN 或 WECHAT_ACTION_UI_BASE_URL")
 
 
 def validate_credential(data: dict, expected_user_id: str | None = None) -> dict:
@@ -205,7 +252,9 @@ def main() -> None:
     board = args.board
     config = BOARD_CONFIGS[board]
     build_dir = ROOT / "build" / config["profile"]
-    origin = resolve_gateway_origin(args.gateway_origin, ROOT / ".env")
+    env_file = ROOT / ".env"
+    server, server_dir = resolve_server_config(args.server, args.server_dir, os.environ, env_file)
+    origin = resolve_gateway_origin(args.gateway_origin, os.environ, env_file)
 
     port = args.port
     if port is None:
@@ -227,11 +276,11 @@ def main() -> None:
     else:
         print("跳过烧录")
 
-    print(f"[3/5] 在服务器注册设备（{args.server}）")
+    print(f"[3/5] 在服务器注册设备（{server}）")
     credential_data: dict | None = None
     if not args.skip_register:
-        script = server_register_script(args.server_dir, args.user_id)
-        stdout = run_remote(args.server, script)
+        script = server_register_script(server_dir, args.user_id)
+        stdout = run_remote(server, script)
         line = next((ln for ln in stdout.splitlines() if ln.startswith("{")), None)
         if line is None:
             raise SystemExit("服务器未返回凭据 JSON")
