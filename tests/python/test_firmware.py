@@ -44,6 +44,16 @@ class ProfileValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(firmware.ProfileError, "找不到命令 idf.py"):
             firmware.run(["idf.py", "build"])
 
+    def test_sparkbot_profile_enables_gateway_im_without_selecting_pcb(self) -> None:
+        profile_path = ROOT / "config" / "profiles" / "esp32s3-esp-sparkbot.json"
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(profile["adapters"]["im"]["driver"], "voicelife-gateway")
+        self.assertEqual(profile["adapters"]["im"]["configRef"], "nvs://im")
+        self.assertIn("CONFIG_VOICELIFE_BOARD_ESP_SPARKBOT=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_VOICELIFE_IM_GATEWAY=y", profile["sdkconfig"])
+        self.assertNotIn("CONFIG_VOICELIFE_BOARD_VOICELIFE_PCB=y", profile["sdkconfig"])
+
     def test_im_pcb_profile_accepts_input_from_its_usb_provisioning_port(self) -> None:
         profile_path = ROOT / "config" / "profiles" / "esp32s3-voicelife-pcb-pcm.json"
         profile = json.loads(profile_path.read_text(encoding="utf-8"))

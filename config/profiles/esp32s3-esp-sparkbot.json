@@ -27,8 +27,12 @@
       ]
     },
     "im": {
-      "driver": "disabled",
-      "capabilities": []
+      "driver": "voicelife-gateway",
+      "capabilities": [
+        "https",
+        "secure-credentials"
+      ],
+      "configRef": "nvs://im"
     }
   },
   "sdkconfig": [
@@ -44,10 +48,15 @@
     "CONFIG_SPIRAM_MEMTEST=n",
     "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288",
     "CONFIG_VOICELIFE_BOARD_ESP_SPARKBOT=y",
+    "CONFIG_VOICELIFE_IM_GATEWAY=y",
+    "CONFIG_LWIP_DHCP_GET_NTP_SRV=y",
+    "CONFIG_LWIP_SNTP_MAX_SERVERS=2",
+    "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y",
     "CONFIG_NVS_ENCRYPTION=y",
     "CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC=y",
     "CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID=1",
     "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
+    "CONFIG_ESP_CONSOLE_SECONDARY_NONE=y",
     "CONFIG_LV_USE_CLIB_MALLOC=y",
     "CONFIG_LV_FONT_FMT_TXT_LARGE=y",
     "CONFIG_LV_USE_GIF=y",

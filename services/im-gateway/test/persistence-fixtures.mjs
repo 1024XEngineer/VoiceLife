@@ -9,6 +9,19 @@ export const T1 = '2026-08-03T00:10:00.000Z';
 export const T2 = '2026-08-03T00:20:00.000Z';
 export const LATE = '2026-08-03T01:00:00.000Z';
 
+/** 构造注册设备聚合。 */
+export function device(deviceId = 'device-1', overrides = {}) {
+    return {
+        deviceId,
+        userId: 'user-1',
+        tokenDigest: new Uint8Array(32).fill(7),
+        status: 'active',
+        createdAt: T0,
+        updatedAt: T0,
+        ...overrides,
+    };
+}
+
 /** 构造渠道账号聚合。 */
 export function channelAccount(id = 'channel-1', overrides = {}) {
     return {

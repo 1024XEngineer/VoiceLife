@@ -4,6 +4,7 @@ export * from './app/create-postgres-gateway.js';
 export * from './app/gateway-process.js';
 export * from './app/mock-scenario.js';
 export * from './application/api.js';
+export * from './application/device-management.js';
 export * from './application/services.js';
 export * from './contracts/device-gateway.js';
 export * from './contracts/device-gateway-parser.js';

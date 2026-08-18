@@ -300,6 +300,7 @@ void TestAuthenticatedProbeMakesRuntimeReady() {
     Check(fixture.runtime.reporting_channel() != nullptr, "认证成功后 Runtime 必须发布上报通道");
     Check(fixture.runtime.pairing_client() != nullptr, "认证成功后 Runtime 必须持有配对客户端");
     Check(fixture.runtime.user_id() == "user-test", "Runtime 必须保留非敏感 userId 供显式配对使用");
+    Check(fixture.runtime.device_id() == "device-test", "Runtime 必须保留非敏感 deviceId 供认证冒烟校验");
     Check(fixture.transport->post_calls == 0, "普通启动和 ready 装配不得自动创建 PairingSession");
 
     Check(fixture.runtime.Start().ok(), "重复启动应幂等成功");

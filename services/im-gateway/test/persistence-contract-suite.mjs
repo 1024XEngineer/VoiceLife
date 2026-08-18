@@ -7,6 +7,7 @@ import {
     binding,
     channelAccount,
     delivery,
+    device,
     externalIdentity,
     inboundEvent,
     intentSubmission,
@@ -22,6 +23,32 @@ import {
 
 /** 与内存实现共享的同一套持久化契约断言。 */
 export async function sharedRepositoryContractSuite(makeUow) {
+    await test('devices create, digest lookup, immutable ownership and list safely', async () => {
+        await withUow(makeUow, async (uow) => {
+            await uow.transaction((ctx) => ctx.devices.create(device()));
+            const byDigest = await uow.transaction((ctx) => ctx.devices.findByTokenDigest(new Uint8Array(32).fill(7)));
+            assert.equal(byDigest.deviceId, 'device-1');
+            await uow.transaction((ctx) =>
+                ctx.devices.save(
+                    device('device-1', {
+                        userId: 'user-other',
+                        status: 'revoked',
+                        tokenDigest: new Uint8Array(32).fill(8),
+                    }),
+                ),
+            );
+            const found = await uow.transaction((ctx) => ctx.devices.findById('device-1'));
+            assert.equal(found.userId, 'user-1');
+            assert.equal(found.status, 'revoked');
+            assert.deepEqual([...found.tokenDigest], [...new Uint8Array(32).fill(8)]);
+            assert.deepEqual(
+                (await uow.transaction((ctx) => ctx.devices.list('user-1'))).map((item) => item.deviceId),
+                ['device-1'],
+            );
+            assert.deepEqual(await uow.transaction((ctx) => ctx.devices.list('user-other')), []);
+        });
+    });
+
     await test('channel accounts save, find and update by id', async () => {
         await withUow(makeUow, async (uow) => {
             await uow.transaction((ctx) => ctx.channelAccounts.save(channelAccount()));
@@ -111,6 +138,26 @@ export async function sharedRepositoryContractSuite(makeUow) {
         });
     });
 
+    await test('terminal pairing transitions never overwrite a concurrently confirmed session', async () => {
+        await withUow(makeUow, async (uow) => {
+            await uow.transaction(async (ctx) => {
+                await ctx.pairingSessions.save(pairingSession());
+                assert.equal(await ctx.pairingSessions.transitionPending('pairing-1', 'cancelled'), true);
+                assert.equal(await ctx.pairingSessions.transitionPending('pairing-1', 'expired'), false);
+                await ctx.pairingSessions.save(
+                    pairingSession('pairing-confirmed-race', {
+                        status: 'confirmed',
+                        displayCodeHash: 'hash-confirmed-race',
+                        confirmedAt: T1,
+                    }),
+                );
+                assert.equal(await ctx.pairingSessions.transitionPending('pairing-confirmed-race', 'cancelled'), false);
+            });
+            const confirmed = await uow.transaction((ctx) => ctx.pairingSessions.findById('pairing-confirmed-race'));
+            assert.equal(confirmed.status, 'confirmed');
+        });
+    });
+
     await test('external identities round-trip and channel-and-hash lookup', async () => {
         await withUow(makeUow, async (uow) => {
             await uow.transaction(async (ctx) => {
@@ -134,7 +181,9 @@ export async function sharedRepositoryContractSuite(makeUow) {
         await withUow(makeUow, async (uow) => {
             await uow.transaction(async (ctx) => {
                 await ctx.bindings.save(binding());
-                await ctx.bindings.save(binding('binding-2', { priority: 5, externalIdentityId: 'identity-2' }));
+                await ctx.bindings.save(
+                    binding('binding-2', { priority: 5, deviceId: 'device-2', externalIdentityId: 'identity-2' }),
+                );
                 await ctx.bindings.save(binding('binding-unbound', { status: 'unbound' }));
             });
             const found = await uow.transaction((ctx) => ctx.bindings.findById('binding-1'));
@@ -145,7 +194,7 @@ export async function sharedRepositoryContractSuite(makeUow) {
                 ['binding-2', 'binding-1'],
             );
             const byDevice = await uow.transaction((ctx) => ctx.bindings.findActiveByDevice('device-1'));
-            assert.equal(byDevice.length, 2);
+            assert.equal(byDevice.length, 1);
             const byIdentity = await uow.transaction((ctx) => ctx.bindings.findActiveByIdentity('identity-1'));
             assert.equal(byIdentity.id, 'binding-1');
             await uow.transaction((ctx) => ctx.bindings.save(binding('binding-1', { status: 'unbound' })));

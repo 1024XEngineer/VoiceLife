@@ -123,6 +123,9 @@ class ImRuntime {
     /** @brief 返回已加载的可选用户引用。 @return 不包含 Secret 的 userId。 */
     [[nodiscard]] const std::optional<std::string>& user_id() const { return user_id_; }
 
+    /** @brief 返回已验证的设备标识。 @return 不包含 Token 的 deviceId。 */
+    [[nodiscard]] const std::string& device_id() const { return device_id_; }
+
    private:
     ImConfigProvider& config_;
     ImCredentialProvider& credentials_;
@@ -134,6 +137,7 @@ class ImRuntime {
     std::unique_ptr<ImReportingChannel> reporting_;
     std::unique_ptr<ImPairingClient> pairing_;
     std::optional<std::string> user_id_;
+    std::string device_id_;
 };
 
 }  // namespace voicelife::im

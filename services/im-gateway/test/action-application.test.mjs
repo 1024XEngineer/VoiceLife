@@ -9,6 +9,7 @@ import {
     buildGateway,
     expectRejected,
     pendingStrongDelivery,
+    seedDevice,
     strongIntent,
     weakIntent,
 } from './helpers.mjs';
@@ -275,28 +276,16 @@ test('replayPending with an unknown cursor replays the whole unconfirmed window'
     assert.equal(replay[0].commandId, command.commandId);
 });
 
-test('Last-Event-ID does not exclude earlier unconfirmed commands in the same window', async () => {
+test('rebinding a device sends new notifications only to its current identity', async () => {
     const { gateway } = actionGateway();
-    await bindFixtureUser(gateway, { externalUserId: 'fixture-open-id-1' });
-    await bindFixtureUser(gateway, { externalUserId: 'fixture-open-id-2' });
+    const first = await bindFixtureUser(gateway, { externalUserId: 'fixture-open-id-1' });
+    const second = await bindFixtureUser(gateway, { externalUserId: 'fixture-open-id-2' });
     const submission = await gateway.application.notifications.submitNotification(strongIntent());
-    assert.equal(submission.deliveries.length, 2);
-    const commands = [];
-    for (const delivery of submission.deliveries) {
-        await gateway.application.deliveryDispatch.dispatch(delivery.deliveryId);
-        const token = await gateway.application.actionUi.issue(delivery.deliveryId);
-        commands.push(await gateway.application.actionUi.execute({ token, action: 'acknowledge' }));
-    }
-
-    const replay = await gateway.application.actions.replayPending(
-        commands[1].deviceId,
-        commands[1].reminderTriggerId,
-        commands[1].commandId,
-    );
-
-    assert.deepEqual(
-        replay.map((command) => command.commandId),
-        commands.map((command) => command.commandId),
+    assert.equal(submission.deliveries.length, 1);
+    assert.equal(submission.deliveries[0].bindingId, second.binding.id);
+    assert.equal(
+        (await gateway.application.bindings.list('user-fixture')).some((binding) => binding.id === first.binding.id),
+        false,
     );
 });
 
@@ -386,6 +375,7 @@ test('malformed persisted action options are rejected instead of becoming execut
             unitOfWork,
             ...mockImGatewayPorts('device-fixture', clock),
         });
+        seedDevice(unitOfWork, 'device-fixture');
         const deliveryId = await pendingStrongDelivery(gateway);
         await unitOfWork.transaction(async (tx) => {
             const delivery = await tx.deliveries.findById(deliveryId);

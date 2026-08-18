@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createMockImGateway } from '../dist/index.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
 import { InMemoryImUnitOfWork } from '../dist/infrastructure/persistence/in-memory.js';
-import { buildGateway, expectGatewayError, registerChannel } from './helpers.mjs';
+import { buildGateway, expectGatewayError, registerChannel, seedDevice } from './helpers.mjs';
 
 class ExposedUnitOfWork extends InMemoryImUnitOfWork {
     setIdentityStatus(identityId, status) {
@@ -51,12 +51,14 @@ test('create retries when an issued display code collides with a pending session
         { displayCode: '222222', hash: 'hash:222222' },
     ];
     let issueCount = 0;
-    const { gateway } = buildGateway({
+    const { gateway, unitOfWork } = buildGateway({
         pairingCodes: {
             issue: async () => issued[issueCount++],
             hash: async (displayCode) => `hash:${displayCode}`,
         },
     });
+    seedDevice(unitOfWork, 'device-a', 'user-a', 2);
+    seedDevice(unitOfWork, 'device-b', 'user-b', 3);
 
     const first = await gateway.application.pairing.create({ userId: 'user-a', deviceId: 'device-a' });
     const second = await gateway.application.pairing.create({ userId: 'user-b', deviceId: 'device-b' });
@@ -85,6 +87,49 @@ test('create rejects a pairing lifetime outside the one-to-ten-minute contract',
             `Pairing accepted expiresInMinutes=${expiresInMinutes}`,
         );
     }
+});
+
+test('confirm acquires device, pairing and binding locks before identity or binding rows', async () => {
+    const { gateway, unitOfWork } = buildGateway();
+    const channel = await registerChannel(gateway);
+    const created = await gateway.application.pairing.create({
+        userId: 'user-fixture',
+        deviceId: 'device-fixture',
+    });
+    const order = [];
+    const deviceLock = unitOfWork.lockById.bind(unitOfWork);
+    unitOfWork.lockById = async (...args) => {
+        order.push('device');
+        return deviceLock(...args);
+    };
+    const pairingLock = unitOfWork.lockPendingByIdAndDisplayCodeHash.bind(unitOfWork);
+    unitOfWork.lockPendingByIdAndDisplayCodeHash = async (...args) => {
+        order.push('pairing');
+        return pairingLock(...args);
+    };
+    const replacementLock = unitOfWork.acquireReplacementLock.bind(unitOfWork);
+    unitOfWork.acquireReplacementLock = async (...args) => {
+        order.push('binding-lock');
+        return replacementLock(...args);
+    };
+    const identityFind = unitOfWork.findByChannelAndHash.bind(unitOfWork);
+    unitOfWork.findByChannelAndHash = async (...args) => {
+        order.push('identity-row');
+        return identityFind(...args);
+    };
+    const replace = unitOfWork.replaceActiveBinding.bind(unitOfWork);
+    unitOfWork.replaceActiveBinding = async (...args) => {
+        order.push('binding-row');
+        return replace(...args);
+    };
+
+    await gateway.application.pairing.confirm({
+        displayCode: created.displayCode,
+        channelAccountId: channel.id,
+        externalUserId: 'open-lock-order',
+    });
+
+    assert.deepEqual(order, ['device', 'pairing', 'binding-lock', 'identity-row', 'binding-row']);
 });
 
 test('confirm protects the external identity and completes the pairing session', async () => {
@@ -134,6 +179,44 @@ test('anonymous pairing requires and accepts a user during confirmation', async 
         userId: 'user-fixture',
     });
     assert.equal(binding.userId, 'user-fixture');
+});
+
+test('confirm rejects a revoked device and a user who does not own it', async () => {
+    const { gateway, unitOfWork } = buildGateway();
+    const channel = await registerChannel(gateway);
+    const revokedSession = await gateway.application.pairing.create({
+        userId: 'user-fixture',
+        deviceId: 'device-fixture',
+    });
+    await unitOfWork.transaction(async (tx) => {
+        const device = await tx.devices.findById('device-fixture');
+        await tx.devices.save({ ...device, status: 'revoked' });
+    });
+    await expectGatewayError(
+        () =>
+            gateway.application.pairing.confirm({
+                displayCode: revokedSession.displayCode,
+                channelAccountId: channel.id,
+                externalUserId: 'open-revoked',
+            }),
+        'invalid_transition',
+        'A revoked device confirmed a pairing',
+    );
+    await gateway.application.pairing.cancel(revokedSession.session.id);
+
+    seedDevice(unitOfWork, 'device-other-owner', 'owner-a', 9);
+    const ownerSession = await gateway.application.pairing.create({ deviceId: 'device-other-owner' });
+    await expectGatewayError(
+        () =>
+            gateway.application.pairing.confirm({
+                displayCode: ownerSession.displayCode,
+                channelAccountId: channel.id,
+                externalUserId: 'open-owner',
+                userId: 'owner-b',
+            }),
+        'invalid_transition',
+        'A user who does not own the device confirmed a pairing',
+    );
 });
 
 test('confirm rejects a user or platform outside the pairing scope', async () => {

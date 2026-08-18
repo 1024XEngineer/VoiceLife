@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
-import { createMockImGateway } from './create-im-gateway.js';
+import { createImGateway, mockImGatewayPorts } from './create-im-gateway.js';
 import type { NotificationIntent } from '../contracts/device-gateway.js';
-import { unsafeId, type ChannelAccountId, type DeviceId, type UserId } from '../contracts/ids.js';
+import { unsafeId, type ChannelAccountId, type DeviceId } from '../contracts/ids.js';
 import type { Delivery } from '../domain/models.js';
 import {
     startWechatDevHttpHarness,
@@ -10,9 +10,16 @@ import {
     type WechatDevDeliverySnapshot,
 } from '../infrastructure/http/wechat-dev-harness.js';
 import { FixedClock, SequentialIdGenerator } from '../infrastructure/mock-support.js';
+import { PostgresImUnitOfWork } from '../infrastructure/persistence/postgres.js';
 import { AesGcmActionTokenPort } from '../infrastructure/security/aes-gcm-action-token.js';
+import {
+    AesGcmExternalIdentityProtector,
+    DatabaseDeviceAuthenticationPort,
+    HmacPairingCodePort,
+} from '../infrastructure/security/production-ports.js';
 import { WechatOfficialAdapter } from '../infrastructure/wechat/wechat-official-adapter.js';
 import type { Clock } from '../ports/external.js';
+import type { ImUnitOfWork } from '../ports/repositories.js';
 import type { IsoDateTime } from '../shared/types.js';
 
 /** 微信开发 harness 可读取的环境变量集合。 */
@@ -21,6 +28,13 @@ export type WechatDevEnvironment = Readonly<Record<string, string | undefined>>;
 /** 微信开发 harness 在自动化测试中允许替换的外部依赖。 */
 export interface WechatDevRuntimeOverrides {
     readonly fetch?: typeof fetch;
+    /** 仅测试使用；生产 harness 始终创建并托管 PostgreSQL UoW。 */
+    readonly unitOfWork?: ImUnitOfWork;
+    /** 仅测试迁移失败清理；正常运行不得替换 PostgreSQL 工厂。 */
+    readonly unitOfWorkFactory?: (databaseUrl: string) => ImUnitOfWork & {
+        migrate(): Promise<void>;
+        close(): Promise<void>;
+    };
 }
 
 interface WechatDevConfiguration {
@@ -40,9 +54,10 @@ interface WechatDevConfiguration {
     readonly displayTimeZone: string;
     readonly actionUiBaseUrl: string;
     readonly openId: string;
+    readonly databaseUrl: string;
     readonly deviceId: string;
-    readonly deviceToken: string;
     readonly actionTokenSecret: string;
+    readonly identitySecret: string;
 }
 
 /**
@@ -57,6 +72,7 @@ export async function startConfiguredWechatDevHarness(
 ): Promise<StartedWechatDevHttpHarness> {
     const config = readConfiguration(environment);
     const clock = new SystemClock();
+    const identityProtector = new AesGcmExternalIdentityProtector(config.identitySecret);
     const ids = new DevHarnessIdGenerator(unsafeId<ChannelAccountId>(config.channelAccountId));
     const adapter = new WechatOfficialAdapter({
         channelAccountId: unsafeId<ChannelAccountId>(config.channelAccountId),
@@ -69,85 +85,125 @@ export async function startConfiguredWechatDevHarness(
             templateFields: config.templateFields,
             displayTimeZone: config.displayTimeZone,
             actionUiBaseUrl: config.actionUiBaseUrl,
-            revealExternalUserId,
+            revealExternalUserId: (ciphertext) => identityProtector.reveal(ciphertext),
             ...(overrides.fetch === undefined ? {} : { fetch: overrides.fetch }),
         },
     });
     const deviceId = unsafeId<DeviceId>(config.deviceId);
-    const userId = unsafeId<UserId>('wechat-dev-user');
-    const runtime = createMockImGateway(deviceId, new FixedClock(clock.now()), {
-        clock,
-        ids,
-        actionTokens: new AesGcmActionTokenPort(config.actionTokenSecret),
-        channelCapabilities: adapter,
-        deliveryRenderer: adapter,
-        imChannel: adapter,
-        wechatAdapter: adapter,
-    });
+    const ownedUnitOfWork = overrides.unitOfWork === undefined;
+    const owned = ownedUnitOfWork
+        ? (overrides.unitOfWorkFactory?.(config.databaseUrl) ?? new PostgresImUnitOfWork(config.databaseUrl))
+        : undefined;
+    const unitOfWork = overrides.unitOfWork ?? owned!;
+    try {
+        if (owned !== undefined) await owned.migrate();
+        const device = await unitOfWork.transaction((tx) => tx.devices.findById(deviceId));
+        if (device === undefined || device.status !== 'active') {
+            throw new Error('WECHAT_DEV_DEVICE_ID must reference an active registered device');
+        }
+        const userId = device.userId;
+        const runtime = createImGateway({
+            ...mockImGatewayPorts(deviceId, new FixedClock(clock.now())),
+            unitOfWork,
+            clock,
+            ids,
+            authentication: new DatabaseDeviceAuthenticationPort(unitOfWork),
+            actionTokens: new AesGcmActionTokenPort(config.actionTokenSecret),
+            pairingCodes: new HmacPairingCodePort(config.identitySecret),
+            identityProtector,
+            channelCapabilities: adapter,
+            deliveryRenderer: adapter,
+            imChannel: adapter,
+            wechatAdapter: adapter,
+        });
 
-    await runtime.application.channels.register({
-        platform: 'wechat_official',
-        tenantExternalId: config.expectedToUserName,
-        koishiBotId: 'wechat-dev-harness',
-        credentialRef: 'secret://env/WECHAT_APP_SECRET',
-        connectionMode: 'webhook',
-    });
-    const pairing = await runtime.application.pairing.create({ userId, deviceId });
-    await runtime.application.pairing.confirm({
-        displayCode: pairing.displayCode,
-        channelAccountId: unsafeId<ChannelAccountId>(config.channelAccountId),
-        externalUserId: config.openId,
-    });
+        const existingChannel = await runtime.application.channels.find(
+            unsafeId<ChannelAccountId>(config.channelAccountId),
+        );
+        if (existingChannel === undefined)
+            await runtime.application.channels.register({
+                platform: 'wechat_official',
+                tenantExternalId: config.expectedToUserName,
+                koishiBotId: 'wechat-dev-harness',
+                credentialRef: 'secret://env/WECHAT_APP_SECRET',
+                connectionMode: 'webhook',
+            });
+        const pairing = await runtime.application.pairing.create({ userId, deviceId });
+        await runtime.application.pairing.confirm({
+            displayCode: pairing.displayCode,
+            channelAccountId: unsafeId<ChannelAccountId>(config.channelAccountId),
+            externalUserId: config.openId,
+        });
 
-    return startWechatDevHttpHarness({
-        host: config.host,
-        port: config.port,
-        deviceToken: config.deviceToken,
-        webhookApi: requiredWechatApi(runtime.wechatApi),
-        actionUiPageApi: runtime.actionUiPageApi,
-        sendTestNotification: async () => {
-            const now = clock.now();
-            const unique = randomUUID();
-            const intent: NotificationIntent = {
-                schemaVersion: '1',
-                businessEventId: unsafeId(`wechat-dev-event-${unique}`),
-                correlationId: unsafeId(`wechat-dev-correlation-${unique}`),
-                kind: 'reminder_due',
-                recipient: { userId, deviceId },
-                scheduleId: unsafeId(`wechat-dev-schedule-${unique}`),
-                taskId: unsafeId(`wechat-dev-task-${unique}`),
-                instanceId: unsafeId(`wechat-dev-instance-${unique}`),
-                reminderTriggerId: unsafeId(`wechat-dev-trigger-${unique}`),
-                reminderType: 'strong',
-                content: {
-                    title: 'VoiceLife 微信联调提醒',
-                    body: `真实测试账号投递 ${now}`,
-                },
-                plannedAt: now,
-                triggerAt: now,
-                actions: [
-                    { kind: 'command', type: 'acknowledge', label: '知道了' },
-                    { kind: 'command', type: 'snooze', label: '推迟 10 分钟', params: { minutes: 10 } },
-                ],
-                occurredAt: now,
-            };
-            const submission = await runtime.application.notifications.submitNotification(intent);
-            const pending = submission.deliveries[0];
-            if (pending === undefined) throw new Error('WeChat development binding produced no delivery');
-            const delivery = await runtime.application.deliveryDispatch.dispatch(pending.deliveryId);
-            return deliverySnapshot(delivery);
-        },
-        inspectDelivery: async (deliveryId) => {
-            const details = await runtime.application.deliveries.find(unsafeId(deliveryId));
-            return details === undefined
-                ? undefined
-                : {
-                      ...deliverySnapshot(details.delivery),
-                      attempts: details.attempts.length,
-                      receipts: details.receipts.length,
-                  };
-        },
-    });
+        const http = await startWechatDevHttpHarness({
+            host: config.host,
+            port: config.port,
+            authentication: new DatabaseDeviceAuthenticationPort(unitOfWork),
+            expectedDeviceId: deviceId,
+            webhookApi: requiredWechatApi(runtime.wechatApi),
+            actionUiPageApi: runtime.actionUiPageApi,
+            sendTestNotification: async () => {
+                const now = clock.now();
+                const unique = randomUUID();
+                const intent: NotificationIntent = {
+                    schemaVersion: '1',
+                    businessEventId: unsafeId(`wechat-dev-event-${unique}`),
+                    correlationId: unsafeId(`wechat-dev-correlation-${unique}`),
+                    kind: 'reminder_due',
+                    recipient: { userId, deviceId },
+                    scheduleId: unsafeId(`wechat-dev-schedule-${unique}`),
+                    taskId: unsafeId(`wechat-dev-task-${unique}`),
+                    instanceId: unsafeId(`wechat-dev-instance-${unique}`),
+                    reminderTriggerId: unsafeId(`wechat-dev-trigger-${unique}`),
+                    reminderType: 'strong',
+                    content: {
+                        title: 'VoiceLife 微信联调提醒',
+                        body: `真实测试账号投递 ${now}`,
+                    },
+                    plannedAt: now,
+                    triggerAt: now,
+                    actions: [
+                        { kind: 'command', type: 'acknowledge', label: '知道了' },
+                        { kind: 'command', type: 'snooze', label: '推迟 10 分钟', params: { minutes: 10 } },
+                    ],
+                    occurredAt: now,
+                };
+                const submission = await runtime.application.notifications.submitNotification(intent);
+                const pending = submission.deliveries[0];
+                if (pending === undefined) throw new Error('WeChat development binding produced no delivery');
+                const delivery = await runtime.application.deliveryDispatch.dispatch(pending.deliveryId);
+                return deliverySnapshot(delivery);
+            },
+            inspectDelivery: async (deliveryId) => {
+                const details = await runtime.application.deliveries.find(unsafeId(deliveryId));
+                if (details === undefined) return undefined;
+                const belongsToExpectedDevice = await unitOfWork.transaction(async (tx) => {
+                    const binding = await tx.bindings.findById(details.delivery.bindingId);
+                    return binding?.deviceId === deviceId;
+                });
+                return belongsToExpectedDevice
+                    ? {
+                          ...deliverySnapshot(details.delivery),
+                          attempts: details.attempts.length,
+                          receipts: details.receipts.length,
+                      }
+                    : undefined;
+            },
+        });
+        return {
+            origin: http.origin,
+            close: async () => {
+                try {
+                    await http.close();
+                } finally {
+                    if (owned !== undefined) await owned.close();
+                }
+            },
+        };
+    } catch (error) {
+        if (owned !== undefined) await owned.close().catch(() => undefined);
+        throw error;
+    }
 }
 
 function readConfiguration(environment: WechatDevEnvironment): WechatDevConfiguration {
@@ -183,15 +239,16 @@ function readConfiguration(environment: WechatDevEnvironment): WechatDevConfigur
         displayTimeZone: displayTimeZone(environment),
         actionUiBaseUrl,
         openId: requiredEnvironment(environment, 'WECHAT_TEST_OPENID'),
-        deviceId: requiredEnvironment(environment, 'DEVICE_ID'),
-        deviceToken: requiredEnvironment(environment, 'DEVICE_TOKEN'),
+        databaseUrl: requiredEnvironment(environment, 'DATABASE_URL'),
+        deviceId: requiredEnvironment(environment, 'WECHAT_DEV_DEVICE_ID'),
         actionTokenSecret: requiredEnvironment(environment, 'ACTION_TOKEN_SECRET'),
+        identitySecret: environment.IDENTITY_SECRET?.trim() || requiredEnvironment(environment, 'ACTION_TOKEN_SECRET'),
     };
-    if (Buffer.byteLength(config.deviceToken, 'utf8') < 24) {
-        throw new Error('DEVICE_TOKEN must contain at least 24 bytes');
-    }
     if (Buffer.byteLength(config.actionTokenSecret, 'utf8') < 32) {
         throw new Error('ACTION_TOKEN_SECRET must contain at least 32 bytes');
+    }
+    if (Buffer.byteLength(config.identitySecret, 'utf8') < 32) {
+        throw new Error('IDENTITY_SECRET must contain at least 32 bytes');
     }
     return config;
 }
@@ -241,14 +298,6 @@ function assertActionUiBaseUrl(value: string): void {
 function requiredWechatApi<T>(value: T | undefined): T {
     if (value === undefined) throw new Error('WeChat development runtime did not expose its webhook controller');
     return value;
-}
-
-function revealExternalUserId(ciphertext: string): Promise<string> {
-    const prefix = 'ciphertext:';
-    if (!ciphertext.startsWith(prefix) || ciphertext.length === prefix.length) {
-        return Promise.reject(new Error('WeChat development identity ciphertext is invalid'));
-    }
-    return Promise.resolve(ciphertext.slice(prefix.length));
 }
 
 function deliverySnapshot(delivery: Delivery): WechatDevDeliverySnapshot {

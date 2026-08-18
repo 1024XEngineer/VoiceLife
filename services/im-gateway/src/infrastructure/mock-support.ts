@@ -293,9 +293,14 @@ export class MockDeviceAuthenticationPort implements DeviceAuthenticationPort {
         private readonly userId: UserId = unsafeId<UserId>('user-fixture'),
     ) {}
 
+    /** @returns 测试 fixture 可用于预置匹配设备记录的可信主体。 */
+    public get principal(): DevicePrincipal {
+        return { deviceId: this.deviceId, userId: this.userId };
+    }
+
     /** {@inheritDoc DeviceAuthenticationPort.authenticate} */
     public authenticate(_authorization: string): Promise<DevicePrincipal> {
-        return Promise.resolve({ deviceId: this.deviceId, userId: this.userId });
+        return Promise.resolve(this.principal);
     }
 }
 

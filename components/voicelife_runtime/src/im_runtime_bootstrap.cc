@@ -45,6 +45,7 @@ std::atomic_bool g_provisioning_started{false};
 std::atomic<im::ImPairingPort*> g_pairing_client{nullptr};
 std::atomic_uint32_t g_pairing_window_generation{0};
 std::atomic_bool g_pairing_active{false};
+std::string g_pairing_device_id;
 std::optional<std::string> g_pairing_user_id;
 
 bool IsPairingTrigger(std::span<const uint8_t> bytes) {
@@ -88,6 +89,7 @@ Status RunPairingAcceptance(uint8_t expires_in_minutes) {
         ESP_LOGW(kTag, "IM_PAIRING_STATUS=%s", PairingStatusName(begun.status));
         return Status::Error(ErrorCode::kUnavailable, "创建配对会话失败");
     }
+    ESP_LOGI(kTag, "IM_PAIRING_SCOPE device_id=%s user_id=%s", g_pairing_device_id.c_str(), g_pairing_user_id->c_str());
     ESP_LOGI(kTag, "IM_PAIRING_CODE=%s expires_at=%s", begun.display_code.c_str(), begun.expires_at.c_str());
     ESP_LOGI(kTag, "IM_PAIRING_STATUS=pending");
 
@@ -191,10 +193,18 @@ Result<std::string> ReadNvsString(nvs_handle_t handle, std::string_view key) {
 bool ReadConsoleBytes(uint8_t* destination, std::size_t size, int timeout_ms) {
     std::size_t received = 0;
     const int64_t deadline_us = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 1000;
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    while (received < size) {
+        const int64_t remaining_ms = std::max<int64_t>(0, (deadline_us - esp_timer_get_time()) / 1000);
+        const int count = usb_serial_jtag_read_bytes(destination + received, size - received,
+                                                     pdMS_TO_TICKS(std::min<int64_t>(remaining_ms, 10)));
+        if (count > 0) received += static_cast<std::size_t>(count);
+        if (count < 0 || esp_timer_get_time() >= deadline_us) break;
+    }
+    return received == size;
+#else
     const int original_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     if (original_flags < 0 || fcntl(STDIN_FILENO, F_SETFL, original_flags | O_NONBLOCK) < 0) return false;
-
-    bool complete = false;
     while (received < size) {
         const ssize_t count = read(STDIN_FILENO, destination + received, size - received);
         if (count > 0) {
@@ -205,9 +215,9 @@ bool ReadConsoleBytes(uint8_t* destination, std::size_t size, int timeout_ms) {
         if (esp_timer_get_time() >= deadline_us) break;
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    complete = received == size;
     (void)fcntl(STDIN_FILENO, F_SETFL, original_flags);
-    return complete;
+    return received == size;
+#endif
 }
 
 Status StoreProvisioningRequest(im::ImProvisioningRequest& request) {
@@ -429,12 +439,17 @@ bool StartImProvisioningTask() {
     return true;
 }
 
-void RegisterImPairingAcceptance(im::ImPairingPort* client, std::optional<std::string> user_id) {
+void RegisterImPairingAcceptance(im::ImPairingPort* client, std::string device_id, std::optional<std::string> user_id) {
     if (client == nullptr) return;
+    if (device_id.empty()) {
+        ESP_LOGW(kTag, "IM_PAIRING_UNAVAILABLE=device_id_missing");
+        return;
+    }
     if (!user_id.has_value() || user_id->empty()) {
         ESP_LOGW(kTag, "IM_PAIRING_UNAVAILABLE=user_id_missing");
         return;
     }
+    g_pairing_device_id = std::move(device_id);
     g_pairing_user_id = std::move(user_id);
     g_pairing_client.store(client, std::memory_order_release);
     g_pairing_window_generation.fetch_add(1, std::memory_order_acq_rel);

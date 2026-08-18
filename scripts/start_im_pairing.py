@@ -14,6 +14,7 @@ STATUS_PATTERN = re.compile(
     rb"\bIM_PAIRING_STATUS=(pending|retrying|confirmed|expired|cancelled|not_found|timed_out|credential_rejected|failed)\b"
 )
 FAILURE_PATTERN = re.compile(rb"\bIM_PAIRING_FAILED code=(\d+)\b")
+SCOPE_PATTERN = re.compile(rb"\bIM_PAIRING_SCOPE device_id=([^\s]+) user_id=(.*?)\r?\n?$")
 TERMINAL_STATUSES = frozenset(
     {"confirmed", "expired", "cancelled", "not_found", "timed_out", "credential_rejected", "failed"}
 )
@@ -37,21 +38,41 @@ def parse_pairing_line(line: bytes) -> dict[str, str] | None:
     failure = FAILURE_PATTERN.search(line)
     if failure:
         return {"failure_code": failure.group(1).decode("ascii")}
+    scope = SCOPE_PATTERN.search(line)
+    if scope:
+        try:
+            return {
+                "device_id": scope.group(1).decode("ascii"),
+                "user_id": scope.group(2).decode("utf-8"),
+            }
+        except UnicodeDecodeError:
+            return None
     return None
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", required=True, help="locally attached serial device")
     parser.add_argument("--expires-in-minutes", type=int, default=10, choices=range(1, 11))
+    parser.add_argument(
+        "--auth-smoke",
+        action="store_true",
+        help="require real device create/query authentication and treat expected one-minute expiry as success",
+    )
+    parser.add_argument("--expected-device-id", help="registered deviceId required by --auth-smoke")
+    parser.add_argument("--expected-user-id", help="registered immutable userId required by --auth-smoke")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=720.0)
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.auth_smoke and (not args.expected_device_id or not args.expected_user_id):
+        parser.error("--auth-smoke requires --expected-device-id and --expected-user-id")
+    return args
 
 
 def main() -> None:
     args = parse_args()
-    payload = trigger_payload(args.expires_in_minutes)
+    expires_in_minutes = 1 if args.auth_smoke else args.expires_in_minutes
+    payload = trigger_payload(expires_in_minutes)
     try:
         import serial
     except ImportError as error:
@@ -66,6 +87,9 @@ def main() -> None:
         pairing_ready = False
         runtime_ready = False
         sent = False
+        saw_session = False
+        saw_pending = False
+        saw_matching_scope = False
         while time.monotonic() < deadline:
             line = device.readline()
             pairing_ready = pairing_ready or PAIRING_READY in line
@@ -82,12 +106,28 @@ def main() -> None:
             if result is None:
                 continue
             if "code" in result:
+                saw_session = True
                 print(f"Pairing code: {result['code']} (expires at {result['expires_at']})")
                 continue
             if "failure_code" in result:
                 raise SystemExit(f"Board rejected pairing (sanitized status code {result['failure_code']}).")
+            if "device_id" in result:
+                if args.auth_smoke and (
+                    result["device_id"] != args.expected_device_id or result["user_id"] != args.expected_user_id
+                ):
+                    raise SystemExit("Authentication smoke failed: deviceId/userId do not match the order record")
+                saw_matching_scope = True
+                continue
             status = result["status"]
             print(f"Pairing status: {status}")
+            saw_pending = saw_pending or status == "pending"
+            if args.auth_smoke:
+                if status == "expired" and saw_session and saw_pending and saw_matching_scope:
+                    print("Authentication smoke passed: matching session was created, queried, and expired.")
+                    return
+                if status in TERMINAL_STATUSES:
+                    raise SystemExit(f"Authentication smoke failed with status: {status}")
+                continue
             if status in TERMINAL_STATUSES:
                 if status != "confirmed":
                     raise SystemExit(f"Pairing stopped with status: {status}")

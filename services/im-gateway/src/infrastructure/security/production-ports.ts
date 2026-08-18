@@ -6,7 +6,6 @@ import {
     randomInt,
     randomBytes,
     randomUUID,
-    timingSafeEqual,
 } from 'node:crypto';
 
 import { unsafeId } from '../../contracts/ids.js';
@@ -17,14 +16,13 @@ import type {
     DeliveryAttemptId,
     DeliveryId,
     DeliveryReceiptId,
-    DeviceId,
     ExternalIdentityId,
     OperationId,
     OutboxEventId,
     PairingSessionId,
     RequestId,
-    UserId,
 } from '../../contracts/ids.js';
+import type { ImUnitOfWork } from '../../ports/repositories.js';
 import type {
     DeviceAuthenticationPort,
     DevicePrincipal,
@@ -38,32 +36,22 @@ import { ImGatewayError } from '../../shared/errors.js';
 const AES_IV_BYTES = 12;
 const AES_TAG_BYTES = 16;
 const MINIMUM_SECRET_BYTES = 32;
-const TOKEN_PREFIX = 'Bearer ';
+const DEVICE_AUTHORIZATION = /^Bearer ([A-Za-z0-9_-]{43})$/u;
 
-/** 使用部署令牌认证单台设备的生产端口。 */
-export class BearerDeviceAuthenticationPort implements DeviceAuthenticationPort {
-    private readonly expectedTokenDigest: Buffer;
-
-    /**
-     * @param deviceId 部署实例接受的设备标识。
-     * @param userId 与设备凭据绑定的 VoiceLife 用户标识。
-     * @param token 由 Secret 注入的 Bearer 令牌。
-     */
-    public constructor(
-        private readonly deviceId: DeviceId,
-        private readonly userId: UserId,
-        token: string,
-    ) {
-        assertMinimumSecret(token, 'DEVICE_TOKEN', 24);
-        this.expectedTokenDigest = digest(token);
-    }
+/** 按 SHA-256 摘要查询注册表并只认证 active 设备。 */
+export class DatabaseDeviceAuthenticationPort implements DeviceAuthenticationPort {
+    /** @param unitOfWork 用于按摘要读取设备的事务工作单元。 */
+    public constructor(private readonly unitOfWork: ImUnitOfWork) {}
 
     /** {@inheritDoc DeviceAuthenticationPort.authenticate} */
-    public authenticate(authorization: string): Promise<DevicePrincipal> {
-        if (!authorization.startsWith(TOKEN_PREFIX)) return Promise.reject(unauthorized());
-        const actual = digest(authorization.slice(TOKEN_PREFIX.length));
-        if (!timingSafeEqual(actual, this.expectedTokenDigest)) return Promise.reject(unauthorized());
-        return Promise.resolve({ deviceId: this.deviceId, userId: this.userId });
+    public async authenticate(authorization: string): Promise<DevicePrincipal> {
+        const match = DEVICE_AUTHORIZATION.exec(authorization);
+        if (match === null) throw unauthorized();
+        const token = match[1];
+        if (token === undefined) throw unauthorized();
+        const device = await this.unitOfWork.transaction((tx) => tx.devices.findByTokenDigest(digest(token)));
+        if (device === undefined || device.status !== 'active') throw unauthorized();
+        return { deviceId: device.deviceId, userId: device.userId };
     }
 }
 

@@ -1,7 +1,14 @@
-import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
+import { describe, test } from 'node:test';
+import { clearTimeout, setTimeout } from 'node:timers';
 
-import { createMockImGateway, createPostgresImGateway, mockImGatewayPorts } from '../dist/index.js';
+import {
+    createMockImGateway,
+    createPostgresImGateway,
+    DeviceManagementService,
+    mockImGatewayPorts,
+} from '../dist/index.js';
 import { DeliveryOutboxWorker } from '../dist/infrastructure/delivery-outbox-worker.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
 import { PostgresImUnitOfWork } from '../dist/infrastructure/persistence/postgres.js';
@@ -25,6 +32,20 @@ import {
 import { sharedRepositoryContractSuite } from './persistence-contract-suite.mjs';
 
 /** 检测 Postgres 是否可用，不可用时返回 null 并跳过整套 Postgres 契约。 */
+async function withTimeout(promise, milliseconds, label) {
+    let timer;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`${label} timed out`)), milliseconds);
+            }),
+        ]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 async function probePostgres(url) {
     const probe = new PostgresImUnitOfWork(url);
     try {
@@ -353,6 +374,9 @@ describe(
             await uow.migrate();
             await uow.truncateAll();
             await uow.runRaw('DROP INDEX IF EXISTS im_bindings_active_user_device_identity_uq');
+            await uow.runRaw('DROP INDEX IF EXISTS im_bindings_active_device_uq');
+            await uow.runRaw('DROP INDEX IF EXISTS im_bindings_active_external_identity_uq');
+            await uow.runRaw('ALTER TABLE im_bindings DROP CONSTRAINT IF EXISTS im_bindings_active_device_check');
             await uow.runRaw('DELETE FROM im_schema_migrations WHERE version >= 3');
             await uow.runRaw(
                 `INSERT INTO im_bindings (
@@ -391,6 +415,147 @@ describe(
                 ),
             );
             await uow.close();
+        });
+
+        await test('v7 migration cleans null and dual-ranked conflicts then validates one-to-one constraints', async () => {
+            const uow = new PostgresImUnitOfWork(POSTGRES_URL);
+            await uow.migrate();
+            await uow.truncateAll();
+            await uow.runRaw('DROP INDEX IF EXISTS im_bindings_active_device_uq');
+            await uow.runRaw('DROP INDEX IF EXISTS im_bindings_active_external_identity_uq');
+            await uow.runRaw('ALTER TABLE im_bindings DROP CONSTRAINT IF EXISTS im_bindings_active_device_check');
+            await uow.runRaw('DELETE FROM im_schema_migrations WHERE version = 7');
+            await uow.runRaw(
+                `INSERT INTO im_bindings
+                    (id, user_id, device_id, external_identity_id, priority, status, bound_at)
+                 VALUES
+                    ('binding-null', 'user-1', NULL, 'identity-null', 100, 'active', $1),
+                    ('binding-old', 'user-1', 'device-d', 'identity-a', 100, 'active', $1),
+                    ('binding-device-winner', 'user-1', 'device-d', 'identity-b', 100, 'active', $3),
+                    ('binding-identity-winner', 'user-1', 'device-e', 'identity-a', 100, 'active', $2)`,
+                [T0, T1, T2],
+            );
+            await uow.migrate();
+            const rows = await uow.runRaw('SELECT id, status FROM im_bindings ORDER BY id');
+            assert.deepEqual(rows, [
+                { id: 'binding-device-winner', status: 'active' },
+                { id: 'binding-identity-winner', status: 'active' },
+                { id: 'binding-null', status: 'unbound' },
+                { id: 'binding-old', status: 'unbound' },
+            ]);
+            const validation = await uow.runRaw(
+                `SELECT convalidated FROM pg_constraint WHERE conname = 'im_bindings_active_device_check'`,
+            );
+            assert.deepEqual(validation, [{ convalidated: true }]);
+            const indexes = await uow.runRaw(
+                `SELECT indexname FROM pg_indexes
+                 WHERE indexname IN ('im_bindings_active_device_uq', 'im_bindings_active_external_identity_uq')
+                 ORDER BY indexname`,
+            );
+            assert.deepEqual(indexes, [
+                { indexname: 'im_bindings_active_device_uq' },
+                { indexname: 'im_bindings_active_external_identity_uq' },
+            ]);
+            await assert.rejects(
+                uow.runRaw(
+                    `INSERT INTO im_bindings
+                        (id, user_id, device_id, external_identity_id, priority, status, bound_at)
+                     VALUES ('binding-invalid', 'user-1', NULL, 'identity-new', 100, 'active', $1)`,
+                    [T2],
+                ),
+            );
+            await uow.close();
+        });
+
+        await test('v6 device registry enforces raw 32-byte unique digests and owner lookup index', async () => {
+            await withUow(
+                () => makePostgresUow(),
+                async (uow) => {
+                    const columns = await uow.runRaw(
+                        `SELECT data_type FROM information_schema.columns
+                         WHERE table_name = 'im_devices' AND column_name = 'token_digest'`,
+                    );
+                    assert.deepEqual(columns, [{ data_type: 'bytea' }]);
+                    const indexes = await uow.runRaw(
+                        `SELECT indexname FROM pg_indexes WHERE indexname = 'im_devices_user_id_idx'`,
+                    );
+                    assert.deepEqual(indexes, [{ indexname: 'im_devices_user_id_idx' }]);
+                    await assert.rejects(
+                        uow.runRaw(
+                            `INSERT INTO im_devices
+                                (device_id, user_id, token_digest, status, created_at, updated_at)
+                             VALUES ('device-short', 'user-1', $1, 'active', $2, $2)`,
+                            [Buffer.alloc(31), T0],
+                        ),
+                    );
+                },
+            );
+        });
+
+        await test('concurrent cross-device identity swap is deadlock-free and leaves one-to-one active rows', async () => {
+            const first = await makePostgresUow();
+            const second = new PostgresImUnitOfWork(POSTGRES_URL);
+            await second.migrate();
+            try {
+                await first.transaction(async (tx) => {
+                    await tx.bindings.replaceActiveBinding({
+                        id: 'binding-a',
+                        userId: 'user-1',
+                        deviceId: 'device-a',
+                        externalIdentityId: 'identity-a',
+                        priority: 100,
+                        status: 'active',
+                        boundAt: T0,
+                    });
+                    await tx.bindings.replaceActiveBinding({
+                        id: 'binding-b',
+                        userId: 'user-1',
+                        deviceId: 'device-b',
+                        externalIdentityId: 'identity-b',
+                        priority: 100,
+                        status: 'active',
+                        boundAt: T0,
+                    });
+                });
+                await withTimeout(
+                    Promise.all([
+                        first.transaction((tx) =>
+                            tx.bindings.replaceActiveBinding({
+                                id: 'binding-a-to-b',
+                                userId: 'user-1',
+                                deviceId: 'device-a',
+                                externalIdentityId: 'identity-b',
+                                priority: 100,
+                                status: 'active',
+                                boundAt: T1,
+                            }),
+                        ),
+                        second.transaction((tx) =>
+                            tx.bindings.replaceActiveBinding({
+                                id: 'binding-b-to-a',
+                                userId: 'user-1',
+                                deviceId: 'device-b',
+                                externalIdentityId: 'identity-a',
+                                priority: 100,
+                                status: 'active',
+                                boundAt: T1,
+                            }),
+                        ),
+                    ]),
+                    5_000,
+                    'binding swap',
+                );
+                const active = await first.runRaw(
+                    `SELECT device_id, external_identity_id FROM im_bindings
+                     WHERE status = 'active' ORDER BY device_id`,
+                );
+                assert.deepEqual(active, [
+                    { device_id: 'device-a', external_identity_id: 'identity-b' },
+                    { device_id: 'device-b', external_identity_id: 'identity-a' },
+                ]);
+            } finally {
+                await Promise.all([first.close(), second.close()]);
+            }
         });
 
         await test('migration keeps one pending display code and prevents a collision from recurring', async () => {
@@ -572,6 +737,16 @@ describe(
             const reset = new PostgresImUnitOfWork(POSTGRES_URL);
             await reset.migrate();
             await reset.truncateAll();
+            await reset.transaction((tx) =>
+                tx.devices.create({
+                    deviceId: 'device-fixture',
+                    userId: 'user-fixture',
+                    tokenDigest: new Uint8Array(32),
+                    status: 'active',
+                    createdAt: T0,
+                    updatedAt: T0,
+                }),
+            );
             await reset.close();
 
             const clock = new FixedClock();
@@ -614,6 +789,61 @@ describe(
             const after = await uow.runRaw('SELECT COUNT(*)::int AS n FROM im_schema_migrations');
             assert.equal(after[0].n, SCHEMA_VERSION);
             await uow.close();
+        });
+
+        await test('concurrent confirm and revoke linearize without a reverse lock deadlock', async () => {
+            const clock = new FixedClock();
+            const [first, second] = await Promise.all([makePostgresUow(), makePostgresUow()]);
+            try {
+                const gateway = createMockImGateway('device-fixture', clock, { unitOfWork: first });
+                const channel = await gateway.application.channels.register({
+                    platform: 'wechat_official',
+                    tenantExternalId: 'tenant-race',
+                    koishiBotId: 'bot-race',
+                    credentialRef: 'secret://race',
+                    connectionMode: 'webhook',
+                });
+                const pairing = await gateway.application.pairing.create({
+                    userId: 'user-fixture',
+                    deviceId: 'device-fixture',
+                });
+                const management = new DeviceManagementService(second, clock);
+                const [confirmation, revocation] = await withTimeout(
+                    Promise.allSettled([
+                        gateway.application.pairing.confirm({
+                            displayCode: pairing.displayCode,
+                            channelAccountId: channel.id,
+                            externalUserId: 'race-open-id',
+                        }),
+                        management.revoke('device-fixture'),
+                    ]),
+                    5_000,
+                    'confirm/revoke race',
+                );
+                assert.equal(revocation.status, 'fulfilled');
+                const state = await first.runRaw(
+                    `SELECT d.status AS device_status, p.status AS pairing_status,
+                            (SELECT COUNT(*)::int FROM im_bindings WHERE status = 'active') AS active_bindings
+                     FROM im_devices d JOIN im_pairing_sessions p ON p.device_id = d.device_id
+                     WHERE d.device_id = 'device-fixture'`,
+                );
+                assert.equal(state[0].device_status, 'revoked');
+                if (confirmation.status === 'fulfilled') {
+                    assert.deepEqual(state[0], {
+                        device_status: 'revoked',
+                        pairing_status: 'confirmed',
+                        active_bindings: 1,
+                    });
+                } else {
+                    assert.deepEqual(state[0], {
+                        device_status: 'revoked',
+                        pairing_status: 'cancelled',
+                        active_bindings: 0,
+                    });
+                }
+            } finally {
+                await Promise.all([first.close(), second.close()]);
+            }
         });
 
         await test('concurrent migrate calls serialize on the advisory lock without error', async () => {

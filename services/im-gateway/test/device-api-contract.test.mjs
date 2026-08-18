@@ -133,19 +133,13 @@ test('notification rejects a body for another device principal', async () => {
     );
 });
 
-test('pairing status is hidden from a different device principal', async () => {
+test('an unknown device cannot create a pairing session', async () => {
     const { gateway } = buildGateway();
-    const created = await gateway.application.pairing.create({
-        userId: 'user-fixture',
-        deviceId: 'device-other',
-    });
-
-    const result = await gateway.deviceApi.getPairingSession({
-        authorization: 'Bearer fixture-device-token',
-        pairingSessionId: created.session.id,
-    });
-
-    assert.equal(result, undefined);
+    await expectGatewayError(
+        () => gateway.application.pairing.create({ userId: 'user-fixture', deviceId: 'device-other' }),
+        'unauthorized',
+        'An unregistered device created a pairing session',
+    );
 });
 
 test('action result rejects a path for another device principal', async () => {
