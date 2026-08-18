@@ -120,6 +120,7 @@ void CheckInsertAndRoundTrip(const std::filesystem::path& path) {
         .location = std::nullopt,
         .notes = std::nullopt,
         .rule_id = std::nullopt,
+        .reminder_task_id = std::nullopt,
         .status = ScheduleStatus::kActive,
         .created_at = {},
         .updated_at = {},

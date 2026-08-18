@@ -46,9 +46,7 @@ class ScheduleService {
      * @param expected_reminder_task_id 可选的当前提醒任务标识，用于拒绝过期回调。
      * @return 状态更新结果。
      */
-    Status complete_schedule(
-        ScheduleId schedule_id,
-        std::optional<int64_t> expected_reminder_task_id = std::nullopt);
+    Status complete_schedule(ScheduleId schedule_id, std::optional<int64_t> expected_reminder_task_id = std::nullopt);
 
     /**
      * @brief 使用筛选条件和分页参数查询日程。

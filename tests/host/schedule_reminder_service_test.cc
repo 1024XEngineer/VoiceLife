@@ -1,3 +1,5 @@
+#include "voicelife/schedule/schedule_reminder_service.h"
+
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -8,7 +10,6 @@
 #include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_exception_repository.h"
-#include "voicelife/schedule/schedule_reminder_service.h"
 #include "voicelife/schedule/schedule_rule_repository.h"
 #include "voicelife/timing/timing_task.h"
 
@@ -64,12 +65,10 @@ class FakeExceptionRepository final : public voicelife::schedule::ScheduleExcept
         return Result<std::vector<ScheduleException>>::Success(std::move(matched));
     }
 
-    Result<std::optional<ScheduleException>> FindByRuleAndTime(
-        ScheduleRuleId rule_id,
-        DateTime original_start_time) const override {
+    Result<std::optional<ScheduleException>> FindByRuleAndTime(ScheduleRuleId rule_id,
+                                                               DateTime original_start_time) const override {
         for (const auto& exception : exceptions) {
-            if (exception.rule_id == rule_id &&
-                exception.original_start_time == original_start_time) {
+            if (exception.rule_id == rule_id && exception.original_start_time == original_start_time) {
                 return Result<std::optional<ScheduleException>>::Success(exception);
             }
         }
@@ -87,8 +86,7 @@ class FakeExceptionRepository final : public voicelife::schedule::ScheduleExcept
 
 class FakeRuleRepository final : public voicelife::schedule::ScheduleRuleRepository {
    public:
-    explicit FakeRuleRepository(InMemoryScheduleRepository& schedules)
-        : schedules_(schedules) {}
+    explicit FakeRuleRepository(InMemoryScheduleRepository& schedules) : schedules_(schedules) {}
 
     Result<ScheduleRule> Insert(const ScheduleRule& rule) override {
         rules.push_back(rule);
@@ -116,33 +114,28 @@ class FakeRuleRepository final : public voicelife::schedule::ScheduleRuleReposit
         return Result<ScheduleRule>::Failure(ErrorCode::kNotFound, "规则不存在");
     }
 
-    Result<ScheduleRule> CreateWithFirstInstance(
-        const ScheduleRule& rule,
-        const std::optional<Schedule>& first_instance) override {
+    Result<ScheduleRule> CreateWithFirstInstance(const ScheduleRule& rule,
+                                                 const std::optional<Schedule>& first_instance) override {
         (void)first_instance;
         return Insert(rule);
     }
 
-    Result<ScheduleRule> UpdateAndRebuild(
-        const ScheduleRule& rule,
-        const std::optional<Schedule>& first_instance) override {
+    Result<ScheduleRule> UpdateAndRebuild(const ScheduleRule& rule,
+                                          const std::optional<Schedule>& first_instance) override {
         (void)first_instance;
         const Status status = Update(rule);
         return status.ok() ? Result<ScheduleRule>::Success(rule)
                            : Result<ScheduleRule>::Failure(status.code, status.message);
     }
 
-    Status CancelRuleAndInstances(
-        ScheduleRuleId id,
-        int64_t& cancelled_instance_count) override {
+    Status CancelRuleAndInstances(ScheduleRuleId id, int64_t& cancelled_instance_count) override {
         cancelled_instance_count = 0;
         (void)id;
         return Status::Ok();
     }
 
-    Result<Schedule> CreateNextInstance(
-        const Schedule& schedule,
-        const std::optional<ScheduleException>& linked_exception) override {
+    Result<Schedule> CreateNextInstance(const Schedule& schedule,
+                                        const std::optional<ScheduleException>& linked_exception) override {
         (void)linked_exception;
         ++create_next_calls;
         if (fail_create_next_count > 0) {
@@ -160,11 +153,8 @@ class FakeRuleRepository final : public voicelife::schedule::ScheduleRuleReposit
     InMemoryScheduleRepository& schedules_;
 };
 
-Schedule MakeSchedule(
-    int64_t id,
-    std::string event,
-    std::optional<DateTime> start,
-    std::optional<ScheduleRuleId> rule_id = std::nullopt) {
+Schedule MakeSchedule(int64_t id, std::string event, std::optional<DateTime> start,
+                      std::optional<ScheduleRuleId> rule_id = std::nullopt) {
     return {
         .id = id,
         .event = std::move(event),
@@ -210,12 +200,7 @@ struct Fixture {
           rule_service(rules, exceptions, repository),
           schedule_service(repository),
           now(current),
-          reminder(repository,
-                   schedule_service,
-                   rule_service,
-                   timing,
-                   speech,
-                   [this]() { return now; }) {}
+          reminder(repository, schedule_service, rule_service, timing, speech, [this]() { return now; }) {}
 
     InMemoryScheduleRepository repository;
     FakeExceptionRepository exceptions;
@@ -235,16 +220,13 @@ void CheckFutureMemoAndExpiredRestoration() {
         MakeSchedule(3, "已过期", At(999)),
     });
     Check(fixture.reminder.Start().ok(), "启动应恢复未来提醒");
-    Check(fixture.timing.ProcessPendingCommands(Trigger(1'000)) == 1,
-          "只有未来有开始时间的日程应注册提醒");
+    Check(fixture.timing.ProcessPendingCommands(Trigger(1'000)) == 1, "只有未来有开始时间的日程应注册提醒");
 
     const auto future = fixture.repository.FindById(1);
     const auto memo = fixture.repository.FindById(2);
     const auto expired = fixture.repository.FindById(3);
-    Check(future.ok() && future.value->reminder_task_id.has_value(),
-          "未来日程应持久化提醒任务标识");
-    Check(memo.ok() && !memo.value->reminder_task_id.has_value(),
-          "备忘录不应注册提醒");
+    Check(future.ok() && future.value->reminder_task_id.has_value(), "未来日程应持久化提醒任务标识");
+    Check(memo.ok() && !memo.value->reminder_task_id.has_value(), "备忘录不应注册提醒");
     Check(expired.ok() && expired.value->status == ScheduleStatus::kActive &&
               !expired.value->reminder_task_id.has_value(),
           "过期日程应保持 Active 且无提醒");
@@ -261,13 +243,11 @@ void CheckFutureMemoAndExpiredRestoration() {
 
 void CheckSpeechFailureLeavesActive() {
     Fixture fixture({MakeSchedule(1, "失败提醒", At(1'100))});
-    fixture.speech.next_status =
-        Status::Error(ErrorCode::kUnavailable, "TTS 不可用");
+    fixture.speech.next_status = Status::Error(ErrorCode::kUnavailable, "TTS 不可用");
     Check(fixture.reminder.Start().ok(), "失败测试应启动提醒服务");
     fixture.timing.RunDueTasks(Trigger(1'100));
     const auto stored = fixture.repository.FindById(1);
-    Check(stored.ok() && stored.value->status == ScheduleStatus::kActive &&
-              !stored.value->reminder_task_id.has_value(),
+    Check(stored.ok() && stored.value->status == ScheduleStatus::kActive && !stored.value->reminder_task_id.has_value(),
           "TTS 失败后应保持 Active 并清除已终止任务标识");
 }
 
@@ -285,8 +265,7 @@ void CheckCancellationAndRescheduleUseFreshIds() {
     fixture.timing.ProcessPendingCommands(Trigger(1'001));
     const int64_t second_id = *fixture.repository.FindById(1).value->reminder_task_id;
     Check(second_id != first_id, "重新注册必须使用从未使用过的新 TaskId");
-    Check(fixture.timing.RunDueTasks(Trigger(1'100)).processed_count == 0,
-          "旧任务取消后不应在原时间触发");
+    Check(fixture.timing.RunDueTasks(Trigger(1'100)).processed_count == 0, "旧任务取消后不应在原时间触发");
     Check(fixture.timing.RunDueTasks(Trigger(1'200)).processed_count == 1 &&
               fixture.speech.texts.front() == "提醒：现在是「新提醒」时间了",
           "新任务应在修改后的时间触发并使用新文本");
@@ -295,18 +274,14 @@ void CheckCancellationAndRescheduleUseFreshIds() {
 void CheckRecurringFailureStillContinues() {
     Fixture fixture({MakeSchedule(1, "周期首条", At(1'100), 7)});
     fixture.rules.rules.push_back(DailyRule(7));
-    fixture.speech.next_status =
-        Status::Error(ErrorCode::kUnavailable, "TTS 不可用");
+    fixture.speech.next_status = Status::Error(ErrorCode::kUnavailable, "TTS 不可用");
     Check(fixture.reminder.Start().ok(), "周期测试应启动服务");
     fixture.timing.RunDueTasks(Trigger(1'100));
-    Check(fixture.rules.create_next_calls == 1,
-          "周期提醒即使 TTS 失败也必须继续生成下一实例");
+    Check(fixture.rules.create_next_calls == 1, "周期提醒即使 TTS 失败也必须继续生成下一实例");
     const auto schedules = fixture.repository.FindAll();
-    Check(schedules.ok() && schedules.value->size() == 2,
-          "周期回调应保存并同步下一实例");
+    Check(schedules.ok() && schedules.value->size() == 2, "周期回调应保存并同步下一实例");
     const auto& next = schedules.value->back();
-    Check(next.rule_id == 7 && next.reminder_task_id.has_value(),
-          "下一实例应关联原规则并注册提醒");
+    Check(next.rule_id == 7 && next.reminder_task_id.has_value(), "下一实例应关联原规则并注册提醒");
 }
 
 void CheckGenerationRetryBackoff() {
@@ -317,20 +292,16 @@ void CheckGenerationRetryBackoff() {
 
     fixture.now = At(1'100);
     fixture.timing.RunDueTasks(Trigger(1'100));
-    Check(fixture.timing.NextWakeAt() == Trigger(1'160),
-          "首次生成失败应约一分钟后重试");
+    Check(fixture.timing.NextWakeAt() == Trigger(1'160), "首次生成失败应约一分钟后重试");
     fixture.now = At(1'160);
     fixture.timing.RunDueTasks(Trigger(1'160));
-    Check(fixture.timing.NextWakeAt() == Trigger(1'460),
-          "第二次生成失败应约五分钟后重试");
+    Check(fixture.timing.NextWakeAt() == Trigger(1'460), "第二次生成失败应约五分钟后重试");
     fixture.now = At(1'460);
     fixture.timing.RunDueTasks(Trigger(1'460));
-    Check(fixture.timing.NextWakeAt() == Trigger(2'360),
-          "第三次生成失败应约十五分钟后重试");
+    Check(fixture.timing.NextWakeAt() == Trigger(2'360), "第三次生成失败应约十五分钟后重试");
     fixture.now = At(2'360);
     fixture.timing.RunDueTasks(Trigger(2'360));
-    Check(fixture.rules.create_next_calls == 4,
-          "第三次之后应继续按封顶间隔尝试而不是静默终止");
+    Check(fixture.rules.create_next_calls == 4, "第三次之后应继续按封顶间隔尝试而不是静默终止");
 }
 
 }  // namespace
