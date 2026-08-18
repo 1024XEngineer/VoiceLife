@@ -31,6 +31,9 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
         return send_text_result;
     }
     Status SendAudio(voicelife::voice::AudioFrame frame) override {
+        if (frame.generation != tx_generation) {
+            return Status::Error(ErrorCode::kConflict, "测试 TX gate 拒绝非当前 generation 音频");
+        }
         audio_frames.push_back(std::move(frame));
         return send_audio_result;
     }
@@ -38,6 +41,7 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
         ++closes;
         return close_result;
     }
+    void SetGeneration(uint64_t generation) override { tx_generation = generation; }
 
     void EmitText(std::string message) {
         if (sink_.on_text) {
@@ -74,6 +78,7 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
     bool emit_hello = true;
     int connects = 0;
     int closes = 0;
+    uint64_t tx_generation = 0;
     const uint8_t* emitted_binary_data = nullptr;
 };
 
@@ -155,6 +160,8 @@ int main() {
     Check(transport.connects == 1 && transport.texts.size() == 1 &&
               transport.texts.front().find("\"type\":\"hello\"") != std::string::npos,
           "连接必须只发送一次 hello");
+    Check(transport.tx_generation == session_config.generation,
+          "首次连接必须在首帧 PCM 进入 Transport 前初始化 TX generation");
     Check(!events.empty() && events.back().kind == voicelife::voice::VoiceEventKind::kConnected &&
               events.back().generation == 7,
           "hello 事件必须携带当前 generation");

@@ -64,8 +64,10 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
     explicit_disconnect_.store(false);
     transport_connected_.store(false);
     connected_.store(false);
-    generation_.store(config.generation);
-    output_sequence_.store(0);
+    // Prime the transport gate before it can accept the first connection
+    // callback. Otherwise the first session's PCM generation would differ
+    // from the transport default and be silently dropped.
+    SetGeneration(config.generation);
     {
         std::lock_guard<std::mutex> lock(hello_mutex_);
         hello_received_ = false;
