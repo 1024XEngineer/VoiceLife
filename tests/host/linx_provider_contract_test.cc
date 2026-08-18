@@ -115,7 +115,8 @@ int main() {
     auto larger_buffer_connection = connection;
     larger_buffer_connection.playback_buffer_duration_ms = 320;
     auto larger_buffer_hello = codec.EncodeHello(config, larger_buffer_connection);
-    Check(larger_buffer_hello.ok() && larger_buffer_hello.value->find("\"play_buffer_duration\":320") != std::string::npos,
+    Check(larger_buffer_hello.ok() &&
+              larger_buffer_hello.value->find("\"play_buffer_duration\":320") != std::string::npos,
           "连接配置必须能显式控制 Linx 下行缓冲预算");
     auto detect = codec.EncodeListenDetect(config, "请播报\\测试", "收到！");
     Check(detect.ok() && detect.value->find("\\\\测试") != std::string::npos &&
@@ -310,7 +311,8 @@ int main() {
           "hello 必须拒绝无效音频参数");
     auto invalid_connection = connection;
     invalid_connection.playback_buffer_duration_ms = 0;
-    Check(!invalid_connection.valid() && codec.EncodeHello(config, invalid_connection).status.code == ErrorCode::kInvalidArgument,
+    Check(!invalid_connection.valid() &&
+              codec.EncodeHello(config, invalid_connection).status.code == ErrorCode::kInvalidArgument,
           "零播放缓冲预算不能生成 Linx hello");
     Check(codec.EncodeAbort(config, "").status.code == ErrorCode::kInvalidArgument, "空 abort 原因必须拒绝");
     Check(codec.DecodeText("not-json").status.code == ErrorCode::kInvalidArgument, "非 JSON 输入必须拒绝");
