@@ -42,7 +42,4 @@ ignore:
   - "components/voicelife_linx_esp/**"
   - "components/voicelife_audio_esp/**"
   - "components/voicelife_runtime/**"
-  # 日程模块
-  - "components/voicelife_schedule/**"
-  # MCP模块
-  - "components/voicelife_mcp/**"
+
