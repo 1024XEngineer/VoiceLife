@@ -28,7 +28,8 @@ class ScheduleOperationRepository {
      * @param query 查询筛选和分页条件。
      * @return 匹配的操作记录，失败时返回错误状态。
      */
-    [[nodiscard]] virtual Result<std::vector<OperationRecord>> FindOperations(const QueryOperationCommand& query) const = 0;
+    [[nodiscard]] virtual Result<std::vector<OperationRecord>> FindOperations(
+        const QueryOperationCommand& query) const = 0;
 
     /**
      * @brief 统计满足筛选条件的总条数（不受分页影响），配合查询结果 total。

@@ -34,9 +34,8 @@ void CheckSuccessfulRecord(ScheduleOperationService& service) {
     Check(result.result.ok() && result.result.value.has_value() && result.result.error.empty(), "创建操作记录应成功");
     Check(result.result.value->id > 0 && result.result.value->operated_at != DateTime{}, "操作 ID 和时间应由系统生成");
     Check(result.result.value->entity_type == OperationEntityType::kSchedule &&
-              result.result.value->type == ScheduleOperationType::kCreate &&
-              result.result.value->entity_id == 3001 && result.result.value->label == "新日程" &&
-              !result.result.value->before.has_value(),
+              result.result.value->type == ScheduleOperationType::kCreate && result.result.value->entity_id == 3001 &&
+              result.result.value->label == "新日程" && !result.result.value->before.has_value(),
           "操作记录应保留创建信息");
 }
 

@@ -10,8 +10,7 @@ INSERT INTO operation_record (
 ) VALUES (?, ?, ?, ?, ?, ?)
 )sql";
 
-const char kOperationColumns[] =
-    "id, entity_type, type, entity_id, label, operated_at, before";
+const char kOperationColumns[] = "id, entity_type, type, entity_id, label, operated_at, before";
 
 std::string BuildOperationWhere() {
     return R"sql(

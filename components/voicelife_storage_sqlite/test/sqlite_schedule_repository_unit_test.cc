@@ -211,13 +211,11 @@ void CheckOperationMapperValidation(const std::filesystem::path& path) {
 
     auto null_id = database.Prepare("SELECT 1, 1, 1, NULL, '创建', 2000000000, NULL");
     Check(null_id.ok() && null_id.value->Step().ok(), "应构造空实体标识结果行");
-    Check(mapping::ReadOperation(*null_id.value).status.code == ErrorCode::kInternal,
-          "操作 Mapper 应拒绝空实体标识");
+    Check(mapping::ReadOperation(*null_id.value).status.code == ErrorCode::kInternal, "操作 Mapper 应拒绝空实体标识");
 
     auto null_label = database.Prepare("SELECT 1, 1, 1, 100, NULL, 2000000000, NULL");
     Check(null_label.ok() && null_label.value->Step().ok(), "应构造空名称结果行");
-    Check(mapping::ReadOperation(*null_label.value).status.code == ErrorCode::kInternal,
-          "操作 Mapper 应拒绝空名称");
+    Check(mapping::ReadOperation(*null_label.value).status.code == ErrorCode::kInternal, "操作 Mapper 应拒绝空名称");
 
     auto create_with_before = database.Prepare("SELECT 1, 1, 1, 100, '创建', 2000000000, '{\"a\":1}'");
     Check(create_with_before.ok() && create_with_before.value->Step().ok(), "应构造创建带快照结果行");
@@ -244,8 +242,8 @@ void CheckOperationMapperValidation(const std::filesystem::path& path) {
     const auto update_operation = mapping::ReadOperation(*full_update.value);
     Check(update_operation.ok() && update_operation.value->entity_type == OperationEntityType::kRule &&
               update_operation.value->type == ScheduleOperationType::kUpdate &&
-              update_operation.value->entity_id == 101 &&
-              update_operation.value->before.has_value() && *update_operation.value->before == "{\"id\":101}",
+              update_operation.value->entity_id == 101 && update_operation.value->before.has_value() &&
+              *update_operation.value->before == "{\"id\":101}",
           "操作 Mapper 应还原 before 快照");
 }
 
@@ -538,7 +536,9 @@ void CheckOperationFailureBranches() {
             .entity_type = OperationEntityType::kSchedule,
             .type = ScheduleOperationType::kCreate,
             .entity_id = 1,
+            .operated_at = {},
             .label = "失败写入",
+            .before = std::nullopt,
         };
         Check(repository.InsertOperation(op).status.code == ErrorCode::kInternal,
               "InsertOperation 应透传操作表缺失错误");

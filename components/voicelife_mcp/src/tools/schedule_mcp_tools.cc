@@ -515,8 +515,7 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
     // 操作记录查询：记录写入不经过 tool，由变更 service 显式推送；本工具只读查询。
     return server.add_tool(
         "schedule.operation_query", "查询最近的操作记录，支持按对象类型、操作类型和名称筛选。",
-        OperationQueryProperties(),
-        [operation_service](const PropertyList& properties) {
+        OperationQueryProperties(), [operation_service](const PropertyList& properties) {
             if (operation_service == nullptr) return FailureOutput("当前运行时未启用操作记录能力");
 
             schedule::QueryOperationCommand command;

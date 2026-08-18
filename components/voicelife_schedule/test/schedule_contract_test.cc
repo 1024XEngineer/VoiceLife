@@ -28,8 +28,7 @@ int main() {
               static_cast<int>(ScheduleOperationType::kUpdate) == 2 &&
               static_cast<int>(ScheduleOperationType::kDelete) == 3,
           "操作类型应使用稳定的持久化值");
-    Check(static_cast<int>(OperationEntityType::kSchedule) == 1 &&
-              static_cast<int>(OperationEntityType::kRule) == 2 &&
+    Check(static_cast<int>(OperationEntityType::kSchedule) == 1 && static_cast<int>(OperationEntityType::kRule) == 2 &&
               static_cast<int>(OperationEntityType::kException) == 3,
           "实体类型应使用稳定的持久化值");
     return 0;

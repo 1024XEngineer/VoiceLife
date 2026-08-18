@@ -64,13 +64,13 @@ struct RecordOperationCommand {
 
 /// 查询操作记录所需的筛选和分页条件；与 QueryScheduleCommand 对齐。
 struct QueryOperationCommand {
-    std::optional<OperationId> operation_id; ///< 精确查单条，读 before 快照用
+    std::optional<OperationId> operation_id;  ///< 精确查单条，读 before 快照用
     std::optional<OperationEntityType> entity_type;
-    std::optional<int64_t> entity_id;        ///< 需配合 entity_type
+    std::optional<int64_t> entity_id;  ///< 需配合 entity_type
     std::optional<ScheduleOperationType> type;
-    std::optional<DateTime> operated_from;   ///< 时间范围下界
-    std::optional<DateTime> operated_to;     ///< 时间范围上界
-    std::optional<std::string> keyword;      ///< label 模糊匹配
+    std::optional<DateTime> operated_from;  ///< 时间范围下界
+    std::optional<DateTime> operated_to;    ///< 时间范围上界
+    std::optional<std::string> keyword;     ///< label 模糊匹配
     int64_t limit = 20;
     int64_t offset = 0;
 };

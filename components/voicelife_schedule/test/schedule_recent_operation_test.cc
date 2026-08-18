@@ -68,8 +68,7 @@ void CheckQueryFilters(ScheduleOperationService& service, InMemoryScheduleReposi
     repository.InsertOperationAt(
         MakeRecord(At(300), OperationEntityType::kRule, ScheduleOperationType::kCreate, 2001, "周期规则"), At(300));
     repository.InsertOperationAt(
-        MakeRecord(At(400), OperationEntityType::kSchedule, ScheduleOperationType::kUpdate, 1001, "晨会改期"),
-        At(400));
+        MakeRecord(At(400), OperationEntityType::kSchedule, ScheduleOperationType::kUpdate, 1001, "晨会改期"), At(400));
 
     // 无筛选默认分页：全部命中并按时间倒序。
     const auto all = service.query_operations({});
@@ -112,8 +111,7 @@ void CheckQueryFilters(ScheduleOperationService& service, InMemoryScheduleReposi
     window.operated_from = At(150);
     window.operated_to = At(350);
     const auto ranged = service.query_operations(window);
-    Check(ranged.result.ok() && ranged.result.value.size() == 2 && ranged.total == 2,
-          "时间窗口应命中窗口内操作");
+    Check(ranged.result.ok() && ranged.result.value.size() == 2 && ranged.total == 2, "时间窗口应命中窗口内操作");
 
     // 分页裁剪结果但不影响总数。
     QueryOperationCommand paged;
@@ -146,13 +144,11 @@ void CheckInvalidQueryArguments(ScheduleOperationService& service) {
 
     QueryOperationCommand bad_entity;
     bad_entity.entity_type = static_cast<OperationEntityType>(99);
-    Check(service.query_operations(bad_entity).result.status.code == ErrorCode::kInvalidArgument,
-          "未知实体类型应拒绝");
+    Check(service.query_operations(bad_entity).result.status.code == ErrorCode::kInvalidArgument, "未知实体类型应拒绝");
 
     QueryOperationCommand bad_type;
     bad_type.type = static_cast<ScheduleOperationType>(99);
-    Check(service.query_operations(bad_type).result.status.code == ErrorCode::kInvalidArgument,
-          "未知操作类型应拒绝");
+    Check(service.query_operations(bad_type).result.status.code == ErrorCode::kInvalidArgument, "未知操作类型应拒绝");
 
     QueryOperationCommand reversed;
     reversed.operated_from = At(200);
@@ -190,16 +186,14 @@ int main() {
     {
         InMemoryScheduleRepository failure_repository;
         ScheduleOperationService failure_service(failure_repository);
-        failure_repository.FailNextFindOperations(
-            voicelife::Status::Error(ErrorCode::kUnavailable, "操作查询失败"));
+        failure_repository.FailNextFindOperations(voicelife::Status::Error(ErrorCode::kUnavailable, "操作查询失败"));
         Check(failure_service.query_operations({}).result.status.code == ErrorCode::kUnavailable,
               "query_operations 应透传 FindOperations 错误");
     }
     {
         InMemoryScheduleRepository failure_repository;
         ScheduleOperationService failure_service(failure_repository);
-        failure_repository.FailNextCountOperations(
-            voicelife::Status::Error(ErrorCode::kUnavailable, "操作计数失败"));
+        failure_repository.FailNextCountOperations(voicelife::Status::Error(ErrorCode::kUnavailable, "操作计数失败"));
         Check(failure_service.query_operations({}).result.status.code == ErrorCode::kUnavailable,
               "query_operations 应透传 CountOperations 错误");
     }

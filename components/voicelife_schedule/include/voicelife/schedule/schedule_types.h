@@ -50,9 +50,9 @@ struct OperationRecord {
     OperationEntityType entity_type = OperationEntityType::kSchedule;
     ScheduleOperationType type = ScheduleOperationType::kCreate;
     int64_t entity_id = 0;
-    DateTime operated_at;              ///< 仓储盖章，不来自调用方
-    std::string label;                 ///< 展示用名称（日程名 / 规则名 / 例外描述）
-    std::optional<std::string> before; ///< 操作前快照 JSON；kCreate 必须为空
+    DateTime operated_at;               ///< 仓储盖章，不来自调用方
+    std::string label;                  ///< 展示用名称（日程名 / 规则名 / 例外描述）
+    std::optional<std::string> before;  ///< 操作前快照 JSON；kCreate 必须为空
 };
 
 /// 周期规则与单次例外使用的数据库兼容 64 位整数标识。

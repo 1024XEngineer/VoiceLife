@@ -155,60 +155,70 @@ void CheckVersionFourSchema(const std::filesystem::path& path) {
 
     const auto version = SqliteSchema::ReadVersion(database);
     Check(version.ok() && *version.value == VoiceLifeSchema::kCurrentVersion, "数据库应记录当前产品 Schema 版本");
-    Check(ScalarInt64(database, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='operation_record'") == 1,
-          "版本四应重建操作记录表");
+    Check(
+        ScalarInt64(database, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='operation_record'") == 1,
+        "版本四应重建操作记录表");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('operation_record')") == 7,
           "操作记录表应包含约定的七个字段");
     Check(ScalarInt64(database,
-                      "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='operation_record_recent_idx'") == 1,
+                      "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='operation_record_recent_idx'") ==
+              1,
           "版本四应创建操作记录倒序索引");
 
     // 合法写入：创建操作无 before，修改操作有 before。
-    Check(database.Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
-                           "VALUES (1, 1, 100, '创建日程', 2000000000, NULL)")
+    Check(database
+              .Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
+                       "VALUES (1, 1, 100, '创建日程', 2000000000, NULL)")
               .ok(),
           "创建操作应能写入");
-    Check(database.Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
-                           "VALUES (2, 2, 200, '修改规则', 2000000001, '{\"id\":200}')")
+    Check(database
+              .Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
+                       "VALUES (2, 2, 200, '修改规则', 2000000001, '{\"id\":200}')")
               .ok(),
           "修改操作应能写入 before 快照");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM operation_record") == 2, "两条合法操作都应成功保存");
 
     // 约束拒绝：非法实体类型 / 非法操作类型 / 非正数 ID / 空名称 / 超长名称 / 创建带 before / 修改缺 before。
-    Check(!database.Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
-                            "VALUES (99, 1, 100, '非法实体类型', 2000000000, NULL)")
-              .ok(),
+    Check(!database
+               .Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
+                        "VALUES (99, 1, 100, '非法实体类型', 2000000000, NULL)")
+               .ok(),
           "约定之外的实体类型应被数据库约束拒绝");
-    Check(!database.Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
-                            "VALUES (1, 99, 100, '非法操作类型', 2000000000, NULL)")
-              .ok(),
+    Check(!database
+               .Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
+                        "VALUES (1, 99, 100, '非法操作类型', 2000000000, NULL)")
+               .ok(),
           "约定之外的操作类型应被数据库约束拒绝");
-    Check(!database.Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
-                            "VALUES (1, 1, 0, '非法标识', 2000000000, NULL)")
-              .ok(),
+    Check(!database
+               .Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
+                        "VALUES (1, 1, 0, '非法标识', 2000000000, NULL)")
+               .ok(),
           "非正数实体 ID 应被数据库约束拒绝");
-    Check(!database.Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
-                            "VALUES (1, 1, 100, '', 2000000000, NULL)")
-              .ok(),
+    Check(!database
+               .Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
+                        "VALUES (1, 1, 100, '', 2000000000, NULL)")
+               .ok(),
           "空名称应被数据库约束拒绝");
     const std::string long_label(101, 'a');
-    Check(!database.Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
-                            "VALUES (1, 1, 100, '" +
-                            long_label + "', 2000000000, NULL)")
-              .ok(),
+    Check(!database
+               .Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
+                        "VALUES (1, 1, 100, '" +
+                        long_label + "', 2000000000, NULL)")
+               .ok(),
           "超过一百字符的名称应被数据库约束拒绝");
-    Check(!database.Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
-                            "VALUES (1, 1, 100, '创建带快照', 2000000000, '{\"id\":100}')")
-              .ok(),
+    Check(!database
+               .Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
+                        "VALUES (1, 1, 100, '创建带快照', 2000000000, '{\"id\":100}')")
+               .ok(),
           "创建操作携带 before 应被数据库约束拒绝");
-    Check(!database.Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
-                            "VALUES (1, 2, 100, '修改缺快照', 2000000000, NULL)")
-              .ok(),
+    Check(!database
+               .Execute("INSERT INTO operation_record (entity_type, type, entity_id, label, operated_at, before) "
+                        "VALUES (1, 2, 100, '修改缺快照', 2000000000, NULL)")
+               .ok(),
           "修改操作缺少 before 应被数据库约束拒绝");
 
     Check(VoiceLifeSchema::Initialize(database).ok(), "重复初始化当前版本应保持幂等");
-    Check(ScalarInt64(database, "SELECT COUNT(*) FROM operation_record") == 2,
-          "重新初始化后应保留已保存的操作记录");
+    Check(ScalarInt64(database, "SELECT COUNT(*) FROM operation_record") == 2, "重新初始化后应保留已保存的操作记录");
 }
 
 /**

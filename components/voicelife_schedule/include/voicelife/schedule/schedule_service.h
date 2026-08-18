@@ -17,8 +17,7 @@ class ScheduleService {
      * @param repository 日程持久化仓储；其生命周期必须长于本服务。
      * @param operation_service 可选操作记录服务；提供时变更命令成功后追加记录，不提供时跳过。
      */
-    explicit ScheduleService(ScheduleRepository& repository,
-                             ScheduleOperationService* operation_service = nullptr);
+    explicit ScheduleService(ScheduleRepository& repository, ScheduleOperationService* operation_service = nullptr);
 
     /**
      * @brief 创建一条日程。
