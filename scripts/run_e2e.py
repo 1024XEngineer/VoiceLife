@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from e2e_evidence import EvidenceValidationError, EvidenceWriteError, write_evidence
-from e2e_example_adapters import HilLifecycleExampleAdapter, HostLifecycleExampleAdapter
+from e2e_example_adapters import HilLifecycleExampleAdapter, HostImGatewayE2EAdapter, HostLifecycleExampleAdapter
 from e2e_runner import ExitCode, FailureCategory, RunnerConfig, RunnerResult, exit_code_for, run_e2e
 
 PROFILES = {"host": frozenset({"host"}), "hil": frozenset({"sparkbot", "pcb"})}
@@ -41,6 +41,8 @@ def validated_profile(layer: str, profile: str) -> str:
 
 
 def build_adapter(layer: str, journey: str) -> object:
+    if journey == "im-gateway-strong-reminder" and layer == "host":
+        return HostImGatewayE2EAdapter()
     if journey != "lifecycle-example":
         raise ValueError("unknown journey")
     if layer == "host":
