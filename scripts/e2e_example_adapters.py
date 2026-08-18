@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
 import subprocess
+from contextlib import suppress
 from pathlib import Path
 
 from e2e_runner import AssertionResult, FailureCategory, RunContext, RunnerFailure
@@ -57,31 +59,38 @@ class HostImGatewayE2EAdapter:
 
     def __init__(self) -> None:
         self.result: dict[str, object] = {}
+        self._process: subprocess.Popen[str] | None = None
 
     def prepare(self, context: RunContext) -> None:
-        context.remaining()
-
-    def run(self, context: RunContext) -> dict[str, object]:
-        remaining = max(1.0, context.remaining())
         environment = {**os.environ, "E2E_RUN_ID": context.run_id}
-        process = subprocess.run(
+        self._process = subprocess.Popen(
             ["pnpm", "--dir", "services/im-gateway", "run", "e2e:host"],
             cwd=Path(__file__).resolve().parent.parent,
             env=environment,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=remaining,
-            check=False,
+            start_new_session=True,
         )
+        context.cleanup.push("host-gateway-process", self._cleanup_process)
+
+    def run(self, context: RunContext) -> dict[str, object]:
+        process = self._process
+        if process is None:
+            raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "host_gateway_process_missing")
+        try:
+            stdout, stderr = process.communicate(timeout=max(1.0, context.remaining()))
+        except subprocess.TimeoutExpired as error:
+            raise RunnerFailure(FailureCategory.TIMEOUT, "host_gateway_timeout") from error
         if process.returncode != 0:
-            category = (
-                FailureCategory.INFRASTRUCTURE
-                if process.stderr.strip().endswith("host_e2e_infrastructure_failed")
-                else FailureCategory.PRODUCT
-            )
+            marker = stderr.strip().splitlines()[-1] if stderr.strip() else ""
+            category = {
+                "host_e2e_cleanup_failed": FailureCategory.CLEANUP,
+                "host_e2e_infrastructure_failed": FailureCategory.INFRASTRUCTURE,
+            }.get(marker, FailureCategory.PRODUCT)
             raise RunnerFailure(category, "host_gateway_journey_failed")
         try:
-            value = json.loads(process.stdout.strip().splitlines()[-1])
+            value = json.loads(stdout.strip().splitlines()[-1])
         except (json.JSONDecodeError, TypeError) as error:
             raise RunnerFailure(FailureCategory.PRODUCT, "host_gateway_invalid_result") from error
         if not isinstance(value, dict):
@@ -93,11 +102,12 @@ class HostImGatewayE2EAdapter:
         context.remaining()
         values = result if isinstance(result, dict) else {}
         checks = {
-            "http_sse_journey": values.get("assertions") == 10,
-            "one_send_per_delivery": values.get("sendCount") == 2,
+            "http_sse_journey": values.get("assertions") == 22,
+            "one_send_per_delivery": values.get("sendCount") == 3 and values.get("deliveryCount") == 3,
+            "two_worker_dispatch": values.get("workerCount") == 2,
             "accepted_then_delivered": values.get("receiptCount") == 1,
-            "persistent_delivery": values.get("deliveryCount") == 2,
-            "idempotent_action": values.get("actionCount") == 1,
+            "persistent_delivery": values.get("deliveryCount") == 3,
+            "idempotent_action": values.get("actionCount") == 2,
         }
         return [
             AssertionResult(name=name, passed=passed, code="ok" if passed else "mismatch")
@@ -111,16 +121,33 @@ class HostImGatewayE2EAdapter:
             "scope": "runner_contract_only",
             "hardware_verified": False,
             "metrics": {
-                "resource_count": 4,
+                "resource_count": 8,
                 "namespace_count": 1,
                 "bound_port_count": 1,
             },
             "journey_values": {
                 key: values[key]
-                for key in ("deliveryCount", "sendCount", "receiptCount", "actionCount")
+                for key in ("deliveryCount", "sendCount", "receiptCount", "actionCount", "workerCount")
                 if key in values
             },
         }
+
+    def _cleanup_process(self) -> None:
+        process = self._process
+        if process is None:
+            return
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        if process.poll() is not None:
+            return
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=2)
 
 
 class HilLifecycleExampleAdapter:
