@@ -509,7 +509,9 @@ Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
 #ifdef ESP_PLATFORM
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (amplifier_enabled_ && amplifier_callback_) {
+        if (output_writing_) {
+            amplifier_disable_pending_ = true;
+        } else if (amplifier_enabled_ && amplifier_callback_) {
             amplifier_callback_(false);  // 输出关闭：请求关闭功放。
             amplifier_enabled_ = false;
         }
