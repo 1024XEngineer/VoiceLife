@@ -181,6 +181,13 @@ void CheckMapperValidation(const std::filesystem::path& path) {
     const auto start_error = mapping::BindSchedule(*one_parameter.value, CompleteSchedule());
     Check(start_error.code == ErrorCode::kInternal && start_error.message.find("start_time") != std::string::npos,
           "Mapper 应为开始时间绑定错误补充字段名");
+
+    auto six_parameters = database.Prepare("SELECT ?, ?, ?, ?, ?, ?");
+    Check(six_parameters.ok(), "应创建六参数语句");
+    const auto reminder_error = mapping::BindSchedule(*six_parameters.value, CompleteSchedule());
+    Check(reminder_error.code == ErrorCode::kInternal &&
+              reminder_error.message.find("reminder_task_id") != std::string::npos,
+          "Mapper 应为提醒任务标识绑定错误补充字段名");
 }
 
 /**

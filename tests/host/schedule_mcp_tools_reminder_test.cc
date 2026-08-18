@@ -361,6 +361,25 @@ void CheckReminderSyncFailurePaths() {
           "删除保存成功但提醒取消失败时应返回取消失败");
 }
 
+void CheckOperationServiceOverloadWithoutReminder() {
+    InMemoryScheduleRepository schedules;
+    FakeExceptionRepository exceptions;
+    FakeRuleRepository rules(schedules, exceptions);
+    ScheduleRuleService rule_service(rules, exceptions, schedules);
+    ScheduleService service(schedules);
+    ScheduleOperationService operation_service(schedules);
+    McpServer server;
+    Check(voicelife::mcp::RegisterScheduleMcpTools(server, service, rule_service, operation_service).ok(),
+          "四参数日程工具重载应注册成功");
+
+    const auto created = server.call({
+        .request_id = "create-without-reminder",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("无提醒服务日程")}, {"start_time", std::string("2030-01-01 09:00:00")}},
+    });
+    Check(created.status.ok() && OutputString(created, "status") == "success", "未接入提醒服务时创建日程仍应成功");
+}
+
 void CheckRuleReminderSyncFailurePaths() {
     ReminderToolFixture create_fail_fixture;
     create_fail_fixture.timing.register_acceptance = CommandAcceptance::kUnavailable;
@@ -418,6 +437,7 @@ void CheckRuleReminderSyncFailurePaths() {
 int main() {
     CheckOneShotReminderLifecycle();
     CheckReminderSyncFailurePaths();
+    CheckOperationServiceOverloadWithoutReminder();
     CheckRuleReminderSyncFailurePaths();
     return 0;
 }
