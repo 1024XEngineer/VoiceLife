@@ -8,6 +8,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "scripts" / "e2e_runner.py"
@@ -249,7 +250,16 @@ class E2eRunnerTest(unittest.TestCase):
         self.assertGreater(remaining, 0.15)
         self.assertLess(remaining, 0.28)
 
-    def test_non_main_thread_rejects_signal_based_runner_instead_of_hanging(self) -> None:
+    def test_context_creation_failure_returns_safe_infrastructure_result(self) -> None:
+        with mock.patch.object(RUNNER.tempfile, "mkdtemp", side_effect=OSError("/private/path token=secret")):
+            result = RUNNER.run_e2e(self.config(), SpyAdapter())
+        self.assertEqual(result.failure_category, RUNNER.FailureCategory.INFRASTRUCTURE)
+        self.assertEqual(result.failed_phase, "prepare")
+        self.assertEqual(result.message_code, "context_initialization_failed")
+        self.assertEqual(result.exit_code, RUNNER.ExitCode.INFRASTRUCTURE)
+        self.assertNotIn("private", repr(result))
+        self.assertNotIn("secret", repr(result))
+
         results: list[object] = []
 
         def worker() -> None:

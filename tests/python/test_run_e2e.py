@@ -182,6 +182,32 @@ class RunE2eCliTest(unittest.TestCase):
                 self.assertEqual(stages[phase]["status"], "failed")
                 self.assertEqual(stages["cleanup"]["status"], "passed")
 
+    def test_primary_and_cleanup_failures_build_consistent_evidence(self) -> None:
+        class FailingAdapter(ADAPTERS.HostLifecycleExampleAdapter):
+            def prepare(self, context: object) -> None:
+                context.cleanup.push("cleanup-failure", lambda: (_ for _ in ()).throw(RuntimeError("private")))
+
+            def run(self, context: object) -> object:
+                raise RUNNER.RunnerFailure(RUNNER.FailureCategory.PRODUCT, "journey_assertion_failed")
+
+        config = RUNNER.RunnerConfig(
+            layer="host",
+            journey="lifecycle-example",
+            profile="host",
+            hard_timeout_s=1.0,
+            phase_timeout_s=0.5,
+            cleanup_timeout_s=0.2,
+        )
+        result = RUNNER.run_e2e(config, FailingAdapter())
+        document = RUN_E2E.build_evidence(result, config)
+        EVIDENCE.validate_evidence(document)
+        self.assertEqual(document["failure_category"], "cleanup")
+        self.assertEqual(document["failed_phase"], "cleanup")
+        stages = {stage["name"]: stage for stage in document["stages"]}
+        self.assertEqual(stages["run"]["status"], "failed")
+        self.assertEqual(stages["run"]["code"], "journey_assertion_failed")
+        self.assertEqual(stages["cleanup"]["status"], "failed")
+
     def test_two_processes_run_in_parallel_without_artifact_collisions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             command = [sys.executable, str(CLI), *self.base_args(Path(directory))]

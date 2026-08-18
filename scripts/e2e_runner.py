@@ -263,6 +263,28 @@ def _new_context(config: RunnerConfig) -> RunContext:
     )
 
 
+def _initialization_failure_result(started: float | None = None) -> RunnerResult:
+    now = time.monotonic()
+    started = now if started is None else started
+    return RunnerResult(
+        status=RunStatus.FAILED,
+        failure_category=FailureCategory.INFRASTRUCTURE,
+        failed_phase="prepare",
+        exit_code=ExitCode.INFRASTRUCTURE,
+        message_code="context_initialization_failed",
+        run_id=secrets.token_hex(16),
+        correlation_id=secrets.token_hex(16),
+        primary_failure_category=FailureCategory.INFRASTRUCTURE,
+        primary_failed_phase="prepare",
+        primary_message_code="context_initialization_failed",
+        cleanup_errors=(),
+        assertions=(),
+        collected={},
+        started_monotonic=started,
+        finished_monotonic=now,
+    )
+
+
 def _unsupported_thread_result() -> RunnerResult:
     now = time.monotonic()
     return RunnerResult(
@@ -288,7 +310,10 @@ def run_e2e(config: RunnerConfig, adapter: RunnerAdapter) -> RunnerResult:
     """Run one adapter through the shared lifecycle and always finalize resources."""
     if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "setitimer"):
         return _unsupported_thread_result()
-    context = _new_context(config)
+    try:
+        context = _new_context(config)
+    except Exception:
+        return _initialization_failure_result()
     category: FailureCategory | None = None
     failed_phase: str | None = None
     message_code = "run_passed"

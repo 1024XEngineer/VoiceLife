@@ -162,14 +162,24 @@ def validate_evidence(document: dict[str, object]) -> None:
         _reject(any(status != "passed" for status in stage_statuses.values()))
     else:
         _reject(stage_statuses[failed_phase] != "failed")
-        failed_index = PHASE_ORDER.index(failed_phase)
-        for index, phase in enumerate(PHASE_ORDER[:-1]):
-            expected = "passed" if index < failed_index else "skipped"
-            if phase == failed_phase:
-                expected = "failed"
-            _reject(stage_statuses[phase] != expected)
-        if failed_phase != "cleanup":
-            _reject(stage_statuses["cleanup"] != "passed")
+        primary_failures = [phase for phase in PHASE_ORDER[:-1] if stage_statuses[phase] == "failed"]
+        if failed_phase == "cleanup" and primary_failures:
+            _reject(len(primary_failures) != 1)
+            primary_index = PHASE_ORDER.index(primary_failures[0])
+            for index, phase in enumerate(PHASE_ORDER[:-1]):
+                expected = "passed" if index < primary_index else "skipped"
+                if index == primary_index:
+                    expected = "failed"
+                _reject(stage_statuses[phase] != expected)
+        else:
+            failed_index = PHASE_ORDER.index(failed_phase)
+            for index, phase in enumerate(PHASE_ORDER[:-1]):
+                expected = "passed" if index < failed_index else "skipped"
+                if phase == failed_phase:
+                    expected = "failed"
+                _reject(stage_statuses[phase] != expected)
+            if failed_phase != "cleanup":
+                _reject(stage_statuses["cleanup"] != "passed")
 
     assertions = value["assertions"]
     _reject(not isinstance(assertions, list) or len(assertions) > 64)
