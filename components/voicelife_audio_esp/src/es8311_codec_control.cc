@@ -213,13 +213,16 @@ voicelife::Status ReadEs8311Pcm(void* dev_handle, int16_t* samples, std::size_t 
 #endif
 }
 
-voicelife::Status WriteEs8311Pcm(void* dev_handle, int16_t* samples, std::size_t sample_count) {
+voicelife::Status WriteEs8311Pcm(void* dev_handle, const int16_t* samples, std::size_t sample_count) {
 #ifdef ESP_PLATFORM
     if (dev_handle == nullptr || samples == nullptr || sample_count == 0) {
         return voicelife::Status::Error(voicelife::ErrorCode::kInvalidArgument, "ES8311 写入参数无效");
     }
     auto* handle = static_cast<Es8311ControlHandle*>(dev_handle);
-    const esp_err_t result = esp_codec_dev_write(handle->device, samples, sample_count * sizeof(int16_t));
+    // The upstream esp_codec_dev API takes void* although it only consumes the
+    // buffer synchronously. Keep the VoiceLife boundary read-only.
+    const esp_err_t result =
+        esp_codec_dev_write(handle->device, const_cast<int16_t*>(samples), sample_count * sizeof(int16_t));
     if (result != ESP_OK) {
         return voicelife::Status::Error(voicelife::ErrorCode::kUnavailable,
                                         std::string("ES8311 PCM 写入失败: ") + esp_err_to_name(result));

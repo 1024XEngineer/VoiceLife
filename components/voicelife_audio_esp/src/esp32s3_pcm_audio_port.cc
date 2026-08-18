@@ -98,6 +98,7 @@ AudioPortStats Esp32s3PcmAudioPorts::Impl::stats() const {
     result.dropped_input_frames = dropped_input_frames_.load();
     result.played_frames = played_frames_.load();
     result.rejected_output_frames = rejected_output_frames_.load();
+    result.resampled_frames = resampled_frames_.load();
     result.short_reads = short_reads_.load();
     result.short_writes = short_writes_.load();
     result.input_high_watermark = input_high_watermark_.load();
@@ -431,34 +432,13 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(voice::AudioFrame frame) {
     if (!output_open_ || output_closing_ || !playback_format_.has_value()) {
         return detail::Unavailable("输出端口尚未打开");
     }
-    if (frame.payload.empty() || frame.payload.size() % (sizeof(int16_t) * playback_format_->channels) != 0) {
+    if (!frame.format.valid() || frame.format.codec != voice::AudioCodec::kPcmS16Le ||
+        frame.format.bits_per_sample != 16 || frame.format.channels != playback_format_->channels ||
+        frame.payload.empty() || frame.payload.size() > voice::AudioFrame::kMaxPayloadBytes ||
+        frame.payload.size() % (sizeof(int16_t) * frame.format.channels) != 0) {
         return detail::Invalid("播放帧 PCM 负载无效");
     }
-    // 采样率不匹配（如服务端协商 16k、播放端 24k）：线性重采样到播放格式。
-    voice::AudioFrame out = std::move(frame);
-    if (out.format.sample_rate_hz != 0 && out.format.sample_rate_hz != playback_format_->sample_rate_hz &&
-        out.format.channels == playback_format_->channels && out.format.bits_per_sample == 16) {
-        const uint32_t src_rate = out.format.sample_rate_hz;
-        const uint32_t dst_rate = playback_format_->sample_rate_hz;
-        const std::size_t src_samples = out.payload.size() / sizeof(int16_t);
-        const std::size_t dst_samples = src_samples * dst_rate / src_rate;
-        std::vector<uint8_t> resampled(dst_samples * sizeof(int16_t));
-        const int16_t* src = reinterpret_cast<const int16_t*>(out.payload.data());
-        auto* dst = reinterpret_cast<int16_t*>(resampled.data());
-        for (std::size_t i = 0; i < dst_samples; ++i) {
-            const double pos = static_cast<double>(i) * src_rate / dst_rate;
-            const std::size_t i0 = static_cast<std::size_t>(pos);
-            const std::size_t i1 = i0 + 1 < src_samples ? i0 + 1 : i0;
-            const double frac = pos - static_cast<double>(i0);
-            dst[i] = static_cast<int16_t>(src[i0] * (1.0 - frac) + src[i1] * frac);
-        }
-        out.payload = std::move(resampled);
-        out.format = *playback_format_;
-        ++resampled_frames_;
-    } else if (!detail::SameFormat(out.format, *playback_format_, false)) {
-        return detail::Invalid("播放帧格式不支持");
-    }
-    const uint64_t frame_duration_ms = detail::PcmDurationMs(out);
+    const uint64_t frame_duration_ms = detail::PcmDurationMs(frame);
     if (frame_duration_ms == 0) {
         return detail::Invalid("播放帧无法推导 PCM 时长");
     }
@@ -470,7 +450,9 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(voice::AudioFrame frame) {
         ++rejected_output_frames_;
         return Status::Error(ErrorCode::kConflict, "播放队列超过最大延迟预算，拒绝新帧");
     }
-    output_queue_.push_back(std::move(out));
+    // 重采样由唯一的输出任务使用启动期预留的 scratch 完成。网络接收回调只
+    // 移交原始帧，避免每个下行帧分配临时 PCM 缓冲并与 TLS/RX 争夺堆。
+    output_queue_.push_back(std::move(frame));
     output_queue_duration_ms_ += frame_duration_ms;
     output_high_watermark_.store(std::max(output_high_watermark_.load(), output_queue_.size()));
     amplifier_disable_pending_ = false;

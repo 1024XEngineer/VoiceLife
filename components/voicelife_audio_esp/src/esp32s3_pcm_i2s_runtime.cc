@@ -324,14 +324,38 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
     if (playback_format_.has_value()) {
         endpoint.format = *playback_format_;
     }
-    const std::size_t sample_count = frame.payload.size() / (sizeof(int16_t) * endpoint.format.channels);
+    if (frame.format.codec != voice::AudioCodec::kPcmS16Le || frame.format.bits_per_sample != 16 ||
+        frame.format.channels != endpoint.format.channels || frame.format.sample_rate_hz == 0) {
+        return detail::Invalid("播放帧格式不支持");
+    }
+    std::size_t sample_count = frame.payload.size() / (sizeof(int16_t) * endpoint.format.channels);
     const auto* pcm = reinterpret_cast<const int16_t*>(frame.payload.data());
+    if (frame.format.sample_rate_hz != endpoint.format.sample_rate_hz) {
+        const uint64_t destination_samples =
+            static_cast<uint64_t>(sample_count) * endpoint.format.sample_rate_hz / frame.format.sample_rate_hz;
+        if (destination_samples == 0 || destination_samples > codec_pcm_scratch_.capacity()) {
+            return detail::Invalid("播放帧重采样超过启动期 PCM scratch 预算");
+        }
+        codec_pcm_scratch_.resize(static_cast<std::size_t>(destination_samples));
+        for (std::size_t index = 0; index < codec_pcm_scratch_.size(); ++index) {
+            const uint64_t source_position = static_cast<uint64_t>(index) * frame.format.sample_rate_hz;
+            const std::size_t lower = static_cast<std::size_t>(source_position / endpoint.format.sample_rate_hz);
+            const std::size_t upper = lower + 1 < sample_count ? lower + 1 : lower;
+            const uint32_t fraction = static_cast<uint32_t>(source_position % endpoint.format.sample_rate_hz);
+            const int64_t interpolated =
+                static_cast<int64_t>(pcm[lower]) * (endpoint.format.sample_rate_hz - fraction) +
+                static_cast<int64_t>(pcm[upper]) * fraction;
+            codec_pcm_scratch_[index] = static_cast<int16_t>(interpolated / endpoint.format.sample_rate_hz);
+        }
+        pcm = codec_pcm_scratch_.data();
+        sample_count = codec_pcm_scratch_.size();
+        ++resampled_frames_;
+    }
     if (profile_.topology == AudioBoardTopology::kExternalCodecDuplex) {
         // The ES8311 owns the I2S format after esp_codec_dev_open(). Feed its
         // single-channel PCM API directly, matching the official SparkBot
         // codec; do not recreate the stale physical slot layout here.
-        codec_pcm_scratch_.assign(pcm, pcm + sample_count);
-        if (!WriteEs8311Pcm(codec_dev_, codec_pcm_scratch_.data(), codec_pcm_scratch_.size()).ok()) {
+        if (!WriteEs8311Pcm(codec_dev_, pcm, sample_count).ok()) {
             ++short_writes_;
             ++output_i2s_errors_;
             return detail::Unavailable("ES8311 播放 PCM 失败");
@@ -339,14 +363,15 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
         uint64_t sum_squares = 0;
         uint16_t peak = 0;
         bool all_zero = true;
-        for (const int16_t sample : codec_pcm_scratch_) {
+        for (std::size_t index = 0; index < sample_count; ++index) {
+            const int16_t sample = pcm[index];
             const uint16_t absolute = AbsolutePcm16(sample);
             peak = std::max(peak, absolute);
             sum_squares += static_cast<uint64_t>(static_cast<int32_t>(sample) * static_cast<int32_t>(sample));
             all_zero = all_zero && sample == 0;
         }
-        output_pcm_bytes_ += codec_pcm_scratch_.size() * sizeof(int16_t);
-        output_samples_ += codec_pcm_scratch_.size();
+        output_pcm_bytes_ += sample_count * sizeof(int16_t);
+        output_samples_ += sample_count;
         output_sum_squares_ += sum_squares;
         if (all_zero) ++output_zero_periods_;
         RaisePeak(output_peak_, peak);

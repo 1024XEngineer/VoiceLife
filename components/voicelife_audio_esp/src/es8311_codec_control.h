@@ -48,7 +48,7 @@ struct Es8311ControlConfig {
 [[nodiscard]] voicelife::Status ReadEs8311Pcm(void* dev_handle, int16_t* samples, std::size_t sample_count);
 
 /** @brief 经 ES8311 官方 codec data interface 写入单声道 PCM。 */
-[[nodiscard]] voicelife::Status WriteEs8311Pcm(void* dev_handle, int16_t* samples, std::size_t sample_count);
+[[nodiscard]] voicelife::Status WriteEs8311Pcm(void* dev_handle, const int16_t* samples, std::size_t sample_count);
 
 /** @brief 设置 ES8311 硬件输出音量（0-100）。 */
 [[nodiscard]] voicelife::Status SetEs8311OutputVolume(void* dev_handle, uint8_t volume);

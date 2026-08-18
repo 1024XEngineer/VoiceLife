@@ -32,6 +32,8 @@ struct AudioPortStats {
     std::size_t played_frames = 0;
     /** @brief 拒绝的输出帧数。 */
     std::size_t rejected_output_frames = 0;
+    /** @brief 已在输出任务完成重采样的帧数。 */
+    std::size_t resampled_frames = 0;
     /** @brief 短读次数。 */
     std::size_t short_reads = 0;
     /** @brief 短写次数。 */
