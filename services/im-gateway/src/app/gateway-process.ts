@@ -3,6 +3,7 @@ import { Context } from '@koishijs/core';
 import { unsafeId, type ChannelAccountId } from '../contracts/ids.js';
 import type { ChannelAccount } from '../domain/models.js';
 import { DeliveryOutboxWorker } from '../infrastructure/delivery-outbox-worker.js';
+import { ChannelAdapterRegistry } from '../infrastructure/channel-adapter-registry.js';
 import {
     type GatewayLogger,
     startGatewayHttpServer,
@@ -169,6 +170,7 @@ export async function startConfiguredGatewayProcess(
                 revealExternalUserId: (ciphertext) => identities.reveal(ciphertext),
             },
         });
+        const channelAdapters = new ChannelAdapterRegistry([{ accountId: channelAccountId, adapter }]);
         const context = new Context();
         const koishiBotId = `wechat:${channelAccountId}`;
         const wechatBot = new WechatOfficialKoishiBot(context, {
@@ -182,14 +184,15 @@ export async function startConfiguredGatewayProcess(
                 unitOfWork,
                 actionTokens: new AesGcmActionTokenPort(config.actionTokenSecret),
                 authentication: new DatabaseDeviceAuthenticationPort(unitOfWork),
-                channelCapabilities: adapter,
+                channelCapabilities: channelAdapters,
                 channelHealth: new CapabilityChannelHealthPort(
                     adapter,
                     clock,
                     (account) => account.koishiBotId === wechatBot.sid && wechatBot.isActive,
                 ),
                 conversations: new DirectConversationResolver(),
-                deliveryRenderer: adapter,
+                deliveryRenderer: channelAdapters,
+                imChannel: channelAdapters,
                 pairingCodes: new HmacPairingCodePort(config.identitySecret),
                 identityProtector: identities,
                 clock,
