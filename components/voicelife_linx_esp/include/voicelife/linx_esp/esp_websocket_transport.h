@@ -40,7 +40,10 @@ struct EspWebSocketTransportOptions {
     size_t event_queue_capacity = 32;
     size_t event_chunk_bytes = 4096;
     uint32_t connect_timeout_ms = 10000;
-    uint32_t network_timeout_ms = 10000;
+    // A generation switch serializes with an in-flight write. Keep the
+    // default bounded so a stalled socket cannot defer a local barge-in for
+    // the old 10-second connection timeout.
+    uint32_t network_timeout_ms = 1000;
     uint32_t reconnect_timeout_ms = 1000;
     uint32_t websocket_task_stack_size = 12288;
     // MCP 日程工具（schedule.create/query）在此 worker 任务上执行 SQLite/FATFS 操作，
