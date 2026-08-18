@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS "src/runtime.cc" "src/bootstrap/storage_bootstrap.cc" "src/im_runtime_bootstrap.cc"
          "src/linx_mcp_bridge.cc" "src/linx_ota_bootstrap.cc" "src/wifi_provisioning.cc"
-         "src/wifi_provisioning_esp.cc" "src/schedule_mcp_tools.cc"
+         "src/wifi_provisioning_esp.cc"
          "src/im_binding_mcp_tools.cc" "src/im_binding_presentation.cc"
     INCLUDE_DIRS "include" "src"
     REQUIRES voicelife_contracts
