@@ -1,0 +1,499 @@
+#include "voicelife/mcp/schedule_mcp_tools.h"
+
+#include <cstdio>
+#include <string>
+#include <unordered_map>
+#include <utility>
+
+#include "schedule_mcp_tools_input.h"
+#include "schedule_tool_output.h"
+#include "voicelife/mcp/mcp_server.h"
+#include "voicelife/schedule/calendar.h"
+#include "voicelife/schedule/schedule_commands.h"
+#include "voicelife/schedule/schedule_results.h"
+#include "voicelife/schedule/schedule_rule_commands.h"
+#include "voicelife/schedule/schedule_rule_results.h"
+#include "voicelife/schedule/schedule_rule_service.h"
+#include "voicelife/schedule/schedule_service.h"
+#include "voicelife/schedule/schedule_types.h"
+
+namespace voicelife::mcp {
+namespace {
+
+using schedule::DateTime;
+using schedule::ScheduleRule;
+using schedule::ScheduleRuleService;
+using schedule::ScheduleService;
+using voicelife::MakeToolOutput;
+using voicelife::ToolOutputArray;
+using voicelife::ToolOutputObject;
+using voicelife::ToolOutputValue;
+using voicelife::mcp::schedule_tool_input::CreateProperties;
+using voicelife::mcp::schedule_tool_input::CreateRuleCommand;
+using voicelife::mcp::schedule_tool_input::DeleteProperties;
+using voicelife::mcp::schedule_tool_input::ParsedRepeat;
+using voicelife::mcp::schedule_tool_input::ParseRepeat;
+using voicelife::mcp::schedule_tool_input::QueryProperties;
+using voicelife::mcp::schedule_tool_input::UpdateProperties;
+using voicelife::mcp::schedule_tool_input::UpdateRuleCommand;
+
+ToolResult Output(ToolOutputObject fields) { return ToolResult::Success(ToolOutputValue::Object(std::move(fields))); }
+
+ToolResult FailureOutput(std::string message) {
+    return Output({
+        MakeToolOutput("status", ToolOutputValue::String("failure")),
+        MakeToolOutput("message", ToolOutputValue::String(std::move(message))),
+    });
+}
+
+ToolResult ConflictOutput(std::string message, ToolOutputArray conflicts) {
+    return Output({
+        MakeToolOutput("status", ToolOutputValue::String("conflict")),
+        MakeToolOutput("message", ToolOutputValue::String(std::move(message))),
+        MakeToolOutput("conflicts", ToolOutputValue::Array(std::move(conflicts))),
+    });
+}
+
+schedule::ScheduleStatusFilter ParseStatus(const std::string& value) {
+    if (value == "all") return schedule::ScheduleStatusFilter::kAll;
+    if (value == "active") return schedule::ScheduleStatusFilter::kActive;
+    if (value == "cancelled") return schedule::ScheduleStatusFilter::kCancelled;
+    if (value == "completed") return schedule::ScheduleStatusFilter::kCompleted;
+    return schedule::ScheduleStatusFilter::kActive;
+}
+
+std::string FormatDateStart(const schedule::LocalDate& date) {
+    char buffer[24];
+    std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d 00:00:00", date.year, date.month, date.day);
+    return buffer;
+}
+
+std::string FormatDateEnd(const schedule::LocalDate& date) {
+    const int64_t days = schedule::DaysFromCivil(date.year, date.month, date.day) + 1;
+    schedule::LocalDate next;
+    schedule::CivilFromDays(days, next.year, next.month, next.day);
+    return FormatDateStart(next);
+}
+
+std::optional<DateTime> ParseDateStart(const PropertyList& properties) {
+    const auto value = properties.value<std::string>("start_date");
+    if (!value.has_value()) return std::nullopt;
+    const auto date = schedule_tool_output::ParseLocalDate(*value);
+    if (!date.has_value()) return std::nullopt;
+    return schedule_tool_output::ParseDateTime(FormatDateStart(*date));
+}
+
+std::optional<DateTime> ParseDateEnd(const PropertyList& properties) {
+    const auto value = properties.value<std::string>("end_date");
+    if (!value.has_value()) return std::nullopt;
+    const auto date = schedule_tool_output::ParseLocalDate(*value);
+    if (!date.has_value()) return std::nullopt;
+    return schedule_tool_output::ParseDateTime(FormatDateEnd(*date));
+}
+
+bool WithinRange(const std::optional<DateTime>& start, const std::optional<DateTime>& end, DateTime value) {
+    if (start.has_value() && value < *start) return false;
+    if (end.has_value() && value >= *end) return false;
+    return true;
+}
+
+}  // namespace
+
+Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, ScheduleRuleService* rule_service) {
+    // schedule.create 根据是否传入 repeat 拆成两条业务路径：
+    // 一次性日程走 ScheduleService，周期日程走 ScheduleRuleService。
+    Status status = server.add_tool(
+        "schedule.create", "创建一次性日程或周期日程。", CreateProperties(),
+        [&service, rule_service](const PropertyList& properties) {
+            const auto repeat = properties.value<JsonValue>("repeat");
+            const ParsedRepeat parsed_repeat = ParseRepeat(repeat, true);
+            if (!parsed_repeat.ok()) return FailureOutput(parsed_repeat.error);
+
+            if (repeat.has_value()) {
+                // 有 repeat 时创建周期规则，并把服务端物化的首条实例作为 schedule 一并返回。
+                if (rule_service == nullptr) {
+                    return FailureOutput("当前运行时未启用周期日程能力");
+                }
+                const auto result = rule_service->create_schedule_rule(CreateRuleCommand(properties, parsed_repeat));
+                if (!result.status.ok()) {
+                    if (result.status.code == ErrorCode::kConflict) {
+                        return ConflictOutput(result.status.message,
+                                              schedule_tool_output::ScheduleArrayOutput(result.conflicts));
+                    }
+                    return FailureOutput(result.status.message);
+                }
+
+                ToolOutputObject fields = {
+                    MakeToolOutput("status", ToolOutputValue::String("success")),
+                    MakeToolOutput("message", ToolOutputValue::String("created success")),
+                    MakeToolOutput("schedule", ToolOutputValue::Null()),
+                    MakeToolOutput("rule", result.rule.has_value() ? schedule_tool_output::RuleOutput(*result.rule)
+                                                                   : ToolOutputValue::Null()),
+                    MakeToolOutput("conflicts",
+                                   ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.conflicts))),
+                };
+                if (!result.schedules.empty() && result.rule.has_value()) {
+                    fields[2] = MakeToolOutput(
+                        "schedule", schedule_tool_output::ScheduleOutput(result.schedules.front(), &*result.rule));
+                }
+                return Output(std::move(fields));
+            }
+
+            // 没有 repeat 时创建一次性日程；时间字符串在这里统一转为领域 DateTime。
+            schedule::CreateScheduleCommand command;
+            command.event = properties.value<std::string>("event").value_or("");
+            command.start_time = properties.value<std::string>("start_time").has_value()
+                                     ? schedule_tool_output::ParseDateTime(*properties.value<std::string>("start_time"))
+                                     : std::nullopt;
+            command.end_time = properties.value<std::string>("end_time").has_value()
+                                   ? schedule_tool_output::ParseDateTime(*properties.value<std::string>("end_time"))
+                                   : std::nullopt;
+            if (properties.value<std::string>("start_time").has_value() && !command.start_time.has_value()) {
+                return FailureOutput("start_time 格式必须是 YYYY-MM-DD HH:mm:ss");
+            }
+            if (properties.value<std::string>("end_time").has_value() && !command.end_time.has_value()) {
+                return FailureOutput("end_time 格式必须是 YYYY-MM-DD HH:mm:ss");
+            }
+            command.location = properties.value<std::string>("location");
+            command.notes = properties.value<std::string>("notes");
+            command.ignore_conflict = properties.value<bool>("ignore_conflict").value_or(false);
+
+            const auto result = service.create_schedule(command);
+            if (!result.result.ok()) {
+                if (result.result.status.code == ErrorCode::kConflict) {
+                    return ConflictOutput(result.result.status.message,
+                                          schedule_tool_output::ScheduleArrayOutput(result.conflicts));
+                }
+                return FailureOutput(result.result.status.message);
+            }
+            return Output({
+                MakeToolOutput("status", ToolOutputValue::String("success")),
+                MakeToolOutput("message", ToolOutputValue::String("created success")),
+                MakeToolOutput("schedule", result.result.value.has_value()
+                                               ? schedule_tool_output::ScheduleOutput(*result.result.value)
+                                               : ToolOutputValue::Null()),
+                MakeToolOutput("conflicts",
+                               ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.conflicts))),
+            });
+        });
+    if (!status.ok()) return status;
+
+    status = server.add_tool(
+        "schedule.query", "按自然语言友好的条件查询当前相关日程。", QueryProperties(),
+        [&service, rule_service](const PropertyList& properties) {
+            // query 是只读编排：先查已物化日程，再补充未来 occurrence 和周期例外，不写 schedule 表。
+            const auto start = ParseDateStart(properties);
+            const auto end = ParseDateEnd(properties);
+            if (properties.value<std::string>("start_date").has_value() && !start.has_value()) {
+                return FailureOutput("start_date 格式必须是 YYYY-MM-DD");
+            }
+            if (properties.value<std::string>("end_date").has_value() && !end.has_value()) {
+                return FailureOutput("end_date 格式必须是 YYYY-MM-DD");
+            }
+            if (start.has_value() && end.has_value() && *start > *end) {
+                return FailureOutput("start_date 不能晚于 end_date");
+            }
+
+            // 已物化日程仍走 ScheduleService，保证一次性日程和已生成周期实例统一从 schedule 表返回。
+            schedule::QueryScheduleCommand command;
+            command.keyword = properties.value<std::string>("keyword");
+            command.start_from = start;
+            command.start_to = end;
+            command.status = ParseStatus(properties.value<std::string>("status").value_or("active"));
+            command.limit = 50;
+            command.offset = 0;
+            const auto result = service.query_schedule(command);
+            if (!result.result.ok()) return FailureOutput(result.result.status.message);
+
+            ToolOutputArray schedules = schedule_tool_output::ScheduleArrayOutput(result.result.value);
+            ToolOutputArray future_occurrences;
+            ToolOutputArray exceptions;
+            // 周期部分不物化，只把规则、未来 occurrence、exception 转成模型可读的结果。
+            std::unordered_map<int64_t, ScheduleRule> rule_by_id;
+            if (rule_service != nullptr) {
+                schedule::QueryScheduleRulesCommand rule_command;
+                rule_command.keyword = properties.value<std::string>("keyword");
+                rule_command.status = command.status;
+                rule_command.limit = 50;
+                rule_command.offset = 0;
+                const auto rules = rule_service->query_schedule_rules(rule_command);
+                if (!rules.status.ok()) return FailureOutput(rules.status.message);
+
+                for (const auto& view : rules.rules) {
+                    rule_by_id.emplace(view.rule.id, view.rule);
+                    exceptions.reserve(exceptions.size() + view.exceptions.size());
+                    for (const auto& exception : view.exceptions) {
+                        if (WithinRange(start, end, exception.original_start_time)) {
+                            exceptions.emplace_back(MakeToolOutput(schedule_tool_output::ExceptionOutput(exception)));
+                        }
+                    }
+                    future_occurrences.reserve(future_occurrences.size() + view.upcoming_occurrences.size());
+                    for (const auto& occurrence : view.upcoming_occurrences) {
+                        if (WithinRange(start, end, occurrence)) {
+                            future_occurrences.emplace_back(
+                                MakeToolOutput(schedule_tool_output::FutureOccurrenceOutput(view.rule, occurrence)));
+                        }
+                    }
+                }
+            }
+
+            return Output({
+                MakeToolOutput("status", ToolOutputValue::String("success")),
+                MakeToolOutput("message", ToolOutputValue::String("query success")),
+                MakeToolOutput("schedules", ToolOutputValue::Array(std::move(schedules))),
+                MakeToolOutput("future_occurrences", ToolOutputValue::Array(std::move(future_occurrences))),
+                MakeToolOutput("exceptions", ToolOutputValue::Array(std::move(exceptions))),
+            });
+        });
+    if (!status.ok()) return status;
+
+    status = server.add_tool(
+        "schedule.update", "更新日程、更新周期规则、取消或跳过某次日程。", UpdateProperties(),
+        [&service, rule_service](const PropertyList& properties) {
+            // update 根据定位参数识别目标：schedule_id 改实例，rule_id 改规则，rule_id + original_start_time
+            // 改未来单次。
+            const bool has_schedule_id = properties.value<int64_t>("schedule_id").has_value();
+            const bool has_rule_id = properties.value<int64_t>("rule_id").has_value();
+            const bool has_original_start_time = properties.value<std::string>("original_start_time").has_value();
+            const auto repeat = properties.value<JsonValue>("repeat");
+
+            if (has_schedule_id && has_rule_id) {
+                return FailureOutput("schedule_id 和 rule_id 不能同时使用");
+            }
+            if (has_original_start_time && !has_rule_id) {
+                return FailureOutput("original_start_time 必须和 rule_id 一起使用");
+            }
+
+            if (has_schedule_id) {
+                // schedule_id 命中已物化实例；status=cancelled 走取消，否则走一次性日程更新。
+                const auto status_text = properties.value<std::string>("status");
+                if (status_text.has_value() && *status_text == "cancelled") {
+                    schedule::CancelScheduleCommand command;
+                    command.schedule_id = properties.value<int64_t>("schedule_id").value_or(0);
+                    const auto result = service.cancel_schedule(command);
+                    if (!result.result.ok()) return FailureOutput(result.result.status.message);
+                    return Output({
+                        MakeToolOutput("status", ToolOutputValue::String("success")),
+                        MakeToolOutput("message", ToolOutputValue::String("deleted success")),
+                        MakeToolOutput("schedule", ToolOutputValue::Null()),
+                        MakeToolOutput("rule", ToolOutputValue::Null()),
+                        MakeToolOutput("exception", ToolOutputValue::Null()),
+                        MakeToolOutput("conflicts", ToolOutputValue::Array(ToolOutputArray{})),
+                    });
+                }
+
+                schedule::UpdateScheduleCommand command;
+                command.schedule_id = *properties.value<int64_t>("schedule_id");
+                if (properties.value<std::string>("event").has_value())
+                    command.event = *properties.value<std::string>("event");
+                if (properties.value<std::string>("start_time").has_value()) {
+                    const auto parsed =
+                        schedule_tool_output::ParseDateTime(*properties.value<std::string>("start_time"));
+                    if (!parsed.has_value()) return FailureOutput("start_time 格式必须是 YYYY-MM-DD HH:mm:ss");
+                    command.start_time = parsed;
+                }
+                if (properties.value<std::string>("end_time").has_value()) {
+                    const auto parsed = schedule_tool_output::ParseDateTime(*properties.value<std::string>("end_time"));
+                    if (!parsed.has_value()) return FailureOutput("end_time 格式必须是 YYYY-MM-DD HH:mm:ss");
+                    command.end_time = parsed;
+                }
+                if (properties.value<std::string>("location").has_value())
+                    command.location = *properties.value<std::string>("location");
+                if (properties.value<std::string>("notes").has_value())
+                    command.notes = *properties.value<std::string>("notes");
+                command.ignore_conflict = properties.value<bool>("ignore_conflict").value_or(false);
+
+                const auto result = service.update_schedule(command);
+                if (!result.result.ok()) {
+                    if (result.result.status.code == ErrorCode::kConflict) {
+                        return ConflictOutput(result.result.status.message,
+                                              schedule_tool_output::ScheduleArrayOutput(result.conflicts));
+                    }
+                    return FailureOutput(result.result.status.message);
+                }
+                return Output({
+                    MakeToolOutput("status", ToolOutputValue::String("success")),
+                    MakeToolOutput("message", ToolOutputValue::String("updated success")),
+                    MakeToolOutput("schedule", result.result.value.has_value()
+                                                   ? schedule_tool_output::ScheduleOutput(*result.result.value)
+                                                   : ToolOutputValue::Null()),
+                    MakeToolOutput("rule", ToolOutputValue::Null()),
+                    MakeToolOutput("exception", ToolOutputValue::Null()),
+                    MakeToolOutput("conflicts",
+                                   ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.conflicts))),
+                });
+            }
+
+            if (rule_service == nullptr) return FailureOutput("当前运行时未启用周期日程能力");
+
+            if (has_original_start_time) {
+                // 未来周期单次没有 schedule_id，通过 rule_id + original_start_time 定位。
+                const auto original = schedule_tool_output::ParseDateTime(
+                    properties.value<std::string>("original_start_time").value_or(""));
+                if (!original.has_value()) {
+                    return FailureOutput("original_start_time 格式必须是 YYYY-MM-DD HH:mm:ss");
+                }
+                const auto status_text = properties.value<std::string>("status");
+                if (status_text.has_value() && *status_text == "cancelled") {
+                    // 跳过未来单次：在 schedule_rule_exception 中记录 skip，后续生成时不再物化这次。
+                    schedule::SkipScheduleOccurrenceCommand command;
+                    command.rule_id = properties.value<int64_t>("rule_id").value_or(0);
+                    command.original_start_time = *original;
+                    const auto result = rule_service->skip_schedule_occurrence(command);
+                    if (!result.status.ok()) return FailureOutput(result.status.message);
+                    return Output({
+                        MakeToolOutput("status", ToolOutputValue::String("success")),
+                        MakeToolOutput("message", ToolOutputValue::String("updated success")),
+                        MakeToolOutput("schedule", ToolOutputValue::Null()),
+                        MakeToolOutput("rule", ToolOutputValue::Null()),
+                        MakeToolOutput("exception", result.exception.has_value()
+                                                        ? schedule_tool_output::ExceptionOutput(*result.exception)
+                                                        : ToolOutputValue::Null()),
+                        MakeToolOutput("conflicts", ToolOutputValue::Array(ToolOutputArray{})),
+                    });
+                }
+
+                // 修改未来单次：先落到 schedule_rule_exception，后续物化该次时使用覆盖字段。
+                schedule::UpdateScheduleOccurrenceCommand command;
+                command.rule_id = properties.value<int64_t>("rule_id").value_or(0);
+                command.original_start_time = *original;
+                if (properties.value<std::string>("event").has_value())
+                    command.event = std::optional<std::string>{*properties.value<std::string>("event")};
+                if (properties.value<std::string>("start_time").has_value()) {
+                    const auto parsed =
+                        schedule_tool_output::ParseDateTime(*properties.value<std::string>("start_time"));
+                    if (!parsed.has_value()) return FailureOutput("start_time 格式必须是 YYYY-MM-DD HH:mm:ss");
+                    command.start_time = std::optional<DateTime>{*parsed};
+                }
+                if (properties.value<std::string>("end_time").has_value()) {
+                    const auto parsed = schedule_tool_output::ParseDateTime(*properties.value<std::string>("end_time"));
+                    if (!parsed.has_value()) return FailureOutput("end_time 格式必须是 YYYY-MM-DD HH:mm:ss");
+                    command.end_time = std::optional<DateTime>{*parsed};
+                }
+                if (properties.value<std::string>("location").has_value())
+                    command.location = std::optional<std::string>{*properties.value<std::string>("location")};
+                if (properties.value<std::string>("notes").has_value())
+                    command.notes = std::optional<std::string>{*properties.value<std::string>("notes")};
+                command.ignore_conflict = properties.value<bool>("ignore_conflict").value_or(false);
+                const auto result = rule_service->update_schedule_occurrence(command);
+                if (!result.status.ok()) return FailureOutput(result.status.message);
+                return Output({
+                    MakeToolOutput("status", ToolOutputValue::String("success")),
+                    MakeToolOutput("message", ToolOutputValue::String("updated success")),
+                    MakeToolOutput("schedule", ToolOutputValue::Null()),
+                    MakeToolOutput("rule", ToolOutputValue::Null()),
+                    MakeToolOutput("exception", result.exception.has_value()
+                                                    ? schedule_tool_output::ExceptionOutput(*result.exception)
+                                                    : ToolOutputValue::Null()),
+                    MakeToolOutput("conflicts", ToolOutputValue::Array(ToolOutputArray{})),
+                });
+            }
+
+            if (!has_rule_id) return FailureOutput("请提供 schedule_id、rule_id 或 rule_id + original_start_time");
+            // 只有 rule_id 时按整条周期规则更新；repeat 提供新规则字段，未传字段由 service 保持原值。
+            const ParsedRepeat parsed_repeat = ParseRepeat(repeat, false);
+            if (!parsed_repeat.ok()) return FailureOutput(parsed_repeat.error);
+            const auto result = rule_service->update_schedule_rule(UpdateRuleCommand(properties, parsed_repeat));
+            if (!result.status.ok()) {
+                if (result.status.code == ErrorCode::kConflict) {
+                    return ConflictOutput(result.status.message,
+                                          schedule_tool_output::ScheduleArrayOutput(result.conflicts));
+                }
+                return FailureOutput(result.status.message);
+            }
+            return Output({
+                MakeToolOutput("status", ToolOutputValue::String("success")),
+                MakeToolOutput("message", ToolOutputValue::String("updated success")),
+                MakeToolOutput("schedule", ToolOutputValue::Null()),
+                MakeToolOutput("rule", result.rule.has_value() ? schedule_tool_output::RuleOutput(*result.rule)
+                                                               : ToolOutputValue::Null()),
+                MakeToolOutput("exception", ToolOutputValue::Null()),
+                MakeToolOutput("conflicts",
+                               ToolOutputValue::Array(schedule_tool_output::ScheduleArrayOutput(result.conflicts))),
+            });
+        });
+    if (!status.ok()) return status;
+
+    return server.add_tool(
+        "schedule.delete", "删除单次日程、未来周期单次或整条周期规则。", DeleteProperties(),
+        [&service, rule_service](const PropertyList& properties) {
+            // delete 根据定位参数拆三条路径：schedule_id 删实例，rule_id 删规则，rule_id + original_start_time
+            // 跳过未来单次。
+            const bool has_schedule_id = properties.value<int64_t>("schedule_id").has_value();
+            const bool has_rule_id = properties.value<int64_t>("rule_id").has_value();
+            const bool has_original_start_time = properties.value<std::string>("original_start_time").has_value();
+            if (!has_schedule_id && !has_rule_id) return FailureOutput("请提供 schedule_id 或 rule_id");
+            if (has_schedule_id && has_rule_id) return FailureOutput("schedule_id 和 rule_id 不能同时使用");
+
+            if (has_schedule_id) {
+                // 删除实例前先读取快照，取消成功后把快照状态改为 cancelled 返回给模型。
+                const schedule::ScheduleId schedule_id = properties.value<int64_t>("schedule_id").value_or(0);
+                schedule::QueryScheduleCommand query;
+                query.schedule_id = schedule_id;
+                query.status = schedule::ScheduleStatusFilter::kAll;
+                query.limit = 1;
+                query.offset = 0;
+                const auto loaded = service.query_schedule(query);
+                if (!loaded.result.ok() || loaded.result.value.empty()) return FailureOutput("日程不存在");
+                const auto result = service.cancel_schedule({.schedule_id = schedule_id});
+                if (!result.result.ok()) return FailureOutput(result.result.status.message);
+                schedule::Schedule deleted = loaded.result.value.front();
+                deleted.status = schedule::ScheduleStatus::kCancelled;
+                return Output({
+                    MakeToolOutput("status", ToolOutputValue::String("success")),
+                    MakeToolOutput("message", ToolOutputValue::String("deleted success")),
+                    MakeToolOutput("schedule", schedule_tool_output::ScheduleOutput(deleted)),
+                    MakeToolOutput("rule", ToolOutputValue::Null()),
+                    MakeToolOutput("exception", ToolOutputValue::Null()),
+                });
+            }
+
+            if (rule_service == nullptr) return FailureOutput("当前运行时未启用周期日程能力");
+            if (has_original_start_time) {
+                // 删除未来周期单次等价于创建 skip exception，不落库为 schedule。
+                const auto original = schedule_tool_output::ParseDateTime(
+                    properties.value<std::string>("original_start_time").value_or(""));
+                if (!original.has_value()) {
+                    return FailureOutput("original_start_time 格式必须是 YYYY-MM-DD HH:mm:ss");
+                }
+                schedule::SkipScheduleOccurrenceCommand command;
+                command.rule_id = properties.value<int64_t>("rule_id").value_or(0);
+                command.original_start_time = *original;
+                const auto result = rule_service->skip_schedule_occurrence(command);
+                if (!result.status.ok()) return FailureOutput(result.status.message);
+                return Output({
+                    MakeToolOutput("status", ToolOutputValue::String("success")),
+                    MakeToolOutput("message", ToolOutputValue::String("deleted success")),
+                    MakeToolOutput("schedule", ToolOutputValue::Null()),
+                    MakeToolOutput("rule", ToolOutputValue::Null()),
+                    MakeToolOutput("exception", result.exception.has_value()
+                                                    ? schedule_tool_output::ExceptionOutput(*result.exception)
+                                                    : ToolOutputValue::Null()),
+                });
+            }
+
+            // 仅 rule_id 时取消整条周期规则及其未来实例。
+            schedule::CancelScheduleRuleCommand command;
+            command.rule_id = properties.value<int64_t>("rule_id").value_or(0);
+            const auto result = rule_service->cancel_schedule_rule(command);
+            if (!result.status.ok()) return FailureOutput(result.status.message);
+            return Output({
+                MakeToolOutput("status", ToolOutputValue::String("success")),
+                MakeToolOutput("message", ToolOutputValue::String("deleted success")),
+                MakeToolOutput("schedule", ToolOutputValue::Null()),
+                MakeToolOutput("rule", result.rule.has_value() ? schedule_tool_output::RuleOutput(*result.rule)
+                                                               : ToolOutputValue::Null()),
+                MakeToolOutput("exception", ToolOutputValue::Null()),
+            });
+        });
+}
+
+Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service) {
+    return RegisterScheduleMcpTools(server, service, nullptr);
+}
+
+Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, ScheduleRuleService& rule_service) {
+    return RegisterScheduleMcpTools(server, service, &rule_service);
+}
+
+}  // namespace voicelife::mcp

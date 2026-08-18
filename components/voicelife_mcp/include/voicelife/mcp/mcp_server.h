@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -11,13 +12,17 @@
 namespace voicelife::mcp {
 
 /// MCP 工具参数支持的数据类型。
-enum class ToolInputType { kString, kInteger, kBoolean };
+enum class ToolInputType { kString, kInteger, kBoolean, kObject };
+
+/// MCP 工具输入参数的 JSON Schema 前向声明。
+struct ToolInputSchema;
 
 /// MCP 工具的单个输入字段定义。
 struct ToolInputField {
     ToolInputType type = ToolInputType::kString;
     std::optional<ToolValue> default_value;
     std::string description;
+    std::shared_ptr<ToolInputSchema> object_schema;
     std::optional<int64_t> minimum;
     std::optional<int64_t> maximum;
     std::optional<std::size_t> min_length;
@@ -48,7 +53,10 @@ struct ListToolsResult {
 };
 
 /// 工具参数支持的类型。
-enum class PropertyType { kBoolean, kInteger, kString };
+enum class PropertyType { kBoolean, kInteger, kString, kObject };
+
+/// 面向业务代码的 MCP 参数集合前向声明。
+class PropertyList;
 
 /// 面向业务代码的单个工具参数声明。
 class Property {
@@ -69,24 +77,49 @@ class Property {
      */
     Property(std::string name, PropertyType type, ToolValue default_value);
     /**
-     * @brief 创建带整数范围约束的参数声明。
+     * @brief 创建带内部字段定义的对象参数声明。
      * @param name 参数名称。
-     * @param type 参数类型，必须为整数。
-     * @param minimum 最小值。
-     * @param maximum 最大值。
+     * @param object_properties 对象内部字段定义。
      * @return 无。
      */
-    Property(std::string name, PropertyType type, int64_t minimum, int64_t maximum);
+    Property(std::string name, PropertyList object_properties);
+    /**
+     * @brief 创建带数值或字符串长度约束的参数声明。
+     * @param name 参数名称。
+     * @param type 参数类型；整数类型使用数值范围，字符串类型使用字符长度。
+     * @param minimum 最小值或最小字符数。
+     * @param maximum 最大值或最大字符数。
+     * @param default_value 默认值；未设置时该参数为必填。
+     * @return 无。
+     */
+    Property(std::string name, PropertyType type, int64_t minimum, int64_t maximum,
+             std::optional<ToolValue> default_value = std::nullopt);
 
     /**
-     * @brief 创建带字符串长度约束的参数声明。
+     * @brief 设置参数字段描述。
+     * @param description 输出到 JSON Schema 字段上的描述。
+     * @return 当前参数声明，便于链式构造。
+     */
+    Property& with_description(std::string description);
+    /**
+     * @brief 设置对象参数内部字段定义。
+     * @param object_properties 对象内部字段定义。
+     * @return 当前参数声明，便于链式构造。
+     */
+    Property& with_object_properties(PropertyList object_properties);
+
+    /** @brief 释放参数声明占用的资源。 */
+    ~Property();
+
+    /**
+     * @brief 创建带整数范围约束的参数声明。
      * @param name 参数名称。
-     * @param minimum 最小字符数。
-     * @param maximum 最大字符数。
+     * @param minimum 最小值（含）。
+     * @param maximum 最大值（含）。
      * @param default_value 默认值；未设置时该参数为必填。
      * @return 参数声明。
      */
-    static Property WithStringLength(std::string name, std::size_t minimum, std::size_t maximum,
+    static Property WithIntegerRange(std::string name, int64_t minimum, int64_t maximum,
                                      std::optional<ToolValue> default_value = std::nullopt);
 
     /**
@@ -96,6 +129,13 @@ class Property {
      * @return 可选参数声明。
      */
     static Property Optional(std::string name, PropertyType type);
+    /**
+     * @brief 创建可省略的对象参数声明并设置内部字段定义。
+     * @param name 参数名称。
+     * @param object_properties 对象内部字段定义。
+     * @return 可选对象参数声明。
+     */
+    static Property OptionalObject(std::string name, PropertyList object_properties);
 
     /**
      * @brief 获取参数名称。
@@ -107,6 +147,16 @@ class Property {
      * @return 参数类型。
      */
     [[nodiscard]] PropertyType type() const { return type_; }
+    /**
+     * @brief 获取参数字段描述。
+     * @return 字段描述；未设置时为空字符串。
+     */
+    [[nodiscard]] const std::string& description() const { return description_; }
+    /**
+     * @brief 获取对象参数内部字段定义。
+     * @return 内部字段定义；未设置时为空。
+     */
+    [[nodiscard]] const std::shared_ptr<PropertyList>& object_properties() const { return object_properties_; }
     /**
      * @brief 获取参数默认值。
      * @return 默认值；未设置时为空。
@@ -127,6 +177,11 @@ class Property {
     /** @brief 获取字符串最大长度。 @return 最大长度；未设置时为空。 */
     [[nodiscard]] std::optional<std::size_t> max_length() const { return max_length_; }
     /**
+     * @brief 判断约束参数是否能按声明类型解释。
+     * @return 约束有效时返回 true。
+     */
+    [[nodiscard]] bool constraint_valid() const { return constraint_valid_; }
+    /**
      * @brief 判断参数缺失时是否应拒绝调用。
      * @return 参数必填时返回 true。
      */
@@ -135,11 +190,14 @@ class Property {
    private:
     std::string name_;
     PropertyType type_;
+    std::string description_;
+    std::shared_ptr<PropertyList> object_properties_;
     std::optional<ToolValue> default_value_;
     std::optional<int64_t> minimum_;
     std::optional<int64_t> maximum_;
     std::optional<std::size_t> min_length_;
     std::optional<std::size_t> max_length_;
+    bool constraint_valid_ = true;
     bool required_ = true;
 };
 
@@ -260,5 +318,12 @@ class McpServer {
     std::unordered_map<std::string, RegisteredTool> tools_;
     std::vector<std::string> registration_order_;
 };
+
+/**
+ * @brief 将结构化工具输出序列化为紧凑 JSON 文本。
+ * @param output 待序列化的工具输出。
+ * @return 序列化成功时返回 JSON 文本，失败时返回空对象。
+ */
+std::string SerializeToolOutputValue(const ToolOutputValue& output);
 
 }  // namespace voicelife::mcp

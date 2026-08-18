@@ -33,7 +33,8 @@ enum class TransportState {
 
 /** 配置 ESP WebSocket 传输的容量、超时和安全策略。 */
 struct EspWebSocketTransportOptions {
-    size_t max_message_bytes = 16 * 1024;
+    // 上限只在分片重组时按实际消息长度占用；64 KiB 可容纳较长的下行控制/文本帧。
+    size_t max_message_bytes = 64 * 1024;
     // A single envelope owns up to 4 KiB of frame data. 32 entries absorb
     // short STT/TTS bursts without allowing unbounded protocol backlog.
     size_t event_queue_capacity = 32;
@@ -42,7 +43,9 @@ struct EspWebSocketTransportOptions {
     uint32_t network_timeout_ms = 10000;
     uint32_t reconnect_timeout_ms = 1000;
     uint32_t websocket_task_stack_size = 12288;
-    uint32_t worker_task_stack_size = 12288;
+    // MCP 日程工具（schedule.create/query）在此 worker 任务上执行 SQLite/FATFS 操作，
+    // SQLite 的 sqlite3_step 需要较大栈，12KB 会导致栈溢出崩溃。
+    uint32_t worker_task_stack_size = 32768;
     bool enable_close_reconnect = true;
     bool allow_insecure_ws = false;
 };

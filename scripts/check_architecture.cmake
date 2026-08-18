@@ -13,11 +13,14 @@ set(known_components
     voicelife_storage_fatfs
     voicelife_storage_sqlite
     voicelife_timing
+    voicelife_timing_esp
     voicelife_voice
     voicelife_linx
     voicelife_linx_esp
     voicelife_audio_esp
+    voicelife_board_esp
     voicelife_display_esp
+    voicelife_display_sparkbot
 )
 
 function(idf_component_register)
@@ -98,8 +101,10 @@ assert_dependencies(voicelife_storage_fatfs PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_storage_fatfs PRIVATE esp_partition fatfs)
 assert_dependencies(voicelife_timing PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_timing PRIVATE)
+assert_dependencies(voicelife_timing_esp PUBLIC voicelife_contracts voicelife_timing)
+assert_dependencies(voicelife_timing_esp PRIVATE esp_timer freertos)
 assert_dependencies(voicelife_mcp PUBLIC voicelife_contracts)
-assert_dependencies(voicelife_mcp PRIVATE yyjson)
+assert_dependencies(voicelife_mcp PRIVATE voicelife_schedule yyjson)
 assert_dependencies(voicelife_voice PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_voice PRIVATE)
 assert_dependencies(voicelife_linx PUBLIC voicelife_contracts voicelife_voice)
@@ -107,10 +112,14 @@ assert_dependencies(voicelife_linx PRIVATE)
 assert_dependencies(voicelife_linx_esp PUBLIC voicelife_contracts voicelife_linx)
 assert_dependencies(voicelife_linx_esp PRIVATE esp_websocket_client esp-tls esp_event esp_timer freertos heap)
 assert_dependencies(voicelife_audio_esp PUBLIC voicelife_contracts voicelife_voice)
-assert_dependencies(voicelife_display_esp PUBLIC voicelife_contracts)
-assert_dependencies(voicelife_display_esp PRIVATE driver esp_lcd)
-assert_dependencies(voicelife_audio_esp PRIVATE esp_driver_i2c esp_driver_i2s espressif__esp-sr)
+assert_dependencies(voicelife_display_esp PUBLIC voicelife_contracts voicelife_voice)
+assert_dependencies(voicelife_display_esp PRIVATE driver esp_lcd esp_timer)
+assert_dependencies(voicelife_display_sparkbot PUBLIC voicelife_contracts voicelife_voice)
+assert_dependencies(voicelife_display_sparkbot PRIVATE esp_driver_spi esp_lcd esp_partition esp_psram freertos spi_flash)
+assert_dependencies(voicelife_audio_esp PRIVATE esp_driver_i2c esp_driver_i2s esp_timer espressif__esp-sr)
+assert_dependencies(voicelife_board_esp PUBLIC voicelife_contracts)
+assert_dependencies(voicelife_board_esp PRIVATE esp_hw_support esp_partition esp_psram esp_system spi_flash)
 assert_dependencies(voicelife_runtime PUBLIC voicelife_contracts)
-assert_dependencies(voicelife_runtime PRIVATE esp-tls esp_app_format esp_driver_gpio esp_driver_usb_serial_jtag led_strip esp_event esp_http_client esp_netif lwip esp_partition esp_psram esp_timer esp_wifi nvs_flash nvs_sec_provider spi_flash voicelife_im voicelife_linx voicelife_linx_esp voicelife_mcp voicelife_voice voicelife_audio_esp voicelife_display_esp voicelife_schedule voicelife_storage_fatfs voicelife_storage_sqlite)
+assert_dependencies(voicelife_runtime PRIVATE esp-tls esp_app_format esp_driver_gpio esp_driver_usb_serial_jtag led_strip esp_event esp_http_client esp_http_server esp_netif lwip esp_partition esp_psram esp_timer esp_wifi nvs_flash nvs_sec_provider spi_flash voicelife_im voicelife_linx voicelife_linx_esp voicelife_mcp voicelife_voice voicelife_audio_esp voicelife_display_esp voicelife_schedule voicelife_storage_fatfs voicelife_storage_sqlite)
 
 message(STATUS "PASS component names, include paths, and dependency graph")

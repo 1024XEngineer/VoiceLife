@@ -60,10 +60,9 @@ Status ValidateRecordScheduleOperationCommand(const RecordScheduleOperationComma
 }
 
 RecordScheduleOperationResult InvalidRecordScheduleOperationResult(std::string error) {
+    const Status status = Status::Error(ErrorCode::kInvalidArgument, error);
     return {
-        .status = Status::Error(ErrorCode::kInvalidArgument, error),
-        .operation = std::nullopt,
-        .error = std::move(error),
+        .result = CommandResult<std::optional<OperationRecord>>::Failure(status),
     };
 }
 

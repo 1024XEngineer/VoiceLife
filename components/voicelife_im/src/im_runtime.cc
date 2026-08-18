@@ -60,6 +60,7 @@ Status ImRuntime::Start() {
         start_status_ = Status::Error(ErrorCode::kInvalidArgument, "IM Gateway origin 必须是安全的 HTTPS origin");
         return start_status_;
     }
+    user_id_ = config.value->user_id;
     const std::string device_id = credentials_.DeviceId();
     std::string device_token = credentials_.DeviceToken();
     if (device_id.empty() || device_token.empty()) {
@@ -133,10 +134,12 @@ ImHttpResponse ImRuntime::ProbeGateway() {
                                          (response.body.empty() || response.body == "Not Found");
     if (response.status == ImTransportStatus::kSuccess || authenticated_not_found) {
         if (!reporting_) reporting_ = std::make_unique<ImReportingChannel>(*transport_, credentials_);
+        if (!pairing_) pairing_ = std::make_unique<ImPairingClient>(*transport_, credentials_);
         state_ = ImRuntimeState::kReady;
         start_status_ = Status::Ok();
     } else {
         reporting_.reset();
+        pairing_.reset();
         state_ = ImRuntimeState::kDegraded;
         start_status_ = Status::Error(ErrorCode::kUnavailable, "IM Gateway 认证探针失败");
     }

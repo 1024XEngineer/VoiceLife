@@ -30,7 +30,7 @@ void VoiceSessionCoordinator::Stop() {
 
 ToolResult VoiceSessionCoordinator::DispatchToolCall(const ToolCall& call) {
     if (state_ != SessionState::kReady) {
-        return {.status = Status::Error(ErrorCode::kUnavailable, "语音会话尚未就绪"), .output = {}};
+        return ToolResult::Failure(Status::Error(ErrorCode::kUnavailable, "语音会话尚未就绪"));
     }
     return tools_.Call(call);
 }

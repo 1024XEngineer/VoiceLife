@@ -10,6 +10,9 @@
 namespace voicelife::runtime {
 namespace {
 
+constexpr std::string_view kBindingToolHandledSummary = "绑定操作已处理";
+constexpr std::string_view kBindingToolFailedSummary = "绑定操作失败";
+
 std::string Escape(std::string_view value) {
     std::string result;
     result.reserve(value.size() + 2);
@@ -91,6 +94,22 @@ std::string IdText(const JsonValue& id) {
     return Serialize(id);
 }
 
+std::string ToolOutcomeSummary(std::string_view request_payload, bool success) {
+    JsonValue request;
+    if (!ParseJson(request_payload, request).ok() || !request.IsObject()) {
+        return success ? "操作已完成" : "操作失败";
+    }
+    const JsonValue* params = Get(request, "params");
+    const JsonValue* name = params == nullptr ? nullptr : Get(*params, "name");
+    if (name == nullptr || !name->IsString()) return success ? "操作已完成" : "操作失败";
+    if (name->string == "schedule.create") return success ? "日程已创建" : "日程创建失败";
+    if (name->string == "schedule.query") return success ? "日程查询完成" : "日程查询失败";
+    if (name->string == "im.binding.start") {
+        return std::string(success ? kBindingToolHandledSummary : kBindingToolFailedSummary);
+    }
+    return success ? "操作已完成" : "操作失败";
+}
+
 std::string Wrap(std::string payload, std::string_view session_id) {
     std::string result = "{\"type\":\"mcp\"";
     if (!session_id.empty()) result += ",\"session_id\":\"" + Escape(session_id) + "\"";
@@ -112,7 +131,20 @@ Result<ToolValue> ToolValueFromJson(const JsonValue& value) {
     if (value.kind == JsonValue::Kind::kNumber && value.number == static_cast<int64_t>(value.number)) {
         return Result<ToolValue>::Success(static_cast<int64_t>(value.number));
     }
-    return Result<ToolValue>::Failure(ErrorCode::kInvalidArgument, "MCP 工具参数只支持字符串、整数和布尔值");
+    if (value.kind == JsonValue::Kind::kObject) {
+        return Result<ToolValue>::Success(value);
+    }
+    return Result<ToolValue>::Failure(ErrorCode::kInvalidArgument, "MCP 工具参数只支持字符串、整数、布尔值和对象");
+}
+
+/**
+ * @brief 获取工具调用面向用户的文本结果。
+ * @param result 已成功执行的工具结果。
+ * @return 工具提供的精确文本，或由结构化输出序列化生成的 JSON 文本。
+ */
+std::string ResolveToolResultText(const ToolResult& result) {
+    if (result.text_output.has_value()) return *result.text_output;
+    return mcp::SerializeToolOutputValue(result.output);
 }
 
 }  // namespace
@@ -170,15 +202,68 @@ Result<std::string> HandleLinxMcpPayload(std::string_view payload, const mcp::Mc
         const int code = call.status.code == ErrorCode::kNotFound ? -32601 : -32602;
         return ErrorResponse(*id, code, call.status.message, session_id);
     }
-    std::string text;
-    for (const auto& [key, value] : call.output) {
-        if (!text.empty()) text += "\\n";
-        text += key + "=" + value;
-    }
+    const std::string text = ResolveToolResultText(call);
     const std::string result = "{\"jsonrpc\":\"2.0\",\"id\":" + Serialize(*id) +
                                ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"" + Escape(text) +
                                "\"}],\"isError\":false}}";
     return Result<std::string>::Success(Wrap(result, session_id));
+}
+
+Result<std::string> BuildLinxMcpUnavailableResponse(std::string_view payload, std::string_view message,
+                                                    std::string_view session_id) {
+    JsonValue request;
+    const Status parsed = ParseJson(payload, request);
+    if (!parsed.ok() || !request.IsObject()) {
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "MCP JSON-RPC payload 无效");
+    }
+    const JsonValue* id = Get(request, "id");
+    const JsonValue* method = Get(request, "method");
+    if (method == nullptr || !method->IsString()) {
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "MCP 请求缺少 method");
+    }
+    // 通知没有响应帧；它们也不会进入有业务执行的 worker。
+    if (id == nullptr && method->string.rfind("notifications/", 0) == 0) {
+        return Result<std::string>::Success(std::string{});
+    }
+    if (id == nullptr) {
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "MCP 请求缺少 id");
+    }
+    return ErrorResponse(*id, -32001, message, session_id);
+}
+
+LinxMcpToolOutcome InspectLinxMcpToolOutcome(std::string_view request_payload, const Result<std::string>& response) {
+    LinxMcpToolOutcome outcome;
+    outcome.summary = ToolOutcomeSummary(request_payload, false);
+    if (!response.ok() || !response.value.has_value()) return outcome;
+
+    JsonValue envelope;
+    if (!ParseJson(*response.value, envelope).ok() || !envelope.IsObject()) return outcome;
+    const JsonValue* payload = Get(envelope, "payload");
+    if (payload == nullptr || !payload->IsObject()) return outcome;
+
+    if (const JsonValue* error = Get(*payload, "error"); error != nullptr && error->IsObject()) {
+        // JSON-RPC/MCP 错误字段属于诊断信息，可能包含参数名、校验规则或
+        // Provider 实现细节。它不能成为设备屏幕上的用户可见文本。
+        return outcome;
+    }
+
+    const JsonValue* result = Get(*payload, "result");
+    if (result == nullptr || !result->IsObject()) return outcome;
+    const JsonValue* is_error = Get(*result, "isError");
+    if (is_error == nullptr || is_error->kind != JsonValue::Kind::kBool || is_error->boolean) {
+        // MCP 的 isError 内容同样是服务端诊断，不向 PresentationPort 透传。
+        return outcome;
+    }
+
+    outcome.success = true;
+    outcome.summary = ToolOutcomeSummary(request_payload, true);
+    // 成功内容同样是 MCP 的机器可读回包（例如 event=、status=、count=）。
+    // 它只随 JSON-RPC 响应回传给 Linx，不能成为设备底部用户文案。
+    return outcome;
+}
+
+bool IsBindingMcpToolSummary(std::string_view summary) {
+    return summary == kBindingToolHandledSummary || summary == kBindingToolFailedSummary;
 }
 
 }  // namespace voicelife::runtime

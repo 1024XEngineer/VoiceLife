@@ -1,8 +1,11 @@
 #include "voicelife/mcp/mcp_server.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 
 #include "mcp_json_writer.h"
 
@@ -23,6 +26,8 @@ bool MatchesType(const ToolValue& value, ToolInputType type) {
             return std::holds_alternative<int64_t>(value);
         case ToolInputType::kString:
             return std::holds_alternative<std::string>(value);
+        case ToolInputType::kObject:
+            return std::holds_alternative<JsonValue>(value) && std::get<JsonValue>(value).IsObject();
     }
     return false;
 }
@@ -32,7 +37,7 @@ bool MatchesType(const ToolValue& value, ToolInputType type) {
  * @param status 失败状态。
  * @return 工具调用失败结果。
  */
-ToolResult Failure(Status status) { return {.status = std::move(status), .output = {}}; }
+ToolResult Failure(Status status) { return ToolResult::Failure(std::move(status)); }
 
 /**
  * @brief 将业务参数类型转换为 MCP 输入类型。
@@ -47,6 +52,8 @@ ToolInputType ToInputType(PropertyType type) {
             return ToolInputType::kInteger;
         case PropertyType::kString:
             return ToolInputType::kString;
+        case PropertyType::kObject:
+            return ToolInputType::kObject;
     }
     return ToolInputType::kString;
 }
@@ -61,28 +68,214 @@ std::size_t Utf8Length(const std::string& value) {
         std::count_if(value.begin(), value.end(), [](unsigned char byte) { return (byte & 0xC0U) != 0x80U; }));
 }
 
+JsonValue ToolValueToJson(const ToolValue& value) {
+    if (std::holds_alternative<bool>(value)) return JsonValue::Bool(std::get<bool>(value));
+    if (std::holds_alternative<int64_t>(value)) return JsonValue::Number(static_cast<double>(std::get<int64_t>(value)));
+    if (std::holds_alternative<std::string>(value)) return JsonValue::String(std::get<std::string>(value));
+    if (std::holds_alternative<JsonValue>(value)) return std::get<JsonValue>(value);
+    return JsonValue{};
+}
+
+bool IsRequired(const ToolInputSchema& schema, const std::string& name) {
+    return std::find(schema.required.begin(), schema.required.end(), name) != schema.required.end();
+}
+
+Status NormalizeAndValidateObject(const JsonValue& value, const ToolInputSchema& schema, const std::string& path,
+                                  JsonValue& normalized) {
+    if (!value.IsObject()) return Status::Error(ErrorCode::kInvalidArgument, "工具参数类型错误：" + path);
+    JsonValue::ObjectMap object;
+    std::unordered_set<std::string> defined_names;
+    for (const auto& [name, field] : schema.properties) {
+        defined_names.insert(name);
+        const std::string child_path = path.empty() ? name : path + "." + name;
+        const auto argument = value.object.find(name);
+        if (argument == value.object.end()) {
+            if (field.default_value.has_value()) {
+                if (field.type == ToolInputType::kObject && field.object_schema != nullptr) {
+                    JsonValue child;
+                    const Status status = NormalizeAndValidateObject(ToolValueToJson(*field.default_value),
+                                                                     *field.object_schema, child_path, child);
+                    if (!status.ok()) return status;
+                    object.emplace(name, std::move(child));
+                    continue;
+                }
+                object.emplace(name, ToolValueToJson(*field.default_value));
+                continue;
+            }
+            if (IsRequired(schema, name)) {
+                return Status::Error(ErrorCode::kInvalidArgument, "缺少参数：" + child_path);
+            }
+            continue;
+        }
+        if (field.type == ToolInputType::kObject && field.object_schema != nullptr) {
+            JsonValue child;
+            if (const Status status =
+                    NormalizeAndValidateObject(argument->second, *field.object_schema, child_path, child);
+                !status.ok()) {
+                return status;
+            }
+            object.emplace(name, std::move(child));
+            continue;
+        }
+        if (field.type == ToolInputType::kInteger) {
+            if (argument->second.kind != JsonValue::Kind::kNumber ||
+                argument->second.number != static_cast<int64_t>(argument->second.number)) {
+                return Status::Error(ErrorCode::kInvalidArgument, "工具参数类型错误：" + child_path);
+            }
+            const int64_t number = static_cast<int64_t>(argument->second.number);
+            if ((field.minimum.has_value() && number < *field.minimum) ||
+                (field.maximum.has_value() && number > *field.maximum)) {
+                return Status::Error(ErrorCode::kInvalidArgument, "工具整数参数超出范围：" + child_path);
+            }
+            object.emplace(name, JsonValue::Number(argument->second.number));
+            continue;
+        }
+        if (field.type == ToolInputType::kString) {
+            if (argument->second.kind != JsonValue::Kind::kString) {
+                return Status::Error(ErrorCode::kInvalidArgument, "工具参数类型错误：" + child_path);
+            }
+            const std::size_t length = Utf8Length(argument->second.string);
+            if ((field.min_length.has_value() && length < *field.min_length) ||
+                (field.max_length.has_value() && length > *field.max_length)) {
+                return Status::Error(ErrorCode::kInvalidArgument, "工具字符串参数长度超出范围：" + child_path);
+            }
+            object.emplace(name, argument->second);
+            continue;
+        }
+        if (field.type == ToolInputType::kBoolean) {
+            if (argument->second.kind != JsonValue::Kind::kBool) {
+                return Status::Error(ErrorCode::kInvalidArgument, "工具参数类型错误：" + child_path);
+            }
+            object.emplace(name, argument->second);
+            continue;
+        }
+        object.emplace(name, argument->second);
+    }
+    for (const auto& [name, member] : value.object) {
+        (void)member;
+        if (!defined_names.contains(name)) {
+            return Status::Error(ErrorCode::kInvalidArgument,
+                                 "不支持的参数：" + (path.empty() ? name : path + "." + name));
+        }
+    }
+    normalized = JsonValue::Object(std::move(object));
+    return Status::Ok();
+}
+
+Status ValidatePropertyDefinition(const Property& property, const std::string& path) {
+    const ToolInputType input_type = ToInputType(property.type());
+    bool default_string_length_invalid = false;
+    if (property.default_value().has_value() && input_type == ToolInputType::kString &&
+        std::holds_alternative<std::string>(*property.default_value())) {
+        const std::size_t length = Utf8Length(std::get<std::string>(*property.default_value()));
+        default_string_length_invalid = (property.min_length().has_value() && length < *property.min_length()) ||
+                                        (property.max_length().has_value() && length > *property.max_length());
+    }
+    bool default_integer_range_invalid = false;
+    if (property.default_value().has_value() && input_type == ToolInputType::kInteger &&
+        std::holds_alternative<int64_t>(*property.default_value())) {
+        const int64_t value = std::get<int64_t>(*property.default_value());
+        default_integer_range_invalid = (property.minimum().has_value() && value < *property.minimum()) ||
+                                        (property.maximum().has_value() && value > *property.maximum());
+    }
+    if ((property.default_value().has_value() && !MatchesType(*property.default_value(), input_type)) ||
+        !property.constraint_valid() || default_string_length_invalid || default_integer_range_invalid ||
+        ((property.minimum().has_value() || property.maximum().has_value()) &&
+         property.type() != PropertyType::kInteger) ||
+        ((property.min_length().has_value() || property.max_length().has_value()) &&
+         property.type() != PropertyType::kString) ||
+        (property.minimum().has_value() && property.maximum().has_value() &&
+         *property.minimum() > *property.maximum()) ||
+        (property.min_length().has_value() && property.max_length().has_value() &&
+         *property.min_length() > *property.max_length())) {
+        return Status::Error(ErrorCode::kInvalidArgument, "工具参数定义无效：" + path);
+    }
+    if (property.object_properties() != nullptr) {
+        if (property.type() != PropertyType::kObject) {
+            return Status::Error(ErrorCode::kInvalidArgument, "只有对象参数可以定义内部字段：" + path);
+        }
+        for (const auto& child : *property.object_properties()) {
+            const Status status =
+                ValidatePropertyDefinition(child, path.empty() ? child.name() : path + "." + child.name());
+            if (!status.ok()) return status;
+        }
+    }
+    return Status::Ok();
+}
+
 }  // namespace
 
 Property::Property(std::string name, PropertyType type) : name_(std::move(name)), type_(type) {}
 
 Property::Property(std::string name, PropertyType type, ToolValue default_value)
-    : name_(std::move(name)), type_(type), default_value_(std::move(default_value)) {}
+    : name_(std::move(name)),
+      type_(type),
+      default_value_(std::move(default_value)),
+      required_(!default_value_.has_value()) {}
 
-Property::Property(std::string name, PropertyType type, int64_t minimum, int64_t maximum)
-    : name_(std::move(name)), type_(type), minimum_(minimum), maximum_(maximum) {}
+Property::Property(std::string name, PropertyList object_properties)
+    : name_(std::move(name)),
+      type_(PropertyType::kObject),
+      object_properties_(std::make_shared<PropertyList>(std::move(object_properties))) {}
 
-Property Property::WithStringLength(std::string name, std::size_t minimum, std::size_t maximum,
+Property::Property(std::string name, PropertyType type, int64_t minimum, int64_t maximum,
+                   std::optional<ToolValue> default_value)
+    : name_(std::move(name)),
+      type_(type),
+      default_value_(std::move(default_value)),
+      required_(!default_value_.has_value()) {
+    switch (type_) {
+        case PropertyType::kInteger:
+            minimum_ = minimum;
+            maximum_ = maximum;
+            break;
+        case PropertyType::kString:
+            if (minimum < 0 || maximum < 0 ||
+                static_cast<std::uintmax_t>(minimum) > std::numeric_limits<std::size_t>::max() ||
+                static_cast<std::uintmax_t>(maximum) > std::numeric_limits<std::size_t>::max()) {
+                constraint_valid_ = false;
+                break;
+            }
+            min_length_ = static_cast<std::size_t>(minimum);
+            max_length_ = static_cast<std::size_t>(maximum);
+            break;
+        case PropertyType::kBoolean:
+        case PropertyType::kObject:
+            constraint_valid_ = false;
+            break;
+    }
+}
+
+Property& Property::with_description(std::string description) {
+    description_ = std::move(description);
+    return *this;
+}
+
+Property& Property::with_object_properties(PropertyList object_properties) {
+    object_properties_ = std::make_shared<PropertyList>(std::move(object_properties));
+    return *this;
+}
+
+Property::~Property() = default;
+
+Property Property::WithIntegerRange(std::string name, int64_t minimum, int64_t maximum,
                                     std::optional<ToolValue> default_value) {
-    Property property(std::move(name), PropertyType::kString);
+    Property property(std::move(name), PropertyType::kInteger);
     property.default_value_ = std::move(default_value);
-    property.min_length_ = minimum;
-    property.max_length_ = maximum;
+    property.minimum_ = minimum;
+    property.maximum_ = maximum;
     property.required_ = !property.default_value_.has_value();
     return property;
 }
 
 Property Property::Optional(std::string name, PropertyType type) {
     Property property(std::move(name), type);
+    property.required_ = false;
+    return property;
+}
+
+Property Property::OptionalObject(std::string name, PropertyList object_properties) {
+    Property property(std::move(name), std::move(object_properties));
     property.required_ = false;
     return property;
 }
@@ -94,11 +287,15 @@ ToolInputSchema PropertyList::to_schema() const {
     for (const auto& property : properties_) {
         ToolInputField field{.type = ToInputType(property.type()),
                              .default_value = property.default_value(),
-                             .description = {},
+                             .description = property.description(),
+                             .object_schema = nullptr,
                              .minimum = property.minimum(),
                              .maximum = property.maximum(),
                              .min_length = property.min_length(),
                              .max_length = property.max_length()};
+        if (property.object_properties() != nullptr) {
+            field.object_schema = std::make_shared<ToolInputSchema>(property.object_properties()->to_schema());
+        }
         schema.properties.emplace(property.name(), std::move(field));
         if (property.required() && !property.default_value().has_value()) {
             schema.required.push_back(property.name());
@@ -137,27 +334,10 @@ Status McpServer::add_tool(std::string name, std::string description, PropertyLi
         return Status::Error(ErrorCode::kAlreadyExists, "工具已注册：" + name);
     }
 
-    // 校验参数默认值、类型及取值约束
+    // 校验参数默认值、类型及取值约束，包括对象内部字段。
     for (const auto& property : properties) {
-        const ToolInputType input_type = ToInputType(property.type());
-        bool default_string_length_invalid = false;
-        if (property.default_value().has_value() && input_type == ToolInputType::kString &&
-            std::holds_alternative<std::string>(*property.default_value())) {
-            const std::size_t length = Utf8Length(std::get<std::string>(*property.default_value()));
-            default_string_length_invalid = (property.min_length().has_value() && length < *property.min_length()) ||
-                                            (property.max_length().has_value() && length > *property.max_length());
-        }
-        if ((property.default_value().has_value() && !MatchesType(*property.default_value(), input_type)) ||
-            default_string_length_invalid ||
-            ((property.minimum().has_value() || property.maximum().has_value()) &&
-             property.type() != PropertyType::kInteger) ||
-            ((property.min_length().has_value() || property.max_length().has_value()) &&
-             property.type() != PropertyType::kString) ||
-            (property.minimum().has_value() && property.maximum().has_value() &&
-             *property.minimum() > *property.maximum()) ||
-            (property.min_length().has_value() && property.max_length().has_value() &&
-             *property.min_length() > *property.max_length())) {
-            return Status::Error(ErrorCode::kInvalidArgument, "工具参数定义无效：" + property.name());
+        if (const Status status = ValidatePropertyDefinition(property, property.name()); !status.ok()) {
+            return status;
         }
     }
 
@@ -192,7 +372,15 @@ ToolResult McpServer::call(const ToolCall& call) const {
         const auto argument = call.arguments.find(name);
         if (argument == call.arguments.end()) {
             if (field.default_value.has_value()) {
-                normalized_call.arguments.emplace(name, *field.default_value);
+                if (field.type == ToolInputType::kObject && field.object_schema != nullptr) {
+                    JsonValue normalized;
+                    const Status status = NormalizeAndValidateObject(std::get<JsonValue>(*field.default_value),
+                                                                     *field.object_schema, name, normalized);
+                    if (!status.ok()) return Failure(status);
+                    normalized_call.arguments.emplace(name, std::move(normalized));
+                } else {
+                    normalized_call.arguments.emplace(name, *field.default_value);
+                }
                 continue;
             }
             if (std::find(registered->second.definition.input_schema.required.begin(),
@@ -200,6 +388,15 @@ ToolResult McpServer::call(const ToolCall& call) const {
                           name) != registered->second.definition.input_schema.required.end()) {
                 return Failure(Status::Error(ErrorCode::kInvalidArgument, "缺少参数：" + name));
             }
+        } else if (field.type == ToolInputType::kObject && field.object_schema != nullptr) {
+            if (!MatchesType(argument->second, field.type)) {
+                return Failure(Status::Error(ErrorCode::kInvalidArgument, "工具参数类型错误：" + name));
+            }
+            JsonValue normalized;
+            const Status status = NormalizeAndValidateObject(std::get<JsonValue>(argument->second),
+                                                             *field.object_schema, name, normalized);
+            if (!status.ok()) return Failure(status);
+            normalized_call.arguments[name] = std::move(normalized);
         } else if (!MatchesType(argument->second, field.type)) {
             return Failure(Status::Error(ErrorCode::kInvalidArgument, "工具参数类型错误：" + name));
         } else if (field.type == ToolInputType::kInteger) {

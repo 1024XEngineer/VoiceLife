@@ -26,6 +26,7 @@
 #include "esp_partition.h"
 #include "esp_psram.h"
 #include "esp_random.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/event_groups.h"
@@ -33,6 +34,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "voicelife/linx/linx_ota.h"
+#include "wifi_provisioning_esp.h"
 
 namespace voicelife::runtime {
 namespace {
@@ -42,10 +44,10 @@ constexpr char kSecretPartition[] = "linx_secrets";
 constexpr char kTokenKey[] = "token";
 constexpr char kTokenReference[] = "nvs://linx/token";
 constexpr char kClientIdKey[] = "client_id";
-constexpr char kBoardName[] = "voicelife-pcb";
 constexpr char kWifiNamespace[] = "wifi";
 constexpr char kWifiSsidKey[] = "ssid";
 constexpr char kWifiPasswordKey[] = "password";
+constexpr char kWifiProvisioningRequestedKey[] = "reprov";
 constexpr std::array<uint8_t, 4> kProvisionMagic = {'V', 'L', 'W', '1'};
 constexpr size_t kMaxWifiSsidBytes = 32;
 constexpr size_t kMaxWifiPasswordBytes = 64;
@@ -65,15 +67,6 @@ struct WifiCredentials {
 Status EspError(const char* operation, esp_err_t error);
 Result<std::string> ReadNvsString(nvs_handle_t handle, const char* key);
 
-std::string NormalizeSsid(std::string_view value) {
-    std::string normalized;
-    normalized.reserve(value.size());
-    for (const unsigned char character : value) {
-        if (std::isalnum(character) != 0) normalized.push_back(static_cast<char>(std::tolower(character)));
-    }
-    return normalized;
-}
-
 esp_err_t OpenSecretNamespace(const char* name, nvs_open_mode_t mode, nvs_handle_t* handle) {
     return nvs_open_from_partition(kSecretPartition, name, mode, handle);
 }
@@ -81,23 +74,32 @@ esp_err_t OpenSecretNamespace(const char* name, nvs_open_mode_t mode, nvs_handle
 bool ReadConsoleBytes(uint8_t* destination, size_t size, int timeout_ms) {
     size_t received = 0;
     const int64_t deadline_us = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 1000;
-    const int original_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-    if (original_flags < 0 || fcntl(STDIN_FILENO, F_SETFL, original_flags | O_NONBLOCK) < 0) return false;
+    // 非阻塞读取：fcntl(O_NONBLOCK)/poll 在 USB-Serial-JTAG console 的 stdin 下
+    // 不可用；USB-JTAG vfs read 无数据时返回 0（非阻塞），UART 在超时后返回 0。
+    // 因此直接 read + 轮询，兼容两种 console。
     while (received < size) {
+        if (esp_timer_get_time() >= deadline_us) {
+            return false;
+        }
         const ssize_t count = read(STDIN_FILENO, destination + received, size - received);
         if (count > 0) {
             received += static_cast<size_t>(count);
             continue;
         }
-        if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK) break;
-        if (esp_timer_get_time() >= deadline_us) return false;
+        if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+            return false;
+        }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    fcntl(STDIN_FILENO, F_SETFL, original_flags);
-    return true;
+    return received == size;
 }
 
 Status StoreWifiCredentials(std::string_view ssid, std::string_view password) {
+#if !CONFIG_NVS_ENCRYPTION
+    (void)ssid;
+    (void)password;
+    return Status::Error(ErrorCode::kUnavailable, "Wi-Fi 凭据存储需要启用 NVS encryption");
+#else
     nvs_handle_t handle = 0;
     esp_err_t error = OpenSecretNamespace(kWifiNamespace, NVS_READWRITE, &handle);
     if (error != ESP_OK) return EspError("打开 Wi-Fi 加密凭据存储", error);
@@ -106,6 +108,7 @@ Status StoreWifiCredentials(std::string_view ssid, std::string_view password) {
     if (error == ESP_OK) error = nvs_commit(handle);
     nvs_close(handle);
     return error == ESP_OK ? Status::Ok() : EspError("保存 Wi-Fi 加密凭据", error);
+#endif
 }
 
 Status ProvisionWifiCredentialsFromConsole() {
@@ -167,134 +170,170 @@ Result<WifiCredentials> LoadWifiCredentials() {
 #endif
 }
 
-Status EnsureWifiStaConnected() {
-    auto credentials = LoadWifiCredentials();
-    if (!credentials.ok() || !credentials.value.has_value()) {
-        if (credentials.status.code != ErrorCode::kNotFound) return credentials.status;
-        const Status provisioned = ProvisionWifiCredentialsFromConsole();
-        if (!provisioned.ok()) return provisioned;
-        credentials = LoadWifiCredentials();
-        if (!credentials.ok() || !credentials.value.has_value()) return credentials.status;
+bool IsWifiProvisioningRequested() {
+    nvs_handle_t handle = 0;
+    if (OpenSecretNamespace(kWifiNamespace, NVS_READONLY, &handle) != ESP_OK) return false;
+    uint8_t requested = 0;
+    const esp_err_t error = nvs_get_u8(handle, kWifiProvisioningRequestedKey, &requested);
+    nvs_close(handle);
+    return error == ESP_OK && requested == 1;
+}
+
+Status SetWifiProvisioningRequested(bool requested) {
+    nvs_handle_t handle = 0;
+    if (const esp_err_t error = OpenSecretNamespace(kWifiNamespace, NVS_READWRITE, &handle); error != ESP_OK) {
+        return EspError("打开 Wi-Fi 配网请求存储", error);
     }
-    static EventGroupHandle_t events = nullptr;
-    static bool initialized = false;
-    if (initialized) {
-        for (int attempt = 0; attempt < kOtaAttempts; ++attempt) {
-            wifi_ap_record_t access_point{};
-            if (esp_wifi_sta_get_ap_info(&access_point) == ESP_OK) return Status::Ok();
-            xEventGroupClearBits(events, kWifiConnectedBit | kWifiFailedBit);
-            if (const esp_err_t error = esp_wifi_connect(); error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
-                return EspError("重新连接 Wi-Fi STA", error);
-            }
-            const EventBits_t result = xEventGroupWaitBits(events, kWifiConnectedBit | kWifiFailedBit, pdFALSE, pdFALSE,
-                                                           pdMS_TO_TICKS(kWifiConnectTimeoutMs));
-            if ((result & kWifiConnectedBit) != 0 && esp_wifi_sta_get_ap_info(&access_point) == ESP_OK) {
-                return Status::Ok();
-            }
-        }
-        return Status::Error(ErrorCode::kUnavailable, "Wi-Fi STA 尚未连接");
-    }
+    const esp_err_t write_error = nvs_set_u8(handle, kWifiProvisioningRequestedKey, requested ? 1 : 0);
+    const esp_err_t commit_error = write_error == ESP_OK ? nvs_commit(handle) : write_error;
+    nvs_close(handle);
+    return commit_error == ESP_OK ? Status::Ok() : EspError("保存 Wi-Fi 配网请求", commit_error);
+}
+
+Status PrepareWifiForProvisioning() {
     if (const esp_err_t error = esp_netif_init(); error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
         return EspError("初始化 esp_netif", error);
     }
     if (const esp_err_t error = esp_event_loop_create_default(); error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
         return EspError("初始化 ESP 事件循环", error);
     }
-    if (esp_netif_create_default_wifi_sta() == nullptr) {
+    if (esp_netif_get_handle_from_ifkey("WIFI_STA_DEF") == nullptr && esp_netif_create_default_wifi_sta() == nullptr) {
         return Status::Error(ErrorCode::kUnavailable, "创建 Wi-Fi STA netif 失败");
     }
     wifi_init_config_t init_config = WIFI_INIT_CONFIG_DEFAULT();
     if (const esp_err_t error = esp_wifi_init(&init_config); error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
         return EspError("初始化 ESP Wi-Fi", error);
     }
-    events = xEventGroupCreate();
-    if (events == nullptr) return Status::Error(ErrorCode::kUnavailable, "创建 Wi-Fi 事件组失败");
-    if (esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &OnWifiEvent, &events) != ESP_OK ||
-        esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &OnWifiEvent, &events) != ESP_OK) {
-        return Status::Error(ErrorCode::kUnavailable, "注册 Wi-Fi 事件处理器失败");
-    }
-    wifi_config_t config{};
-    std::memcpy(config.sta.ssid, credentials.value->ssid.data(),
-                std::min(credentials.value->ssid.size(), sizeof(config.sta.ssid) - 1));
-    std::memcpy(config.sta.password, credentials.value->password.data(),
-                std::min(credentials.value->password.size(), sizeof(config.sta.password) - 1));
-    if (const esp_err_t error = esp_wifi_set_mode(WIFI_MODE_STA); error != ESP_OK)
+    if (const esp_err_t error = esp_wifi_set_mode(WIFI_MODE_STA); error != ESP_OK) {
         return EspError("设置 Wi-Fi STA 模式", error);
-    if (const esp_err_t error = esp_wifi_set_config(WIFI_IF_STA, &config); error != ESP_OK)
-        return EspError("设置 Wi-Fi STA 配置", error);
-    if (const esp_err_t error = esp_wifi_start(); error != ESP_OK && error != ESP_ERR_INVALID_STATE)
+    }
+    if (const esp_err_t error = esp_wifi_start(); error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
         return EspError("启动 ESP Wi-Fi", error);
-    // From this point onward the netif, event group, and handlers are owned by
-    // this process. A transient first association failure must reuse them on
-    // the next attempt instead of creating a duplicate default STA netif.
-    initialized = true;
+    }
+    return Status::Ok();
+}
+
+Result<std::vector<std::string>> ScanWifiSsidNames() {
     wifi_scan_config_t scan_config{};
     if (const esp_err_t error = esp_wifi_scan_start(&scan_config, true); error != ESP_OK) {
-        return EspError("扫描 Wi-Fi", error);
+        return Result<std::vector<std::string>>::Failure(ErrorCode::kUnavailable, "扫描 Wi-Fi 失败");
     }
-    uint16_t access_point_count = 0;
-    if (const esp_err_t error = esp_wifi_scan_get_ap_num(&access_point_count); error != ESP_OK) {
-        return EspError("读取 Wi-Fi 扫描数量", error);
+    uint16_t count = 0;
+    if (const esp_err_t error = esp_wifi_scan_get_ap_num(&count); error != ESP_OK) {
+        return Result<std::vector<std::string>>::Failure(ErrorCode::kUnavailable, "读取 Wi-Fi 扫描数量失败");
     }
-    std::vector<wifi_ap_record_t> access_points(access_point_count);
-    if (access_point_count > 0 && esp_wifi_scan_get_ap_records(&access_point_count, access_points.data()) != ESP_OK) {
-        return Status::Error(ErrorCode::kUnavailable, "读取 Wi-Fi 扫描结果失败");
+    std::vector<wifi_ap_record_t> records(count);
+    if (count > 0 && esp_wifi_scan_get_ap_records(&count, records.data()) != ESP_OK) {
+        return Result<std::vector<std::string>>::Failure(ErrorCode::kUnavailable, "读取 Wi-Fi 扫描结果失败");
     }
-    bool configured_ssid_present = false;
-    bool configured_ssid_case_variant = false;
-    bool configured_ssid_normalized_variant = false;
-    std::array<uint8_t, sizeof(config.sta.ssid)> scanned_ssid{};
-    const std::string normalized_configured_ssid = NormalizeSsid(credentials.value->ssid);
-    for (const wifi_ap_record_t& access_point : access_points) {
-        const size_t ssid_size = strnlen(reinterpret_cast<const char*>(access_point.ssid), sizeof(access_point.ssid));
-        if (ssid_size == credentials.value->ssid.size() &&
-            std::memcmp(access_point.ssid, credentials.value->ssid.data(), ssid_size) == 0) {
-            configured_ssid_present = true;
-            break;
+    std::vector<std::string> names;
+    names.reserve(count);
+    for (const wifi_ap_record_t& record : records) {
+        const size_t size = strnlen(reinterpret_cast<const char*>(record.ssid), sizeof(record.ssid));
+        if (size == 0) continue;
+        const std::string name(reinterpret_cast<const char*>(record.ssid), size);
+        if (std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
+    }
+    return Result<std::vector<std::string>>::Success(std::move(names));
+}
+
+Result<WifiProvisioningCredentials> GetSoftApCandidate(WifiProvisioningCause cause,
+                                                       const WifiProvisioningStatusSink& status_sink) {
+    auto names = ScanWifiSsidNames();
+    if (!names.ok() || !names.value.has_value()) {
+        return Result<WifiProvisioningCredentials>::Failure(names.status.code, names.status.message);
+    }
+    return ProvisionWifiOverSoftAp(cause, *names.value, status_sink);
+}
+
+Status EnsureWifiStaConnected(const WifiProvisioningStatusSink& status_sink) {
+    const bool force_provisioning = IsWifiProvisioningRequested();
+    auto stored_credentials = LoadWifiCredentials();
+    bool candidate_requires_persistence = false;
+    WifiCredentials credentials;
+    WifiProvisioningCause provisioning_cause = WifiProvisioningCause::kMissingCredentials;
+    if (!force_provisioning && stored_credentials.ok() && stored_credentials.value.has_value()) {
+        credentials = std::move(*stored_credentials.value);
+    } else {
+        if (stored_credentials.status.code != ErrorCode::kNotFound && !force_provisioning)
+            return stored_credentials.status;
+        // 物理长按只请求下一次启动进入配网。开始流程时立即消费标记，
+        // 这样用户取消、热点超时或候选网络失败后仍能在下次启动恢复旧网络。
+        if (force_provisioning) {
+            if (const Status consumed = SetWifiProvisioningRequested(false); !consumed.ok()) return consumed;
         }
-        if (ssid_size == credentials.value->ssid.size()) {
-            bool case_insensitive_match = true;
-            for (size_t index = 0; index < ssid_size; ++index) {
-                const auto scanned = static_cast<unsigned char>(access_point.ssid[index]);
-                const auto configured = static_cast<unsigned char>(credentials.value->ssid[index]);
-                if (std::tolower(scanned) != std::tolower(configured)) {
-                    case_insensitive_match = false;
-                    break;
-                }
+        if (const Status prepared = PrepareWifiForProvisioning(); !prepared.ok()) return prepared;
+        provisioning_cause =
+            force_provisioning ? WifiProvisioningCause::kUserRequested : WifiProvisioningCause::kMissingCredentials;
+        auto candidate = GetSoftApCandidate(provisioning_cause, status_sink);
+        if (!candidate.ok() || !candidate.value.has_value()) {
+            // 保留串口作为无显示/诊断环境中的最后回退；热点超时不会清除任何密钥。
+            const Status serial = ProvisionWifiCredentialsFromConsole();
+            if (!serial.ok()) return candidate.status;
+            stored_credentials = LoadWifiCredentials();
+            if (!stored_credentials.ok() || !stored_credentials.value.has_value()) return stored_credentials.status;
+            credentials = std::move(*stored_credentials.value);
+        } else {
+            credentials = {.ssid = std::move(candidate.value->ssid), .password = std::move(candidate.value->password)};
+            candidate_requires_persistence = true;
+        }
+    }
+    static EventGroupHandle_t events = nullptr;
+    static bool initialized = false;
+    if (!initialized) {
+        if (const Status prepared = PrepareWifiForProvisioning(); !prepared.ok()) return prepared;
+        events = xEventGroupCreate();
+        if (events == nullptr) return Status::Error(ErrorCode::kUnavailable, "创建 Wi-Fi 事件组失败");
+        if (esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &OnWifiEvent, &events) != ESP_OK ||
+            esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &OnWifiEvent, &events) != ESP_OK) {
+            return Status::Error(ErrorCode::kUnavailable, "注册 Wi-Fi 事件处理器失败");
+        }
+        if (const esp_err_t error = esp_wifi_set_storage(WIFI_STORAGE_RAM); error != ESP_OK) {
+            return EspError("设置 Wi-Fi RAM 存储", error);
+        }
+        initialized = true;
+    }
+
+    for (int portal_attempt = 0; portal_attempt < kOtaAttempts; ++portal_attempt) {
+        wifi_config_t config{};
+        std::memcpy(config.sta.ssid, credentials.ssid.data(),
+                    std::min(credentials.ssid.size(), sizeof(config.sta.ssid) - 1));
+        std::memcpy(config.sta.password, credentials.password.data(),
+                    std::min(credentials.password.size(), sizeof(config.sta.password) - 1));
+        if (const esp_err_t error = esp_wifi_set_mode(WIFI_MODE_STA); error != ESP_OK)
+            return EspError("设置 Wi-Fi STA 模式", error);
+        if (const esp_err_t error = esp_wifi_set_config(WIFI_IF_STA, &config); error != ESP_OK)
+            return EspError("设置 Wi-Fi STA 配置", error);
+        if (const esp_err_t error = esp_wifi_start(); error != ESP_OK && error != ESP_ERR_INVALID_STATE)
+            return EspError("启动 ESP Wi-Fi", error);
+        bool connected = false;
+        for (int attempt = 0; attempt < kOtaAttempts; ++attempt) {
+            xEventGroupClearBits(events, kWifiConnectedBit | kWifiFailedBit);
+            if (const esp_err_t error = esp_wifi_connect(); error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
+                return EspError("连接 Wi-Fi STA", error);
             }
-            if (case_insensitive_match) {
-                configured_ssid_case_variant = true;
-                std::memcpy(scanned_ssid.data(), access_point.ssid, ssid_size);
+            const EventBits_t result = xEventGroupWaitBits(events, kWifiConnectedBit | kWifiFailedBit, pdFALSE, pdFALSE,
+                                                           pdMS_TO_TICKS(kWifiConnectTimeoutMs));
+            wifi_ap_record_t access_point{};
+            if ((result & kWifiConnectedBit) != 0 && esp_wifi_sta_get_ap_info(&access_point) == ESP_OK) {
+                connected = true;
                 break;
             }
         }
-        const std::string normalized_scanned_ssid(
-            NormalizeSsid(std::string_view(reinterpret_cast<const char*>(access_point.ssid), ssid_size)));
-        if (!normalized_configured_ssid.empty() && !normalized_scanned_ssid.empty() &&
-            normalized_scanned_ssid == normalized_configured_ssid) {
-            configured_ssid_normalized_variant = true;
-            std::memcpy(scanned_ssid.data(), access_point.ssid, ssid_size);
-            break;
+        if (connected) {
+            if (candidate_requires_persistence) {
+                const Status stored = StoreWifiCredentials(credentials.ssid, credentials.password);
+                if (!stored.ok()) return stored;
+            }
+            return Status::Ok();
         }
+        if (status_sink) status_sink("配网", "无法连接该 Wi-Fi，请重新输入");
+        auto candidate = GetSoftApCandidate(WifiProvisioningCause::kConnectionFailed, status_sink);
+        if (!candidate.ok() || !candidate.value.has_value()) return candidate.status;
+        credentials = {.ssid = std::move(candidate.value->ssid), .password = std::move(candidate.value->password)};
+        candidate_requires_persistence = true;
     }
-    if (!configured_ssid_present && (configured_ssid_case_variant || configured_ssid_normalized_variant)) {
-        std::memset(config.sta.ssid, 0, sizeof(config.sta.ssid));
-        std::memcpy(config.sta.ssid, scanned_ssid.data(), scanned_ssid.size());
-        if (const esp_err_t error = esp_wifi_set_config(WIFI_IF_STA, &config); error != ESP_OK) {
-            return EspError("更新 Wi-Fi STA 配置", error);
-        }
-    }
-    ESP_LOGI(kTag, "WIFI_SCAN target_present=%d case_variant=%d normalized_variant=%d ap_count=%u",
-             configured_ssid_present ? 1 : 0, configured_ssid_case_variant ? 1 : 0,
-             configured_ssid_normalized_variant ? 1 : 0, static_cast<unsigned>(access_point_count));
-    xEventGroupClearBits(events, kWifiConnectedBit | kWifiFailedBit);
-    esp_wifi_connect();
-    const EventBits_t result = xEventGroupWaitBits(events, kWifiConnectedBit | kWifiFailedBit, pdFALSE, pdFALSE,
-                                                   pdMS_TO_TICKS(kWifiConnectTimeoutMs));
-    if ((result & kWifiConnectedBit) == 0) {
-        return Status::Error(ErrorCode::kUnavailable, "Wi-Fi STA 连接失败或超时");
-    }
-    return Status::Ok();
+    return Status::Error(ErrorCode::kUnavailable, "Wi-Fi STA 连接失败");
 }
 
 Status EspError(const char* operation, esp_err_t error) {
@@ -436,6 +475,31 @@ void LogOtaResponseShape(const linx::LinxOtaResponse& response) {
 
 const char* LinxSecretPartitionLabel() { return kSecretPartition; }
 
+bool LinxWifiStaConnected() {
+#ifdef ESP_PLATFORM
+    wifi_ap_record_t access_point{};
+    return esp_wifi_sta_get_ap_info(&access_point) == ESP_OK;
+#else
+    return false;
+#endif
+}
+
+Status RequestLinxWifiProvisioning() {
+#ifdef ESP_PLATFORM
+    const Status request = SetWifiProvisioningRequested(true);
+    if (!request.ok()) {
+        ESP_LOGW(kTag, "WIFI_REPROVISION_REQUEST_FAILED code=%d detail=%s", static_cast<int>(request.code),
+                 request.message.c_str());
+        return request;
+    }
+    ESP_LOGI(kTag, "WIFI_REPROVISION_REQUESTED=1");
+    esp_restart();
+    return Status::Ok();
+#else
+    return Status::Error(ErrorCode::kUnavailable, "仅 ESP 设备支持 Wi-Fi 配网请求");
+#endif
+}
+
 Status InitializeLinxSecretStore() {
 #if !CONFIG_NVS_ENCRYPTION || !CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC
     return Status::Error(ErrorCode::kUnavailable, "Linx 凭据存储需要 HMAC NVS encryption");
@@ -452,11 +516,12 @@ Status InitializeLinxSecretStore() {
 #endif
 }
 
-Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig() {
+Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig(std::string_view board_identity,
+                                                          const WifiProvisioningStatusSink& provisioning_status_sink) {
     Result<linx::LinxConnectionConfig> last_failure =
         Result<linx::LinxConnectionConfig>::Failure(ErrorCode::kUnavailable, "Linx OTA 初始化失败");
     for (int attempt = 1; attempt <= kOtaAttempts; ++attempt) {
-        auto device = ReadOtaDeviceInfo();
+        auto device = ReadOtaDeviceInfo(board_identity, provisioning_status_sink);
         if (!device.ok() || !device.value.has_value()) {
             last_failure = Result<linx::LinxConnectionConfig>::Failure(device.status.code, device.status.message);
         } else {
@@ -489,6 +554,19 @@ Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig() {
                         }
                     }
                     if (response.value->activation.has_value()) {
+                        // 激活码是服务端明确下发、供操作者在 Linx 控制台绑定本机
+                        // 设备的一次性公开信息。仅接受 6 位数字，绝不记录 challenge、
+                        // WSS 地址、token、Wi-Fi 配置或 NVS 内容。
+                        const std::string& code = response.value->activation->code;
+                        const bool six_digit_code =
+                            code.size() == 6 && std::all_of(code.begin(), code.end(), [](unsigned char value) {
+                                return std::isdigit(value) != 0;
+                            });
+                        if (six_digit_code) {
+                            ESP_LOGW(kTag, "LINX_ACTIVATION_CODE=%s", code.c_str());
+                        } else {
+                            ESP_LOGW(kTag, "LINX_ACTIVATION_CODE_INVALID=1");
+                        }
                         ESP_LOGW(kTag, "LINX_ACTIVATION_REQUIRED=1");
                         return Result<linx::LinxConnectionConfig>::Failure(ErrorCode::kUnavailable,
                                                                            "Linx 设备需要控制台激活");

@@ -4,13 +4,20 @@
 
 #include "voicelife/contracts/status.h"
 
+namespace voicelife::schedule {
+class ScheduleRepository;
+class ScheduleOperationRepository;
+class ScheduleRuleRepository;
+class ScheduleExceptionRepository;
+}  // namespace voicelife::schedule
+
 namespace voicelife::runtime {
 
 /**
  * @brief 负责组装并管理运行时的持久化基础设施。
  *
  * 存储启动顺序固定为 FATFS/Wear Levelling 挂载、SQLite 连接、Schema 健康检查。
- * 该类不创建任何业务 Repository；业务模块在基础设施就绪后由更上层按需装配。
+ * 该类同时持有共享同一 SQLite 连接的日程 Repository，并只向上层暴露领域接口。
  */
 class StorageBootstrap final {
    public:
@@ -46,6 +53,32 @@ class StorageBootstrap final {
      * @return 已成功启动且尚未停止时返回 true。
      */
     [[nodiscard]] bool IsReady() const;
+
+#ifdef ESP_PLATFORM
+    /**
+     * @brief 获取由当前存储装配器持有的日程仓储。
+     * @return 生命周期与当前装配器一致的日程仓储引用；执行读写前必须先成功调用 Start()。
+     */
+    [[nodiscard]] schedule::ScheduleRepository& GetScheduleRepository();
+
+    /**
+     * @brief 获取由当前存储装配器持有的日程操作仓储。
+     * @return 生命周期与当前装配器一致的操作仓储引用；与日程仓储共享同一连接。
+     */
+    [[nodiscard]] schedule::ScheduleOperationRepository& GetScheduleOperationRepository();
+
+    /**
+     * @brief 获取由当前存储装配器持有的周期规则仓储。
+     * @return 生命周期与当前装配器一致的规则仓储引用；与日程仓储共享同一连接。
+     */
+    [[nodiscard]] schedule::ScheduleRuleRepository& GetScheduleRuleRepository();
+
+    /**
+     * @brief 获取由当前存储装配器持有的单次例外仓储。
+     * @return 生命周期与当前装配器一致的例外仓储引用；与规则仓储共享同一连接。
+     */
+    [[nodiscard]] schedule::ScheduleExceptionRepository& GetScheduleExceptionRepository();
+#endif
 
    private:
     class Impl;

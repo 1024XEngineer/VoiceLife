@@ -1,6 +1,6 @@
 import { createKoishiGatewayRuntime, type KoishiGatewayRuntime } from './create-koishi-gateway.js';
 import { Context } from '@koishijs/core';
-import { unsafeId, type ChannelAccountId, type DeviceId } from '../contracts/ids.js';
+import { unsafeId, type ChannelAccountId, type DeviceId, type UserId } from '../contracts/ids.js';
 import type { ChannelAccount } from '../domain/models.js';
 import { DeliveryOutboxWorker } from '../infrastructure/delivery-outbox-worker.js';
 import {
@@ -74,6 +74,7 @@ export interface GatewayConfiguration {
     readonly port: number;
     readonly databaseUrl: string;
     readonly deviceId: string;
+    readonly deviceUserId: string;
     readonly deviceToken: string;
     readonly actionTokenSecret: string;
     readonly identitySecret: string;
@@ -120,6 +121,7 @@ export function readGatewayConfiguration(environment: GatewayEnvironment): Gatew
         port,
         databaseUrl,
         deviceId: requiredEnvironment(environment, 'DEVICE_ID'),
+        deviceUserId: requiredEnvironment(environment, 'DEVICE_USER_ID'),
         deviceToken,
         actionTokenSecret,
         identitySecret,
@@ -190,6 +192,7 @@ export async function startConfiguredGatewayProcess(
                 actionTokens: new AesGcmActionTokenPort(config.actionTokenSecret),
                 authentication: new BearerDeviceAuthenticationPort(
                     unsafeId<DeviceId>(config.deviceId),
+                    unsafeId<UserId>(config.deviceUserId),
                     config.deviceToken,
                 ),
                 channelCapabilities: adapter,

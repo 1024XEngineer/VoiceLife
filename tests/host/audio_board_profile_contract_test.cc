@@ -11,9 +11,20 @@ int main() {
     using voicelife::audio_esp::AudioProbeReport;
     using voicelife::audio_esp::Esp32s3AudioProbe;
     using voicelife::audio_esp::LichuangEsp32s3Profile;
+    using voicelife::audio_esp::SparkBotEsp32s3AudioProfile;
     using voicelife::audio_esp::VoiceLifePcbEsp32s3Profile;
 
     const AudioBoardProfile profile = LichuangEsp32s3Profile();
+
+    // ES8311-only（SparkBot）：es7210/pca9557 地址为 0（未接线）必须通过校验。
+    const AudioBoardProfile sparkbot = SparkBotEsp32s3AudioProfile();
+    Check(sparkbot.Validate().ok(), "SparkBot ES8311-only Profile 必须通过校验");
+    Check(sparkbot.topology == AudioBoardTopology::kExternalCodecDuplex && sparkbot.codec_control.has_value() &&
+              sparkbot.codec_control->addresses.es8311_8bit == 0x30 &&
+              sparkbot.codec_control->addresses.es7210_8bit == 0 && sparkbot.codec_control->addresses.pca9557_7bit == 0,
+          "SparkBot 必须为 ES8311-only 双工（仅 ES8311 接线）");
+    Check(sparkbot.capture_i2s.format.sample_rate_hz == 16000 && sparkbot.playback_i2s.format.sample_rate_hz == 16000,
+          "SparkBot 音频必须为 16kHz 双工");
     Check(profile.Validate().ok(), "旧 MVP 立创板事实应形成合法 Profile");
     Check(profile.topology == AudioBoardTopology::kExternalCodecDuplex, "立创板必须声明外部 Codec 双工拓扑");
     Check(profile.capture_i2s.mclk == 38 && profile.capture_i2s.ws == 13 && profile.capture_i2s.bclk == 14 &&
@@ -111,5 +122,18 @@ int main() {
     Esp32s3AudioProbe probe;
     const auto host_result = probe.Run(profile);
     Check(host_result.status.code == ErrorCode::kUnavailable, "主机不能伪装成 ESP32-S3 音频探针已执行");
+    // ES8311-only 探针报告：未接线 codec 不要求 ACK，hardware_ready 只看 ES8311。
+    AudioProbeReport sparkbot_report;
+    sparkbot_report.codec_control_required = true;
+    sparkbot_report.i2c_bus_ready = true;
+    sparkbot_report.es8311_ack = true;
+    sparkbot_report.es7210_present = false;
+    sparkbot_report.pca9557_present = false;
+    sparkbot_report.es7210_ack = false;
+    sparkbot_report.pca9557_ack = false;
+    sparkbot_report.i2s_channels_ready = true;
+    sparkbot_report.i2s_channels_started = true;
+    Check(sparkbot_report.hardware_ready(), "ES8311-only 板型在 ES8311 ACK 后必须 hardware_ready");
+
     return 0;
 }

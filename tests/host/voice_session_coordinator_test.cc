@@ -5,6 +5,7 @@
 using voicelife::ErrorCode;
 using voicelife::Status;
 using voicelife::ToolCall;
+using voicelife::ToolOutputValue;
 using voicelife::ToolResult;
 using voicelife::test::Check;
 
@@ -40,7 +41,7 @@ class RecordingTools final : public voicelife::voice::ToolGatewayPort {
    public:
     ToolResult Call(const ToolCall&) override {
         ++calls;
-        return {.status = Status::Ok(), .output = {}};
+        return ToolResult::Success(ToolOutputValue::Null());
     }
     int calls = 0;
 };

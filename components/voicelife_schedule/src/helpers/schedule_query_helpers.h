@@ -3,6 +3,7 @@
 #include <string_view>
 
 #include "voicelife/schedule/schedule_commands.h"
+#include "voicelife/schedule/schedule_query_score.h"
 #include "voicelife/schedule/schedule_results.h"
 
 namespace voicelife::schedule {

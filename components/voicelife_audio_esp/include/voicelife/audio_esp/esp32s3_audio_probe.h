@@ -16,8 +16,12 @@ struct AudioProbeReport {
     bool i2c_bus_ready = false;
     /** @brief ES8311 ACK。 */
     bool es8311_ack = false;
+    /** @brief ES7210 是否接线（地址非零）。 */
+    bool es7210_present = false;
     /** @brief ES7210 ACK。 */
     bool es7210_ack = false;
+    /** @brief PCA9557 是否接线（地址非零）。 */
+    bool pca9557_present = false;
     /** @brief PCA9557 ACK。 */
     bool pca9557_ack = false;
     /** @brief I2S 通道是否就绪。 */
@@ -51,7 +55,10 @@ struct AudioProbeReport {
 
     /** @brief 硬件是否就绪（Codec + I2S 全部满足）。 @return 就绪返回 true。 */
     [[nodiscard]] bool hardware_ready() const {
-        const bool codec_ready = !codec_control_required || (i2c_bus_ready && es8311_ack && es7210_ack && pca9557_ack);
+        // ES7210/PCA9557 地址为 0（未接线）时不要求 ACK（ES8311-only 板型）。
+        const bool codec_ready =
+            !codec_control_required ||
+            (i2c_bus_ready && es8311_ack && (!es7210_present || es7210_ack) && (!pca9557_present || pca9557_ack));
         return codec_ready && i2s_channels_ready && i2s_channels_started;
     }
 

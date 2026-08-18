@@ -64,9 +64,10 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     Status Speak(std::string_view text) override;
     /** @brief 发送本地唤醒确认，触发 Linx listen.detect。
      * @param wake_word 已由板端确认的唤醒词。
+     * @param text_response 可选的服务端 TTS 确认文本。
      * @return 消息发送结果。
      */
-    Status NotifyLocalWakeWord(std::string_view wake_word) override;
+    Status NotifyLocalWakeWord(std::string_view wake_word, std::string_view text_response = {}) override;
     /** @brief 断开 Linx Provider 会话。 @return 断开结果。 */
     Status Disconnect() override;
     /**

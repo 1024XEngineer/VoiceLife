@@ -16,11 +16,13 @@ import {
 test('production device authentication accepts only the configured device token', async () => {
     const authentication = new BearerDeviceAuthenticationPort(
         'device-fixture',
+        'user-fixture',
         'fixture-device-token-with-enough-entropy',
     );
 
     assert.deepEqual(await authentication.authenticate('Bearer fixture-device-token-with-enough-entropy'), {
         deviceId: 'device-fixture',
+        userId: 'user-fixture',
     });
     await assert.rejects(authentication.authenticate('Bearer wrong-device-token-with-enough-entropy'));
     await assert.rejects(authentication.authenticate('Basic fixture'));

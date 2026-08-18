@@ -66,6 +66,15 @@ test('create retries when an issued display code collides with a pending session
     assert.equal(issueCount, 3);
 });
 
+test('a retried create cancels the previous pending session for the same device', async () => {
+    const { gateway } = buildGateway();
+    const first = await gateway.application.pairing.create({ userId: 'user-fixture', deviceId: 'device-fixture' });
+    const second = await gateway.application.pairing.create({ userId: 'user-fixture', deviceId: 'device-fixture' });
+
+    assert.equal((await gateway.application.pairing.find(first.session.id)).status, 'cancelled');
+    assert.equal((await gateway.application.pairing.find(second.session.id)).status, 'pending');
+});
+
 test('create rejects a pairing lifetime outside the one-to-ten-minute contract', async () => {
     const { gateway } = buildGateway();
 

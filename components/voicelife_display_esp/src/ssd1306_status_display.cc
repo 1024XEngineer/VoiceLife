@@ -664,7 +664,8 @@ Status Flush(DisplayState& state, std::string_view text) {
     if (error != ESP_OK) {
         return Status::Error(ErrorCode::kUnavailable, "OLED SSD1306 绘制失败");
     }
-    ESP_LOGI("VoiceLifeDisplay", "DISPLAY_DRAW=1 text=%.*s", static_cast<int>(text.size()), text.data());
+    // 屏幕可能显示配网口令或其他用户内容；串口只保留渲染事实，不回显文本。
+    ESP_LOGI("VoiceLifeDisplay", "DISPLAY_DRAW=1 bytes=%u", static_cast<unsigned>(text.size()));
     return Status::Ok();
 }
 
@@ -746,7 +747,7 @@ Status InitializeStatusDisplay() {
         esp_lcd_panel_disp_on_off(state.panel, true) != ESP_OK) {
         return Status::Error(ErrorCode::kUnavailable, "OLED SSD1306 上电失败");
     }
-    // Match the bread-compact-wifi board orientation used by 小智.
+    // 实板面板需要双轴镜像，才能使正常装配方向下的文字正向显示。
     if (esp_lcd_panel_mirror(state.panel, true, true) != ESP_OK ||
         esp_lcd_panel_invert_color(state.panel, false) != ESP_OK) {
         return Status::Error(ErrorCode::kUnavailable, "OLED SSD1306 显示方向配置失败");

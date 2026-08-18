@@ -14,7 +14,7 @@ import type {
 import { unsafeId } from '../contracts/ids.js';
 import type { IsoDateTime } from '../shared/types.js';
 import { ImGatewayError } from '../shared/errors.js';
-import { FixedClock } from '../infrastructure/mock-support.js';
+import { FixedClock, MockDeviceAuthenticationPort } from '../infrastructure/mock-support.js';
 import { createMockImGateway } from './create-im-gateway.js';
 
 /**
@@ -25,7 +25,9 @@ export async function runMockNotificationScenario(): Promise<void> {
     const deviceId = unsafeId<DeviceId>('device-demo');
     const userId = unsafeId<UserId>('user-demo');
     const clock = new FixedClock();
-    const gateway = createMockImGateway(deviceId, clock);
+    const gateway = createMockImGateway(deviceId, clock, {
+        authentication: new MockDeviceAuthenticationPort(deviceId, userId),
+    });
     const channel = await gateway.application.channels.register({
         platform: 'wechat_official',
         tenantExternalId: 'wechat-app-demo',

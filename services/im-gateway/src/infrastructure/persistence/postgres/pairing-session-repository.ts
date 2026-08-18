@@ -1,4 +1,4 @@
-import type { PairingSessionId } from '../../../contracts/ids.js';
+import type { DeviceId, PairingSessionId } from '../../../contracts/ids.js';
 import type { PairingSession } from '../../../domain/models.js';
 import type { PairingSessionRepository } from '../../../ports/repositories.js';
 import type { IsoDateTime } from '../../../shared/types.js';
@@ -43,6 +43,15 @@ export class PostgresPairingSessionRepository implements PairingSessionRepositor
             ],
         );
         return row !== undefined;
+    }
+
+    /** {@inheritDoc PairingSessionRepository.cancelPendingByDevice} */
+    public async cancelPendingByDevice(deviceId: DeviceId): Promise<void> {
+        await this.executor.query('UPDATE im_pairing_sessions SET status = $1 WHERE device_id = $2 AND status = $3', [
+            'cancelled',
+            deviceId,
+            'pending',
+        ]);
     }
 
     /** {@inheritDoc PairingSessionRepository.findById} */

@@ -6,6 +6,7 @@ import type {
     DeviceId,
     EventId,
     OperationId,
+    PairingSessionId,
     ReminderTriggerId,
     ScheduleId,
     TimerInstanceId,
@@ -29,6 +30,24 @@ export interface CreatePairingSessionRequest {
     readonly deviceId: DeviceId;
     readonly allowedPlatforms?: readonly ImPlatform[];
     readonly expiresInMinutes?: number;
+}
+
+/** 设备 HTTP 边界可见的配对状态；不包含内部展示码 hash 或外部身份。 */
+export interface PairingSessionStatus {
+    readonly id: PairingSessionId;
+    readonly userId?: UserId;
+    readonly deviceId: DeviceId;
+    readonly allowedPlatforms?: readonly ImPlatform[];
+    readonly status: 'pending' | 'confirmed' | 'expired' | 'cancelled';
+    readonly expiresAt: IsoDateTime;
+    readonly createdAt: IsoDateTime;
+    readonly confirmedAt?: IsoDateTime;
+}
+
+/** 设备创建配对会话后收到的公开状态与一次性六位码。 */
+export interface CreatedPairingSessionResponse {
+    readonly session: PairingSessionStatus;
+    readonly displayCode: string;
 }
 
 /** 日程变更产生回执时的操作类型。 */

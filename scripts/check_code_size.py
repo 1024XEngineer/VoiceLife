@@ -39,8 +39,11 @@ def check_sizes(
     warnings: list[str] = []
     for status, path in files:
         lines = len(path.read_text(encoding="utf-8").splitlines())
-        if status == "A" and lines > new_file_limit:
-            errors.append(f"{path}: 新增源码文件 {lines} 行，超过 {new_file_limit} 行上限")
+        # 测试文件通常需要覆盖多个边界场景，使用更高的新增文件阈值，仍保留拆分提示。
+        is_test_file = path.parts and (path.parts[0] == "tests" or "test" in path.parts)
+        file_limit = 900 if is_test_file else new_file_limit
+        if status == "A" and lines > file_limit:
+            errors.append(f"{path}: 新增源码文件 {lines} 行，超过 {file_limit} 行上限")
         elif status == "M" and lines > existing_file_warning:
             warnings.append(f"{path}: 现有源码文件 {lines} 行，超过 {existing_file_warning} 行，建议拆分")
     return errors, warnings

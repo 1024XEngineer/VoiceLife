@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 #include "voicelife/audio_esp/audio_board_profile.h"
@@ -39,6 +40,29 @@ struct AudioPortStats {
     std::size_t output_high_watermark = 0;
     /** @brief 最小空闲堆字节数。 */
     std::size_t minimum_free_heap_bytes = 0;
+    /** @brief 已从 I2S 转换的输入 PCM 字节数。 */
+    uint64_t input_pcm_bytes = 0;
+    /** @brief 已提交给 I2S 的输出 PCM 字节数。 */
+    uint64_t output_pcm_bytes = 0;
+    /** @brief 输入 PCM 样本数与平方和（用于离线推导 RMS）。 */
+    uint64_t input_samples = 0;
+    uint64_t input_sum_squares = 0;
+    /** @brief 输出缩放后 PCM 样本数与平方和（用于离线推导 RMS）。 */
+    uint64_t output_samples = 0;
+    uint64_t output_sum_squares = 0;
+    /** @brief 输入/输出绝对峰值。 */
+    uint16_t input_peak = 0;
+    uint16_t output_peak = 0;
+    /** @brief 完全静音（所有样本为零）的 PCM period 数。 */
+    uint64_t input_zero_periods = 0;
+    uint64_t output_zero_periods = 0;
+    /** @brief 数字音量缩放导致的削波样本数。 */
+    uint64_t output_clipped_samples = 0;
+    /** @brief I2S API 返回错误次数（短读/短写另计）。 */
+    uint64_t input_i2s_errors = 0;
+    uint64_t output_i2s_errors = 0;
+    /** @brief 当前生效的板端输出音量。 */
+    uint8_t output_volume = 0;
 };
 
 /**
@@ -49,12 +73,18 @@ struct AudioPortStats {
  */
 class Esp32s3PcmAudioPorts final {
    public:
+    /** @brief 功放请求回调（经板级仲裁，不得直接写 GPIO）。 */
+    using AmplifierCallback = std::function<void(bool)>;
+
+   public:
     /**
      * @brief 构造音频端口。
      * @param profile 音频板 Profile。
      * @param options 端口选项。
+     * @param amplifier_callback 可选功放请求回调（经板级仲裁）。
      */
-    Esp32s3PcmAudioPorts(AudioBoardProfile profile, AudioPortOptions options = {});
+    Esp32s3PcmAudioPorts(AudioBoardProfile profile, AudioPortOptions options = {},
+                         AmplifierCallback amplifier_callback = {});
     /** @brief 析构音频端口。 */
     ~Esp32s3PcmAudioPorts();
 

@@ -20,8 +20,9 @@ std::string PartitionTableJson() {
     return result + ']';
 }
 
-Result<linx::LinxOtaDeviceInfo> ReadOtaDeviceInfo() {
-    if (const Status wifi_status = EnsureWifiStaConnected(); !wifi_status.ok()) {
+Result<linx::LinxOtaDeviceInfo> ReadOtaDeviceInfo(std::string_view board_identity,
+                                                  const WifiProvisioningStatusSink& provisioning_status_sink) {
+    if (const Status wifi_status = EnsureWifiStaConnected(provisioning_status_sink); !wifi_status.ok()) {
         return Result<linx::LinxOtaDeviceInfo>::Failure(wifi_status.code, wifi_status.message);
     }
     wifi_ap_record_t access_point{};
@@ -52,16 +53,16 @@ Result<linx::LinxOtaDeviceInfo> ReadOtaDeviceInfo() {
         .activation_version = "1",
         .device_id = device_id,
         .client_id = std::move(*client_id.value),
-        .user_agent = std::string(kBoardName) + '/' + application->version,
-        .application_name = kBoardName,
+        .user_agent = std::string(board_identity) + '/' + application->version,
+        .application_name = std::string(board_identity),
         .application_version = application->version,
         .application_elf_sha256 = HexDigest(application->app_elf_sha256, sizeof(application->app_elf_sha256)),
         .chip_model_name = "esp32s3",
         .flash_size_bytes = flash_size,
         .psram_size_bytes = psram_size,
         .partition_table_json = partitions,
-        .board_type = kBoardName,
-        .board_name = kBoardName,
+        .board_type = std::string(board_identity),
+        .board_name = std::string(board_identity),
         .wifi_ssid = std::string(reinterpret_cast<const char*>(access_point.ssid), ssid_size),
         .wifi_rssi = access_point.rssi,
         .serial_number = std::nullopt,

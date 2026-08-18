@@ -1,6 +1,9 @@
 <div align="center">
 
-<h1>VoiceLife 声活</h1>
+<h1 align="center">
+  <img src="./assets/logo.png" alt="VoiceLife 声活 Logo" width="120" valign="middle" />
+  VoiceLife 声活
+</h1>
 
 <p><strong>面向本地日程、提醒、存储、语音和消息渠道的设备端系统</strong></p>
 
@@ -94,7 +97,8 @@ VoiceLife 使用 ESP-IDF 组件化模块单体。核心代码使用 C++，外部
 | `voicelife_linx` | Linx/XRobot 协议和 Provider Adapter | contracts、voice |
 | `voicelife_linx_esp` | ESP32-S3 WSS/TLS Transport 和分片重组 | contracts、linx |
 | `voicelife_audio_esp` | ESP32-S3 音频 Profile、探针和设备端 Port | contracts、voice |
-| `voicelife_mcp` | 工具 Schema、注册中心和调用路由 | contracts |
+| `voicelife_board_esp` | ESP-SparkBot 板级 Profile、能力矩阵、共享电源仲裁和身份探针 | contracts |
+| `voicelife_mcp` | 工具 Schema、注册中心、调用路由和测试工具适配 | contracts、schedule |
 | `voicelife_runtime` | 唯一组装入口，按生命周期启动和回滚基础设施 | contracts、mcp、voice、linx、storage adapters |
 
 依赖方向只有一条：适配器依赖用例，用例依赖领域，领域不认识 ESP-IDF、HTTP 或平台 SDK。CI 会运行 `scripts/check_architecture.sh` 检查组件清单、命名空间和依赖图。
@@ -147,7 +151,7 @@ VoiceLife/
 └── third_party/       # 第三方源码和许可证
 ```
 
-README 只保留项目入口和跨模块信息。语音架构、语音迁移研究、官方资料核对和实板细节分别维护在对应文档与研究目录中，避免把某一个模块的过程材料当成整个项目的产品说明。
+README 只保留项目入口和跨模块信息。当前维护文档按[文档导航](./docs/README.md)组织；研究、阶段草稿和一次性证据留在对应 Issue、PR 或 Git 历史，避免把某一个模块的过程材料当成整个项目的产品说明。
 
 ## 相关入口
 
@@ -155,6 +159,9 @@ README 只保留项目入口和跨模块信息。语音架构、语音迁移研�
 - [ADR 0001：组件化模块单体与 Ports/Adapters](./docs/adr/0001-component-modular-hexagonal.md)
 - [ADR 0002：能力驱动的适配器 Profile](./docs/adr/0002-capability-driven-adapters.md)
 - [SQLite 实板验证与 Flash 恢复手册](./docs/engineering/board-storage-validation.md)
+- [硬件调试与串口日志规则](./docs/engineering/hardware-debugging.md)
+- [SparkBot 显示组件说明](./docs/components/sparkbot-display.md)
+- [IM Gateway 运行手册](./docs/services/im-gateway.md)
 - [协同开发规范](./docs/engineering/collaboration.md)
 - [提交描述规范](./docs/engineering/commit-convention.md)
 - [参与开发](./CONTRIBUTING.md)

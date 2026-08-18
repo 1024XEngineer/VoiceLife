@@ -124,7 +124,18 @@ def build(profile_id: str) -> Path:
     build_dir = ROOT / "build" / profile_id
     build_dir.mkdir(parents=True, exist_ok=True)
     defaults = build_dir / "sdkconfig.profile.defaults"
-    defaults.write_text("\n".join(profile["sdkconfig"]) + "\n", encoding="utf-8")
+    defaults_content = "\n".join(profile["sdkconfig"]) + "\n"
+    # ESP-IDF 优先复用已有 sdkconfig，Profile 新增或变更的 Kconfig 值不会
+    # 覆盖旧值。Profile 内容变化时仅删除该生成配置，让同一 Profile 的构建期
+    # 选板和功能开关重新由 defaults 决定；不影响源码或其它 Profile。
+    profile_stamp = build_dir / ".sdkconfig.profile.defaults"
+    previous_defaults = profile_stamp.read_text(encoding="utf-8") if profile_stamp.is_file() else None
+    if previous_defaults != defaults_content:
+        sdkconfig = build_dir / "sdkconfig"
+        if sdkconfig.is_file():
+            sdkconfig.unlink()
+    defaults.write_text(defaults_content, encoding="utf-8")
+    profile_stamp.write_text(defaults_content, encoding="utf-8")
     run(
         [
             "idf.py",

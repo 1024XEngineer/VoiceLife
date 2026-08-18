@@ -42,9 +42,13 @@ bool MatchesStatus(ScheduleStatus status, ScheduleStatusFilter filter) {
 
 }  // namespace
 
+// 查询入口先校验 ID、时间范围和分页参数，避免无效条件进入筛选与分页逻辑。
 Status ValidateQueryScheduleCommand(const QueryScheduleCommand& command) {
     if (command.schedule_id.has_value() && *command.schedule_id <= 0) {
         return Status::Error(ErrorCode::kInvalidArgument, "日程 ID 必须大于 0");
+    }
+    if (command.rule_id.has_value() && *command.rule_id <= 0) {
+        return Status::Error(ErrorCode::kInvalidArgument, "规则 ID 必须大于 0");
     }
     if (command.start_from.has_value() && command.start_to.has_value() && *command.start_from > *command.start_to) {
         return Status::Error(ErrorCode::kInvalidArgument, "开始时间范围下限不能晚于上限");
@@ -58,6 +62,7 @@ Status ValidateQueryScheduleCommand(const QueryScheduleCommand& command) {
     return Status::Ok();
 }
 
+// 关键词按空白拆词，去掉可选加号前缀后要求每个词都命中日程名称。
 bool MatchesScheduleKeyword(std::string_view event, std::string_view keyword) {
     const std::string normalized_event = NormalizeKeywordText(event);
     std::istringstream stream{NormalizeKeywordText(keyword)};
@@ -70,8 +75,12 @@ bool MatchesScheduleKeyword(std::string_view event, std::string_view keyword) {
     return true;
 }
 
+// 按查询命令逐项过滤日程：先匹配固定字段，再判断可选时间范围。
 bool MatchesScheduleQuery(const Schedule& schedule, const QueryScheduleCommand& command) {
     if (command.schedule_id.has_value() && schedule.id != *command.schedule_id) return false;
+    if (command.rule_id.has_value() && (!schedule.rule_id.has_value() || *schedule.rule_id != *command.rule_id)) {
+        return false;
+    }
     if (!MatchesStatus(schedule.status, command.status)) return false;
     if (command.keyword.has_value() && !MatchesScheduleKeyword(schedule.event, *command.keyword)) return false;
 

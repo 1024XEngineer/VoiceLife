@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -9,6 +10,7 @@
 #include <vector>
 
 #include "voicelife/contracts/status.h"
+#include "voicelife/voice/display_snapshot.h"
 #include "voicelife/voice/voice_types.h"
 
 namespace voicelife::voice {
@@ -21,6 +23,61 @@ using EvidenceSink = std::function<void(const VoiceEvidence&)>;
 
 /** @brief 原始音频帧回调：Provider 下行或输入端口上行。 */
 using AudioFrameSink = std::function<Status(AudioFrame)>;
+
+/**
+ * @brief 显示能力和资源上限，不暴露图形框架或板级总线细节。
+ *
+ * 语义约束（方案 A）：available 表示当前渲染路径是否可用；available 为
+ * false 时，text/static_image/animation/preview_image 必须全部为 false，
+ * 调用方不得据此分配或声明资源。max_frame_bytes 与 refresh_budget_hz 是
+ * 硬件上限参考（而非当前 Renderer 已验证值）：在官方 Renderer 移植与真机
+ * 证据完成前，Runtime 不得使用这两个字段做真实资源分配。
+ */
+struct DisplayCapabilities {
+    /** @brief 当前渲染路径是否可用（Renderer/资源就绪后为 true）。 */
+    bool available = false;
+    /** @brief 是否支持文本（仅 available 为 true 时有效）。 */
+    bool text = false;
+    /** @brief 是否支持静态图片（仅 available 为 true 时有效）。 */
+    bool static_image = false;
+    /** @brief 是否支持动画（仅 available 为 true 时有效）。 */
+    bool animation = false;
+    /** @brief 是否支持受约束的预览图（仅 available 为 true 时有效）。 */
+    bool preview_image = false;
+    /** @brief 单帧缓冲硬件上限（字节），非当前可用值。 */
+    uint32_t max_frame_bytes = 0;
+    /** @brief 刷新预算硬件上限（Hz），未核实前为 0。 */
+    uint32_t refresh_budget_hz = 0;
+};
+
+/**
+ * @brief 业务语义到板级显示实现的端口。
+ *
+ * 调用上下文契约：
+ * - 唯一提交者是交互事件循环（InteractionEventLoop 或等效的显示快照生产
+ *   者）；Provider 回调、音频实时任务、输入回调和定时器不得直接调用
+ *   Render，只能投递事件。
+ * - Render 必须在显示适配器专属的显示任务/受控上下文内执行，由
+ *   Adapter 负责串行化、丢弃旧 revision/旧 generation 并防止阻塞音频任务。
+ * - LVGL 对象、GIF 解码、缓存、路径和像素缓冲区只存在于具体显示 Adapter
+ *   的专属上下文中，不反向暴露给 Runtime 或 Domain。
+ * 调用方不能传入 URL 或任意文件路径。
+ */
+class PresentationPort {
+   public:
+    /** @brief 虚析构函数。 */
+    virtual ~PresentationPort() = default;
+
+    /** @brief 返回当前显示适配器声明的能力和资源预算。 @return 显示能力引用。 */
+    [[nodiscard]] virtual const DisplayCapabilities& capabilities() const = 0;
+
+    /**
+     * @brief 提交一份完整显示快照。
+     * @param snapshot 只包含业务语义的显示快照。
+     * @return 快照被接受或明确失败时的状态。
+     */
+    virtual Status Render(const DisplaySnapshot& snapshot) = 0;
+};
 
 /** @brief 硬件音频采集设备抽象（I2S 麦克风、AFE 管线等）。 */
 class AudioInputPort {
@@ -229,7 +286,7 @@ class SpeechProviderAdapter {
      *  @param wake_word 已由本地检测器确认的唤醒词。
      *  @return 通知发送结果。
      */
-    virtual Status NotifyLocalWakeWord(std::string_view /*wake_word*/) {
+    virtual Status NotifyLocalWakeWord(std::string_view /*wake_word*/, std::string_view /*text_response*/ = {}) {
         return Status::Error(ErrorCode::kUnavailable, "本地唤醒未实现");
     }
 

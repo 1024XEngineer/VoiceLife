@@ -5,6 +5,7 @@
 
 namespace voicelife::schedule {
 
+// 筛选 15 分钟撤销窗口内的操作记录，并按时间从新到旧返回，供撤销入口展示最近可撤销项。
 std::vector<OperationRecord> FilterRecentScheduleOperations(std::vector<OperationRecord> operations, DateTime now) {
     const DateTime earliest = now - std::chrono::minutes{15};
     operations.erase(std::remove_if(operations.begin(), operations.end(),
