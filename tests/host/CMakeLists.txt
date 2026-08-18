@@ -71,18 +71,16 @@ add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_create_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_occurrence_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_operation_helpers.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_operation_query_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_query_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_rule_result_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_rule_update_helpers.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_rule_result_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_snapshot_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_operation_service.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_rule_service_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_rule_service.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_service.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/rules/recurrence_planner.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/rules/schedule_time_rules.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_undo_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_update_helpers.cc")
 target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule PUBLIC contracts Threads::Threads)
@@ -124,6 +122,7 @@ add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v001_create_schedule.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v002_create_schedule_operation.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v003_create_schedule_rule.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v004_create_operation_record.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/sqlite_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/voicelife_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/operation_sql.cc"
@@ -217,13 +216,7 @@ target_link_libraries(schedule_operation_test PRIVATE schedule)
 
 add_voicelife_test(schedule_recent_operation_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_recent_operation_test.cc")
-target_include_directories(schedule_recent_operation_test PRIVATE
-    "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule_recent_operation_test PRIVATE schedule)
-
-add_voicelife_test(schedule_undo_operation_test "unit;schedule"
-    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_undo_operation_test.cc")
-target_link_libraries(schedule_undo_operation_test PRIVATE schedule)
 
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
 target_link_libraries(status_test PRIVATE contracts)
@@ -462,12 +455,6 @@ add_voicelife_test(sqlite_schedule_repository_unit_test "unit;storage;sqlite;sch
 target_include_directories(sqlite_schedule_repository_unit_test PRIVATE
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
 target_link_libraries(sqlite_schedule_repository_unit_test PRIVATE storage_sqlite schedule)
-
-add_voicelife_test(sqlite_schedule_repository_rollback_coverage_test "unit;storage;sqlite;schedule;repository"
-    sqlite_schedule_repository_rollback_coverage_test.cc)
-target_include_directories(sqlite_schedule_repository_rollback_coverage_test PRIVATE
-    "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
-target_link_libraries(sqlite_schedule_repository_rollback_coverage_test PRIVATE storage_sqlite schedule)
 
 add_voicelife_test(sqlite_schedule_rule_repository_test "integration;storage;sqlite;schedule"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_rule_repository_test.cc")

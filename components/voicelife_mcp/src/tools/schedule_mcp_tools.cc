@@ -1,6 +1,8 @@
 #include "voicelife/mcp/schedule_mcp_tools.h"
 
+#include <chrono>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -10,6 +12,7 @@
 #include "voicelife/mcp/mcp_server.h"
 #include "voicelife/schedule/calendar.h"
 #include "voicelife/schedule/schedule_commands.h"
+#include "voicelife/schedule/schedule_operation_service.h"
 #include "voicelife/schedule/schedule_results.h"
 #include "voicelife/schedule/schedule_rule_commands.h"
 #include "voicelife/schedule/schedule_rule_results.h"
@@ -31,6 +34,7 @@ using voicelife::ToolOutputValue;
 using voicelife::mcp::schedule_tool_input::CreateProperties;
 using voicelife::mcp::schedule_tool_input::CreateRuleCommand;
 using voicelife::mcp::schedule_tool_input::DeleteProperties;
+using voicelife::mcp::schedule_tool_input::OperationQueryProperties;
 using voicelife::mcp::schedule_tool_input::ParsedRepeat;
 using voicelife::mcp::schedule_tool_input::ParseRepeat;
 using voicelife::mcp::schedule_tool_input::QueryProperties;
@@ -60,6 +64,25 @@ schedule::ScheduleStatusFilter ParseStatus(const std::string& value) {
     if (value == "cancelled") return schedule::ScheduleStatusFilter::kCancelled;
     if (value == "completed") return schedule::ScheduleStatusFilter::kCompleted;
     return schedule::ScheduleStatusFilter::kActive;
+}
+
+/** @brief 返回当前秒级系统时间。 @return 当前日程时间。 */
+DateTime Now() { return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()); }
+
+/** @brief 将实体类型字符串转为枚举；非法值返回空。 @param value 输入字符串。 @return 对应枚举。 */
+std::optional<schedule::OperationEntityType> ParseEntityType(const std::string& value) {
+    if (value == "schedule") return schedule::OperationEntityType::kSchedule;
+    if (value == "rule") return schedule::OperationEntityType::kRule;
+    if (value == "exception") return schedule::OperationEntityType::kException;
+    return std::nullopt;
+}
+
+/** @brief 将操作类型字符串转为枚举；非法值返回空。 @param value 输入字符串。 @return 对应枚举。 */
+std::optional<schedule::ScheduleOperationType> ParseOperationType(const std::string& value) {
+    if (value == "create") return schedule::ScheduleOperationType::kCreate;
+    if (value == "update") return schedule::ScheduleOperationType::kUpdate;
+    if (value == "delete") return schedule::ScheduleOperationType::kDelete;
+    return std::nullopt;
 }
 
 std::string FormatDateStart(const schedule::LocalDate& date) {
@@ -99,7 +122,8 @@ bool WithinRange(const std::optional<DateTime>& start, const std::optional<DateT
 
 }  // namespace
 
-Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, ScheduleRuleService* rule_service) {
+Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, ScheduleRuleService* rule_service,
+                                schedule::ScheduleOperationService* operation_service) {
     // schedule.create 根据是否传入 repeat 拆成两条业务路径：
     // 一次性日程走 ScheduleService，周期日程走 ScheduleRuleService。
     Status status = server.add_tool(
@@ -486,14 +510,59 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                 MakeToolOutput("exception", ToolOutputValue::Null()),
             });
         });
+    if (!status.ok()) return status;
+
+    // 操作记录查询：记录写入不经过 tool，由变更 service 显式推送；本工具只读查询。
+    return server.add_tool(
+        "schedule.operation_query", "查询最近的操作记录，支持按对象类型、操作类型和名称筛选。",
+        OperationQueryProperties(),
+        [operation_service](const PropertyList& properties) {
+            if (operation_service == nullptr) return FailureOutput("当前运行时未启用操作记录能力");
+
+            schedule::QueryOperationCommand command;
+            const auto entity_type = properties.value<std::string>("entity_type");
+            if (entity_type.has_value()) {
+                const auto parsed = ParseEntityType(*entity_type);
+                if (!parsed.has_value()) return FailureOutput("entity_type 取值为 schedule、rule、exception");
+                command.entity_type = parsed;
+            }
+            const auto type = properties.value<std::string>("type");
+            if (type.has_value()) {
+                const auto parsed = ParseOperationType(*type);
+                if (!parsed.has_value()) return FailureOutput("type 取值为 create、update、delete");
+                command.type = parsed;
+            }
+            command.keyword = properties.value<std::string>("keyword");
+            // 最近 15 分钟窗口由 handler 作为调用方约定填充，分页取最近 50 条。
+            const DateTime now = Now();
+            command.operated_from = now - std::chrono::minutes{15};
+            command.operated_to = now;
+            command.limit = 50;
+            command.offset = 0;
+
+            const auto result = operation_service->query_operations(command);
+            if (!result.result.ok()) return FailureOutput(result.result.status.message);
+            return Output({
+                MakeToolOutput("status", ToolOutputValue::String("success")),
+                MakeToolOutput("message", ToolOutputValue::String("query success")),
+                MakeToolOutput("total", ToolOutputValue::Integer(result.total)),
+                MakeToolOutput("operations",
+                               ToolOutputValue::Array(schedule_tool_output::OperationArrayOutput(result.result.value))),
+            });
+        });
 }
 
 Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service) {
-    return RegisterScheduleMcpTools(server, service, nullptr);
+    return RegisterScheduleMcpTools(server, service, nullptr, nullptr);
 }
 
 Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, ScheduleRuleService& rule_service) {
-    return RegisterScheduleMcpTools(server, service, &rule_service);
+    return RegisterScheduleMcpTools(server, service, &rule_service, nullptr);
+}
+
+Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, ScheduleRuleService& rule_service,
+                                schedule::ScheduleOperationService& operation_service) {
+    return RegisterScheduleMcpTools(server, service, &rule_service, &operation_service);
 }
 
 }  // namespace voicelife::mcp

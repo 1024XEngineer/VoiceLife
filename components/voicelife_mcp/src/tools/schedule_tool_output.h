@@ -254,4 +254,88 @@ inline ToolOutputArray ExceptionsOutput(const std::vector<schedule::ScheduleExce
     return output;
 }
 
+inline const char* EntityTypeName(schedule::OperationEntityType value) {
+    switch (value) {
+        case schedule::OperationEntityType::kSchedule:
+            return "schedule";
+        case schedule::OperationEntityType::kRule:
+            return "rule";
+        case schedule::OperationEntityType::kException:
+            return "exception";
+    }
+    return "schedule";
+}
+
+inline const char* OperationTypeName(schedule::ScheduleOperationType value) {
+    switch (value) {
+        case schedule::ScheduleOperationType::kCreate:
+            return "create";
+        case schedule::ScheduleOperationType::kUpdate:
+            return "update";
+        case schedule::ScheduleOperationType::kDelete:
+            return "delete";
+    }
+    return "create";
+}
+
+/** @brief 将 contracts 的 JsonValue 递归转换为工具输出节点。 @param value 待转换值。 @return 工具输出节点。 */
+inline ToolOutputValue JsonToToolOutputValue(const JsonValue& value) {
+    switch (value.kind) {
+        case JsonValue::Kind::kNull:
+            return ToolOutputValue::Null();
+        case JsonValue::Kind::kBool:
+            return ToolOutputValue::Boolean(value.boolean);
+        case JsonValue::Kind::kNumber:
+            return ToolOutputValue::Integer(static_cast<std::int64_t>(value.number));
+        case JsonValue::Kind::kString:
+            return ToolOutputValue::String(value.string);
+        case JsonValue::Kind::kArray: {
+            ToolOutputArray items;
+            items.reserve(value.array.size());
+            for (const auto& item : value.array) {
+                items.emplace_back(MakeToolOutput(JsonToToolOutputValue(item)));
+            }
+            return ToolOutputValue::Array(std::move(items));
+        }
+        case JsonValue::Kind::kObject: {
+            ToolOutputObject members;
+            members.reserve(value.object.size());
+            for (const auto& [key, item] : value.object) {
+                members.emplace_back(MakeToolOutput(key, JsonToToolOutputValue(item)));
+            }
+            return ToolOutputValue::Object(std::move(members));
+        }
+    }
+    return ToolOutputValue::Null();
+}
+
+/** @brief 将存储的 before 快照 JSON 转换为 object 或 null。 @param before 快照 JSON。 @return 输出节点。 */
+inline ToolOutputValue BeforeOutput(const std::optional<std::string>& before) {
+    if (!before.has_value()) return ToolOutputValue::Null();
+    JsonValue parsed;
+    if (!ParseJson(*before, parsed).ok() || !parsed.IsObject()) return ToolOutputValue::Null();
+    return JsonToToolOutputValue(parsed);
+}
+
+inline ToolOutputValue OperationOutput(const schedule::OperationRecord& operation) {
+    return ToolOutputValue::Object({
+        MakeToolOutput("id", ToolOutputValue::Integer(operation.id)),
+        MakeToolOutput("entity_type", ToolOutputValue::String(EntityTypeName(operation.entity_type))),
+        MakeToolOutput("type", ToolOutputValue::String(OperationTypeName(operation.type))),
+        MakeToolOutput("entity_id", ToolOutputValue::Integer(operation.entity_id)),
+        MakeToolOutput("label", ToolOutputValue::String(operation.label)),
+        MakeToolOutput("operated_at", ToolOutputValue::String(FormatDateTime(operation.operated_at))),
+        MakeToolOutput("before", BeforeOutput(operation.before)),
+    });
+}
+
+inline ToolOutputArray OperationArrayOutput(const std::vector<schedule::OperationRecord>& operations) {
+    ToolOutputArray output;
+    output.reserve(operations.size());
+    for (const auto& operation : operations) {
+        output.emplace_back(MakeToolOutput(OperationOutput(operation)));
+    }
+    return output;
+}
+
 }  // namespace voicelife::mcp::schedule_tool_output

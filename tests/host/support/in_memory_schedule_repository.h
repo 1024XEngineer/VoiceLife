@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
@@ -19,7 +20,7 @@ namespace voicelife::test {
  * @brief 为日程主机测试提供实例隔离的内存仓储。
  *
  * 该类型同时实现日程实体和操作记录仓储，仅供测试使用。每个实例独立保存
- * 数据，并在同一互斥区内完成撤销所需的实体恢复、原操作失效和撤销记录写入。
+ * 数据，并在同一互斥区内完成操作记录的写入与查询。
  */
 class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
                                          public schedule::ScheduleOperationRepository {
@@ -200,74 +201,51 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
     }
 
     /**
-     * @brief 查询十五分钟闭区间内仍有效的操作记录。
-     * @param now 查询窗口结束时间。
-     * @return 按时间和标识倒序排列的操作记录。
+     * @brief 按筛选条件查询操作记录，按时间和标识倒序排列。
+     * @param query 查询筛选和分页条件。
+     * @return 匹配的操作记录，失败时返回错误状态。
      */
-    [[nodiscard]] Result<std::vector<schedule::OperationRecord>> FindRecentOperations(
-        schedule::DateTime now) const override {
+    [[nodiscard]] Result<std::vector<schedule::OperationRecord>> FindOperations(
+        const schedule::QueryOperationCommand& query) const override {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (next_find_recent_failure_.has_value()) {
-            Status failure = std::move(*next_find_recent_failure_);
-            next_find_recent_failure_.reset();
+        if (next_find_operations_failure_.has_value()) {
+            Status failure = std::move(*next_find_operations_failure_);
+            next_find_operations_failure_.reset();
             return Result<std::vector<schedule::OperationRecord>>::Failure(failure.code, failure.message);
         }
-        std::vector<schedule::OperationRecord> result;
-        for (const StoredOperation& stored : operations_) {
-            if (stored.active && in_memory_schedule_repository_helpers::IsWithinUndoWindow(stored.operation, now))
-                result.push_back(stored.operation);
+        std::vector<schedule::OperationRecord> matched;
+        for (const schedule::OperationRecord& operation : operations_) {
+            if (in_memory_schedule_repository_helpers::MatchesOperation(operation, query)) matched.push_back(operation);
         }
-        std::sort(result.begin(), result.end(),
+        std::sort(matched.begin(), matched.end(),
                   [](const schedule::OperationRecord& left, const schedule::OperationRecord& right) {
                       if (left.operated_at != right.operated_at) return left.operated_at > right.operated_at;
                       return left.id > right.id;
                   });
-        return Result<std::vector<schedule::OperationRecord>>::Success(std::move(result));
+        const auto begin = std::min(static_cast<std::size_t>(query.offset), matched.size());
+        const auto count = std::min(static_cast<std::size_t>(query.limit), matched.size() - begin);
+        return Result<std::vector<schedule::OperationRecord>>::Success(
+            std::vector<schedule::OperationRecord>(matched.begin() + static_cast<std::ptrdiff_t>(begin),
+                                                   matched.begin() + static_cast<std::ptrdiff_t>(begin + count)));
     }
 
     /**
-     * @brief 原子撤销指定操作并追加撤销记录。
-     * @param operation_id 待撤销操作标识。
-     * @param now 撤销时间和窗口结束时间。
-     * @return 原操作以及撤销完成后的日程。
+     * @brief 统计满足筛选条件的操作总条数，不受分页影响。
+     * @param query 查询筛选条件。
+     * @return 操作总条数，失败时返回错误状态。
      */
-    Result<schedule::UndoOperationResult> UndoOperation(schedule::OperationId operation_id,
-                                                        schedule::DateTime now) override {
+    [[nodiscard]] Result<int64_t> CountOperations(const schedule::QueryOperationCommand& query) const override {
         std::lock_guard<std::mutex> lock(mutex_);
-        StoredOperation* target = FindOperationLocked(operation_id);
-        const Result<schedule::OperationRecord> validated = ValidateUndoableOperation(target, now);
-        if (!validated.ok()) {
-            return Result<schedule::UndoOperationResult>::Failure(validated.status.code, validated.status.message);
+        if (next_count_operations_failure_.has_value()) {
+            Status failure = std::move(*next_count_operations_failure_);
+            next_count_operations_failure_.reset();
+            return Result<int64_t>::Failure(failure.code, failure.message);
         }
-        if (next_undo_failure_.has_value()) {
-            Status failure = std::move(*next_undo_failure_);
-            next_undo_failure_.reset();
-            return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
+        int64_t total = 0;
+        for (const schedule::OperationRecord& operation : operations_) {
+            if (in_memory_schedule_repository_helpers::MatchesOperation(operation, query)) ++total;
         }
-
-        const schedule::OperationRecord original = *validated.value;
-        const auto current = FindScheduleIteratorLocked(original.schedule_id);
-        const std::optional<schedule::Schedule> before =
-            current == schedules_.end() ? std::nullopt : std::optional<schedule::Schedule>{*current};
-        std::optional<schedule::Schedule> after;
-        const Status applied = ApplyUndoLocked(original, current, after);
-        if (!applied.ok()) {
-            return Result<schedule::UndoOperationResult>::Failure(applied.code, applied.message);
-        }
-
-        const std::string event =
-            before.has_value() ? before->event : (after.has_value() ? after->event : original.schedule_event);
-        const schedule::OperationRecord undo{
-            .id = 0,
-            .type = schedule::ScheduleOperationType::kUndo,
-            .schedule_id = original.schedule_id,
-            .schedule_event = event,
-            .operated_at = {},
-            .previous = before,
-        };
-        target->active = false;
-        (void)AppendOperationLocked(undo, now);
-        return Result<schedule::UndoOperationResult>::Success({.operation = original, .schedule = std::move(after)});
+        return Result<int64_t>::Success(total);
     }
 
     /**
@@ -281,12 +259,12 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         operations_.clear();
         next_schedule_id_ = in_memory_schedule_repository_helpers::NextScheduleId(schedules_);
         next_operation_id_ = 1;
-        next_undo_failure_.reset();
         next_find_overlapping_failure_.reset();
         next_find_failure_.reset();
         next_count_failure_.reset();
         next_insert_operation_failure_.reset();
-        next_find_recent_failure_.reset();
+        next_find_operations_failure_.reset();
+        next_count_operations_failure_.reset();
     }
 
     /**
@@ -315,38 +293,12 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
     }
 
     /**
-     * @brief 返回当前仍有效的全部操作记录。
+     * @brief 返回当前实例保存的全部操作记录。
      * @return 按写入顺序排列的操作记录副本。
      */
-    [[nodiscard]] std::vector<schedule::OperationRecord> ActiveOperations() const {
+    [[nodiscard]] std::vector<schedule::OperationRecord> Operations() const {
         std::lock_guard<std::mutex> lock(mutex_);
-        std::vector<schedule::OperationRecord> result;
-        for (const StoredOperation& stored : operations_) {
-            if (stored.active) result.push_back(stored.operation);
-        }
-        return result;
-    }
-
-    /**
-     * @brief 校验指定操作在给定时间是否仍可撤销。
-     * @param operation_id 操作标识。
-     * @param now 校验时间。
-     * @return 可撤销时返回操作记录。
-     */
-    [[nodiscard]] Result<schedule::OperationRecord> FindUndoableOperation(schedule::OperationId operation_id,
-                                                                          schedule::DateTime now) const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return ValidateUndoableOperation(FindOperationLocked(operation_id), now);
-    }
-
-    /**
-     * @brief 注入下一次撤销失败状态。
-     * @param status 下一次 UndoOperation 返回的错误。
-     * @return 无。
-     */
-    void FailNextUndo(Status status) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        next_undo_failure_ = std::move(status);
+        return operations_;
     }
 
     /**
@@ -390,22 +342,26 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
     }
 
     /**
-     * @brief 注入下一次 FindRecentOperations 失败状态。
-     * @param status 下一次 FindRecentOperations 返回的错误。
+     * @brief 注入下一次 FindOperations 失败状态。
+     * @param status 下一次 FindOperations 返回的错误。
      * @return 无。
      */
-    void FailNextFindRecentOperations(Status status) {
+    void FailNextFindOperations(Status status) {
         std::lock_guard<std::mutex> lock(mutex_);
-        next_find_recent_failure_ = std::move(status);
+        next_find_operations_failure_ = std::move(status);
+    }
+
+    /**
+     * @brief 注入下一次 CountOperations 失败状态。
+     * @param status 下一次 CountOperations 返回的错误。
+     * @return 无。
+     */
+    void FailNextCountOperations(Status status) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        next_count_operations_failure_ = std::move(status);
     }
 
    private:
-    /** @brief 内存中的操作条目。 */
-    struct StoredOperation {
-        schedule::OperationRecord operation;
-        bool active = true;
-    };
-
     using ScheduleIterator = std::vector<schedule::Schedule>::iterator;
 
     /** @brief 返回当前秒级系统时间。 @return 当前日程时间。 */
@@ -425,22 +381,6 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
                             [id](const schedule::Schedule& stored) { return stored.id == id; });
     }
 
-    /** @brief 在锁内按标识查找操作。 @param id 操作标识。 @return 操作地址或 nullptr。 */
-    StoredOperation* FindOperationLocked(schedule::OperationId id) {
-        for (StoredOperation& stored : operations_) {
-            if (stored.operation.id == id) return &stored;
-        }
-        return nullptr;
-    }
-
-    /** @brief 在锁内按标识查找操作。 @param id 操作标识。 @return 操作地址或 nullptr。 */
-    const StoredOperation* FindOperationLocked(schedule::OperationId id) const {
-        for (const StoredOperation& stored : operations_) {
-            if (stored.operation.id == id) return &stored;
-        }
-        return nullptr;
-    }
-
     /**
      * @brief 在锁内追加操作记录。
      * @param input 操作数据。
@@ -452,94 +392,21 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         schedule::OperationRecord stored = input;
         stored.id = next_operation_id_++;
         stored.operated_at = operated_at;
-        operations_.push_back({.operation = stored, .active = true});
+        operations_.push_back(stored);
         return stored;
-    }
-
-    /**
-     * @brief 校验锁内找到的操作是否可撤销。
-     * @param stored 操作条目。
-     * @param now 当前时间。
-     * @return 可撤销时返回操作记录。
-     */
-    static Result<schedule::OperationRecord> ValidateUndoableOperation(const StoredOperation* stored,
-                                                                       schedule::DateTime now) {
-        if (stored == nullptr || !stored->active) {
-            return Result<schedule::OperationRecord>::Failure(ErrorCode::kNotFound, "操作不存在或已撤销");
-        }
-        if (stored->operation.operated_at > now) {
-            return Result<schedule::OperationRecord>::Failure(ErrorCode::kConflict, "操作时间晚于当前时间，不能撤销");
-        }
-        if (!in_memory_schedule_repository_helpers::IsWithinUndoWindow(stored->operation, now)) {
-            return Result<schedule::OperationRecord>::Failure(ErrorCode::kConflict, "操作已超过十五分钟撤销期限");
-        }
-        return Result<schedule::OperationRecord>::Success(stored->operation);
-    }
-
-    /**
-     * @brief 在锁内应用日程逆操作。
-     * @param operation 被撤销操作。
-     * @param current 当前日程迭代器。
-     * @param after 接收撤销后的日程。
-     * @return 应用结果。
-     */
-    Status ApplyUndoLocked(const schedule::OperationRecord& operation, ScheduleIterator current,
-                           std::optional<schedule::Schedule>& after) {
-        if (operation.previous.has_value() && operation.previous->id != operation.schedule_id) {
-            return Status::Error(ErrorCode::kInternal, "操作记录的日程快照与目标 ID 不一致");
-        }
-        switch (operation.type) {
-            case schedule::ScheduleOperationType::kCreate:
-                if (current == schedules_.end()) return Status::Error(ErrorCode::kNotFound, "未找到指定日程");
-                schedules_.erase(current);
-                return Status::Ok();
-            case schedule::ScheduleOperationType::kUpdate:
-                if (!operation.previous.has_value()) {
-                    return Status::Error(ErrorCode::kInternal, "操作记录缺少可恢复的日程快照");
-                }
-                if (current == schedules_.end()) return Status::Error(ErrorCode::kNotFound, "未找到指定日程");
-                *current = *operation.previous;
-                after = operation.previous;
-                return Status::Ok();
-            case schedule::ScheduleOperationType::kDelete:
-                if (!operation.previous.has_value()) {
-                    return Status::Error(ErrorCode::kInternal, "操作记录缺少可恢复的日程快照");
-                }
-                if (current == schedules_.end())
-                    schedules_.push_back(*operation.previous);
-                else
-                    *current = *operation.previous;
-                after = operation.previous;
-                return Status::Ok();
-            case schedule::ScheduleOperationType::kUndo:
-                if (operation.previous.has_value()) {
-                    if (current == schedules_.end()) {
-                        schedules_.push_back(*operation.previous);
-                    } else {
-                        *current = *operation.previous;
-                    }
-                    after = operation.previous;
-                    return Status::Ok();
-                }
-                if (current == schedules_.end()) return Status::Error(ErrorCode::kNotFound, "未找到指定日程");
-                schedules_.erase(current);
-                return Status::Ok();
-            default:
-                return Status::Error(ErrorCode::kInternal, "操作记录包含不支持的类型");
-        }
     }
 
     mutable std::mutex mutex_;
     std::vector<schedule::Schedule> schedules_;
-    std::vector<StoredOperation> operations_;
+    std::vector<schedule::OperationRecord> operations_;
     schedule::ScheduleId next_schedule_id_ = 1;
     schedule::OperationId next_operation_id_ = 1;
-    std::optional<Status> next_undo_failure_;
     mutable std::optional<Status> next_find_overlapping_failure_;
     mutable std::optional<Status> next_find_failure_;
     mutable std::optional<Status> next_count_failure_;
     std::optional<Status> next_insert_operation_failure_;
-    mutable std::optional<Status> next_find_recent_failure_;
+    mutable std::optional<Status> next_find_operations_failure_;
+    mutable std::optional<Status> next_count_operations_failure_;
 };
 
 }  // namespace voicelife::test

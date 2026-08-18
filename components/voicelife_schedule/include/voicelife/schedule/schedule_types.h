@@ -23,8 +23,11 @@ enum class ScheduleStatus {
 /// 日程查询使用的状态筛选条件。
 enum class ScheduleStatusFilter { kAll, kActive, kCancelled, kCompleted };
 
-/// 可记录和撤销的日程操作类型；撤销本身也是可再次撤销的独立操作。
-enum class ScheduleOperationType { kCreate = 1, kUpdate = 2, kDelete = 3, kUndo = 4 };
+/// 操作对象实体类型：决定 before 快照的结构，以及查询时的实体维度。
+enum class OperationEntityType { kSchedule = 1, kRule = 2, kException = 3 };
+
+/// 可记录的操作类型；撤销没有独立接口，回滚动作按其自然类型被记录。
+enum class ScheduleOperationType { kCreate = 1, kUpdate = 2, kDelete = 3 };
 
 /// 日程实体，对应 Schedule 数据表。
 struct Schedule {
@@ -44,12 +47,12 @@ struct Schedule {
 /// 日程操作记录，对应 OperationRecord 数据表。
 struct OperationRecord {
     OperationId id = 0;
+    OperationEntityType entity_type = OperationEntityType::kSchedule;
     ScheduleOperationType type = ScheduleOperationType::kCreate;
-    ScheduleId schedule_id = 0;
-    std::string schedule_event;
-    DateTime operated_at;
-    /// 操作前的领域快照；创建时为空，撤销时为空表示撤销前日程不存在。
-    std::optional<Schedule> previous;
+    int64_t entity_id = 0;
+    DateTime operated_at;              ///< 仓储盖章，不来自调用方
+    std::string label;                 ///< 展示用名称（日程名 / 规则名 / 例外描述）
+    std::optional<std::string> before; ///< 操作前快照 JSON；kCreate 必须为空
 };
 
 /// 周期规则与单次例外使用的数据库兼容 64 位整数标识。

@@ -234,4 +234,15 @@ PropertyList DeleteProperties() {
     });
 }
 
+PropertyList OperationQueryProperties() {
+    return PropertyList({
+        Property::Optional("entity_type", PropertyType::kString)
+            .with_description("操作对象类型，取值为 schedule、rule、exception"),
+        Property::Optional("type", PropertyType::kString)
+            .with_description("操作类型，取值为 create、update、delete"),
+        Property::Optional("keyword", PropertyType::kString)
+            .with_description("按操作对象名称模糊搜索"),
+    });
+}
+
 }  // namespace voicelife::mcp::schedule_tool_input

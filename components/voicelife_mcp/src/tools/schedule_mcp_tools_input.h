@@ -67,4 +67,7 @@ PropertyList UpdateProperties();
 /** @brief 创建 schedule.delete 工具参数定义。 @return 参数定义。 */
 PropertyList DeleteProperties();
 
+/** @brief 创建 schedule.operation_query 工具参数定义。 @return 参数定义。 */
+PropertyList OperationQueryProperties();
+
 }  // namespace voicelife::mcp::schedule_tool_input
