@@ -1,10 +1,14 @@
 #include "voicelife/audio_esp/pcm_frame_assembler.h"
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <new>
-#include <stdexcept>
 #include <utility>
+
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#endif
 
 namespace voicelife::audio_esp {
 namespace {
@@ -23,6 +27,14 @@ PcmFrameAssembler::PcmFrameAssembler(voice::AudioFormat frame_format, uint16_t h
             frame_samples_ = static_cast<std::size_t>(samples_per_channel) * frame_format_.channels;
         }
     }
+}
+
+PcmFrameAssembler::~PcmFrameAssembler() {
+#ifdef ESP_PLATFORM
+    heap_caps_free(pending_samples_);
+#else
+    delete[] pending_samples_;
+#endif
 }
 
 Status PcmFrameAssembler::Validate() const {
@@ -51,20 +63,13 @@ Status PcmFrameAssembler::Prepare() {
     if (prepared_) {
         return Status::Ok();
     }
-#if defined(__cpp_exceptions) || defined(_CPPUNWIND)
-    try {
-        // 组帧器在端口打开时创建并准备，避免首个 I2S period 在实时采集任务扩容。
-        pending_samples_.reserve(frame_samples_);
-    } catch (const std::bad_alloc&) {
-        return Status::Error(ErrorCode::kUnavailable, "PCM 组帧缓存分配失败");
-    } catch (const std::length_error&) {
-        return Invalid("PCM 组帧缓存长度超出限制");
-    }
+#ifdef ESP_PLATFORM
+    pending_samples_ =
+        static_cast<int16_t*>(heap_caps_malloc(frame_samples_ * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
 #else
-    // ESP-IDF firmware uses -fno-exceptions. Validate() limits this startup
-    // reserve to AudioFrame::kMaxPayloadBytes before it reaches the allocator.
-    pending_samples_.reserve(frame_samples_);
+    pending_samples_ = new (std::nothrow) int16_t[frame_samples_];
 #endif
+    if (pending_samples_ == nullptr) return Status::Error(ErrorCode::kUnavailable, "PCM 组帧缓存分配失败");
     prepared_ = true;
     return Status::Ok();
 }
@@ -84,52 +89,29 @@ Status PcmFrameAssembler::Push(const int16_t* samples, std::size_t sample_count,
     if (frame_samples_ == 0 || sample_count % channel_count != 0) {
         return Invalid("PCM 样本数不能组成完整声道帧");
     }
-    const std::size_t pending_count = pending_samples_.size() - pending_offset_;
-    if (sample_count > std::numeric_limits<std::size_t>::max() - pending_count) {
-        return Invalid("PCM 组帧缓存长度溢出");
-    }
-    // Capture normally supplies fixed hardware periods. Keep a read offset so
-    // completing a transmission frame does not shift its full payload in the
-    // realtime capture task. Compact only when a partial tail needs room.
-    if (pending_offset_ == pending_samples_.size()) {
-        pending_samples_.clear();
-        pending_offset_ = 0;
-    } else if (pending_samples_.capacity() - pending_samples_.size() < sample_count) {
-        if (pending_count != 0) {
-            std::memmove(pending_samples_.data(), pending_samples_.data() + pending_offset_,
-                         pending_count * sizeof(int16_t));
-        }
-        pending_samples_.resize(pending_count);
-        pending_offset_ = 0;
-    }
-    if (sample_count != 0) {
-        pending_samples_.insert(pending_samples_.end(), samples, samples + sample_count);
-    }
-
-    while (pending_samples_.size() - pending_offset_ >= frame_samples_) {
+    while (sample_count != 0) {
+        const std::size_t copied = std::min(sample_count, frame_samples_ - pending_size_);
+        std::memcpy(pending_samples_ + pending_size_, samples, copied * sizeof(int16_t));
+        pending_size_ += copied;
+        samples += copied;
+        sample_count -= copied;
+        if (pending_size_ != frame_samples_) continue;
         voice::AudioFrame frame;
         frame.format = frame_format_;
         if (frame_samples_ > std::numeric_limits<std::size_t>::max() / sizeof(int16_t)) {
             return Invalid("PCM 组帧负载长度溢出");
         }
         frame.payload.resize(frame_samples_ * sizeof(int16_t));
-        std::memcpy(frame.payload.data(), pending_samples_.data() + pending_offset_, frame.payload.size());
-        pending_offset_ += frame_samples_;
+        std::memcpy(frame.payload.data(), pending_samples_, frame.payload.size());
+        pending_size_ = 0;
         const Status status = sink(std::move(frame));
         if (!status.ok()) {
             return status;
         }
     }
-    if (pending_offset_ == pending_samples_.size()) {
-        pending_samples_.clear();
-        pending_offset_ = 0;
-    }
     return Status::Ok();
 }
 
-void PcmFrameAssembler::Reset() {
-    pending_samples_.clear();
-    pending_offset_ = 0;
-}
+void PcmFrameAssembler::Reset() { pending_size_ = 0; }
 
 }  // namespace voicelife::audio_esp

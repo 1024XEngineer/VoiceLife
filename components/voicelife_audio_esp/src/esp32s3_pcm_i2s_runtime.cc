@@ -452,6 +452,11 @@ void Esp32s3PcmAudioPorts::Impl::OutputLoop() {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             output_writing_ = false;
+            if (amplifier_disable_pending_ && output_queue_.empty() && amplifier_enabled_ && amplifier_callback_) {
+                amplifier_callback_(false);
+                amplifier_enabled_ = false;
+            }
+            amplifier_disable_pending_ = false;
         }
     }
     MarkTaskDone(&output_task_);

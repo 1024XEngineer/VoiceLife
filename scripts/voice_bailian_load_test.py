@@ -213,20 +213,25 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-    ready = {"api_key_configured": bool(api_key), "dashscope_installed": dashscope is not None}
+    needs_tts_dependency = args.mode != "stt"
+    ready = {
+        "api_key_configured": bool(api_key),
+        "dashscope_installed": dashscope is not None or not needs_tts_dependency,
+    }
     if args.preflight:
         print(json.dumps(ready, ensure_ascii=False))
         return 0 if all(ready.values()) else 2
     if not api_key:
         print("DASHSCOPE_API_KEY is required", file=sys.stderr)
         return 2
-    if dashscope is None or SpeechSynthesizer is None:
+    if needs_tts_dependency and (dashscope is None or SpeechSynthesizer is None):
         print(
             "dashscope package is required; install the locked test dependency before running this probe",
             file=sys.stderr,
         )
         return 2
-    dashscope.api_key = api_key
+    if needs_tts_dependency:
+        dashscope.api_key = api_key
     stt_audio: bytes | None = None
     stt_mime_type: str | None = None
     if args.mode == "stt":

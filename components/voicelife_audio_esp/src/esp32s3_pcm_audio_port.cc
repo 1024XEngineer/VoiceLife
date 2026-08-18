@@ -33,6 +33,11 @@ Status ValidatePlaybackFormat(const I2sEndpointProfile& endpoint, const voice::A
         negotiated.sample_rate_hz > 48000) {
         return Invalid("协商下行 PCM 格式不受当前板级 I2S 输出支持");
     }
+    const uint64_t payload_bytes = static_cast<uint64_t>(negotiated.sample_rate_hz) * negotiated.frame_duration_ms *
+                                   negotiated.channels * (negotiated.bits_per_sample / 8U) / 1000U;
+    if (payload_bytes == 0 || payload_bytes > voice::AudioFrame::kMaxPayloadBytes) {
+        return Invalid("协商下行 PCM 单帧超过允许的负载上限");
+    }
     return Status::Ok();
 }
 
@@ -463,6 +468,7 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(voice::AudioFrame frame) {
     output_queue_.push_back(std::move(out));
     output_queue_duration_ms_ += frame_duration_ms;
     output_high_watermark_.store(std::max(output_high_watermark_.load(), output_queue_.size()));
+    amplifier_disable_pending_ = false;
     if (!amplifier_enabled_ && amplifier_callback_) {
         amplifier_callback_(true);
         amplifier_enabled_ = true;
@@ -477,7 +483,9 @@ Status Esp32s3PcmAudioPorts::Impl::FlushOutput() {
     std::lock_guard<std::mutex> lock(mutex_);
     output_queue_.clear();
     output_queue_duration_ms_ = 0;
-    if (amplifier_enabled_ && amplifier_callback_) {
+    if (output_writing_) {
+        amplifier_disable_pending_ = true;
+    } else if (amplifier_enabled_ && amplifier_callback_) {
         amplifier_callback_(false);  // 播放打断/清空：经板级仲裁请求关闭功放。
         amplifier_enabled_ = false;
     }

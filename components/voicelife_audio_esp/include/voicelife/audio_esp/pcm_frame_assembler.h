@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <vector>
 
 #include "voicelife/contracts/status.h"
 #include "voicelife/voice/voice_types.h"
@@ -27,6 +26,12 @@ class PcmFrameAssembler final {
      * @param hardware_period_ms 硬件 period 时长（毫秒）。
      */
     PcmFrameAssembler(voice::AudioFormat frame_format, uint16_t hardware_period_ms);
+    /** @brief 释放启动期申请的 PCM 缓冲。 */
+    ~PcmFrameAssembler();
+    /** @brief 禁止复制，避免重复释放预分配 PCM 缓冲。 */
+    PcmFrameAssembler(const PcmFrameAssembler&) = delete;
+    /** @brief 禁止复制赋值，避免重复释放预分配 PCM 缓冲。 */
+    PcmFrameAssembler& operator=(const PcmFrameAssembler&) = delete;
 
     /** @brief 校验帧格式与 period 参数是否合法。 @return 合法返回 Ok。 */
     [[nodiscard]] Status Validate() const;
@@ -47,7 +52,7 @@ class PcmFrameAssembler final {
     [[nodiscard]] std::size_t frame_samples() const { return frame_samples_; }
 
     /** @brief 当前待组装的样本数。 @return 挂起样本数。 */
-    [[nodiscard]] std::size_t pending_samples() const { return pending_samples_.size() - pending_offset_; }
+    [[nodiscard]] std::size_t pending_samples() const { return pending_size_; }
 
     /**
      * @brief 推送逻辑 S16 样本。
@@ -68,8 +73,8 @@ class PcmFrameAssembler final {
     voice::AudioFormat frame_format_;
     uint16_t hardware_period_ms_ = 0;
     std::size_t frame_samples_ = 0;
-    std::vector<int16_t> pending_samples_;
-    std::size_t pending_offset_ = 0;
+    int16_t* pending_samples_ = nullptr;
+    std::size_t pending_size_ = 0;
     bool prepared_ = false;
 };
 

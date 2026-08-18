@@ -163,6 +163,7 @@ class Esp32s3PcmAudioPorts::Impl final {
     bool output_running_ = false;
     // 正在执行 i2s_channel_write 的帧（同步阻塞写期间队列可能空但 I2S 仍在播）。
     bool output_writing_ = false;
+    bool amplifier_disable_pending_ = false;
 #endif
 
     std::atomic<std::size_t> captured_frames_{0};

@@ -111,6 +111,11 @@ int main() {
     Check(ports.input().Open(capture).code == ErrorCode::kUnavailable, "主机 Audio Port 不能伪造 ESP32-S3 采集已打开");
     Check(ports.output().Open(playback).code == ErrorCode::kUnavailable,
           "主机 Audio Port 不能伪造 ESP32-S3 播放已打开");
+    auto oversized_playback = playback;
+    oversized_playback.channels = 2;
+    oversized_playback.frame_duration_ms = UINT16_MAX;
+    Check(ports.output().Open(oversized_playback).code == ErrorCode::kInvalidArgument,
+          "超过 AudioFrame 负载上限的下行协商格式必须在 scratch 分配前拒绝");
     Check(ports.input().StartCapture(voicelife::voice::VoiceMode::kManual).code == ErrorCode::kUnavailable,
           "主机 Audio Port 不能伪造 ESP32-S3 采集已启动");
 
