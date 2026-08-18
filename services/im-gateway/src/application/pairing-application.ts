@@ -78,6 +78,7 @@ export class DefaultPairingApplication implements PairingApplication {
 
     /** {@inheritDoc PairingApplication.find} */
     public async find(pairingSessionId: PairingSessionId): Promise<PairingSession | undefined> {
+        await this.expireDue();
         return this.unitOfWork.transaction((tx) => tx.pairingSessions.findById(pairingSessionId));
     }
 
