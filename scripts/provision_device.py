@@ -19,7 +19,6 @@ import re
 import runpy
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,7 +46,17 @@ BOARD_CONFIGS: dict[str, dict] = {
 FLASH_SETTINGS = ("--flash-mode", "dio", "--flash-size", "16MB", "--flash-freq", "80m")
 
 UUID_V4_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+DEVICE_ID_PATTERN = re.compile(r"^[!-~]{1,128}$")
 TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
+GIT_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+
+
+class RemoteOperationError(RuntimeError):
+    """A remote command failed without exposing its output."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -141,14 +150,15 @@ def resolve_gateway_origin(
     raise SystemExit("缺少 Gateway origin；请配置 PROVISION_GATEWAY_ORIGIN 或 WECHAT_ACTION_UI_BASE_URL")
 
 
-def validate_credential(data: dict, expected_user_id: str | None = None) -> dict:
+def validate_credential(data: dict, expected_user_id: str | None = None, *, require_uuid: bool = True) -> dict:
     """校验服务器返回的设备凭据，绝不回显 Token。"""
     device_id = data.get("deviceId")
     user_id = data.get("userId")
     token = data.get("deviceToken")
     status = data.get("status")
-    if not isinstance(device_id, str) or not UUID_V4_PATTERN.fullmatch(device_id):
-        raise ValueError("服务器返回的 deviceId 不是 UUID v4")
+    pattern = UUID_V4_PATTERN if require_uuid else DEVICE_ID_PATTERN
+    if not isinstance(device_id, str) or not pattern.fullmatch(device_id):
+        raise ValueError("服务器返回的 deviceId 格式无效")
     if not isinstance(user_id, str) or not user_id:
         raise ValueError("服务器返回的 userId 为空")
     if expected_user_id is not None and user_id != expected_user_id:
@@ -203,14 +213,32 @@ def flash_command(board: str, port: str, build_dir: Path, idf_dir: str | None = 
     )
 
 
-def server_register_script(server_dir: str, user_id: str | None) -> str:
+def _shell_assignment(name: str, value: str) -> str:
+    if not DEVICE_ID_PATTERN.fullmatch(value) or "'" in value:
+        raise ValueError(f"{name} contains unsafe shell characters")
+    return f"{name}='{value}'"
+
+
+def _shell_directory(value: str) -> str:
+    if not value.startswith("/") or not DEVICE_ID_PATTERN.fullmatch(value) or "'" in value:
+        raise ValueError("server directory contains unsafe shell characters")
+    return f"'{value}'"
+
+
+def server_register_script(
+    server_dir: str,
+    user_id: str | None,
+    *,
+    device_id: str | None = None,
+    include_commit: bool = False,
+) -> str:
     """构造在 Gateway 服务器上创建设备的 bash 脚本；stdout 仅输出凭据 JSON。"""
     lines = [
         "set -euo pipefail",
-        f"cd {server_dir}",
+        f"cd {_shell_directory(server_dir)}",
     ]
     if user_id:
-        lines.append(f"user_id={user_id}")
+        lines.append(_shell_assignment("user_id", user_id))
     else:
         lines.append(
             "user_id=$(docker compose exec -T postgres sh -lc "
@@ -218,8 +246,42 @@ def server_register_script(server_dir: str, user_id: str | None) -> str:
             "\"SELECT user_id FROM im_devices WHERE status='active' ORDER BY created_at DESC LIMIT 1\"' </dev/null)"
         )
         lines.append('if [ -z "$user_id" ]; then echo "no active device to inherit userId" >&2; exit 3; fi')
-    lines.append('docker compose exec -T gateway pnpm --silent device -- create --user-id "$user_id" </dev/null')
+    create = 'docker compose exec -T gateway pnpm --silent device -- create --user-id "$user_id"'
+    if device_id is not None:
+        lines.append(_shell_assignment("device_id", device_id))
+        create += ' --device-id "$device_id"'
+    create += " </dev/null"
+    if include_commit:
+        lines.extend(
+            [
+                "gateway_commit=$(git rev-parse HEAD)",
+                f'if ! printf "%s" "$gateway_commit" | grep -Eq "{GIT_COMMIT_PATTERN.pattern}"; then exit 4; fi',
+                f"credential=$({create})",
+                "printf '%s\\n' \"$credential\" | python3 -c 'import json,sys; d=json.load(sys.stdin); "
+                'd["gatewayCommit"]=sys.argv[1]; print(json.dumps(d,separators=(",",":")))\' "$gateway_commit"',
+            ]
+        )
+    else:
+        lines.append(create)
     return "\n".join(lines) + "\n"
+
+
+def server_revoke_script(server_dir: str, device_id: str) -> str:
+    """构造幂等吊销测试设备的远端脚本。"""
+    return (
+        "\n".join(
+            [
+                "set -euo pipefail",
+                f"cd {_shell_directory(server_dir)}",
+                _shell_assignment("device_id", device_id),
+                (
+                    "docker compose exec -T gateway pnpm --silent device -- revoke "
+                    '--device-id "$device_id" </dev/null >/dev/null'
+                ),
+            ]
+        )
+        + "\n"
+    )
 
 
 def run_remote(server: str, script: str, timeout: int = 180) -> str:
@@ -232,7 +294,7 @@ def run_remote(server: str, script: str, timeout: int = 180) -> str:
         check=False,
     )
     if result.returncode != 0:
-        raise SystemExit(f"服务器操作失败（{result.returncode}）：{result.stderr.strip()}")
+        raise RemoteOperationError("remote_operation_failed")
     return result.stdout
 
 
@@ -288,58 +350,48 @@ def main() -> None:
     else:
         print("跳过注册（无法 provisioning/smoke，请确认设备已注册）")
 
-    token_file: str | None = None
-    try:
-        if credential_data is not None:
-            with tempfile.NamedTemporaryFile(
-                "w", prefix=f"im-{board}-credentials.", suffix=".json", mode=0o600, delete=False
-            ) as handle:
-                handle.write(json.dumps(credential_data))
-                token_file = handle.name
-            print(f"[4/5] USB provisioning（{config['description']}）")
-            if not args.skip_provision:
-                run_with_getpass(
-                    PROVISION_SCRIPT,
-                    [
-                        "--port",
-                        port,
-                        "--gateway-origin",
-                        origin,
-                        "--device-id",
-                        credential_data["deviceId"],
-                        "--user-id",
-                        credential_data["userId"],
-                    ]
-                    + (["--force"] if args.force else []),
-                    credential_data["deviceToken"],
-                )
-            else:
-                print("跳过 provisioning")
-
-            print("[5/5] 真机认证冒烟（需设备已联网）")
-            if not args.skip_smoke:
-                run_with_getpass(
-                    PAIRING_SCRIPT,
-                    [
-                        "--port",
-                        port,
-                        "--auth-smoke",
-                        "--expected-device-id",
-                        credential_data["deviceId"],
-                        "--expected-user-id",
-                        credential_data["userId"],
-                        "--timeout",
-                        str(args.smoke_timeout),
-                    ],
-                    "",
-                )
-            else:
-                print("跳过认证冒烟")
+    if credential_data is not None:
+        print(f"[4/5] USB provisioning（{config['description']}）")
+        if not args.skip_provision:
+            run_with_getpass(
+                PROVISION_SCRIPT,
+                [
+                    "--port",
+                    port,
+                    "--gateway-origin",
+                    origin,
+                    "--device-id",
+                    credential_data["deviceId"],
+                    "--user-id",
+                    credential_data["userId"],
+                ]
+                + (["--force"] if args.force else []),
+                credential_data["deviceToken"],
+            )
         else:
-            print("未注册新设备；跳过 provisioning 与冒烟")
-    finally:
-        if token_file is not None:
-            Path(token_file).unlink(missing_ok=True)
+            print("跳过 provisioning")
+
+        print("[5/5] 真机认证冒烟（需设备已联网）")
+        if not args.skip_smoke:
+            run_with_getpass(
+                PAIRING_SCRIPT,
+                [
+                    "--port",
+                    port,
+                    "--auth-smoke",
+                    "--expected-device-id",
+                    credential_data["deviceId"],
+                    "--expected-user-id",
+                    credential_data["userId"],
+                    "--timeout",
+                    str(args.smoke_timeout),
+                ],
+                "",
+            )
+        else:
+            print("跳过认证冒烟")
+    else:
+        print("未注册新设备；跳过 provisioning 与冒烟")
 
     print(f"完成：{config['description']}（{board}）")
 

@@ -26,6 +26,10 @@ def load_module(name: str, path: Path) -> object:
 RUNNER = load_module("e2e_runner", SCRIPTS / "e2e_runner.py")
 EVIDENCE = load_module("e2e_evidence", SCRIPTS / "e2e_evidence.py")
 ADAPTERS = load_module("e2e_example_adapters", SCRIPTS / "e2e_example_adapters.py")
+COLLECTOR = load_module("collect_linx_e2e_evidence", SCRIPTS / "collect_linx_e2e_evidence.py")
+PAIRING = load_module("start_im_pairing", SCRIPTS / "start_im_pairing.py")
+HIL_DEVICE = load_module("e2e_hil_device", SCRIPTS / "e2e_hil_device.py")
+HIL_ADAPTERS = load_module("e2e_hil_adapters", SCRIPTS / "e2e_hil_adapters.py")
 RUN_E2E = load_module("run_e2e", CLI)
 
 
@@ -146,6 +150,13 @@ class RunE2eCliTest(unittest.TestCase):
             self.assertNotIn("Authorization", result.stderr)
             self.assertNotIn("canary", result.stderr)
 
+    def test_cli_rejects_hil_only_options_for_contract_examples(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            arguments = self.base_args(Path(directory)) + ["--server", "runner@example.test"]
+            result = self.run_cli(*arguments)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, "")
+
     def test_failed_and_timeout_results_build_consistent_evidence(self) -> None:
         config = RUNNER.RunnerConfig(
             layer="host",
@@ -245,6 +256,51 @@ class RunE2eCliTest(unittest.TestCase):
                 combined += evidence_path.read_text(encoding="utf-8")
             self.assertNotIn("must-not-appear", combined)
             self.assertNotIn("CANARY_TOKEN", combined)
+
+    def test_real_hil_pairing_requires_device_and_non_secret_gateway_options(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            arguments = self.base_args(Path(directory), "hil", "sparkbot")
+            arguments[arguments.index("lifecycle-example")] = "im-pairing"
+            result = self.run_cli(*arguments)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, "")
+            self.assertNotIn(str(Path(directory)), result.stderr)
+
+    def test_build_adapter_registers_real_hil_without_host_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            descriptor = Path(directory) / "device.json"
+            descriptor.write_text(
+                json.dumps({"schema_version": 1, "name": "bench-a", "port": "/dev/cu.test", "profile": "sparkbot"}),
+                encoding="utf-8",
+            )
+            args = RUN_E2E.parse_args(
+                [
+                    "--layer",
+                    "hil",
+                    "--journey",
+                    "im-pairing",
+                    "--profile",
+                    "sparkbot",
+                    "--artifact-dir",
+                    directory,
+                    "--timeout",
+                    "2",
+                    "--device",
+                    str(descriptor),
+                    "--server",
+                    "runner@example.test",
+                    "--server-dir",
+                    "/srv/voicelife",
+                    "--gateway-origin",
+                    "https://gateway.example.test",
+                    "--user-id",
+                    "user-test",
+                ]
+            )
+            adapter = RUN_E2E.build_adapter(args.layer, args.journey, args)
+        self.assertEqual(type(adapter).__name__, "HilPairingAdapter")
+        with self.assertRaises(ValueError):
+            RUN_E2E.build_adapter("host", "im-pairing", args)
 
 
 if __name__ == "__main__":

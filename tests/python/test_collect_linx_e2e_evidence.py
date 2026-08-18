@@ -142,6 +142,38 @@ class CollectLinxE2eEvidenceTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("degraded", error)
 
+    def test_hil_readiness_requires_provision_wifi_sntp_and_ready_in_order(self) -> None:
+        signals = [
+            {"signal": "provisioned"},
+            {"signal": "wifi_ready"},
+            {"signal": "sntp_synced"},
+            {"signal": "ready"},
+        ]
+        ok, code = MODULE.hil_readiness_status(signals)
+        self.assertTrue(ok, code)
+        self.assertEqual(MODULE.hil_readiness_markers(signals), ["provisioned", "wifi_ready", "sntp_synced", "ready"])
+
+        for invalid in (
+            [{"signal": "ready"}],
+            [{"signal": "provisioned"}, {"signal": "sntp_synced"}, {"signal": "wifi_ready"}, {"signal": "ready"}],
+            signals + [{"signal": "degraded", "state": 2, "code": 5}],
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertFalse(MODULE.hil_readiness_status(invalid)[0])
+
+    def test_parses_hil_wifi_and_stable_failure_markers_without_raw_text(self) -> None:
+        self.assertEqual(
+            MODULE.parse_im_signal("I VoiceLifeRuntime: WIFI_STA_GOT_IP=1 ip=192.0.2.1"), {"signal": "wifi_ready"}
+        )
+        self.assertEqual(
+            MODULE.parse_im_signal("W VoiceLifeRuntime: IM_PROVISION_FAILED code=4 token=canary"),
+            {"signal": "provision_failure", "code": 4},
+        )
+        self.assertEqual(
+            MODULE.parse_im_signal("W VoiceLifeRuntime: STARTUP_ERROR stage=linx_bootstrap code=5 password=canary"),
+            {"signal": "startup_failure", "code": 5},
+        )
+
     def test_write_evidence_records_im_signals_without_raw_line(self) -> None:
         voice = MODULE.parse_voice_event(
             "VOICE_EVENT session=local generation=1 event=stt_text_received detail_present=1 "

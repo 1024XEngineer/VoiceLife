@@ -55,6 +55,64 @@ class StartImPairingTest(unittest.TestCase):
         self.assertEqual(args.expected_device_id, "device-1")
         self.assertEqual(args.expected_user_id, "user-1")
 
+    def test_hil_lifecycle_requires_code_matching_scope_pending_and_expired(self):
+        lifecycle = PAIRING.PairingLifecycle("device-1", "user-1")
+        lifecycle.observe({"device_id": "device-1", "user_id": "user-1"})
+        lifecycle.observe({"code": "123456", "expires_at": "2026-08-03T00:01:00.000Z"})
+        lifecycle.observe({"status": "pending"})
+        lifecycle.observe({"status": "expired"})
+        self.assertTrue(lifecycle.complete)
+        self.assertEqual(lifecycle.public_markers, ["scope_matched", "code_valid", "pending", "expired"])
+
+    def test_hil_lifecycle_rejects_missing_order_mismatched_scope_and_wrong_terminal(self):
+        cases = (
+            (
+                [
+                    {"device_id": "device-1", "user_id": "user-1"},
+                    {"code": "123456", "expires_at": "2026-08-03T00:01:00.000Z"},
+                    {"status": "expired"},
+                ],
+                True,
+            ),
+            (
+                [
+                    {"device_id": "another-device", "user_id": "user-1"},
+                    {"code": "123456", "expires_at": "2026-08-03T00:01:00.000Z"},
+                    {"status": "pending"},
+                    {"status": "expired"},
+                ],
+                True,
+            ),
+            (
+                [
+                    {"device_id": "device-1", "user_id": "user-1"},
+                    {"code": "123456", "expires_at": "2026-08-03T00:01:00.000Z"},
+                    {"status": "pending"},
+                    {"status": "confirmed"},
+                ],
+                True,
+            ),
+            (
+                [
+                    {"device_id": "device-1", "user_id": "user-1"},
+                    {"code": "123456", "expires_at": "2026-08-03T00:01:00.000Z"},
+                    {"status": "pending"},
+                ],
+                False,
+            ),
+        )
+        for events, raises in cases:
+            with self.subTest(events=events):
+                lifecycle = PAIRING.PairingLifecycle("device-1", "user-1")
+                if raises:
+                    with self.assertRaises(PAIRING.PairingLifecycleError):
+                        for event in events:
+                            lifecycle.observe(event)
+                else:
+                    for event in events:
+                        lifecycle.observe(event)
+                    self.assertFalse(lifecycle.complete)
+
 
 if __name__ == "__main__":
     unittest.main()

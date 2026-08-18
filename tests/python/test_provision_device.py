@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -226,9 +228,51 @@ class CommandConstructionTest(unittest.TestCase):
 
     def test_server_register_script_creates_device_with_user(self) -> None:
         script = provision_device.server_register_script("/root/XE6-15", "user-test")
-        self.assertIn("cd /root/XE6-15", script)
+        self.assertIn("cd '/root/XE6-15'", script)
         self.assertIn("pnpm --silent device -- create --user-id", script)
         self.assertIn("user-test", script)
+
+    def test_hil_registration_uses_explicit_run_device_and_records_gateway_commit(self) -> None:
+        script = provision_device.server_register_script(
+            "/root/XE6-15", "user-test", device_id="e2e-" + "a" * 32, include_commit=True
+        )
+        self.assertIn("--device-id", script)
+        self.assertIn("e2e-" + "a" * 32, script)
+        self.assertIn("git rev-parse HEAD", script)
+        self.assertIn("gatewayCommit", script)
+        with self.assertRaises(ValueError):
+            provision_device.server_register_script("/safe; touch /tmp/pwn", "user-test")
+
+    def test_revoke_script_is_idempotent_and_does_not_contain_token(self) -> None:
+        script = provision_device.server_revoke_script("/root/XE6-15", "e2e-" + "a" * 32)
+        self.assertIn("device -- revoke --device-id", script)
+        self.assertIn("e2e-" + "a" * 32, script)
+        self.assertNotIn("token", script.lower())
+
+    def test_run_remote_reports_safe_error_without_stderr(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=9, stdout="", stderr="Authorization: Bearer canary /private/path"
+        )
+        with (
+            mock.patch.object(provision_device.subprocess, "run", return_value=completed),
+            self.assertRaises(provision_device.RemoteOperationError) as raised,
+        ):
+            provision_device.run_remote("host", "safe script")
+        self.assertEqual(raised.exception.code, "remote_operation_failed")
+        self.assertNotIn("canary", repr(raised.exception))
+        self.assertNotIn("private", repr(raised.exception))
+
+    def test_hil_run_scoped_device_id_can_be_validated_without_uuid(self) -> None:
+        credential = {
+            "deviceId": "e2e-" + "a" * 32,
+            "userId": "user-test",
+            "deviceToken": "A" * 43,
+            "status": "active",
+        }
+        self.assertEqual(
+            provision_device.validate_credential(credential, "user-test", require_uuid=False)["deviceId"],
+            credential["deviceId"],
+        )
 
 
 if __name__ == "__main__":

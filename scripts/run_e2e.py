@@ -11,6 +11,7 @@ from pathlib import Path
 
 from e2e_evidence import EvidenceValidationError, EvidenceWriteError, write_evidence
 from e2e_example_adapters import HilLifecycleExampleAdapter, HostImGatewayE2EAdapter, HostLifecycleExampleAdapter
+from e2e_hil_adapters import HilPairingAdapter, RealHilHardware
 from e2e_runner import ExitCode, FailureCategory, RunnerConfig, RunnerResult, exit_code_for, run_e2e
 
 PROFILES = {"host": frozenset({"host"}), "hil": frozenset({"sparkbot", "pcb"})}
@@ -31,6 +32,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--artifact-dir", type=Path, required=True)
     parser.add_argument("--timeout", type=float, required=True)
     parser.add_argument("--retries", type=int, default=0)
+    parser.add_argument("--device", type=Path)
+    parser.add_argument("--lease-dir", type=Path)
+    parser.add_argument("--server")
+    parser.add_argument("--server-dir")
+    parser.add_argument("--gateway-origin")
+    parser.add_argument("--user-id")
     return parser.parse_args(argv)
 
 
@@ -40,7 +47,28 @@ def validated_profile(layer: str, profile: str) -> str:
     return profile
 
 
-def build_adapter(layer: str, journey: str) -> object:
+def _required_hil_option(args: argparse.Namespace, name: str) -> object:
+    value = getattr(args, name)
+    if value is None:
+        raise ValueError("missing required HIL configuration")
+    return value
+
+
+def build_adapter(layer: str, journey: str, args: argparse.Namespace | None = None) -> object:
+    hil_options = ("device", "lease_dir", "server", "server_dir", "gateway_origin", "user_id")
+    if journey != "im-pairing" and args is not None and any(getattr(args, name) is not None for name in hil_options):
+        raise ValueError("HIL options require the im-pairing journey")
+    if journey == "im-pairing":
+        if layer != "hil" or args is None:
+            raise ValueError("unknown journey")
+        device = _required_hil_option(args, "device")
+        server = _required_hil_option(args, "server")
+        server_directory = _required_hil_option(args, "server_dir")
+        gateway_origin = _required_hil_option(args, "gateway_origin")
+        user_id = _required_hil_option(args, "user_id")
+        lease_directory = args.lease_dir or Path.home() / ".voicelife" / "hil-leases"
+        hardware = RealHilHardware(str(server), str(server_directory), str(gateway_origin), str(user_id))
+        return HilPairingAdapter(Path(device), lease_directory, hardware=hardware)
     if journey == "im-gateway-strong-reminder" and layer == "host":
         return HostImGatewayE2EAdapter()
     if journey != "lifecycle-example":
@@ -84,11 +112,26 @@ def build_evidence(result: RunnerResult, config: RunnerConfig) -> dict[str, obje
     )
     collected = result.collected
     metrics = collected.get("metrics", {}) if isinstance(collected, dict) else {}
+    scope = collected.get("scope", "runner_contract_only") if isinstance(collected, dict) else "runner_contract_only"
+    hardware_verified = (
+        collected.get("hardware_verified", False)
+        if isinstance(collected, dict) and result.status.value == "passed"
+        else False
+    )
+    hil = None
+    if scope == "hil_im_pairing" and result.status.value == "passed":
+        hil = {
+            "firmware_sha256": collected.get("firmware_sha256"),
+            "gateway_commit": collected.get("gateway_commit"),
+            "device_fingerprint": collected.get("device_fingerprint"),
+            "readiness_markers": collected.get("readiness_markers"),
+            "pairing_markers": collected.get("pairing_markers"),
+        }
     return {
         "schema_version": 1,
         "run_id": result.run_id,
         "correlation_id": result.correlation_id,
-        "scope": "runner_contract_only",
+        "scope": scope,
         "layer": config.layer,
         "journey": config.journey,
         "profile": config.profile,
@@ -109,7 +152,8 @@ def build_evidence(result: RunnerResult, config: RunnerConfig) -> dict[str, obje
             "status": "failed" if result.cleanup_errors else "passed",
             "error_codes": [error.code for error in result.cleanup_errors],
         },
-        "hardware_verified": False,
+        "hardware_verified": hardware_verified,
+        "hil": hil,
     }
 
 
@@ -154,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
             cleanup_timeout_s=min(5.0, args.timeout),
             retries=args.retries,
         )
-        adapter = build_adapter(args.layer, args.journey)
+        adapter = build_adapter(args.layer, args.journey, args)
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return int(ExitCode.CONFIGURATION)
