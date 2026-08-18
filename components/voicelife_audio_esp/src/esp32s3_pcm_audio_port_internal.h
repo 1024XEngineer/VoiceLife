@@ -153,6 +153,7 @@ class Esp32s3PcmAudioPorts::Impl final {
     bool input_open_ = false;
     bool output_open_ = false;
 #ifdef ESP_PLATFORM
+    bool output_closing_ = false;
     // A barge-in flush powers down the amplifier. The next accepted TTS frame
     // must restore that request before it reaches I2S.
     bool amplifier_enabled_ = false;

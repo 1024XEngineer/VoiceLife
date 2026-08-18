@@ -220,6 +220,7 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
         wire_scratch_.reserve(static_cast<std::size_t>(wire_bytes));
     }
     output_open_ = true;
+    output_closing_ = false;
 #ifdef ESP_PLATFORM
     ESP_LOGI(voicelife::audio_esp::detail::kAudioRuntimeTag, "OUTPUT_OPEN sr=%u ch=%u bits=%u",
              playback_format_->sample_rate_hz, playback_format_->channels, playback_format_->bits_per_sample);
@@ -423,7 +424,7 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(voice::AudioFrame frame) {
     return detail::Unavailable("ESP32-S3 PCM Audio Port 只能在 ESP-IDF 目标运行");
 #else
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!output_open_ || !playback_format_.has_value()) {
+    if (!output_open_ || output_closing_ || !playback_format_.has_value()) {
         return detail::Unavailable("输出端口尚未打开");
     }
     if (frame.payload.empty() || frame.payload.size() % (sizeof(int16_t) * playback_format_->channels) != 0) {
@@ -509,6 +510,7 @@ Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
 #ifdef ESP_PLATFORM
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        output_closing_ = true;
         if (output_writing_) {
             amplifier_disable_pending_ = true;
         } else if (amplifier_enabled_ && amplifier_callback_) {
@@ -542,6 +544,7 @@ Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
 
     lock.lock();
     output_open_ = false;
+    output_closing_ = false;
     playback_format_.reset();
     if (!input_open_) {
         DestroyChannelsLocked();
