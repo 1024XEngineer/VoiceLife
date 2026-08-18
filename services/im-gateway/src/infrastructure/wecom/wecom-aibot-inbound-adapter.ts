@@ -14,6 +14,8 @@ const MAX_TEXT_LENGTH = 16 * 1024;
 export interface WecomAibotInboundAdapterOptions {
     readonly channelAccountId: ChannelAccountId;
     readonly botId: string;
+    /** 可替换的接收时间来源，仅在平台帧未提供 create_time 时使用。 */
+    readonly now?: () => IsoDateTime;
 }
 
 /**
@@ -28,12 +30,15 @@ export class WecomAibotInboundAdapter implements PlatformCapabilityPort {
 
     private readonly botId: string;
 
+    private readonly now: () => IsoDateTime;
+
     /**
      * @param options 渠道账号与企业微信机器人标识。
      */
     public constructor(options: WecomAibotInboundAdapterOptions) {
         this.channelAccountId = requiredOption(options.channelAccountId, 'channel account ID') as ChannelAccountId;
         this.botId = requiredOption(options.botId, 'bot ID');
+        this.now = options.now ?? (() => new Date().toISOString() as IsoDateTime);
     }
 
     /** {@inheritDoc PlatformCapabilityPort.capabilities} */
@@ -73,10 +78,13 @@ export class WecomAibotInboundAdapter implements PlatformCapabilityPort {
         if (requiredString(body, 'chattype', 'WeCom AI Bot chat type') !== 'single') {
             throw new ImGatewayError('invalid_contract', 'WeCom AI Bot group chat is not supported');
         }
+        if (body.chatid !== undefined) {
+            throw new ImGatewayError('invalid_contract', 'WeCom AI Bot group chat is not supported');
+        }
         const externalEventId = requiredExternalId(body, 'msgid', 'WeCom AI Bot message ID');
         const from = requiredRecord(body.from, 'WeCom AI Bot sender');
         const externalUserId = requiredExternalId(from, 'userid', 'WeCom AI Bot userid');
-        const occurredAt = eventTime(body.create_time);
+        const occurredAt = body.create_time === undefined ? this.now() : eventTime(body.create_time);
         const messageType = requiredString(body, 'msgtype', 'WeCom AI Bot message type').toLowerCase();
         if (messageType !== 'text') {
             throw new ImGatewayError('capability_not_supported', 'WeCom AI Bot only supports text messages');

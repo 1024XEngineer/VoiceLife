@@ -3,8 +3,13 @@ import { test } from 'node:test';
 
 import { ImGatewayError, WecomAibotInboundAdapter } from '../dist/index.js';
 
-function adapter() {
-    return new WecomAibotInboundAdapter({ channelAccountId: 'channel-wecom', botId: 'bot-fixture' });
+function adapter(overrides = {}) {
+    return new WecomAibotInboundAdapter({
+        channelAccountId: 'channel-wecom',
+        botId: 'bot-fixture',
+        now: () => '2026-08-18T00:00:00.000Z',
+        ...overrides,
+    });
 }
 
 function textFrame(overrides = {}) {
@@ -54,11 +59,21 @@ test('WeCom AI Bot preserves ordinary single-chat text as a message event', asyn
     });
 });
 
-test('WeCom AI Bot rejects a message for another bot, an empty userid, and group chat', async () => {
+test('WeCom AI Bot uses its receive time when a valid single-chat message omits create_time', async () => {
+    const frame = textFrame({ msgid: 'message-without-time' });
+    delete frame.body.create_time;
+
+    const event = await adapter().normalizeInbound(frame);
+
+    assert.equal(event.occurredAt, '2026-08-18T00:00:00.000Z');
+});
+
+test('WeCom AI Bot rejects a message for another bot, an empty userid, and group context', async () => {
     for (const frame of [
         textFrame({ aibotid: 'bot-other' }),
         textFrame({ from: { userid: '  ' } }),
         textFrame({ chattype: 'group', chatid: 'chat-fixture' }),
+        textFrame({ chatid: 'chat-fixture' }),
     ]) {
         await assert.rejects(
             () => adapter().normalizeInbound(frame),
