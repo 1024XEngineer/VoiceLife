@@ -193,6 +193,13 @@ test('device CLI rejects invalid arguments before database configuration or migr
     }
 });
 
+test('production image preserves silent pnpm output for credential-safe device CLI execution', async () => {
+    const dockerfile = await readFile(new URL('../Dockerfile', import.meta.url), 'utf8');
+    const npmConfig = await readFile(new URL('../.npmrc', import.meta.url), 'utf8');
+    assert.match(npmConfig, /^reporter=silent$/mu);
+    assert.match(dockerfile, /COPY package\.json \.npmrc pnpm-lock\.yaml/u);
+});
+
 test('pnpm device keeps lifecycle output off stdout on a create argument failure', () => {
     const result = spawnSync('pnpm', ['device', '--', 'create'], {
         cwd: new URL('..', import.meta.url),
