@@ -68,6 +68,7 @@ Schedule CompleteSchedule() {
         .location = "会议室 C",
         .notes = "完整字段往返",
         .rule_id = 88,
+        .reminder_task_id = 900'001,
         .status = ScheduleStatus::kCancelled,
         .created_at = At(2'000'000'000),
         .updated_at = At(2'000'000'100),
@@ -139,12 +140,14 @@ void CheckInsertAndRoundTrip(const std::filesystem::path& path) {
     Check(complete_row.event == complete_input.event && complete_row.start_time == complete_input.start_time &&
               complete_row.end_time == complete_input.end_time && complete_row.location == complete_input.location &&
               complete_row.notes == complete_input.notes && complete_row.rule_id == complete_input.rule_id &&
+              complete_row.reminder_task_id == complete_input.reminder_task_id &&
               complete_row.status == complete_input.status && complete_row.created_at == complete_input.created_at &&
               complete_row.updated_at == complete_input.updated_at,
           "完整日程的所有字段都应往返一致");
     const Schedule& minimal_row = stored.value->back();
     Check(!minimal_row.start_time.has_value() && !minimal_row.end_time.has_value() &&
-              !minimal_row.location.has_value() && !minimal_row.notes.has_value() && !minimal_row.rule_id.has_value(),
+              !minimal_row.location.has_value() && !minimal_row.notes.has_value() && !minimal_row.rule_id.has_value() &&
+              !minimal_row.reminder_task_id.has_value(),
           "最小日程的可空字段应保持为空");
 }
 
@@ -157,12 +160,12 @@ void CheckMapperValidation(const std::filesystem::path& path) {
     SqliteDatabase database(path.string());
     Check(database.Open().ok(), "Mapper 测试应打开数据库");
 
-    auto invalid_status = database.Prepare("SELECT 1, '日程', NULL, NULL, NULL, NULL, NULL, 99, 100, 100");
+    auto invalid_status = database.Prepare("SELECT 1, '日程', NULL, NULL, NULL, NULL, NULL, NULL, 99, 100, 100");
     Check(invalid_status.ok() && invalid_status.value->Step().ok(), "应构造非法状态结果行");
     Check(mapping::ReadSchedule(*invalid_status.value).status.code == ErrorCode::kInternal,
           "Mapper 应拒绝非法日程状态");
 
-    auto null_event = database.Prepare("SELECT 1, NULL, NULL, NULL, NULL, NULL, NULL, 1, 100, 100");
+    auto null_event = database.Prepare("SELECT 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 100, 100");
     Check(null_event.ok() && null_event.value->Step().ok(), "应构造空标题结果行");
     Check(mapping::ReadSchedule(*null_event.value).status.code == ErrorCode::kInternal, "Mapper 应拒绝空标题结果行");
 

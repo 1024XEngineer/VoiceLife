@@ -12,11 +12,12 @@ idf_component_register(
         "src/service/schedule_operation_service.cc"
         "src/service/schedule_rule_service_helpers.cc"
         "src/service/schedule_rule_service.cc"
+        "src/service/schedule_reminder_service.cc"
         "src/factory/schedule_factory.cc"
         "src/rules/schedule_time_rules.cc"
         "src/calendar.cc"
         "src/rules/recurrence_planner.cc"
         "src/helpers/schedule_update_helpers.cc"
     INCLUDE_DIRS "include"
-    REQUIRES voicelife_contracts
+    REQUIRES voicelife_contracts voicelife_timing
 )
