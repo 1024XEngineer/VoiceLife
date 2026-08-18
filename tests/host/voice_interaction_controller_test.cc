@@ -72,17 +72,22 @@ int main() {
                     "重开语音用例应先进入聆听");
     CheckTransition(restart_during_finalization, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kFinalizing,
                     VoiceInteractionAction::kStopVoiceTurn, "松开后应进入最终识别等待");
-    CheckTransition(restart_during_finalization, VoiceInteractionEvent::kPressDown, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kInterruptAndStartCapture,
-                    "等待最终识别时再次按下必须取消旧回合并立即开始新采集");
+    CheckTransition(restart_during_finalization, VoiceInteractionEvent::kPressDown,
+                    VoiceInteractionState::kInterrupting, VoiceInteractionAction::kInterruptAndStartCapture,
+                    "等待最终识别时再次按下必须先取消旧回合，不能提前显示新采集");
+    CheckTransition(restart_during_finalization, VoiceInteractionEvent::kCaptureStarted,
+                    VoiceInteractionState::kListening, VoiceInteractionAction::kNone,
+                    "旧回合取消后只有成功采集确认才能进入新聆听");
 
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
                     VoiceInteractionAction::kStartVoiceTurn, "按住说打断路径前应可进入一轮语音");
     CheckTransition(controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
                     VoiceInteractionAction::kNone, "按住说打断路径应可进入播报状态");
-    CheckTransition(controller, VoiceInteractionEvent::kPressDown, VoiceInteractionState::kListening,
+    CheckTransition(controller, VoiceInteractionEvent::kPressDown, VoiceInteractionState::kInterrupting,
                     VoiceInteractionAction::kInterruptAndStartCapture,
-                    "播报中按住说只能重启采集，不能伪造本地唤醒事件");
+                    "播报中按住说必须先显示打断中，不能伪造本地唤醒或提前显示聆听");
+    CheckTransition(controller, VoiceInteractionEvent::kCaptureStarted, VoiceInteractionState::kListening,
+                    VoiceInteractionAction::kNone, "打断后的采集确认才进入聆听");
     CheckTransition(controller, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kFinalizing,
                     VoiceInteractionAction::kStopVoiceTurn, "打断后松开触摸应进入等待最终 STT");
 
@@ -117,6 +122,20 @@ int main() {
                     VoiceInteractionAction::kStartVoiceTurn, "待机中唤醒应开始新一轮云端语音");
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kStopVoiceTurn, "聆听中再次唤醒应关闭当前音频通道");
+
+    VoiceInteractionController interrupt_ack_controller;
+    CheckTransition(interrupt_ack_controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "打断确认用例应先进入待机");
+    CheckTransition(interrupt_ack_controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
+                    VoiceInteractionAction::kStartVoiceTurn, "打断确认用例应先开始一轮语音");
+    CheckTransition(interrupt_ack_controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
+                    VoiceInteractionAction::kNone, "打断确认用例应进入播报");
+    CheckTransition(interrupt_ack_controller, VoiceInteractionEvent::kInterruptAndAcknowledge,
+                    VoiceInteractionState::kInterrupting, VoiceInteractionAction::kInterruptAndStartVoiceTurn,
+                    "确认请求未获 Provider 接受前不得提前显示聆听");
+    CheckTransition(interrupt_ack_controller, VoiceInteractionEvent::kInterruptAcknowledged,
+                    VoiceInteractionState::kListening, VoiceInteractionAction::kNone,
+                    "Provider 接受确认请求后才进入聆听");
 
     const auto invalid = controller.Handle(VoiceInteractionEvent::kTtsStopped);
     Check(invalid.status.code == ErrorCode::kConflict && controller.state() == VoiceInteractionState::kStandby,

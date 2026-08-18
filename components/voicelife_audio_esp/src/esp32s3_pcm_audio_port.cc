@@ -206,23 +206,39 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
     if (nominal_latency_ms > options_.maximum_playback_latency_ms) {
         return detail::Invalid("播放队列深度超过最大延迟预算");
     }
+    if (format.frame_duration_ms > options_.maximum_playback_latency_ms) {
+        return detail::Invalid("协商下行 PCM 帧时长超过最大播放延迟预算");
+    }
     // 播放端固定用板级 Profile 格式，协商/上游帧在 Push 时统一重采样。
     // 这样 I2S 时钟恒定（与 MVP 一致），避免 16k 协商导致硬件无声。
     playback_format_ = profile_.playback_i2s.format;
-    const uint16_t scratch_frame_duration_ms = std::max(playback_format_->frame_duration_ms, format.frame_duration_ms);
+    // 下行 binary message 可以合法聚合多个协商帧。PushOutput 按真实 PCM 时长
+    // 限制为 maximum_playback_latency_ms；加 1ms 吸收 PcmDurationMs 的整除截断，
+    // 使所有已接受帧都能在输出任务使用既有 scratch 完成重采样。
+    const uint64_t scratch_frame_duration_ms =
+        std::max<uint64_t>({playback_format_->frame_duration_ms, format.frame_duration_ms,
+                            static_cast<uint64_t>(options_.maximum_playback_latency_ms) + 1U});
     const uint64_t output_samples = static_cast<uint64_t>(playback_format_->sample_rate_hz) *
                                     scratch_frame_duration_ms * playback_format_->channels / 1000U;
     const uint64_t wire_slots =
         profile_.playback_i2s.wire_slot_count == 0 ? playback_format_->channels : profile_.playback_i2s.wire_slot_count;
     // 这些缓冲仅由输出任务使用；在 Open 阶段一次性分配，避免首帧 TTS 在
     // I2S 实时路径扩容。Profile 已校验位宽与 slot 数，以下计算仍保留上限保护。
-    if (output_samples > 0 && output_samples <= codec_pcm_scratch_.max_size()) {
-        codec_pcm_scratch_.reserve(static_cast<std::size_t>(output_samples));
+    if (output_samples == 0 || output_samples > codec_pcm_scratch_.max_size()) {
+        output_open_ = false;
+        playback_format_.reset();
+        return detail::Invalid("下行 PCM scratch 预算超出平台上限");
     }
-    const uint64_t wire_bytes = output_samples * wire_slots * profile_.playback_i2s.wire_bits_per_sample / 8U;
-    if (wire_bytes > 0 && wire_bytes <= wire_scratch_.max_size()) {
-        wire_scratch_.reserve(static_cast<std::size_t>(wire_bytes));
+    codec_pcm_scratch_.reserve(static_cast<std::size_t>(output_samples));
+    const uint64_t wire_period_samples = static_cast<uint64_t>(playback_format_->sample_rate_hz) *
+                                         playback_format_->frame_duration_ms * playback_format_->channels / 1000U;
+    const uint64_t wire_bytes = wire_period_samples * wire_slots * profile_.playback_i2s.wire_bits_per_sample / 8U;
+    if (wire_bytes == 0 || wire_bytes > wire_scratch_.max_size()) {
+        output_open_ = false;
+        playback_format_.reset();
+        return detail::Invalid("I2S wire scratch 预算超出平台上限");
     }
+    wire_scratch_.reserve(static_cast<std::size_t>(wire_bytes));
     output_open_ = true;
     output_closing_ = false;
     output_cleanup_started_ = false;

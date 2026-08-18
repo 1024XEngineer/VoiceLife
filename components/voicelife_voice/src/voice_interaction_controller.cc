@@ -48,7 +48,9 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
                 transition.action = VoiceInteractionAction::kStartCapture;
             } else if (state_ == VoiceInteractionState::kSpeaking || state_ == VoiceInteractionState::kThinking ||
                        state_ == VoiceInteractionState::kFinalizing) {
-                state_ = VoiceInteractionState::kListening;
+                // 打断尚未完成时，不能先显示“聆听中”。成功开始采集的证据
+                // 才会将 kInterrupting 收口到 kListening；失败可安全回待机。
+                state_ = VoiceInteractionState::kInterrupting;
                 transition.action = VoiceInteractionAction::kInterruptAndStartCapture;
             } else {
                 return InvalidTransition(state_, event);
@@ -77,12 +79,18 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             break;
         case VoiceInteractionEvent::kCaptureStarted:
             // 事务式启动确认：kOpeningCapture → kListening（采集真正开始）；
-            // kListening 幂等（重复 capture_started 无害）。
-            if (state_ == VoiceInteractionState::kOpeningCapture) {
+            // 从打断重启采集也必须等待同一确认；kListening 幂等。
+            if (state_ == VoiceInteractionState::kOpeningCapture || state_ == VoiceInteractionState::kInterrupting) {
                 state_ = VoiceInteractionState::kListening;
             } else if (state_ != VoiceInteractionState::kListening) {
                 return InvalidTransition(state_, event);
             }
+            break;
+        case VoiceInteractionEvent::kInterruptAcknowledged:
+            // “别说了”的确认请求已被 Provider 接受。确认 TTS 随后会把
+            // kListening 转到 kSpeaking；请求失败则由 kStandbyReady 收口。
+            if (state_ != VoiceInteractionState::kInterrupting) return InvalidTransition(state_, event);
+            state_ = VoiceInteractionState::kListening;
             break;
         case VoiceInteractionEvent::kEndpointDetected:
             // VAD 检测到说话结束：停止采集并发送 listen.stop（kStopVoiceTurn），
@@ -126,12 +134,13 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             break;
         case VoiceInteractionEvent::kInterruptAndAcknowledge:
             // “别说了”不是静默终止：先隔离正在播放的旧回合，再经 Provider
-            // 合成一次“收到！”。TTS 结束后沿 kTtsStopped 正常进入聆听。
+            // 合成一次“收到！”。提交成功后才进入聆听，避免队列/网络失败时
+            // 将 UI 永久留在“聆听中”。
             if (state_ != VoiceInteractionState::kListening && state_ != VoiceInteractionState::kThinking &&
                 state_ != VoiceInteractionState::kSpeaking && state_ != VoiceInteractionState::kFinalizing) {
                 return InvalidTransition(state_, event);
             }
-            state_ = VoiceInteractionState::kListening;
+            state_ = VoiceInteractionState::kInterrupting;
             transition.action = VoiceInteractionAction::kInterruptAndStartVoiceTurn;
             break;
         case VoiceInteractionEvent::kInterruptRequested:

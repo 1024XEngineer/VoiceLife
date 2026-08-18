@@ -669,33 +669,46 @@ class Runtime final {
         EnqueueEvent(event, wake_word);
     }
 
-    void QueueVoiceTurn(std::string_view wake_word) {
-        if (wake_queue_ == nullptr) return;
+    bool EnqueueBoardRequest(const BoardRequest& request, std::string_view action) {
+        if (wake_queue_ == nullptr) {
+            ESP_LOGE(kTag, "BOARD_REQUEST_UNAVAILABLE action=%.*s", static_cast<int>(action.size()), action.data());
+            return false;
+        }
+        // 仅由事件循环或 WakeTask 调用，绝不在 I2S、VAD 或网络回调上等待。
+        // 短暂等待可覆盖 WakeTask 正在收尾前一请求的窗口；超时必须显式上报，
+        // 不能让 UI 已迁移而硬件动作被静默丢弃。
+        constexpr TickType_t kBoardRequestWait = pdMS_TO_TICKS(50);
+        if (xQueueSend(wake_queue_, &request, kBoardRequestWait) == pdTRUE) return true;
+        const uint32_t dropped = ++dropped_board_requests_;
+        ESP_LOGE(kTag, "BOARD_REQUEST_QUEUE_FULL action=%.*s dropped=%u", static_cast<int>(action.size()),
+                 action.data(), static_cast<unsigned>(dropped));
+        return false;
+    }
+
+    bool QueueVoiceTurn(std::string_view wake_word) {
         BoardRequest request{};
         request.kind = BoardRequestKind::kWakeWord;
         const std::size_t size =
             wake_word.size() < sizeof(request.wake_word) - 1 ? wake_word.size() : sizeof(request.wake_word) - 1;
         std::memcpy(request.wake_word, wake_word.data(), size);
         request.wake_word[size] = '\0';
-        (void)xQueueSend(wake_queue_, &request, 0);
+        return EnqueueBoardRequest(request, "wake_word");
     }
 
-    void QueueInterruptAndVoiceTurn(std::string_view wake_word) {
-        if (wake_queue_ == nullptr) return;
+    bool QueueInterruptAndVoiceTurn(std::string_view wake_word) {
         BoardRequest request{};
         request.kind = BoardRequestKind::kInterruptAndWakeWord;
         const std::size_t size =
             wake_word.size() < sizeof(request.wake_word) - 1 ? wake_word.size() : sizeof(request.wake_word) - 1;
         std::memcpy(request.wake_word, wake_word.data(), size);
         request.wake_word[size] = '\0';
-        (void)xQueueSend(wake_queue_, &request, 0);
+        return EnqueueBoardRequest(request, "interrupt_wake_word");
     }
 
-    void QueueStandbyRecovery(bool settle_controller = true) {
-        if (wake_queue_ == nullptr) return;
+    bool QueueStandbyRecovery(bool settle_controller = true) {
         BoardRequest recovery{};
         recovery.settle_controller = settle_controller;
-        (void)xQueueSend(wake_queue_, &recovery, 0);
+        return EnqueueBoardRequest(recovery, "restore_standby");
     }
 
     bool QueueSystemSpeech(std::string_view text) {
@@ -708,11 +721,7 @@ class Runtime final {
         request.kind = BoardRequestKind::kInterrupt;
         std::memcpy(request.system_speech, text.data(), text.size());
         request.system_speech[text.size()] = '\0';
-        if (xQueueSend(wake_queue_, &request, 0) != pdTRUE) {
-            ESP_LOGW(kTag, "SYSTEM_SPEECH_QUEUE_FULL=1");
-            return false;
-        }
-        return true;
+        return EnqueueBoardRequest(request, "system_speech");
     }
 
     // 下行长文本滚动由显示 Adapter 负责（Ssd1306PresentationAdapter）。
@@ -760,32 +769,28 @@ class Runtime final {
         }
     }
 
-    void QueueInterrupt() {
-        if (wake_queue_ == nullptr) return;
+    bool QueueInterrupt() {
         BoardRequest request{};
         request.kind = BoardRequestKind::kInterrupt;
-        (void)xQueueSend(wake_queue_, &request, 0);
+        return EnqueueBoardRequest(request, "interrupt");
     }
 
-    void QueueCaptureStart() {
-        if (wake_queue_ == nullptr) return;
+    bool QueueCaptureStart() {
         BoardRequest request{};
         request.kind = BoardRequestKind::kStartCapture;
-        (void)xQueueSend(wake_queue_, &request, 0);
+        return EnqueueBoardRequest(request, "start_capture");
     }
 
-    void QueueCaptureStop() {
-        if (wake_queue_ == nullptr) return;
+    bool QueueCaptureStop() {
         BoardRequest request{};
         request.kind = BoardRequestKind::kStopCapture;
-        (void)xQueueSend(wake_queue_, &request, 0);
+        return EnqueueBoardRequest(request, "stop_capture");
     }
 
-    void QueueInterruptAndCapture() {
-        if (wake_queue_ == nullptr) return;
+    bool QueueInterruptAndCapture() {
         BoardRequest request{};
         request.kind = BoardRequestKind::kInterruptAndStartCapture;
-        (void)xQueueSend(wake_queue_, &request, 0);
+        return EnqueueBoardRequest(request, "interrupt_start_capture");
     }
 
 #if CONFIG_VOICELIFE_STATE_FLOW_TEST
@@ -1219,36 +1224,43 @@ class Runtime final {
             case voice::VoiceInteractionAction::kNone:
                 return Status::Ok();
             case voice::VoiceInteractionAction::kStartCapture:
-                QueueCaptureStart();
-                return Status::Ok();
+                if (QueueCaptureStart()) return Status::Ok();
+                break;
             case voice::VoiceInteractionAction::kStartVoiceTurn:
                 if (wake_word.empty()) {
                     return Status::Error(ErrorCode::kInvalidArgument, "本地唤醒词不能为空");
                 }
-                QueueVoiceTurn(wake_word);
-                return Status::Ok();
+                if (QueueVoiceTurn(wake_word)) return Status::Ok();
+                break;
             case voice::VoiceInteractionAction::kStopVoiceTurn:
-                QueueCaptureStop();
-                return Status::Ok();
+                if (QueueCaptureStop()) return Status::Ok();
+                break;
             case voice::VoiceInteractionAction::kInterruptAndStartCapture:
-                QueueInterruptAndCapture();
-                return Status::Ok();
+                if (QueueInterruptAndCapture()) return Status::Ok();
+                break;
             case voice::VoiceInteractionAction::kInterruptAndStartVoiceTurn:
                 if (wake_word.empty()) {
                     return Status::Error(ErrorCode::kInvalidArgument, "本地打断词不能为空");
                 }
-                QueueInterruptAndVoiceTurn(wake_word);
-                return Status::Ok();
+                if (QueueInterruptAndVoiceTurn(wake_word)) return Status::Ok();
+                break;
             case voice::VoiceInteractionAction::kRestoreStandby:
                 // transport_disconnected 必须停在 kReconnecting；物理唤醒门可恢复，
                 // 但不可用 kStandbyReady 把可见状态提前伪装为空闲。
-                QueueStandbyRecovery(interaction_.state() != voice::VoiceInteractionState::kReconnecting);
-                return Status::Ok();
+                if (QueueStandbyRecovery(interaction_.state() != voice::VoiceInteractionState::kReconnecting)) {
+                    return Status::Ok();
+                }
+                break;
             case voice::VoiceInteractionAction::kInterruptSession:
-                QueueInterrupt();
-                return Status::Ok();
+                if (QueueInterrupt()) return Status::Ok();
+                break;
         }
-        return Status::Error(ErrorCode::kInternal, "未知板端交互动作");
+        // 状态迁移已经发生但硬件动作没有被 WakeTask 接收。后续 kFailure
+        // 将可见状态收口为 Error，而非永久显示 Listening/Interrupting。
+        if (!EnqueueEvent(voice::VoiceInteractionEvent::kFailure)) {
+            ESP_LOGE(kTag, "BOARD_REQUEST_FAILURE_EVENT_DROPPED=1");
+        }
+        return Status::Error(ErrorCode::kUnavailable, "板端语音控制请求未进入执行队列");
     }
 
     void LogVoiceEvidence(const voice::VoiceEvidence& evidence) { EnqueueVoiceEvidence(evidence); }
@@ -1269,9 +1281,10 @@ class Runtime final {
                  static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
                  static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
                  static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
-        ESP_LOGI(kTag, "INTERACTION_QUEUE_STATS control_dropped=%u best_effort_dropped=%u",
+        ESP_LOGI(kTag, "INTERACTION_QUEUE_STATS control_dropped=%u best_effort_dropped=%u board_dropped=%u",
                  static_cast<unsigned>(dropped_control_events_.load()),
-                 static_cast<unsigned>(dropped_best_effort_events_.load()));
+                 static_cast<unsigned>(dropped_best_effort_events_.load()),
+                 static_cast<unsigned>(dropped_board_requests_.load()));
         ESP_LOGI(kTag, "VOICE_EVENT session=%s generation=%llu event=%s detail_present=%d latency_from_capture_ms=%llu",
                  evidence.session_id.c_str(), static_cast<unsigned long long>(evidence.generation),
                  evidence.event.c_str(), evidence.detail.empty() ? 0 : 1, static_cast<unsigned long long>(latency_ms));
@@ -1379,6 +1392,9 @@ class Runtime final {
             // 本地唤醒/打断确认已经成功提交给 Provider，但真正的 tts.start
             // 可能永远不到达（断线或服务端无响应）。此时 UI 已处于
             // kListening，必须有边界地回到待机，不能无限显示“聆听中”。
+            if (evidence.event == "interrupt_ack_requested") {
+                (void)EnqueueEvent(voice::VoiceInteractionEvent::kInterruptAcknowledged);
+            }
             StartListenTimer(kListenStartTimeoutMs);
         } else if (evidence.event == "tts_sentence_started") {
             // 回写服务端回复句子到屏幕（detail 为 TTS 文本），并立即提交快照
@@ -1523,6 +1539,7 @@ class Runtime final {
     std::deque<InteractionEventItem> best_effort_event_queue_;
     std::atomic<uint32_t> dropped_control_events_{0};
     std::atomic<uint32_t> dropped_best_effort_events_{0};
+    std::atomic<uint32_t> dropped_board_requests_{0};
     mutable std::mutex event_mutex_;
     std::condition_variable event_cv_;
     TaskHandle_t event_task_ = nullptr;
@@ -1550,7 +1567,7 @@ class Runtime final {
     }
 
     /** @brief 非阻塞投递：控制事件独立于显示/诊断背压，并优先被消费。 */
-    void EnqueueInteractionItem(InteractionEventItem item) {
+    bool EnqueueInteractionItem(InteractionEventItem item) {
         const bool best_effort = IsBestEffortEvent(item);
         {
             std::lock_guard<std::mutex> lock(event_mutex_);
@@ -1563,20 +1580,21 @@ class Runtime final {
                 } else {
                     const uint32_t dropped = ++dropped_control_events_;
                     ESP_LOGW(kTag, "INTERACTION_CONTROL_QUEUE_FULL dropped=%u", static_cast<unsigned>(dropped));
-                    return;
+                    return false;
                 }
             }
             queue.push_back(std::move(item));
         }
         event_cv_.notify_one();
+        return true;
     }
 
     /** @brief 投递交互事件；任何线程可调用。 */
-    void EnqueueEvent(voice::VoiceInteractionEvent event, std::string_view wake_word = {}) {
+    bool EnqueueEvent(voice::VoiceInteractionEvent event, std::string_view wake_word = {}) {
         InteractionEventItem item{};
         item.event = event;
         item.wake_word = std::string(wake_word);
-        EnqueueInteractionItem(std::move(item));
+        return EnqueueInteractionItem(std::move(item));
     }
 
     /** @brief 投递纯显示刷新（TTS 文本等，事件循环内应用，不触发状态机）。 */
