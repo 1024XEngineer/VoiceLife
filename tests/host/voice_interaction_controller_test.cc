@@ -64,6 +64,18 @@ int main() {
     CheckTransition(controller, VoiceInteractionEvent::kFinalizationTimedOut, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "最终 STT 超时应恢复待机");
 
+    VoiceInteractionController restart_during_finalization;
+    CheckTransition(restart_during_finalization, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "重开语音用例应先完成启动");
+    CheckTransition(restart_during_finalization, VoiceInteractionEvent::kWakeDetected,
+                    VoiceInteractionState::kListening, VoiceInteractionAction::kStartVoiceTurn,
+                    "重开语音用例应先进入聆听");
+    CheckTransition(restart_during_finalization, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kFinalizing,
+                    VoiceInteractionAction::kStopVoiceTurn, "松开后应进入最终识别等待");
+    CheckTransition(restart_during_finalization, VoiceInteractionEvent::kPressDown, VoiceInteractionState::kListening,
+                    VoiceInteractionAction::kInterruptAndStartCapture,
+                    "等待最终识别时再次按下必须取消旧回合并立即开始新采集");
+
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
                     VoiceInteractionAction::kStartVoiceTurn, "按住说打断路径前应可进入一轮语音");
     CheckTransition(controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,

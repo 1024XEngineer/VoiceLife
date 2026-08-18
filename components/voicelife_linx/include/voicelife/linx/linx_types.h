@@ -71,7 +71,9 @@ struct LinxTransportSink {
     std::function<void()> on_connected;
     std::function<void()> on_disconnected;
     std::function<void(std::string_view)> on_text;
-    std::function<void(const std::vector<uint8_t>&)> on_binary;
+    // Binary audio is owned by the receiver so a WebSocket assembly buffer can
+    // move directly into the provider instead of being copied on every frame.
+    std::function<void(std::vector<uint8_t>)> on_binary;
     std::function<void(Status)> on_error;
 };
 
@@ -98,7 +100,7 @@ class LinxTransportPort {
      * @param frame 待发送音频帧。
      * @return 发送结果。
      */
-    virtual Status SendAudio(const voice::AudioFrame& frame) = 0;
+    virtual Status SendAudio(voice::AudioFrame frame) = 0;
     /**
      * @brief 关闭 Linx 连接。
      * @return 关闭结果。

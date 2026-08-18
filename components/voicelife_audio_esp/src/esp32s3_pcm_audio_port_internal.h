@@ -47,6 +47,7 @@ int32_t ToWire(int16_t pcm, const I2sEndpointProfile& endpoint);
 
 Status ValidateNegotiatedFormat(const I2sEndpointProfile& endpoint, const voice::AudioFormat& negotiated);
 Status ValidatePlaybackFormat(const I2sEndpointProfile& endpoint, const voice::AudioFormat& negotiated);
+uint64_t PcmDurationMs(const voice::AudioFrame& frame);
 
 }  // namespace detail
 
@@ -69,7 +70,7 @@ class Esp32s3PcmAudioPorts::Impl final {
        public:
         explicit OutputPort(Impl& owner) : owner_(owner) {}
         Status Open(const voice::AudioFormat& format) override;
-        Status Push(const voice::AudioFrame& frame) override;
+        Status Push(voice::AudioFrame frame) override;
         Status Flush() override;
         bool IsIdle() const override;
         void Close() override;
@@ -105,7 +106,7 @@ class Esp32s3PcmAudioPorts::Impl final {
     Status StartCapture(voice::VoiceMode mode);
     Status StopCapture();
     Status CloseInput();
-    Status PushOutput(const voice::AudioFrame& frame);
+    Status PushOutput(voice::AudioFrame frame);
     Status FlushOutput();
     bool OutputIdle() const;
     Status CloseOutput();
@@ -141,6 +142,10 @@ class Esp32s3PcmAudioPorts::Impl final {
     std::condition_variable done_cv_;
     std::deque<voice::AudioFrame> input_queue_;
     std::deque<voice::AudioFrame> output_queue_;
+    uint64_t output_queue_duration_ms_ = 0;
+    // Reused only by the output task to avoid heap churn for every I2S period.
+    std::vector<int16_t> codec_pcm_scratch_;
+    std::vector<uint8_t> wire_scratch_;
     voice::AudioFrameSink input_sink_;
     std::optional<voice::AudioFormat> capture_format_;
     std::optional<voice::AudioFormat> playback_format_;

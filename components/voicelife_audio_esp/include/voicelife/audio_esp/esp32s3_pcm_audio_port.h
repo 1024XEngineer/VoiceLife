@@ -17,7 +17,9 @@ struct AudioPortOptions {
     /** @brief 输入队列深度。 */
     std::size_t input_queue_depth = 4;
     /** @brief 输出队列深度。 */
-    std::size_t output_queue_depth = 50;
+    std::size_t output_queue_depth = 8;
+    /** @brief 名义播放队列允许的最大延迟（毫秒）。 */
+    uint32_t maximum_playback_latency_ms = 500;
 };
 
 /** @brief 音频端口统计。 */

@@ -33,7 +33,8 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
                 // 由最终 STT/5s 超时收尾，不直接回 Standby。
                 state_ = VoiceInteractionState::kFinalizing;
                 transition.action = VoiceInteractionAction::kStopVoiceTurn;
-            } else if (state_ == VoiceInteractionState::kSpeaking || state_ == VoiceInteractionState::kThinking) {
+            } else if (state_ == VoiceInteractionState::kSpeaking || state_ == VoiceInteractionState::kThinking ||
+                       state_ == VoiceInteractionState::kFinalizing) {
                 state_ = VoiceInteractionState::kInterrupting;
                 transition.action = VoiceInteractionAction::kInterruptSession;
             } else {
@@ -45,7 +46,8 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
                 // 事务式启动：先提交采集请求，capture_started 后才进入 kListening。
                 state_ = VoiceInteractionState::kOpeningCapture;
                 transition.action = VoiceInteractionAction::kStartCapture;
-            } else if (state_ == VoiceInteractionState::kSpeaking || state_ == VoiceInteractionState::kThinking) {
+            } else if (state_ == VoiceInteractionState::kSpeaking || state_ == VoiceInteractionState::kThinking ||
+                       state_ == VoiceInteractionState::kFinalizing) {
                 state_ = VoiceInteractionState::kListening;
                 transition.action = VoiceInteractionAction::kInterruptAndStartCapture;
             } else {
@@ -134,7 +136,7 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             break;
         case VoiceInteractionEvent::kInterruptRequested:
             if (state_ != VoiceInteractionState::kListening && state_ != VoiceInteractionState::kThinking &&
-                state_ != VoiceInteractionState::kSpeaking) {
+                state_ != VoiceInteractionState::kSpeaking && state_ != VoiceInteractionState::kFinalizing) {
                 return InvalidTransition(state_, event);
             }
             state_ = VoiceInteractionState::kInterrupting;

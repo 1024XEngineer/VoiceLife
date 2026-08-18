@@ -31,6 +31,15 @@ class PcmFrameAssembler final {
     /** @brief 校验帧格式与 period 参数是否合法。 @return 合法返回 Ok。 */
     [[nodiscard]] Status Validate() const;
 
+    /**
+     * @brief 校验并为一个完整传输帧预留有界缓存。
+     *
+     * 必须在采集任务启动前调用。该步骤会把内存分配从实时 Push 路径移出，
+     * 并将分配失败转换为状态码而不是异常。
+     * @return 准备成功返回 Ok。
+     */
+    Status Prepare();
+
     /** @brief 目标传输帧格式。 @return 帧格式引用。 */
     [[nodiscard]] const voice::AudioFormat& frame_format() const { return frame_format_; }
 
@@ -38,7 +47,7 @@ class PcmFrameAssembler final {
     [[nodiscard]] std::size_t frame_samples() const { return frame_samples_; }
 
     /** @brief 当前待组装的样本数。 @return 挂起样本数。 */
-    [[nodiscard]] std::size_t pending_samples() const { return pending_samples_.size(); }
+    [[nodiscard]] std::size_t pending_samples() const { return pending_samples_.size() - pending_offset_; }
 
     /**
      * @brief 推送逻辑 S16 样本。
@@ -60,6 +69,8 @@ class PcmFrameAssembler final {
     uint16_t hardware_period_ms_ = 0;
     std::size_t frame_samples_ = 0;
     std::vector<int16_t> pending_samples_;
+    std::size_t pending_offset_ = 0;
+    bool prepared_ = false;
 };
 
 }  // namespace voicelife::audio_esp

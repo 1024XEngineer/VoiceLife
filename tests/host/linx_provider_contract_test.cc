@@ -30,8 +30,8 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
         }
         return send_text_result;
     }
-    Status SendAudio(const voicelife::voice::AudioFrame& frame) override {
-        audio_frames.push_back(frame);
+    Status SendAudio(voicelife::voice::AudioFrame frame) override {
+        audio_frames.push_back(std::move(frame));
         return send_audio_result;
     }
     Status Close() override {
@@ -46,7 +46,8 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
     }
     void EmitBinary(std::vector<uint8_t> payload) {
         if (sink_.on_binary) {
-            sink_.on_binary(payload);
+            emitted_binary_data = payload.data();
+            sink_.on_binary(std::move(payload));
         }
     }
     void EmitConnected() {
@@ -73,6 +74,7 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
     bool emit_hello = true;
     int connects = 0;
     int closes = 0;
+    const uint8_t* emitted_binary_data = nullptr;
 };
 
 voicelife::voice::VoiceSessionConfig Config() {
@@ -225,11 +227,17 @@ int main() {
     uplink.sequence = 0;
     uplink.format = config.audio;
     uplink.payload = {1, 2, 3};
-    Check(provider.SendAudio(uplink).ok() && transport.audio_frames.size() == 1, "当前 generation 音频应上行");
+    const auto* uplink_data = uplink.payload.data();
+    Check(provider.SendAudio(std::move(uplink)).ok() && transport.audio_frames.size() == 1 &&
+              transport.audio_frames.back().payload.data() == uplink_data,
+          "当前 generation 音频应上行");
+    Check(transport.audio_frames.back().payload.data() == uplink_data,
+          "Provider 到 WebSocket Transport 的上行 PCM 负载必须移动，不能复制每个音频帧");
     transport.EmitBinary({4, 5, 6});
     Check(received_audio.size() == 1 && received_audio.front().generation == 7 &&
               received_audio.front().sequence == 0 && received_audio.front().payload.size() == 3 &&
-              received_audio.front().format.sample_rate_hz == 24000,
+              received_audio.front().format.sample_rate_hz == 24000 &&
+              received_audio.front().payload.data() == transport.emitted_binary_data,
           "二进制下行音频应使用协商格式并携带 generation");
     const auto events_before_output_backpressure = events.size();
     reject_output = true;
@@ -239,7 +247,7 @@ int main() {
           "有界播放队列拒绝单帧应只计入端口指标，不能伪装成 Provider 失败");
     transport.EmitDisconnected();
     Check(events.back().kind == voicelife::voice::VoiceEventKind::kDisconnected, "物理断线必须向会话上报生命周期事件");
-    Check(provider.SendAudio(uplink).code == ErrorCode::kUnavailable, "断线后必须立即阻断音频上行");
+    Check(provider.SendAudio({}).code == ErrorCode::kUnavailable, "断线后必须立即阻断音频上行");
     provider.SetGeneration(8);
     transport.EmitConnected();
     Check(transport.texts.size() == 7 && transport.texts.back().find("\"type\":\"hello\"") != std::string::npos,
@@ -249,8 +257,9 @@ int main() {
     transport.EmitBinary({7, 8, 9});
     Check(received_audio.size() == 2 && received_audio.back().generation == 8 && received_audio.back().sequence == 0,
           "同一连接打断后 Provider 应切换到新的 generation");
-    uplink.generation = 6;
-    Check(provider.SendAudio(uplink).code == ErrorCode::kConflict, "旧 generation 上行必须拒绝");
+    voicelife::voice::AudioFrame stale_uplink;
+    stale_uplink.generation = 6;
+    Check(provider.SendAudio(std::move(stale_uplink)).code == ErrorCode::kConflict, "旧 generation 上行必须拒绝");
 
     transport.EmitDisconnected();
     provider.SetGeneration(9);

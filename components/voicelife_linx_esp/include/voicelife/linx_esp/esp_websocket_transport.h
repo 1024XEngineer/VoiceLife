@@ -92,7 +92,7 @@ class EspWebSocketTransport final : public linx::LinxTransportPort {
      * @param frame 待发送音频帧。
      * @return 发送结果。
      */
-    Status SendAudio(const voice::AudioFrame& frame) override;
+    Status SendAudio(voice::AudioFrame frame) override;
     /**
      * @brief 关闭 WebSocket 连接。
      * @return 关闭结果。

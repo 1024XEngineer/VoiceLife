@@ -84,7 +84,7 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
     transport_sink.on_connected = [this]() { OnTransportConnected(); };
     transport_sink.on_disconnected = [this]() { OnTransportDisconnected(); };
     transport_sink.on_text = [this](std::string_view message) { OnText(message); };
-    transport_sink.on_binary = [this](const std::vector<uint8_t>& payload) { OnBinary(payload); };
+    transport_sink.on_binary = [this](std::vector<uint8_t> payload) { OnBinary(std::move(payload)); };
     transport_sink.on_error = [this](Status status) {
         connected_.store(false);
         {
@@ -146,14 +146,14 @@ Status LinxSpeechProviderAdapter::StopCapture() {
     return Send(codec_.EncodeListenStop(ActiveSessionConfig()));
 }
 
-Status LinxSpeechProviderAdapter::SendAudio(const voice::AudioFrame& frame) {
+Status LinxSpeechProviderAdapter::SendAudio(voice::AudioFrame frame) {
     if (!connected_.load()) {
         return Status::Error(ErrorCode::kUnavailable, "Linx Provider 尚未连接");
     }
     if (frame.generation != generation_.load()) {
         return Status::Error(ErrorCode::kConflict, "Linx 音频帧属于旧连接代次");
     }
-    return transport_.SendAudio(frame);
+    return transport_.SendAudio(std::move(frame));
 }
 
 Status LinxSpeechProviderAdapter::Abort(std::string_view reason) {
@@ -418,13 +418,17 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
     }
 }
 
-void LinxSpeechProviderAdapter::OnBinary(const std::vector<uint8_t>& payload) {
+void LinxSpeechProviderAdapter::OnBinary(std::vector<uint8_t> payload) {
     if (!connected_.load()) {
         Emit(Event(voice::VoiceEventKind::kError, "Linx hello 未完成，拒绝下行音频"));
         return;
     }
     if (payload.empty()) {
         Emit(Event(voice::VoiceEventKind::kError, "Linx 下行音频帧为空"));
+        return;
+    }
+    if (payload.size() > voice::AudioFrame::kMaxPayloadBytes) {
+        Emit(Event(voice::VoiceEventKind::kError, "Linx 下行音频帧超过单帧内存上限"));
         return;
     }
     voice::AudioFrame frame;
@@ -434,7 +438,7 @@ void LinxSpeechProviderAdapter::OnBinary(const std::vector<uint8_t>& payload) {
         std::lock_guard<std::mutex> lock(hello_mutex_);
         frame.format = audio_formats_.playback;
     }
-    frame.payload = payload;
+    frame.payload = std::move(payload);
     voice::AudioFrameSink sink;
     {
         std::lock_guard<std::mutex> lock(callback_mutex_);

@@ -59,8 +59,9 @@ class FakeOutput final : public voicelife::voice::AudioOutputPort {
         opened_format = format;
         return open_result;
     }
-    Status Push(const voicelife::voice::AudioFrame&) override {
+    Status Push(voicelife::voice::AudioFrame frame) override {
         ++pushes;
+        last_frame = std::move(frame);
         return push_result;
     }
     Status Flush() override {
@@ -81,6 +82,7 @@ class FakeOutput final : public voicelife::voice::AudioOutputPort {
     int pushes = 0;
     int flushes = 0;
     int closes = 0;
+    voicelife::voice::AudioFrame last_frame;
 
    private:
     std::vector<char>* close_order_ = nullptr;
@@ -103,9 +105,9 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
         ++stops;
         return stop_result;
     }
-    Status SendAudio(const voicelife::voice::AudioFrame& frame) override {
+    Status SendAudio(voicelife::voice::AudioFrame frame) override {
         ++audio_frames;
-        last_audio_frame = frame;
+        last_audio_frame = std::move(frame);
         return send_result;
     }
     Status Abort(std::string_view) override {
@@ -210,6 +212,9 @@ int main() {
                                                evidence.push_back(item);
                                            });
 
+    auto invalid_vad_config = Config();
+    invalid_vad_config.vad_silence_ms = 0;
+    Check(session.Start(invalid_vad_config).code == ErrorCode::kInvalidArgument, "零毫秒 VAD 端点窗口必须在启动前拒绝");
     Check(session.Start(Config()).ok(), "合法配置应启动语音会话");
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady, "启动后应进入 ready");
     Check(session.NotifyLocalWakeWord("你好牛牛", "收到！").ok() && provider.wake_notifications == 1 &&
@@ -252,8 +257,13 @@ int main() {
         .kind = voicelife::voice::VoiceEventKind::kTtsStarted, .generation = generation, .text = {}, .aborted = false});
     Check(session.state() == voicelife::voice::VoiceSessionState::kSpeaking,
           "收到有效 STT 后 TTS start 应进入播报状态");
-    Check(provider.EmitAudio(Frame(generation, 0)).ok() && output.pushes == 1,
+    auto first_playback = Frame(generation, 0);
+    const auto* first_playback_data = first_playback.payload.data();
+    Check(provider.EmitAudio(std::move(first_playback)).ok() && output.pushes == 1 &&
+              output.last_frame.payload.data() == first_playback_data,
           "TTS start 后的下行音频应通过会话输出端口");
+    Check(output.last_frame.payload.data() == first_playback_data,
+          "会话到播放端口必须移动 PCM 负载，不能复制每个下行帧");
     Check(!evidence.empty() && evidence.back().event == "tts_first_audio",
           "每段 TTS 首个成功播放帧必须提供无内容的时延证据");
     const std::size_t evidence_before_late_asr = evidence.size();
@@ -274,7 +284,13 @@ int main() {
           "非播报状态的下行音频必须拒绝");
     Check(session.BeginCapture().ok(), "ready 会话应开始采集");
     Check(session.SubmitAudio(Frame(generation, 0)).ok(), "当前 generation 的首帧应发送");
-    Check(input.EmitCapture(Frame(0, 0)).ok() && provider.audio_frames == 2, "输入端口采集回调应转发为上行音频");
+    auto captured = Frame(0, 0);
+    const auto* captured_data = captured.payload.data();
+    Check(input.EmitCapture(std::move(captured)).ok() && provider.audio_frames == 2 &&
+              provider.last_audio_frame.payload.data() == captured_data,
+          "输入端口采集回调应转发为上行音频");
+    Check(provider.last_audio_frame.payload.data() == captured_data,
+          "采集到 Provider 的上行 PCM 负载必须移动，不能复制每个音频帧");
     Check(provider.last_audio_frame.generation == generation && provider.last_audio_frame.sequence == 1,
           "会话应为输入回调补齐当前 generation 和连续序号");
     auto mismatched_format = Frame(generation, 1);
@@ -329,6 +345,19 @@ int main() {
     Check(input.EmitCapture(Frame(0, 0)).code == ErrorCode::kUnavailable,
           "停止会话应清理输入回调，避免资源关闭后的迟到帧");
     Check(evidence_count >= 4, "会话生命周期应产出可关联的证据事件");
+
+    FakeInput finalizing_input;
+    FakeOutput finalizing_output;
+    FakeProvider finalizing_provider;
+    voicelife::voice::VoiceSession finalizing_session(finalizing_input, finalizing_output, finalizing_provider);
+    Check(finalizing_session.Start(Config()).ok() && finalizing_session.BeginCapture().ok() &&
+              finalizing_session.EndCapture().ok(),
+          "最终识别取消用例应先停止采集并保留最终 STT 等待");
+    const uint64_t finalizing_generation = finalizing_session.generation();
+    Check(finalizing_session.Interrupt().ok() && finalizing_session.generation() == finalizing_generation + 1 &&
+              finalizing_provider.aborts == 1 &&
+              finalizing_provider.generation_at_abort == finalizing_session.generation(),
+          "等待最终 STT 时打断必须推进 generation 并中止旧服务端回合");
 
     FakeInput bad_input;
     bad_input.open_result = Status::Error(ErrorCode::kUnavailable, "麦克风不可用");

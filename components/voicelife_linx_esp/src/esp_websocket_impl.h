@@ -17,6 +17,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
+#include "voicelife/linx_esp/linx_tx_generation_gate.h"
 #include "voicelife/linx_esp/websocket_fragment_assembler.h"
 
 namespace voicelife::linx_esp {
@@ -64,7 +65,7 @@ class EspWebSocketTransport::Impl final {
 
     Status Connect(const linx::LinxConnectionConfig& config, linx::LinxTransportSink sink);
     Status SendText(std::string_view message);
-    Status SendAudio(const voice::AudioFrame& frame);
+    Status SendAudio(voice::AudioFrame frame);
     Status Close();
     void SetGeneration(uint64_t generation);
     TransportState state() const { return state_.load(); }
@@ -106,6 +107,10 @@ class EspWebSocketTransport::Impl final {
     StaticTask_t* tx_tcb_ = nullptr;
     EventGroupHandle_t state_events_ = nullptr;
     SemaphoreHandle_t worker_stopped_ = nullptr;
+    // Close must not destroy `client_` while TxLoop is inside a synchronous
+    // WebSocket write. The task signals this semaphore after it has observed
+    // `running_ == false` and released every client access.
+    SemaphoreHandle_t tx_stopped_ = nullptr;
     TaskHandle_t worker_ = nullptr;
     std::atomic<bool> running_{false};
     std::atomic<bool> closing_{false};
@@ -119,6 +124,7 @@ class EspWebSocketTransport::Impl final {
     std::mutex assembler_mutex_;
     std::mutex callback_mutex_;
     std::mutex status_mutex_;
+    LinxTxGenerationGate tx_generation_gate_;
     WebSocketFragmentAssembler assembler_;
     linx::LinxTransportSink sink_;
     std::string headers_;

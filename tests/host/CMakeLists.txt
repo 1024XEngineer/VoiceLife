@@ -102,6 +102,7 @@ target_link_libraries(mcp PUBLIC contracts schedule)
 target_link_libraries(mcp PRIVATE yyjson)
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/audio_frame_queue.cc"
+    "${ROOT_DIR}/components/voicelife_voice/src/audio_aec.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/wake_gate_audio_input.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_interaction_controller.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_provider_registry.cc"
@@ -150,6 +151,7 @@ add_voicelife_library(audio_esp voicelife_audio_esp
     "${ROOT_DIR}/components/voicelife_audio_esp/src/pcm_frame_assembler.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_pcm_audio_port.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp32s3_pcm_i2s_runtime.cc"
+    "${ROOT_DIR}/components/voicelife_audio_esp/src/esp_aec_service.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp_multinet_wake_detector.cc"
     "${ROOT_DIR}/components/voicelife_audio_esp/src/esp_wakenet_detector.cc")
 target_link_libraries(audio_esp PUBLIC contracts voice)
@@ -319,6 +321,10 @@ add_voicelife_test(audio_frame_queue_contract_test "unit;voice;audio;contract"
     audio_frame_queue_contract_test.cc)
 target_link_libraries(audio_frame_queue_contract_test PRIVATE voice)
 
+add_voicelife_test(audio_aec_service_contract_test "unit;voice;audio;aec;contract"
+    audio_aec_service_contract_test.cc)
+target_link_libraries(audio_aec_service_contract_test PRIVATE audio_esp)
+
 add_voicelife_test(wake_gate_audio_input_test "unit;voice;audio;contract"
     wake_gate_audio_input_test.cc)
 target_link_libraries(wake_gate_audio_input_test PRIVATE voice)
@@ -339,7 +345,7 @@ target_link_libraries(linx_provider_contract_test PRIVATE linx)
 
 add_voicelife_test(linx_esp_transport_contract_test "unit;voice;linx;esp;contract"
     linx_esp_transport_contract_test.cc)
-target_link_libraries(linx_esp_transport_contract_test PRIVATE linx_esp)
+target_link_libraries(linx_esp_transport_contract_test PRIVATE linx_esp Threads::Threads)
 
 add_voicelife_test(audio_board_profile_contract_test "unit;voice;audio;esp;contract"
     audio_board_profile_contract_test.cc)
