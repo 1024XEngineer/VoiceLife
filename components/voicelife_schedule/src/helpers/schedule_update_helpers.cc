@@ -4,24 +4,14 @@
 
 namespace voicelife::schedule {
 
+// 构造修改日程的参数错误结果，确保错误状态、空消息和空冲突列表结构一致。
 UpdateScheduleResult InvalidUpdateScheduleResult(std::string error) {
+    const Status status = Status::Error(ErrorCode::kInvalidArgument, error);
     return {
-        .status = Status::Error(ErrorCode::kInvalidArgument, error),
+        .result = CommandResult<std::optional<Schedule>>::Failure(status),
         .message = {},
-        .schedule = std::nullopt,
         .conflicts = {},
-        .error = std::move(error),
     };
-}
-
-bool IsSupportedScheduleStatus(ScheduleStatus status) {
-    switch (status) {
-        case ScheduleStatus::kActive:
-        case ScheduleStatus::kCancelled:
-        case ScheduleStatus::kCompleted:
-            return true;
-    }
-    return false;
 }
 
 }  // namespace voicelife::schedule

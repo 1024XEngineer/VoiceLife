@@ -66,13 +66,21 @@ add_voicelife_library(im voicelife_im
 target_include_directories(im PUBLIC "${ROOT_DIR}/components/voicelife_im/src/transport")
 target_link_libraries(im PUBLIC contracts)
 add_voicelife_library(schedule voicelife_schedule
+    "${ROOT_DIR}/components/voicelife_schedule/src/calendar.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/factory/schedule_factory.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_create_helpers.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/mock/schedule_mock_data.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_occurrence_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_operation_helpers.cc"
-    "${ROOT_DIR}/components/voicelife_schedule/src/mock/schedule_operation_mock_data.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_operation_query_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_query_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_rule_result_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_rule_update_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_rule_result_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_operation_service.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_rule_service_helpers.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_rule_service.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/service/schedule_service.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/rules/recurrence_planner.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/rules/schedule_time_rules.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_undo_helpers.cc"
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_update_helpers.cc")
@@ -87,8 +95,10 @@ add_voicelife_library(timing_esp voicelife_timing_esp
 target_link_libraries(timing_esp PUBLIC timing contracts)
 add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_server.cc"
-    "${ROOT_DIR}/components/voicelife_mcp/src/mcp_json_writer.cc")
-target_link_libraries(mcp PUBLIC contracts)
+    "${ROOT_DIR}/components/voicelife_mcp/src/mcp_json_writer.cc"
+    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools_input.cc")
+target_include_directories(mcp PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src/tools")
+target_link_libraries(mcp PUBLIC contracts schedule)
 target_link_libraries(mcp PRIVATE yyjson)
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/audio_frame_queue.cc"
@@ -107,13 +117,22 @@ add_voicelife_library(linx_esp voicelife_linx_esp
     "${ROOT_DIR}/components/voicelife_linx_esp/src/websocket_fragment_assembler.cc")
 target_link_libraries(linx_esp PUBLIC contracts linx)
 add_voicelife_library(storage_sqlite voicelife_storage_sqlite
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/operation_row_mapper.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_exception_row_mapper.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_rule_row_mapper.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_row_mapper.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v001_create_schedule.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v002_create_schedule_operation.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v003_create_schedule_rule.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/sqlite_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/voicelife_schema.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/operation_sql.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_exception_sql.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_rule_sql.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_sql.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_database.cc"
-    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_repository.cc")
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_repository.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_rule_repository.cc")
 target_include_directories(storage_sqlite PRIVATE "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
 target_link_libraries(storage_sqlite PUBLIC contracts schedule)
 if(TARGET SQLite3::SQLite3)
@@ -172,6 +191,14 @@ add_voicelife_test(schedule_query_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_query_test.cc")
 target_link_libraries(schedule_query_test PRIVATE schedule)
 
+add_voicelife_test(schedule_recurrence_planner_test "unit;schedule"
+    "${ROOT_DIR}/components/voicelife_schedule/test/schedule_recurrence_planner_test.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/rules/recurrence_planner.cc"
+    "${ROOT_DIR}/components/voicelife_schedule/src/calendar.cc")
+target_include_directories(schedule_recurrence_planner_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_schedule/src"
+    "${ROOT_DIR}/components/voicelife_schedule/include")
+
 add_voicelife_test(schedule_repository_service_test "unit;schedule;repository"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_repository_service_test.cc")
 target_link_libraries(schedule_repository_service_test PRIVATE schedule)
@@ -186,8 +213,6 @@ target_link_libraries(schedule_update_test PRIVATE schedule)
 
 add_voicelife_test(schedule_operation_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_operation_test.cc")
-target_include_directories(schedule_operation_test PRIVATE
-    "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule_operation_test PRIVATE schedule)
 
 add_voicelife_test(schedule_recent_operation_test "unit;schedule"
@@ -198,8 +223,6 @@ target_link_libraries(schedule_recent_operation_test PRIVATE schedule)
 
 add_voicelife_test(schedule_undo_operation_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_undo_operation_test.cc")
-target_include_directories(schedule_undo_operation_test PRIVATE
-    "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule_undo_operation_test PRIVATE schedule)
 
 add_voicelife_test(status_test "unit;contracts" status_test.cc)
@@ -233,14 +256,51 @@ add_voicelife_test(mcp_server_test "unit;mcp"
 target_include_directories(mcp_server_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
 target_link_libraries(mcp_server_test PRIVATE mcp)
 
+
 add_voicelife_test(schedule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_mcp_tools_test.cc
-    "${ROOT_DIR}/components/voicelife_runtime/src/schedule_mcp_tools.cc")
-target_include_directories(schedule_mcp_tools_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule)
+
+add_voicelife_test(schedule_mcp_tools_failure_coverage_test "unit;mcp;schedule;runtime"
+    schedule_mcp_tools_failure_coverage_test.cc
+    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
+target_link_libraries(schedule_mcp_tools_failure_coverage_test PRIVATE mcp schedule)
+
+add_voicelife_test(schedule_rule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_rule_mcp_tools_test.cc
+    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_rule_mcp_tools.cc")
+target_include_directories(schedule_rule_mcp_tools_test PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src/tools")
+target_link_libraries(schedule_rule_mcp_tools_test PRIVATE mcp schedule)
+
+add_voicelife_test(schedule_rule_service_test "unit;schedule" schedule_rule_service_test.cc)
+target_link_libraries(schedule_rule_service_test PRIVATE schedule)
+
+add_voicelife_test(schedule_rule_service_helpers_test "unit;schedule" schedule_rule_service_helpers_test.cc)
+target_include_directories(schedule_rule_service_helpers_test PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src/service")
+target_link_libraries(schedule_rule_service_helpers_test PRIVATE schedule)
+
+add_voicelife_test(schedule_helpers_test "unit;schedule" schedule_helpers_test.cc)
+target_include_directories(schedule_helpers_test PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
+target_link_libraries(schedule_helpers_test PRIVATE schedule)
+
+add_voicelife_test(schedule_helpers_coverage_test "unit;schedule" schedule_helpers_coverage_test.cc)
+target_include_directories(schedule_helpers_coverage_test PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
+target_link_libraries(schedule_helpers_coverage_test PRIVATE schedule)
+
+add_voicelife_test(mcp_json_writer_coverage_test "unit;mcp" mcp_json_writer_coverage_test.cc)
+target_include_directories(mcp_json_writer_coverage_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
+target_link_libraries(mcp_json_writer_coverage_test PRIVATE mcp)
+
+add_voicelife_test(mcp_server_coverage_test "unit;mcp" mcp_server_coverage_test.cc)
+target_include_directories(mcp_server_coverage_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
+target_link_libraries(mcp_server_coverage_test PRIVATE mcp)
+
+add_voicelife_test(schedule_mcp_tools_input_test "unit;mcp;schedule;runtime" schedule_mcp_tools_input_test.cc)
+target_include_directories(schedule_mcp_tools_input_test PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src/tools")
+target_link_libraries(schedule_mcp_tools_input_test PRIVATE mcp schedule)
 
 add_voicelife_test(linx_mcp_bridge_test "unit;mcp;linx;runtime" linx_mcp_bridge_test.cc
     "${ROOT_DIR}/components/voicelife_runtime/src/linx_mcp_bridge.cc"
-    "${ROOT_DIR}/components/voicelife_runtime/src/schedule_mcp_tools.cc")
+    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 target_include_directories(linx_mcp_bridge_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
 target_link_libraries(linx_mcp_bridge_test PRIVATE contracts mcp schedule)
 
@@ -402,3 +462,15 @@ add_voicelife_test(sqlite_schedule_repository_unit_test "unit;storage;sqlite;sch
 target_include_directories(sqlite_schedule_repository_unit_test PRIVATE
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
 target_link_libraries(sqlite_schedule_repository_unit_test PRIVATE storage_sqlite schedule)
+
+add_voicelife_test(sqlite_schedule_repository_rollback_coverage_test "unit;storage;sqlite;schedule;repository"
+    sqlite_schedule_repository_rollback_coverage_test.cc)
+target_include_directories(sqlite_schedule_repository_rollback_coverage_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
+target_link_libraries(sqlite_schedule_repository_rollback_coverage_test PRIVATE storage_sqlite schedule)
+
+add_voicelife_test(sqlite_schedule_rule_repository_test "integration;storage;sqlite;schedule"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_rule_repository_test.cc")
+target_include_directories(sqlite_schedule_rule_repository_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
+target_link_libraries(sqlite_schedule_rule_repository_test PRIVATE storage_sqlite schedule)

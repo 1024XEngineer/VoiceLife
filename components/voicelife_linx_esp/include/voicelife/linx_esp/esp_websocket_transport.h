@@ -43,7 +43,9 @@ struct EspWebSocketTransportOptions {
     uint32_t network_timeout_ms = 10000;
     uint32_t reconnect_timeout_ms = 1000;
     uint32_t websocket_task_stack_size = 12288;
-    uint32_t worker_task_stack_size = 12288;
+    // MCP 日程工具（schedule.create/query）在此 worker 任务上执行 SQLite/FATFS 操作，
+    // SQLite 的 sqlite3_step 需要较大栈，12KB 会导致栈溢出崩溃。
+    uint32_t worker_task_stack_size = 32768;
     bool enable_close_reconnect = true;
     bool allow_insecure_ws = false;
 };

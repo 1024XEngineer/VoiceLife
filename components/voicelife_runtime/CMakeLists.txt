@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS "src/runtime.cc" "src/bootstrap/storage_bootstrap.cc" "src/im_runtime_bootstrap.cc"
          "src/linx_mcp_bridge.cc" "src/linx_ota_bootstrap.cc" "src/wifi_provisioning.cc"
-         "src/wifi_provisioning_esp.cc" "src/schedule_mcp_tools.cc"
+         "src/wifi_provisioning_esp.cc"
          "src/im_binding_mcp_tools.cc" "src/im_binding_presentation.cc"
     INCLUDE_DIRS "include" "src"
     REQUIRES voicelife_contracts
@@ -12,10 +12,6 @@ idf_component_register(
                   esp_driver_usb_serial_jtag led_strip
 )
 
-if(CONFIG_VOICELIFE_STORAGE_FATFS AND NOT CONFIG_VOICELIFE_STORAGE_SQLITE)
-    message(FATAL_ERROR "Runtime 存储 Profile 必须同时启用 VOICELIFE_STORAGE_FATFS 和 VOICELIFE_STORAGE_SQLITE")
-endif()
-
-if(CONFIG_VOICELIFE_STORAGE_SQLITE AND NOT CONFIG_VOICELIFE_STORAGE_FATFS)
-    message(FATAL_ERROR "Runtime 存储 Profile 必须同时启用 VOICELIFE_STORAGE_FATFS 和 VOICELIFE_STORAGE_SQLITE")
+if(NOT CONFIG_VOICELIFE_STORAGE_FATFS OR NOT CONFIG_VOICELIFE_STORAGE_SQLITE)
+    message(FATAL_ERROR "Runtime 日程持久化必须同时启用 VOICELIFE_STORAGE_FATFS 和 VOICELIFE_STORAGE_SQLITE")
 endif()

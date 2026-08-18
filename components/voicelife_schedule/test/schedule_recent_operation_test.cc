@@ -4,16 +4,18 @@
 #include <vector>
 
 #include "../src/helpers/schedule_operation_query_helpers.h"
+#include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
-#include "voicelife/schedule/schedule_service.h"
+#include "voicelife/schedule/schedule_operation_service.h"
 
 using voicelife::schedule::DateTime;
 using voicelife::schedule::FilterRecentScheduleOperations;
 using voicelife::schedule::OperationRecord;
 using voicelife::schedule::RecordScheduleOperationCommand;
+using voicelife::schedule::ScheduleOperationService;
 using voicelife::schedule::ScheduleOperationType;
-using voicelife::schedule::ScheduleService;
 using voicelife::test::Check;
+using voicelife::test::InMemoryScheduleRepository;
 
 namespace {
 
@@ -57,12 +59,12 @@ void CheckWindowAndOrdering() {
 
 /**
  * @brief 验证服务返回十五分钟内全部操作且查询不会消费记录。
- * @param service 被测试的日程服务。
+ * @param service 被测试的日程操作服务。
  * @return 无返回值；断言失败时终止测试。
  */
-void CheckServiceQuery(ScheduleService& service) {
+void CheckServiceQuery(ScheduleOperationService& service) {
     const auto empty = service.query_recent_schedule_operation();
-    Check(empty.status.ok() && empty.operations.empty() && empty.error.empty(), "无操作时应返回成功的空结果");
+    Check(empty.result.ok() && empty.result.value.empty() && empty.result.error.empty(), "无操作时应返回成功的空结果");
 
     for (int index = 0; index < 12; ++index) {
         RecordScheduleOperationCommand command{
@@ -71,17 +73,17 @@ void CheckServiceQuery(ScheduleService& service) {
             .schedule_event = "最近操作 " + std::to_string(index),
             .previous = std::nullopt,
         };
-        Check(service.record_schedule_operation(command).status.ok(), "查询测试的操作记录应写入成功");
+        Check(service.record_schedule_operation(command).result.ok(), "查询测试的操作记录应写入成功");
     }
 
     const auto first = service.query_recent_schedule_operation();
     const auto second = service.query_recent_schedule_operation();
-    Check(first.status.ok() && first.error.empty() && first.operations.size() == 12,
+    Check(first.result.ok() && first.result.error.empty() && first.result.value.size() == 12,
           "查询应返回十五分钟内全部操作且不限制为十条");
-    Check(first.operations.front().schedule_id == 6011 && first.operations.back().schedule_id == 6000,
+    Check(first.result.value.front().schedule_id == 6011 && first.result.value.back().schedule_id == 6000,
           "服务结果应按最新操作优先排列");
-    Check(second.operations.size() == first.operations.size() &&
-              second.operations.front().id == first.operations.front().id,
+    Check(second.result.value.size() == first.result.value.size() &&
+              second.result.value.front().id == first.result.value.front().id,
           "重复查询不应消费操作记录");
 }
 
@@ -90,7 +92,19 @@ void CheckServiceQuery(ScheduleService& service) {
 /** @brief 执行最近日程操作查询测试。 @return 全部断言通过时返回 0。 */
 int main() {
     CheckWindowAndOrdering();
-    ScheduleService service;
+    InMemoryScheduleRepository repository;
+    ScheduleOperationService service(repository);
     CheckServiceQuery(service);
+
+    // 仓储失败路径：最近操作查询失败时应透传底层错误。
+    {
+        InMemoryScheduleRepository failure_repository;
+        ScheduleOperationService failure_service(failure_repository);
+        failure_repository.FailNextFindRecentOperations(
+            voicelife::Status::Error(voicelife::ErrorCode::kUnavailable, "操作查询失败"));
+        Check(
+            failure_service.query_recent_schedule_operation().result.status.code == voicelife::ErrorCode::kUnavailable,
+            "query_recent 应透传 FindRecentOperations 错误");
+    }
     return 0;
 }

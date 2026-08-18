@@ -1,14 +1,17 @@
 #include "linx_mcp_bridge.h"
 
-#include "schedule_mcp_tools.h"
+#include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/mcp/mcp_server.h"
+#include "voicelife/mcp/schedule_mcp_tools.h"
 #include "voicelife/schedule/schedule_service.h"
 
+using voicelife::JsonValue;
 using voicelife::mcp::McpServer;
 using voicelife::schedule::ScheduleService;
 using voicelife::test::Check;
+using voicelife::test::InMemoryScheduleRepository;
 
 namespace {
 
@@ -26,8 +29,9 @@ voicelife::JsonValue ParseMcpEnvelope(const std::string& encoded) {
 
 int main() {
     McpServer server;
-    ScheduleService service;
-    Check(voicelife::runtime::RegisterScheduleMcpTools(server, service).ok(), "测试前应注册日程工具");
+    InMemoryScheduleRepository repository;
+    ScheduleService service(repository);
+    Check(voicelife::mcp::RegisterScheduleMcpTools(server, service).ok(), "测试前应注册日程工具");
 
     const auto initialize =
         voicelife::runtime::HandleLinxMcpPayload(R"({"jsonrpc":"2.0","method":"initialize","id":1})", server);
@@ -46,24 +50,25 @@ int main() {
     Check(list.value->find("\"session_id\":\"remote-session\"") != std::string::npos,
           "MCP 响应必须回传 Linx session_id");
     const auto& tools = listed.Get("result")->Get("tools")->array;
-    Check(tools.size() == 2 && tools[0].Get("name")->string == "schedule.create" &&
-              tools[1].Get("name")->string == "schedule.query",
-          "tools/list 必须返回两个稳定排序的 MVP 工具");
+    Check(tools.size() == 4 && tools[0].Get("name")->string == "schedule.create" &&
+              tools[1].Get("name")->string == "schedule.query" && tools[2].Get("name")->string == "schedule.update" &&
+              tools[3].Get("name")->string == "schedule.delete",
+          "tools/list 必须返回稳定排序的一次性日程工具");
     const auto* create_schema = tools[0].Get("inputSchema");
     Check(create_schema->Get("required")->array.size() == 1 &&
               create_schema->Get("required")->array[0].string == "event" &&
-              create_schema->Get("properties")->Get("start_time")->Get("type")->string == "integer" &&
+              create_schema->Get("properties")->Get("start_time")->Get("type")->string == "string" &&
               create_schema->Get("properties")->Get("start_time")->Get("default") == nullptr,
           "可选日程时间不得被伪造成带默认值的必填参数");
 
     const auto call = voicelife::runtime::HandleLinxMcpPayload(
-        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"创建会议","start_time":1900000000}},"id":3})",
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"创建会议","start_time":"2030-03-18 00:00:00"}},"id":3})",
         server);
     Check(call.ok(), "tools/call 应分发给日程工具并回传文本结果");
     const auto& called = ParseMcpEnvelope(*call.value);
     Check(called.Get("result")->Get("content")->array.size() == 1 &&
               called.Get("result")->Get("content")->array[0].Get("type")->string == "text" &&
-              called.Get("result")->Get("content")->array[0].Get("text")->string.find("event=创建会议") !=
+              called.Get("result")->Get("content")->array[0].Get("text")->string.find("\"event\":\"创建会议\"") !=
                   std::string::npos,
           "tools/call 必须返回 MCP text content");
     Check(called.Get("result")->Get("isError")->boolean == false, "成功 tools/call 必须明确声明 isError=false");
@@ -109,6 +114,7 @@ int main() {
 
     const auto schedules_before_unavailable = service.query_schedule({
         .schedule_id = std::nullopt,
+        .rule_id = std::nullopt,
         .keyword = std::nullopt,
         .start_from = std::nullopt,
         .start_to = std::nullopt,
@@ -126,6 +132,7 @@ int main() {
           "MCP 忙响应必须保留请求 id 并使用稳定的 server-error code");
     const auto schedules_after_unavailable = service.query_schedule({
         .schedule_id = std::nullopt,
+        .rule_id = std::nullopt,
         .keyword = std::nullopt,
         .start_from = std::nullopt,
         .start_to = std::nullopt,
@@ -133,7 +140,7 @@ int main() {
         .limit = 10,
         .offset = 0,
     });
-    Check(schedules_after_unavailable.schedules.size() == schedules_before_unavailable.schedules.size(),
+    Check(schedules_after_unavailable.result.value.size() == schedules_before_unavailable.result.value.size(),
           "构建 busy 响应不得执行任何日程工具");
 
     const auto notification_busy = voicelife::runtime::BuildLinxMcpUnavailableResponse(

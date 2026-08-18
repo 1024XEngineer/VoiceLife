@@ -1,10 +1,12 @@
 #include "mcp_json_writer.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
 #include <string>
 #include <string_view>
 
+#include "voicelife/contracts/tool.h"
 #include "yyjson.h"
 
 namespace voicelife::mcp {
@@ -92,6 +94,63 @@ yyjson_mut_val* AddArray(yyjson_mut_doc* document, yyjson_mut_val* object, std::
 }
 
 /**
+ * @brief 将结构化工具输出值写入 mutable yyjson 文档。
+ * @param document 节点所属文档。
+ * @param output 待写入的工具输出。
+ * @return 创建成功时返回节点，否则返回 nullptr。
+ */
+yyjson_mut_val* BuildToolOutputValue(yyjson_mut_doc* document, const ToolOutputValue& output) {
+    switch (output.kind) {
+        case ToolOutputValue::Kind::kNull:
+            return yyjson_mut_null(document);
+        case ToolOutputValue::Kind::kBoolean:
+            return yyjson_mut_bool(document, output.boolean);
+        case ToolOutputValue::Kind::kInteger:
+            return yyjson_mut_sint(document, output.integer);
+        case ToolOutputValue::Kind::kString:
+            return MakeString(document, output.string);
+        case ToolOutputValue::Kind::kArray: {
+            yyjson_mut_val* array = yyjson_mut_arr(document);
+            if (array == nullptr) return nullptr;
+            if (output.array != nullptr) {
+                for (const auto& item : *output.array) {
+                    yyjson_mut_val* child =
+                        item == nullptr ? yyjson_mut_null(document) : BuildToolOutputValue(document, *item);
+                    if (child == nullptr || !yyjson_mut_arr_append(array, child)) return nullptr;
+                }
+            }
+            return array;
+        }
+        case ToolOutputValue::Kind::kObject: {
+            yyjson_mut_val* object = yyjson_mut_obj(document);
+            if (object == nullptr) return nullptr;
+            if (output.object != nullptr) {
+                for (const auto& [key, value] : *output.object) {
+                    yyjson_mut_val* child =
+                        value == nullptr ? yyjson_mut_null(document) : BuildToolOutputValue(document, *value);
+                    if (child == nullptr || !yyjson_mut_obj_add(object, MakeString(document, key), child))
+                        return nullptr;
+                }
+            }
+            return object;
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * @brief 将 mutable yyjson 文档写出为字符串。
+ * @param document 已设置根节点的文档。
+ * @return 序列化结果。
+ */
+std::string WriteDocument(yyjson_mut_doc* document) {
+    if (document == nullptr) return "{}";
+    size_t length = 0;
+    JsonStringPtr text(yyjson_mut_write(document, YYJSON_WRITE_NOFLAG, &length));
+    return text == nullptr ? "{}" : std::string(text.get(), length);
+}
+
+/**
  * @brief 获取工具输入类型对应的 JSON Schema 类型名称。
  * @param type 工具输入类型。
  * @return JSON Schema 类型名称。
@@ -104,8 +163,48 @@ std::string_view InputTypeName(ToolInputType type) {
             return "integer";
         case ToolInputType::kString:
             return "string";
+        case ToolInputType::kObject:
+            return "object";
     }
     return "string";
+}
+
+/**
+ * @brief 将单个输入字段追加到所属对象。
+ * @param document 节点所属文档。
+ * @param object 所属对象。
+ * @param name 字段名。
+ * @param field 输入字段定义。
+ * @return 追加成功时返回 true，否则返回 false。
+ */
+bool AppendInputField(yyjson_mut_doc* document, yyjson_mut_val* object, std::string_view name,
+                      const ToolInputField& field) {
+    yyjson_mut_val* property = AddObject(document, object, name);
+    if (property == nullptr || !AddString(document, property, "type", InputTypeName(field.type)) ||
+        (!field.description.empty() && !AddString(document, property, "description", field.description)) ||
+        (field.minimum.has_value() && !AddInteger(document, property, "minimum", *field.minimum)) ||
+        (field.maximum.has_value() && !AddInteger(document, property, "maximum", *field.maximum))) {
+        return false;
+    }
+    if ((field.min_length.has_value() && !AddInteger(document, property, "minLength", *field.min_length)) ||
+        (field.max_length.has_value() && !AddInteger(document, property, "maxLength", *field.max_length))) {
+        return false;
+    }
+    if (field.type == ToolInputType::kObject && field.object_schema != nullptr) {
+        yyjson_mut_val* properties = AddObject(document, property, "properties");
+        if (properties == nullptr) return false;
+        for (const auto& [child_name, child_field] : field.object_schema->properties) {
+            if (!AppendInputField(document, properties, child_name, child_field)) return false;
+        }
+        if (!field.object_schema->required.empty()) {
+            yyjson_mut_val* required = AddArray(document, property, "required");
+            if (required == nullptr) return false;
+            for (const auto& child_name : field.object_schema->required) {
+                if (!yyjson_mut_arr_append(required, MakeString(document, child_name))) return false;
+            }
+        }
+    }
+    return true;
 }
 
 /**
@@ -132,15 +231,7 @@ bool AppendTool(yyjson_mut_doc* document, yyjson_mut_val* tools, const ToolDefin
         return false;
     }
     for (const auto& [name, field] : definition.input_schema.properties) {
-        yyjson_mut_val* property = AddObject(document, properties, name);
-        if (property == nullptr || !AddString(document, property, "type", InputTypeName(field.type)) ||
-            (!field.description.empty() && !AddString(document, property, "description", field.description)) ||
-            (field.minimum.has_value() && !AddInteger(document, property, "minimum", *field.minimum)) ||
-            (field.maximum.has_value() && !AddInteger(document, property, "maximum", *field.maximum))) {
-            return false;
-        }
-        if ((field.min_length.has_value() && !AddInteger(document, property, "minLength", *field.min_length)) ||
-            (field.max_length.has_value() && !AddInteger(document, property, "maxLength", *field.max_length))) {
+        if (!AppendInputField(document, properties, name, field)) {
             return false;
         }
     }
@@ -181,9 +272,17 @@ std::string SerializeListToolsResult(const ListToolsResult& result) {
         }
     }
 
-    size_t length = 0;
-    JsonStringPtr text(yyjson_mut_write(document.get(), YYJSON_WRITE_NOFLAG, &length));
-    return text == nullptr ? "{}" : std::string(text.get(), length);
+    return WriteDocument(document.get());
+}
+
+std::string SerializeToolOutputValue(const ToolOutputValue& output) {
+    MutableDocumentPtr document(yyjson_mut_doc_new(nullptr));
+    if (!document) return "{}";
+
+    yyjson_mut_val* root = BuildToolOutputValue(document.get(), output);
+    if (root == nullptr) return "{}";
+    yyjson_mut_doc_set_root(document.get(), root);
+    return WriteDocument(document.get());
 }
 
 }  // namespace voicelife::mcp

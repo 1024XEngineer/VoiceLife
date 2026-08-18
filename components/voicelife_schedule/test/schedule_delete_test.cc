@@ -1,13 +1,15 @@
 #include <chrono>
 
+#include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_service.h"
 
 using voicelife::ErrorCode;
+using voicelife::schedule::CancelScheduleCommand;
 using voicelife::schedule::CreateScheduleCommand;
-using voicelife::schedule::DeleteScheduleCommand;
 using voicelife::schedule::ScheduleService;
 using voicelife::test::Check;
+using voicelife::test::InMemoryScheduleRepository;
 
 namespace {
 
@@ -17,14 +19,18 @@ namespace {
  * @return 无返回值；断言失败时终止测试。
  */
 void CheckInvalidScheduleId(ScheduleService& service) {
-    const auto invalid = service.delete_schedule(DeleteScheduleCommand{.schedule_id = 0});
-    Check(invalid.status.code == ErrorCode::kInvalidArgument && !invalid.deleted && !invalid.error.empty(),
+    const auto invalid = service.cancel_schedule(CancelScheduleCommand{.schedule_id = 0});
+    Check(invalid.result.status.code == ErrorCode::kInvalidArgument && !invalid.result.value &&
+              !invalid.result.error.empty(),
           "非正数日程 ID 应返回参数错误");
 
-    const auto missing = service.delete_schedule(DeleteScheduleCommand{.schedule_id = 9999});
-    Check(missing.status.code == ErrorCode::kNotFound && missing.schedule_id == 9999 && !missing.deleted &&
-              !missing.error.empty(),
+    const auto missing = service.cancel_schedule(CancelScheduleCommand{.schedule_id = 9999});
+    Check(missing.result.status.code == ErrorCode::kNotFound && missing.schedule_id == 9999 && !missing.result.value &&
+              !missing.result.error.empty(),
           "不存在的日程应返回未找到错误");
+
+    const auto recurring = service.cancel_schedule(CancelScheduleCommand{.schedule_id = 1003});
+    Check(recurring.result.ok() && recurring.result.value, "已落库周期实例应允许按日程取消");
 }
 
 /**
@@ -33,13 +39,14 @@ void CheckInvalidScheduleId(ScheduleService& service) {
  * @return 无返回值；断言失败时终止测试。
  */
 void CheckSoftDelete(ScheduleService& service) {
-    const auto deleted = service.delete_schedule(DeleteScheduleCommand{.schedule_id = 1001});
-    Check(deleted.status.ok() && deleted.schedule_id == 1001 && deleted.deleted && deleted.error.empty(),
+    const auto deleted = service.cancel_schedule(CancelScheduleCommand{.schedule_id = 1001});
+    Check(deleted.result.ok() && deleted.schedule_id == 1001 && deleted.result.value && deleted.result.error.empty(),
           "有效日程应成功取消并返回原 ID");
 
-    const auto repeated = service.delete_schedule(DeleteScheduleCommand{.schedule_id = 1001});
-    Check(repeated.status.code == ErrorCode::kConflict && !repeated.deleted && !repeated.error.empty(),
-          "已取消日程不能重复删除");
+    const auto repeated = service.cancel_schedule(CancelScheduleCommand{.schedule_id = 1001});
+    Check(
+        repeated.result.status.code == ErrorCode::kConflict && !repeated.result.value && !repeated.result.error.empty(),
+        "已取消日程不能重复删除");
 }
 
 /**
@@ -54,7 +61,7 @@ void CheckCancelledScheduleIsInactive(const ScheduleService& service) {
     command.end_time = voicelife::schedule::DateTime{std::chrono::seconds{1'800'001'200}};
 
     const auto created = service.create_schedule(command);
-    Check(created.status.ok() && created.conflicts.empty(), "已取消日程不应继续阻止同时间段的新日程");
+    Check(created.result.ok() && created.conflicts.empty(), "已取消日程不应继续阻止同时间段的新日程");
 }
 
 }  // namespace
@@ -64,7 +71,8 @@ void CheckCancelledScheduleIsInactive(const ScheduleService& service) {
  * @return 全部断言通过时返回 0。
  */
 int main() {
-    ScheduleService service;
+    InMemoryScheduleRepository repository(InMemoryScheduleRepository::DefaultSchedules());
+    ScheduleService service(repository);
     CheckInvalidScheduleId(service);
     CheckSoftDelete(service);
     CheckCancelledScheduleIsInactive(service);

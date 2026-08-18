@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <climits>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "support/im_pairing_test_support.h"
@@ -22,6 +23,30 @@ using voicelife::mcp::McpServer;
 using voicelife::test::Check;
 
 namespace {
+
+/**
+ * @brief 从工具输出对象中读取指定字符串字段。
+ * @param output 工具输出值。
+ * @param key 字段名。
+ * @return 字段存在且为字符串时返回其值。
+ */
+std::optional<std::string> OutputString(const voicelife::ToolOutputValue& output, const std::string& key) {
+    if (!output.IsObject() || output.object == nullptr) return std::nullopt;
+    for (const auto& [name, value] : *output.object) {
+        if (name == key && value != nullptr && value->IsString()) return value->string;
+    }
+    return std::nullopt;
+}
+
+/**
+ * @brief 判断工具输出对象中是否存在指定字段。
+ * @param output 工具输出值。
+ * @param key 字段名。
+ * @return 存在字符串字段时返回 true。
+ */
+bool OutputContains(const voicelife::ToolOutputValue& output, const std::string& key) {
+    return OutputString(output, key).has_value();
+}
 
 class FakeClock final : public ImPairingClock {
    public:
@@ -52,16 +77,17 @@ void TestRegistersAndCreatesBinding() {
     Check(found, "tools/list 必须公开 im.binding.start");
 
     const auto result = server.call({.request_id = "bind-1", .name = "im.binding.start", .arguments = {}});
-    Check(result.status.ok() && result.output.at("status") == "pending" &&
-              result.output.at("display_code") == "123456" && result.output.contains("expires_at") &&
-              !result.output.at("message").empty() && result.output.at("reason") == "created" &&
-              result.output.at("retryable") == "false" &&
-              result.output.at("speak_text") == "请在微信公众号发送：绑定 123456",
+    Check(result.status.ok() && OutputString(result.output, "status") == "pending" &&
+              OutputString(result.output, "display_code") == "123456" && OutputContains(result.output, "expires_at") &&
+              !OutputString(result.output, "message")->empty() && OutputString(result.output, "reason") == "created" &&
+              OutputString(result.output, "retryable") == "false" &&
+              OutputString(result.output, "speak_text") == "请在微信公众号发送：绑定 123456",
           "无参调用应使用十分钟默认值并返回可播报绑定码信息、speak_text 与稳定字段");
 
     const auto duplicate = server.call({.request_id = "bind-2", .name = "im.binding.start", .arguments = {}});
-    Check(duplicate.status.ok() && duplicate.output.at("status") == "already_active" &&
-              duplicate.output.at("display_code") == "123456" && !duplicate.output.at("message").empty(),
+    Check(duplicate.status.ok() && OutputString(duplicate.output, "status") == "already_active" &&
+              OutputString(duplicate.output, "display_code") == "123456" &&
+              !OutputString(duplicate.output, "message")->empty(),
           "重复语音命令应返回携带当前码的 already_active，而非创建无界会话");
 }
 
@@ -76,7 +102,7 @@ void TestAcceptsExplicitExpiryAndRejectsInvalidArguments() {
 
     const auto explicit_expiry = server.call(
         {.request_id = "bind-3", .name = "im.binding.start", .arguments = {{"expires_in_minutes", int64_t{5}}}});
-    Check(explicit_expiry.status.ok() && explicit_expiry.output.at("status") == "pending",
+    Check(explicit_expiry.status.ok() && OutputString(explicit_expiry.output, "status") == "pending",
           "显式有效期应通过工具参数契约");
 
     McpServer invalid_server;
@@ -128,14 +154,15 @@ void TestInvokesResultHookAndCarriesFields() {
           "带 hook 的绑定工具应可注册");
 
     const auto first = server.call({.request_id = "bind-hook-1", .name = "im.binding.start", .arguments = {}});
-    Check(first.status.ok() && first.output.at("status") == "pending" && hook_count == 1 &&
+    Check(first.status.ok() && OutputString(first.output, "status") == "pending" && hook_count == 1 &&
               hook_result.state == voicelife::im::BindingState::kPending && hook_result.display_code == "123456" &&
               hook_result.generation != 0,
           "创建成功必须恰好触发一次并携带脱敏结果与代次的会话开始 hook");
     const auto second = server.call({.request_id = "bind-hook-2", .name = "im.binding.start", .arguments = {}});
-    Check(second.status.ok() && second.output.at("status") == "already_active" &&
-              second.output.at("display_code") == "123456" && second.output.at("reason") == "session_active" &&
-              second.output.at("retryable") == "false" && hook_count == 2 &&
+    Check(second.status.ok() && OutputString(second.output, "status") == "already_active" &&
+              OutputString(second.output, "display_code") == "123456" &&
+              OutputString(second.output, "reason") == "session_active" &&
+              OutputString(second.output, "retryable") == "false" && hook_count == 2 &&
               hook_result.state == voicelife::im::BindingState::kAlreadyActive,
           "already_active 必须投递当前码，以恢复被普通语音覆盖的 OLED 内容，但不重启轮询");
 }
@@ -154,11 +181,49 @@ void TestReturnsSpeakableUnavailableResult() {
               .ok(),
           "绑定工具应可注册");
     const auto result = server.call({.request_id = "bind-6", .name = "im.binding.start", .arguments = {}});
-    Check(result.status.ok() && result.output.at("status") == "unavailable" && !result.output.at("message").empty() &&
-              result.output.at("reason") == "not_ready" && result.output.at("retryable") == "true" &&
-              !result.output.contains("display_code") && hook_count == 1 &&
-              hook_result.state == voicelife::im::BindingState::kUnavailable,
+    Check(result.status.ok() && OutputString(result.output, "status") == "unavailable" &&
+              !OutputString(result.output, "message")->empty() &&
+              OutputString(result.output, "reason") == "not_ready" &&
+              OutputString(result.output, "retryable") == "true" && !OutputContains(result.output, "display_code") &&
+              hook_count == 1 && hook_result.state == voicelife::im::BindingState::kUnavailable,
           "IM 未 ready 时必须投递可呈现 unavailable，而非只返回 MCP 文本");
+}
+
+void TestCoversBindingStatusMappings() {
+    using voicelife::im::BindingState;
+    const std::vector<std::pair<BindingState, const char*>> states{
+        {BindingState::kIdle, "idle"},           {BindingState::kUnavailable, "unavailable"},
+        {BindingState::kPending, "pending"},     {BindingState::kWaiting, "waiting"},
+        {BindingState::kRetrying, "retrying"},   {BindingState::kAlreadyActive, "already_active"},
+        {BindingState::kConfirmed, "confirmed"}, {BindingState::kExpired, "expired"},
+        {BindingState::kCancelled, "cancelled"}, {BindingState::kNotFound, "not_found"},
+        {BindingState::kTimedOut, "timed_out"},  {BindingState::kCredentialRejected, "credential_rejected"},
+        {BindingState::kFailed, "failed"},
+    };
+    for (const auto& [state, expected] : states) {
+        Check(std::string(voicelife::runtime::BindingStatusName(state)) == expected,
+              "每个绑定状态都必须映射到稳定的状态名");
+        Check(!std::string(voicelife::runtime::BindingReasonCode(state)).empty() &&
+                  !voicelife::runtime::BindingMessage(state).empty(),
+              "每个绑定状态都必须有稳定原因码和可播报消息");
+    }
+
+    for (const auto& [create_status, expected_status] : std::vector<std::pair<PairingClientStatus, std::string>>{
+             {PairingClientStatus::kCredentialRejected, "credential_rejected"},
+             {PairingClientStatus::kRejected, "failed"},
+         }) {
+        FakePairingPort port;
+        FakeClock clock;
+        port.created = {.status = create_status, .value = std::nullopt, .message = "create failed"};
+        BindingUseCase use_case(port, clock);
+        use_case.set_user_id("user-fixture");
+        McpServer server;
+        Check(voicelife::runtime::RegisterImBindingMcpTools(server, use_case).ok(), "绑定工具应可注册");
+        const auto result = server.call({.request_id = "bind-status", .name = "im.binding.start", .arguments = {}});
+        Check(result.status.ok() && OutputString(result.output, "status") == expected_status &&
+                  OutputContains(result.output, "reason") && OutputContains(result.output, "message"),
+              "创建失败结果必须返回稳定状态、原因和可播报消息");
+    }
 }
 
 }  // namespace
@@ -169,5 +234,6 @@ int main() {
     TestRejectsOutOfRangeExpiryAtBoundary();
     TestInvokesResultHookAndCarriesFields();
     TestReturnsSpeakableUnavailableResult();
+    TestCoversBindingStatusMappings();
     return 0;
 }

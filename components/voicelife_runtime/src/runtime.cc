@@ -36,6 +36,8 @@
 #include "voicelife/linx/linx_types.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
 #include "voicelife/mcp/mcp_server.h"
+#include "voicelife/schedule/schedule_operation_service.h"
+#include "voicelife/schedule/schedule_rule_service.h"
 #include "voicelife/schedule/schedule_service.h"
 #endif
 
@@ -47,7 +49,7 @@
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
 #include "mcp_worker_policy.h"
-#include "schedule_mcp_tools.h"
+#include "voicelife/mcp/schedule_mcp_tools.h"
 #include "voicelife/voice/display_snapshot.h"
 #include "voicelife/voice/voice_interaction_controller.h"
 #include "voicelife/voice/voice_ports.h"
@@ -163,10 +165,18 @@ class ScaffoldSpeechProvider final : public voice::SpeechProviderAdapter {
 
 class Runtime final {
    public:
-    Runtime() {
+    /** @brief 构造运行时并将日程服务绑定到持久化仓储。 */
+    Runtime()
+#ifdef ESP_PLATFORM
+        : schedule_service_(storage_.GetScheduleRepository()),
+          schedule_operation_service_(storage_.GetScheduleOperationRepository()),
+          schedule_rule_service_(storage_.GetScheduleRuleRepository(), storage_.GetScheduleExceptionRepository(),
+                                 storage_.GetScheduleRepository())
+#endif
+    {
         auto& registry = voice::SpeechProviderRegistry::Instance();
 #ifdef ESP_PLATFORM
-        init_status_ = RegisterScheduleMcpTools(mcp_server_, schedule_service_);
+        init_status_ = mcp::RegisterScheduleMcpTools(mcp_server_, schedule_service_, schedule_rule_service_);
         if (init_status_.ok()) {
             // MCP worker 只产生绑定结果；轮询与 OLED/TTS 均由各自受控任务处理。
             init_status_ =
@@ -176,7 +186,9 @@ class Runtime final {
                 });
         }
         if (init_status_.ok()) {
-            ESP_LOGI(kTag, "MCP_TOOLS_READY count=3 names=schedule.create,schedule.query,im.binding.start");
+            ESP_LOGI(kTag,
+                     "MCP_TOOLS_READY count=5 names=schedule.create,schedule.query,schedule.update,schedule.delete,"
+                     "im.binding.start");
         }
         registry.Register("xrobot-websocket", linx::LinxSpeechProviderAdapter::DefaultCapabilities(), [this]() {
             return std::make_unique<linx::LinxSpeechProviderAdapter>(
@@ -324,6 +336,7 @@ class Runtime final {
     }
 
    private:
+    StorageBootstrap storage_;
 #ifdef ESP_PLATFORM
     void StopEventLoop() {
         if (event_task_ == nullptr) return;
@@ -1449,6 +1462,8 @@ class Runtime final {
     TaskHandle_t im_lifecycle_task_ = nullptr;
     mcp::McpServer mcp_server_;
     schedule::ScheduleService schedule_service_;
+    schedule::ScheduleOperationService schedule_operation_service_;
+    schedule::ScheduleRuleService schedule_rule_service_;
     Status init_status_ = Status::Ok();
     linx::LinxJsonCodec linx_codec_;
     linx::LinxConnectionConfig linx_config_;
@@ -1945,7 +1960,6 @@ class Runtime final {
     ScaffoldAudioOutput audio_output_;
 #endif
     voice::VoiceInteractionController interaction_;
-    StorageBootstrap storage_;
     std::unique_ptr<voice::SpeechProviderAdapter> provider_;
     std::unique_ptr<voice::VoiceSession> session_;
 
