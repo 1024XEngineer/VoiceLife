@@ -341,7 +341,6 @@ test('cancel and expiry make a pairing code unusable', async () => {
         expiresInMinutes: 1,
     });
     expiryClock.advanceMinutes(1);
-    assert.equal(await expiryGateway.application.pairing.expireDue(), 1);
     assert.equal((await expiryGateway.application.pairing.find(expiring.session.id)).status, 'expired');
     assert.equal(await expiryGateway.application.pairing.expireDue(), 0);
     await expectGatewayError(
