@@ -6,14 +6,18 @@
 
 namespace voicelife::schedule {
 
+/// 提供日程操作记录业务。
+class ScheduleOperationService;
+
 /// 提供一次性日程创建、取消、修改和查询业务。
 class ScheduleService {
    public:
     /**
      * @brief 使用指定日程仓储构造服务。
      * @param repository 日程持久化仓储；其生命周期必须长于本服务。
+     * @param operation_service 可选操作记录服务；提供时变更命令成功后追加记录，不提供时跳过。
      */
-    explicit ScheduleService(ScheduleRepository& repository);
+    explicit ScheduleService(ScheduleRepository& repository, ScheduleOperationService* operation_service = nullptr);
 
     /**
      * @brief 创建一条日程。
@@ -46,6 +50,8 @@ class ScheduleService {
    private:
     /// 一次性日程创建、取消、修改和查询使用的持久化仓储。
     ScheduleRepository& repository_;
+    /// 可选操作记录服务；为空时变更命令不追加操作日志。
+    ScheduleOperationService* operation_service_;
 };
 
 }  // namespace voicelife::schedule

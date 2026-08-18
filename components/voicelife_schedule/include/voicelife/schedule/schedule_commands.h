@@ -52,18 +52,27 @@ struct QueryScheduleCommand {
     int64_t offset = 0;
 };
 
-/// 写入日程操作记录所需的数据；撤销操作允许用空快照表达操作前日程不存在。
-struct RecordScheduleOperationCommand {
+/// 写入一条日程操作记录所需的数据。
+struct RecordOperationCommand {
+    OperationEntityType entity_type = OperationEntityType::kSchedule;
     ScheduleOperationType type = ScheduleOperationType::kCreate;
-    ScheduleId schedule_id = 0;
-    std::string schedule_event;
-    /// 创建时为空，修改和删除时保存完整快照，撤销时保存撤销前可能不存在的日程状态。
-    std::optional<Schedule> previous;
+    int64_t entity_id = 0;
+    std::string label;
+    /// 操作前快照 JSON；kCreate 必须为空，kUpdate / kDelete 必须有值。
+    std::optional<std::string> before;
 };
 
-/// 撤销指定日程操作所需的数据。
-struct UndoScheduleOperationCommand {
-    OperationId operation_id = 0;
+/// 查询操作记录所需的筛选和分页条件；与 QueryScheduleCommand 对齐。
+struct QueryOperationCommand {
+    std::optional<OperationId> operation_id;  ///< 精确查单条，读 before 快照用
+    std::optional<OperationEntityType> entity_type;
+    std::optional<int64_t> entity_id;  ///< 需配合 entity_type
+    std::optional<ScheduleOperationType> type;
+    std::optional<DateTime> operated_from;  ///< 时间范围下界
+    std::optional<DateTime> operated_to;    ///< 时间范围上界
+    std::optional<std::string> keyword;     ///< label 模糊匹配
+    int64_t limit = 20;
+    int64_t offset = 0;
 };
 
 }  // namespace voicelife::schedule

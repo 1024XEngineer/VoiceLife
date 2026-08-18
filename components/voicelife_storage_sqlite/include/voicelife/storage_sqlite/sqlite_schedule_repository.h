@@ -72,44 +72,29 @@ class SqliteScheduleRepository final : public schedule::ScheduleRepository,
 
     /**
      * @brief 插入一条日程操作记录。
-     * @param operation 待保存的操作。
+     * @param operation 待保存的操作；仓储负责生成 id 和 operated_at。
      * @return 实际保存后的完整操作记录。
      */
     Result<schedule::OperationRecord> InsertOperation(const schedule::OperationRecord& operation) override;
 
     /**
-     * @brief 查询十五分钟闭区间内仍有效的操作记录。
-     * @param now 查询窗口结束时间。
-     * @return 按时间和标识倒序排列的操作记录。
+     * @brief 按筛选条件查询操作记录，按 operated_at DESC, id DESC 排序。
+     * @param query 查询筛选和分页条件。
+     * @return 匹配的操作记录。
      */
-    [[nodiscard]] Result<std::vector<schedule::OperationRecord>> FindRecentOperations(
-        schedule::DateTime now) const override;
+    [[nodiscard]] Result<std::vector<schedule::OperationRecord>> FindOperations(
+        const schedule::QueryOperationCommand& query) const override;
 
     /**
-     * @brief 在单个立即事务内执行日程逆操作并写入撤销记录。
-     * @param operation_id 要撤销的操作标识。
-     * @param now 撤销发生时间。
-     * @return 原操作及撤销后的日程。
+     * @brief 统计满足筛选条件的操作总条数（不受分页影响）。
+     * @param query 查询筛选条件。
+     * @return 满足条件的总条数。
      */
-    Result<schedule::UndoOperationResult> UndoOperation(schedule::OperationId operation_id,
-                                                        schedule::DateTime now) override;
+    [[nodiscard]] Result<int64_t> CountOperations(const schedule::QueryOperationCommand& query) const override;
 
    private:
     /** @brief 在调用方持有仓储锁时读取指定日程。 @param id 日程标识。 @return 日程或错误。 */
     Result<schedule::Schedule> FindByIdLocked(schedule::ScheduleId id) const;
-    /** @brief 在调用方持有仓储锁时插入操作。 @param operation 待保存操作。 @return 保存结果。 */
-    Result<schedule::OperationRecord> InsertOperationLocked(const schedule::OperationRecord& operation);
-    /**
-     * @brief 在调用方持有仓储锁时恢复日程快照。
-     * @param snapshot 完整快照。
-     * @param require_existing 是否要求目标已存在。
-     * @return 恢复结果。
-     */
-    Status RestoreScheduleLocked(const schedule::Schedule& snapshot, bool require_existing);
-    /** @brief 在调用方持有仓储锁时物理删除日程。 @param id 日程标识。 @return 删除状态。 */
-    Status RemoveScheduleLocked(schedule::ScheduleId id);
-    /** @brief 将撤销失败转换为事务回滚后的状态。 @param failure 原始失败状态。 @return 保留原始错误的状态。 */
-    Status RollbackAfterFailure(const Status& failure);
 
     SqliteDatabase& database_;
     mutable std::mutex mutex_;

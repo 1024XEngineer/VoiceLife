@@ -14,10 +14,11 @@
 
 using voicelife::ErrorCode;
 using voicelife::schedule::DateTime;
+using voicelife::schedule::OperationEntityType;
 using voicelife::schedule::OperationRecord;
+using voicelife::schedule::QueryOperationCommand;
 using voicelife::schedule::QueryScheduleCommand;
 using voicelife::schedule::Schedule;
-using voicelife::schedule::ScheduleId;
 using voicelife::schedule::ScheduleOperationType;
 using voicelife::schedule::ScheduleStatus;
 using voicelife::schedule::ScheduleStatusFilter;
@@ -90,12 +91,12 @@ void CheckUnavailableRepository(const std::filesystem::path& path) {
     Check(repository.FindOverlapping(At(2'100'000'000), At(2'100'003'600), std::nullopt).status.code ==
               ErrorCode::kUnavailable,
           "未打开数据库不能查询重叠日程");
-    Check(repository.FindRecentOperations(At(2'100'000'000)).status.code == ErrorCode::kUnavailable,
-          "未打开数据库不能查询近期操作");
+    Check(repository.FindOperations(QueryOperationCommand{}).status.code == ErrorCode::kUnavailable,
+          "未打开数据库不能查询操作记录");
+    Check(repository.CountOperations(QueryOperationCommand{}).status.code == ErrorCode::kUnavailable,
+          "未打开数据库不能统计操作记录");
     Check(repository.InsertOperation(OperationRecord{}).status.code == ErrorCode::kUnavailable,
           "未打开数据库不能写入操作记录");
-    Check(repository.UndoOperation(1, At(2'100'000'000)).status.code == ErrorCode::kUnavailable,
-          "未打开数据库不能撤销操作");
 }
 
 /**
@@ -190,72 +191,60 @@ void CheckOperationMapperValidation(const std::filesystem::path& path) {
     auto no_parameters = database.Prepare("SELECT 1");
     Check(no_parameters.ok(), "操作 Mapper 应创建无参数语句");
     OperationRecord sample;
+    sample.entity_type = OperationEntityType::kSchedule;
     sample.type = ScheduleOperationType::kCreate;
-    sample.schedule_id = 100;
-    sample.schedule_event = "创建";
-    const auto type_bind = mapping::BindOperation(*no_parameters.value, sample);
-    Check(type_bind.code == ErrorCode::kInternal && type_bind.message.find("type") != std::string::npos,
-          "操作 Mapper 应为 type 绑定错误补充字段名");
+    sample.entity_id = 100;
+    sample.label = "创建";
+    const auto entity_bind = mapping::BindOperation(*no_parameters.value, sample);
+    Check(entity_bind.code == ErrorCode::kInternal && entity_bind.message.find("entity_type") != std::string::npos,
+          "操作 Mapper 应为 entity_type 绑定错误补充字段名");
 
-    auto invalid_type = database.Prepare(
-        "SELECT 1, 99, 100, '创建', 2000000000, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL");
+    auto invalid_entity = database.Prepare("SELECT 1, 99, 1, 100, '创建', 2000000000, NULL");
+    Check(invalid_entity.ok() && invalid_entity.value->Step().ok(), "应构造非法实体类型结果行");
+    Check(mapping::ReadOperation(*invalid_entity.value).status.code == ErrorCode::kInternal,
+          "操作 Mapper 应拒绝非法实体类型");
+
+    auto invalid_type = database.Prepare("SELECT 1, 1, 99, 100, '创建', 2000000000, NULL");
     Check(invalid_type.ok() && invalid_type.value->Step().ok(), "应构造非法操作类型结果行");
     Check(mapping::ReadOperation(*invalid_type.value).status.code == ErrorCode::kInternal,
           "操作 Mapper 应拒绝非法操作类型");
 
-    auto null_field = database.Prepare(
-        "SELECT 1, 1, 100, NULL, 2000000000, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL");
-    Check(null_field.ok() && null_field.value->Step().ok(), "应构造空字段结果行");
-    Check(mapping::ReadOperation(*null_field.value).status.code == ErrorCode::kInternal, "操作 Mapper 应拒绝空字段");
+    auto null_id = database.Prepare("SELECT 1, 1, 1, NULL, '创建', 2000000000, NULL");
+    Check(null_id.ok() && null_id.value->Step().ok(), "应构造空实体标识结果行");
+    Check(mapping::ReadOperation(*null_id.value).status.code == ErrorCode::kInternal, "操作 Mapper 应拒绝空实体标识");
 
-    auto invalid_active = database.Prepare(
-        "SELECT 1, 1, 100, '创建', 2000000000, 2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL");
-    Check(invalid_active.ok() && invalid_active.value->Step().ok(), "应构造非法 active 结果行");
-    Check(mapping::ReadOperation(*invalid_active.value).status.code == ErrorCode::kInternal,
-          "操作 Mapper 应拒绝非法 active");
+    auto null_label = database.Prepare("SELECT 1, 1, 1, 100, NULL, 2000000000, NULL");
+    Check(null_label.ok() && null_label.value->Step().ok(), "应构造空名称结果行");
+    Check(mapping::ReadOperation(*null_label.value).status.code == ErrorCode::kInternal, "操作 Mapper 应拒绝空名称");
 
-    auto inconsistent = database.Prepare(
-        "SELECT 1, 1, 100, '修改', 2000000000, 1, NULL, 'x', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL");
-    Check(inconsistent.ok() && inconsistent.value->Step().ok(), "应构造快照列不一致结果行");
-    Check(mapping::ReadOperation(*inconsistent.value).status.code == ErrorCode::kInternal,
-          "操作 Mapper 应拒绝不一致的快照列");
+    auto create_with_before = database.Prepare("SELECT 1, 1, 1, 100, '创建', 2000000000, '{\"a\":1}'");
+    Check(create_with_before.ok() && create_with_before.value->Step().ok(), "应构造创建带快照结果行");
+    Check(mapping::ReadOperation(*create_with_before.value).status.code == ErrorCode::kInternal,
+          "操作 Mapper 应拒绝创建操作携带 before");
 
-    auto incomplete = database.Prepare(
-        "SELECT 1, 1, 100, '修改', 2000000000, 1, 100, NULL, 2100000000, 2100003600, NULL, NULL, NULL, 1, "
-        "2000000000, 2000000100");
-    Check(incomplete.ok() && incomplete.value->Step().ok(), "应构造快照字段不完整结果行");
-    Check(mapping::ReadOperation(*incomplete.value).status.code == ErrorCode::kInternal,
-          "操作 Mapper 应拒绝不完整的快照");
+    auto update_without_before = database.Prepare("SELECT 1, 1, 2, 100, '修改', 2000000000, NULL");
+    Check(update_without_before.ok() && update_without_before.value->Step().ok(), "应构造修改缺快照结果行");
+    Check(mapping::ReadOperation(*update_without_before.value).status.code == ErrorCode::kInternal,
+          "操作 Mapper 应拒绝修改操作缺少 before");
 
-    auto bad_status = database.Prepare(
-        "SELECT 1, 1, 100, '修改', 2000000000, 1, 100, 'x', 2100000000, 2100003600, NULL, NULL, NULL, 99, "
-        "2000000000, 2000000100");
-    Check(bad_status.ok() && bad_status.value->Step().ok(), "应构造非法快照状态结果行");
-    Check(mapping::ReadOperation(*bad_status.value).status.code == ErrorCode::kInternal,
-          "操作 Mapper 应拒绝非法快照状态");
+    auto full_create = database.Prepare("SELECT 7, 1, 1, 100, '创建', 2000000000, NULL");
+    Check(full_create.ok() && full_create.value->Step().ok(), "应构造完整创建结果行");
+    const auto create_operation = mapping::ReadOperation(*full_create.value);
+    Check(create_operation.ok() && create_operation.value->id == 7 &&
+              create_operation.value->entity_type == OperationEntityType::kSchedule &&
+              create_operation.value->type == ScheduleOperationType::kCreate &&
+              create_operation.value->entity_id == 100 && create_operation.value->label == "创建" &&
+              !create_operation.value->before.has_value(),
+          "操作 Mapper 应还原完整创建记录");
 
-    auto id_mismatch = database.Prepare(
-        "SELECT 1, 1, 100, '修改', 2000000000, 1, 999, 'x', 2100000000, 2100003600, NULL, NULL, NULL, 1, "
-        "2000000000, 2000000100");
-    Check(id_mismatch.ok() && id_mismatch.value->Step().ok(), "应构造快照 ID 不一致结果行");
-    Check(mapping::ReadOperation(*id_mismatch.value).status.code == ErrorCode::kInternal,
-          "操作 Mapper 应拒绝快照 ID 不一致");
-
-    auto bad_range = database.Prepare(
-        "SELECT 1, 1, 100, '修改', 2000000000, 1, 100, 'x', NULL, 2100003600, NULL, NULL, NULL, 1, 2000000000, "
-        "2000000100");
-    Check(bad_range.ok() && bad_range.value->Step().ok(), "应构造快照时间范围无效结果行");
-    Check(mapping::ReadOperation(*bad_range.value).status.code == ErrorCode::kInternal,
-          "操作 Mapper 应拒绝无效快照时间范围");
-
-    auto full_snapshot = database.Prepare(
-        "SELECT 1, 1, 100, '修改', 2000000000, 1, 100, 'x', 2100000000, 2100003600, '会议室', '复盘', NULL, 1, "
-        "2000000000, 2000000100");
-    Check(full_snapshot.ok() && full_snapshot.value->Step().ok(), "应构造完整快照结果行");
-    const auto full_operation = mapping::ReadOperation(*full_snapshot.value);
-    Check(full_operation.ok() && full_operation.value->previous.has_value() &&
-              full_operation.value->previous->location == "会议室" && full_operation.value->previous->notes == "复盘",
-          "操作 Mapper 应还原含地点和备注的完整快照");
+    auto full_update = database.Prepare("SELECT 8, 2, 2, 101, '修改', 2000000001, '{\"id\":101}'");
+    Check(full_update.ok() && full_update.value->Step().ok(), "应构造完整修改结果行");
+    const auto update_operation = mapping::ReadOperation(*full_update.value);
+    Check(update_operation.ok() && update_operation.value->entity_type == OperationEntityType::kRule &&
+              update_operation.value->type == ScheduleOperationType::kUpdate &&
+              update_operation.value->entity_id == 101 && update_operation.value->before.has_value() &&
+              *update_operation.value->before == "{\"id\":101}",
+          "操作 Mapper 应还原 before 快照");
 }
 
 /**
@@ -284,9 +273,6 @@ void CheckRepositoryErrorPropagation(const std::filesystem::path& path) {
     Check(repository.FindAll().status.code == ErrorCode::kInternal, "Repository 应传播查询 SQL 编译错误");
 }
 
-/** @brief 返回当前秒级系统时间。 @return 当前日程时间。 */
-DateTime CurrentTime() { return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()); }
-
 /** @brief 构造仅含事件名的日程。 @param event 日程名称。 @return 最小日程。 */
 Schedule MinimalSchedule(const std::string& event) {
     Schedule schedule;
@@ -305,135 +291,152 @@ void CheckOperationRepository(const std::filesystem::path& path) {
     SqliteScheduleRepository repository(database);
     Check(repository.Initialize().ok(), "操作仓储测试应初始化表结构");
 
-    Schedule base = MinimalSchedule("操作目标日程");
-    base.start_time = At(2'100'000'000);
-    base.end_time = At(2'100'003'600);
-    base.created_at = At(2'000'000'000);
-    base.updated_at = At(2'000'000'100);
-    const auto target = repository.Insert(base);
-    Check(target.ok() && target.value->id > 0, "应创建操作目标日程");
-    const ScheduleId sid = target.value->id;
+    const int64_t schedule_id = 1001;
+    const std::string snapshot = R"({"id":1001,"event":"操作目标日程"})";
 
     // InsertOperation 校验分支。
-    OperationRecord empty_event;
-    empty_event.type = ScheduleOperationType::kCreate;
-    empty_event.schedule_id = sid;
-    empty_event.schedule_event = "";
-    Check(repository.InsertOperation(empty_event).status.code == ErrorCode::kInvalidArgument, "空操作事件名应被拒绝");
+    OperationRecord empty_label;
+    empty_label.entity_type = OperationEntityType::kSchedule;
+    empty_label.type = ScheduleOperationType::kCreate;
+    empty_label.entity_id = schedule_id;
+    empty_label.label = "";
+    Check(repository.InsertOperation(empty_label).status.code == ErrorCode::kInvalidArgument, "空操作名称应被拒绝");
+
+    OperationRecord bad_entity;
+    bad_entity.entity_type = static_cast<OperationEntityType>(99);
+    bad_entity.type = ScheduleOperationType::kCreate;
+    bad_entity.entity_id = schedule_id;
+    bad_entity.label = "非法实体类型";
+    Check(repository.InsertOperation(bad_entity).status.code == ErrorCode::kInvalidArgument, "非法实体类型应被拒绝");
 
     OperationRecord bad_type;
+    bad_type.entity_type = OperationEntityType::kSchedule;
     bad_type.type = static_cast<ScheduleOperationType>(99);
-    bad_type.schedule_id = sid;
-    bad_type.schedule_event = "非法类型";
+    bad_type.entity_id = schedule_id;
+    bad_type.label = "非法类型";
     Check(repository.InsertOperation(bad_type).status.code == ErrorCode::kInvalidArgument, "非法操作类型应被拒绝");
 
-    OperationRecord create_with_previous;
-    create_with_previous.type = ScheduleOperationType::kCreate;
-    create_with_previous.schedule_id = sid;
-    create_with_previous.schedule_event = "创建带快照";
-    create_with_previous.previous = *target.value;
-    Check(repository.InsertOperation(create_with_previous).status.code == ErrorCode::kInvalidArgument,
+    OperationRecord bad_id;
+    bad_id.entity_type = OperationEntityType::kSchedule;
+    bad_id.type = ScheduleOperationType::kCreate;
+    bad_id.entity_id = 0;
+    bad_id.label = "非法 ID";
+    Check(repository.InsertOperation(bad_id).status.code == ErrorCode::kInvalidArgument, "非正数实体 ID 应被拒绝");
+
+    OperationRecord create_with_before;
+    create_with_before.entity_type = OperationEntityType::kSchedule;
+    create_with_before.type = ScheduleOperationType::kCreate;
+    create_with_before.entity_id = schedule_id;
+    create_with_before.label = "创建带快照";
+    create_with_before.before = snapshot;
+    Check(repository.InsertOperation(create_with_before).status.code == ErrorCode::kInvalidArgument,
           "创建操作带快照应被拒绝");
 
-    OperationRecord update_without_previous;
-    update_without_previous.type = ScheduleOperationType::kUpdate;
-    update_without_previous.schedule_id = sid;
-    update_without_previous.schedule_event = "修改无快照";
-    Check(repository.InsertOperation(update_without_previous).status.code == ErrorCode::kInvalidArgument,
+    OperationRecord update_without_before;
+    update_without_before.entity_type = OperationEntityType::kSchedule;
+    update_without_before.type = ScheduleOperationType::kUpdate;
+    update_without_before.entity_id = schedule_id;
+    update_without_before.label = "修改无快照";
+    Check(repository.InsertOperation(update_without_before).status.code == ErrorCode::kInvalidArgument,
           "修改操作缺快照应被拒绝");
 
-    OperationRecord mismatch_previous;
-    mismatch_previous.type = ScheduleOperationType::kUpdate;
-    mismatch_previous.schedule_id = sid;
-    mismatch_previous.schedule_event = "快照不一致";
-    mismatch_previous.previous = *target.value;
-    mismatch_previous.previous->id = sid + 999;
-    Check(repository.InsertOperation(mismatch_previous).status.code == ErrorCode::kInvalidArgument,
-          "快照 ID 不一致应被拒绝");
+    OperationRecord delete_without_before;
+    delete_without_before.entity_type = OperationEntityType::kSchedule;
+    delete_without_before.type = ScheduleOperationType::kDelete;
+    delete_without_before.entity_id = schedule_id;
+    delete_without_before.label = "删除无快照";
+    Check(repository.InsertOperation(delete_without_before).status.code == ErrorCode::kInvalidArgument,
+          "删除操作缺快照应被拒绝");
 
     // 创建 / 修改 / 删除操作的正常写入（覆盖 BindOperation 两种快照分支）。
     OperationRecord create_op;
+    create_op.entity_type = OperationEntityType::kSchedule;
     create_op.type = ScheduleOperationType::kCreate;
-    create_op.schedule_id = sid;
-    create_op.schedule_event = "创建操作";
+    create_op.entity_id = schedule_id;
+    create_op.label = "创建操作";
     const auto saved_create = repository.InsertOperation(create_op);
-    Check(saved_create.ok() && saved_create.value->id > 0, "应保存创建操作");
+    Check(saved_create.ok() && saved_create.value->id > 0 && saved_create.value->operated_at != DateTime{},
+          "应保存创建操作");
 
     OperationRecord update_op;
+    update_op.entity_type = OperationEntityType::kSchedule;
     update_op.type = ScheduleOperationType::kUpdate;
-    update_op.schedule_id = sid;
-    update_op.schedule_event = "修改操作";
-    update_op.previous = *target.value;
+    update_op.entity_id = schedule_id;
+    update_op.label = "修改操作";
+    update_op.before = snapshot;
     const auto saved_update = repository.InsertOperation(update_op);
-    Check(saved_update.ok(), "应保存修改操作");
+    Check(saved_update.ok() && saved_update.value->before == snapshot, "应保存修改操作");
 
     OperationRecord delete_op;
+    delete_op.entity_type = OperationEntityType::kException;
     delete_op.type = ScheduleOperationType::kDelete;
-    delete_op.schedule_id = sid;
-    delete_op.schedule_event = "删除操作";
-    delete_op.previous = *target.value;
+    delete_op.entity_id = 42;
+    delete_op.label = "例外删除";
+    delete_op.before = snapshot;
     const auto saved_delete = repository.InsertOperation(delete_op);
     Check(saved_delete.ok(), "应保存删除操作");
 
-    // FindRecentOperations 应返回窗口内全部有效操作。
-    const auto recent = repository.FindRecentOperations(CurrentTime());
-    Check(recent.ok() && recent.value->size() >= 3, "应查询到窗口内操作");
+    // 默认查询应返回全部操作，同秒时按标识倒序。
+    const auto all = repository.FindOperations(QueryOperationCommand{});
+    Check(all.ok() && all.value->size() == 3, "应查询到全部操作");
+    Check(all.value->front().id == saved_delete.value->id && all.value->back().id == saved_create.value->id,
+          "查询应按标识倒序返回");
 
-    // UndoOperation 校验分支。
-    Check(repository.UndoOperation(0, CurrentTime()).status.code == ErrorCode::kInvalidArgument,
-          "撤销非法标识应被拒绝");
-    Check(repository.UndoOperation(999999, CurrentTime()).status.code == ErrorCode::kNotFound,
-          "撤销不存在操作应被拒绝");
+    // 按实体类型和操作类型筛选。
+    QueryOperationCommand schedule_query;
+    schedule_query.entity_type = OperationEntityType::kSchedule;
+    const auto schedules = repository.FindOperations(schedule_query);
+    Check(schedules.ok() && schedules.value->size() == 2, "实体类型筛选应命中两条操作");
 
-    // 撤销修改操作：恢复 previous 快照（RestoreScheduleLocked 更新路径）。
-    const auto undo_update = repository.UndoOperation(saved_update.value->id, CurrentTime());
-    Check(undo_update.ok() && undo_update.value->schedule.has_value() &&
-              undo_update.value->schedule->event == target.value->event,
-          "撤销修改应恢复快照");
+    QueryOperationCommand create_query;
+    create_query.type = ScheduleOperationType::kCreate;
+    const auto creates = repository.FindOperations(create_query);
+    Check(creates.ok() && creates.value->size() == 1 && creates.value->front().label == "创建操作",
+          "操作类型筛选应命中创建操作");
 
-    // 撤销删除操作：恢复 previous 快照（删除逆操作分支）。
-    Check(repository.Delete(sid).ok(), "应先软删除目标日程");
-    const auto undo_delete = repository.UndoOperation(saved_delete.value->id, CurrentTime());
-    Check(undo_delete.ok() && undo_delete.value->schedule.has_value(), "撤销删除应恢复快照");
+    QueryOperationCommand by_entity;
+    by_entity.entity_type = OperationEntityType::kSchedule;
+    by_entity.entity_id = schedule_id;
+    const auto by_entity_result = repository.FindOperations(by_entity);
+    Check(by_entity_result.ok() && by_entity_result.value->size() == 2, "实体标识筛选应命中该日程操作");
 
-    // 撤销创建操作：物理删除日程。
-    const auto undo_create = repository.UndoOperation(saved_create.value->id, CurrentTime());
-    Check(undo_create.ok() && !undo_create.value->schedule.has_value(), "撤销创建应物理删除日程");
-    Check(repository.FindById(sid).status.code == ErrorCode::kNotFound, "撤销创建后日程应不存在");
+    QueryOperationCommand by_id;
+    by_id.operation_id = saved_update.value->id;
+    const auto by_id_result = repository.FindOperations(by_id);
+    Check(by_id_result.ok() && by_id_result.value->size() == 1 &&
+              by_id_result.value->front().id == saved_update.value->id,
+          "按操作 ID 应精确命中");
 
-    // 撤销已被撤销的操作：active=false 分支。
-    Check(repository.UndoOperation(saved_create.value->id, CurrentTime()).status.code == ErrorCode::kNotFound,
-          "重复撤销应返回未找到");
+    // 时间窗口闭区间：全部操作同秒应命中，未来窗口无命中。
+    QueryOperationCommand window;
+    window.operated_from = saved_create.value->operated_at;
+    window.operated_to = saved_create.value->operated_at;
+    const auto ranged = repository.FindOperations(window);
+    Check(ranged.ok() && ranged.value->size() == 3, "时间窗口应命中同秒操作");
 
-    // 撤销 undo 操作：恢复（覆盖 BindScheduleWithId 插入路径）。
-    const auto after_undo_create = repository.FindRecentOperations(CurrentTime());
-    Check(after_undo_create.ok() && !after_undo_create.value->empty() &&
-              after_undo_create.value->front().type == ScheduleOperationType::kUndo,
-          "撤销创建后应写入 undo 记录");
-    const auto undo_of_undo = repository.UndoOperation(after_undo_create.value->front().id, CurrentTime());
-    Check(undo_of_undo.ok() && undo_of_undo.value->schedule.has_value() &&
-              undo_of_undo.value->schedule->event == target.value->event,
-          "撤销 undo 应恢复被删除的日程");
+    QueryOperationCommand empty_window;
+    empty_window.operated_from = saved_create.value->operated_at + std::chrono::seconds{1};
+    empty_window.operated_to = saved_create.value->operated_at + std::chrono::seconds{10};
+    const auto empty_ranged = repository.FindOperations(empty_window);
+    Check(empty_ranged.ok() && empty_ranged.value->empty(), "未来时间窗口应无命中");
 
-    // 操作时间晚于撤销时间 → 冲突。
-    OperationRecord future_op;
-    future_op.type = ScheduleOperationType::kCreate;
-    future_op.schedule_id = sid;
-    future_op.schedule_event = "未来操作";
-    const auto saved_future = repository.InsertOperation(future_op);
-    const DateTime past = CurrentTime() - std::chrono::seconds{2};
-    Check(repository.UndoOperation(saved_future.value->id, past).status.code == ErrorCode::kConflict,
-          "操作时间晚于撤销时间应冲突");
+    // 名称模糊匹配。
+    QueryOperationCommand keyword;
+    keyword.keyword = std::string{"操作"};
+    const auto by_keyword = repository.FindOperations(keyword);
+    Check(by_keyword.ok() && by_keyword.value->size() == 2, "名称模糊查询应命中两条操作");
 
-    // 操作超出十五分钟撤销窗口 → 冲突。
-    OperationRecord window_op;
-    window_op.type = ScheduleOperationType::kCreate;
-    window_op.schedule_id = sid;
-    window_op.schedule_event = "窗口外操作";
-    const auto saved_window = repository.InsertOperation(window_op);
-    const DateTime too_late = CurrentTime() + std::chrono::minutes{16};
-    Check(repository.UndoOperation(saved_window.value->id, too_late).status.code == ErrorCode::kConflict,
-          "超过十五分钟撤销期限应冲突");
+    // 分页裁剪结果但总数不受影响。
+    QueryOperationCommand paged;
+    paged.limit = 2;
+    paged.offset = 1;
+    const auto page = repository.FindOperations(paged);
+    Check(page.ok() && page.value->size() == 2, "分页查询应限制条数");
+
+    const auto total = repository.CountOperations(QueryOperationCommand{});
+    Check(total.ok() && total.value == 3, "总数统计应为三条");
+    const auto filtered_total = repository.CountOperations(schedule_query);
+    Check(filtered_total.ok() && filtered_total.value == 2, "筛选总数应为两条");
 }
 
 /**
@@ -518,157 +521,27 @@ void CheckQueryBranches(const std::filesystem::path& path) {
  */
 void CheckOperationFailureBranches() {
     {
-        // 删除操作表后：近期操作查询与撤销应透传 SQL 编译错误。
+        // 删除操作表后：操作查询与统计应透传 SQL 编译错误。
         const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
         SqliteDatabase database(file.path.string());
         Check(database.Open().ok(), "操作表失败分支应打开数据库");
         SqliteScheduleRepository repository(database);
         Check(repository.Initialize().ok(), "操作表失败分支应初始化表结构");
         Check(database.Execute("DROP TABLE operation_record").ok(), "应删除操作表制造 SQL 错误");
-        Check(repository.FindRecentOperations(CurrentTime()).status.code == ErrorCode::kInternal,
-              "FindRecentOperations 应透传操作表缺失错误");
-        Check(repository.UndoOperation(1, CurrentTime()).status.code == ErrorCode::kInternal,
-              "UndoOperation 应透传操作表缺失错误");
-    }
-    {
-        // 删除日程表后：撤销操作在读取目标日程时失败应回滚。
-        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
-        SqliteDatabase database(file.path.string());
-        Check(database.Open().ok(), "日程表失败分支应打开数据库");
-        SqliteScheduleRepository repository(database);
-        Check(repository.Initialize().ok(), "日程表失败分支应初始化表结构");
-        Schedule base = MinimalSchedule("撤销目标日程");
-        base.start_time = At(2'100'000'000);
-        base.end_time = At(2'100'003'600);
-        const auto target = repository.Insert(base);
-        Check(target.ok(), "应创建撤销目标日程");
-        OperationRecord op;
-        op.type = ScheduleOperationType::kCreate;
-        op.schedule_id = target.value->id;
-        op.schedule_event = "撤销创建";
-        const auto saved = repository.InsertOperation(op);
-        Check(saved.ok(), "应保存创建操作");
-        Check(database.Execute("DROP TABLE schedule").ok(), "应删除日程表制造 SQL 错误");
-        Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kInternal,
-              "撤销操作读取目标日程失败应回滚");
-    }
-}
-
-/**
- * @brief 验证操作记录表缺失时撤销事务中的编译、绑定和执行错误回滚路径。
- * @return 无。
- */
-void CheckUndoTransactionFailureBranches() {
-    {
-        // 删除操作表：撤销读取操作记录时 SQL 编译失败，应进入回滚失败组合分支。
-        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
-        SqliteDatabase database(file.path.string());
-        Check(database.Open().ok(), "撤销事务失败分支应打开数据库");
-        SqliteScheduleRepository repository(database);
-        Check(repository.Initialize().ok(), "撤销事务失败分支应初始化表结构");
-        Check(database.Execute("DROP TABLE operation_record").ok(), "应删除操作表制造读取操作记录 SQL 错误");
-        Check(repository.UndoOperation(1, CurrentTime()).status.code == ErrorCode::kInternal,
-              "撤销读取操作记录失败应透传内部错误");
-    }
-    {
-        // 保留操作表并插入操作记录，删除日程表使撤销读取目标日程失败并回滚。
-        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
-        SqliteDatabase database(file.path.string());
-        Check(database.Open().ok(), "撤销读取日程失败分支应打开数据库");
-        SqliteScheduleRepository repository(database);
-        Check(repository.Initialize().ok(), "撤销读取日程失败分支应初始化表结构");
-        Schedule base = MinimalSchedule("撤销读取日程失败目标");
-        base.start_time = At(2'100'000'000);
-        base.end_time = At(2'100'003'600);
-        const auto target = repository.Insert(base);
-        Check(target.ok(), "应创建撤销读取失败目标日程");
-        OperationRecord op;
-        op.type = ScheduleOperationType::kCreate;
-        op.schedule_id = target.value->id;
-        op.schedule_event = "撤销创建读取失败";
-        const auto saved = repository.InsertOperation(op);
-        Check(saved.ok(), "应保存撤销读取失败操作");
-        Check(database.Execute("DROP TABLE schedule").ok(), "应删除日程表制造读取目标日程 SQL 错误");
-        Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kInternal,
-              "撤销读取目标日程失败应透传内部错误");
-    }
-    {
-        // 撤销逆操作成功后，停用原操作记录的 UPDATE 执行失败，应回滚并透传错误。
-        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
-        SqliteDatabase database(file.path.string());
-        Check(database.Open().ok(), "撤销停用失败分支应打开数据库");
-        SqliteScheduleRepository repository(database);
-        Check(repository.Initialize().ok(), "撤销停用失败分支应初始化表结构");
-        Schedule base = MinimalSchedule("撤销停用失败目标");
-        base.start_time = At(2'100'000'000);
-        base.end_time = At(2'100'003'600);
-        const auto target = repository.Insert(base);
-        Check(target.ok(), "应创建撤销停用失败目标日程");
-        OperationRecord op;
-        op.type = ScheduleOperationType::kCreate;
-        op.schedule_id = target.value->id;
-        op.schedule_event = "撤销停用失败操作";
-        const auto saved = repository.InsertOperation(op);
-        Check(saved.ok(), "应保存撤销停用失败操作");
-        Check(database
-                  .Execute("CREATE TRIGGER reject_operation_update BEFORE UPDATE ON operation_record "
-                           "BEGIN SELECT RAISE(ABORT, 'operation update blocked'); END")
-                  .ok(),
-              "应创建操作记录更新拒绝触发器");
-        Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kAlreadyExists,
-              "撤销停用原操作失败应透传执行错误");
-    }
-    {
-        // 停用原操作记录影响行数为 0，应回滚并返回冲突。
-        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
-        SqliteDatabase database(file.path.string());
-        Check(database.Open().ok(), "撤销停用无变化分支应打开数据库");
-        SqliteScheduleRepository repository(database);
-        Check(repository.Initialize().ok(), "撤销停用无变化分支应初始化表结构");
-        Schedule base = MinimalSchedule("撤销停用无变化目标");
-        base.start_time = At(2'100'000'000);
-        base.end_time = At(2'100'003'600);
-        const auto target = repository.Insert(base);
-        Check(target.ok(), "应创建撤销停用无变化目标日程");
-        OperationRecord op;
-        op.type = ScheduleOperationType::kCreate;
-        op.schedule_id = target.value->id;
-        op.schedule_event = "撤销停用无变化操作";
-        const auto saved = repository.InsertOperation(op);
-        Check(saved.ok(), "应保存撤销停用无变化操作");
-        Check(database
-                  .Execute("CREATE TRIGGER ignore_operation_update BEFORE UPDATE ON operation_record "
-                           "BEGIN SELECT RAISE(IGNORE); END")
-                  .ok(),
-              "应创建操作记录更新忽略触发器");
-        Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kConflict,
-              "停用原操作无变化应返回冲突");
-    }
-    {
-        // 撤销逆操作成功后，写入 undo 操作记录失败，应回滚并透传错误。
-        const TemporaryDatabaseFile file = MakeTemporaryDatabaseFile();
-        SqliteDatabase database(file.path.string());
-        Check(database.Open().ok(), "撤销写入记录失败分支应打开数据库");
-        SqliteScheduleRepository repository(database);
-        Check(repository.Initialize().ok(), "撤销写入记录失败分支应初始化表结构");
-        Schedule base = MinimalSchedule("撤销写入记录失败目标");
-        base.start_time = At(2'100'000'000);
-        base.end_time = At(2'100'003'600);
-        const auto target = repository.Insert(base);
-        Check(target.ok(), "应创建撤销写入记录失败目标日程");
-        OperationRecord op;
-        op.type = ScheduleOperationType::kCreate;
-        op.schedule_id = target.value->id;
-        op.schedule_event = "撤销写入记录失败操作";
-        const auto saved = repository.InsertOperation(op);
-        Check(saved.ok(), "应保存撤销写入记录失败操作");
-        Check(database
-                  .Execute("CREATE TRIGGER reject_operation_insert BEFORE INSERT ON operation_record "
-                           "BEGIN SELECT RAISE(ABORT, 'operation insert blocked'); END")
-                  .ok(),
-              "应创建操作记录插入拒绝触发器");
-        Check(repository.UndoOperation(saved.value->id, CurrentTime()).status.code == ErrorCode::kAlreadyExists,
-              "撤销写入 undo 记录失败应透传执行错误");
+        Check(repository.FindOperations(QueryOperationCommand{}).status.code == ErrorCode::kInternal,
+              "FindOperations 应透传操作表缺失错误");
+        Check(repository.CountOperations(QueryOperationCommand{}).status.code == ErrorCode::kInternal,
+              "CountOperations 应透传操作表缺失错误");
+        const OperationRecord op{
+            .entity_type = OperationEntityType::kSchedule,
+            .type = ScheduleOperationType::kCreate,
+            .entity_id = 1,
+            .operated_at = {},
+            .label = "失败写入",
+            .before = std::nullopt,
+        };
+        Check(repository.InsertOperation(op).status.code == ErrorCode::kInternal,
+              "InsertOperation 应透传操作表缺失错误");
     }
 }
 
@@ -691,6 +564,5 @@ int main() {
     const TemporaryDatabaseFile queries = MakeTemporaryDatabaseFile();
     CheckQueryBranches(queries.path);
     CheckOperationFailureBranches();
-    CheckUndoTransactionFailureBranches();
     return 0;
 }

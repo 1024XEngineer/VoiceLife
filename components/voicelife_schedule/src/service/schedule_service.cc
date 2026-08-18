@@ -3,22 +3,49 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <optional>
 #include <utility>
 
 #include "../helpers/schedule_create_helpers.h"
 #include "../helpers/schedule_query_helpers.h"
+#include "../helpers/schedule_snapshot_helpers.h"
 #include "../helpers/schedule_update_helpers.h"
 #include "../rules/schedule_time_rules.h"
 #include "voicelife/schedule/schedule_factory.h"
+#include "voicelife/schedule/schedule_operation_service.h"
 
 namespace voicelife::schedule {
 namespace {
 
 constexpr std::size_t kMaximumEventLength = 100;
 
+/**
+ * @brief 在变更成功后追加一条操作日志（方案 A：尽力而为，失败不回滚变更）。
+ * @param service 可空的操作记录服务。
+ * @param entity_type 被操作实体类型。
+ * @param type 操作类型。
+ * @param entity_id 被操作实体标识。
+ * @param label 展示用名称。
+ * @param before 操作前快照 JSON。
+ * @return 无。
+ */
+void RecordScheduleMutation(ScheduleOperationService* service, OperationEntityType entity_type,
+                            ScheduleOperationType type, int64_t entity_id, std::string label,
+                            std::optional<std::string> before) {
+    if (service == nullptr) return;
+    (void)service->record_operation({
+        .entity_type = entity_type,
+        .type = type,
+        .entity_id = entity_id,
+        .label = std::move(label),
+        .before = std::move(before),
+    });
+}
+
 }  // namespace
 
-ScheduleService::ScheduleService(ScheduleRepository& repository) : repository_(repository) {}
+ScheduleService::ScheduleService(ScheduleRepository& repository, ScheduleOperationService* operation_service)
+    : repository_(repository), operation_service_(operation_service) {}
 
 CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleCommand& command) const {
     // 先清理文本并校验入参，避免把无效数据带入后续组装和落库。
@@ -86,6 +113,10 @@ CreateScheduleResult ScheduleService::create_schedule(const CreateScheduleComman
     }
     schedule = *stored.value;
 
+    // 变更成功后追加创建日志；kCreate 无 before 快照。
+    RecordScheduleMutation(operation_service_, OperationEntityType::kSchedule, ScheduleOperationType::kCreate,
+                           schedule.id, schedule.event, std::nullopt);
+
     // 组装成功结果，保留冲突和临近日程信息供调用方做提醒。
     const std::string message = nearby_schedules.empty() ? "日程创建成功" : "日程创建成功，附近还有其他日程";
     return {
@@ -115,7 +146,7 @@ CancelScheduleResult ScheduleService::cancel_schedule(const CancelScheduleComman
         };
     }
 
-    // 委托仓储做软取消，保留历史数据并支撑后续撤销。
+    // 委托仓储做软取消，保留历史数据供回滚参考。
     const Status cancelled = repository_.Delete(command.schedule_id);
     if (!cancelled.ok()) {
         return {
@@ -123,6 +154,10 @@ CancelScheduleResult ScheduleService::cancel_schedule(const CancelScheduleComman
             .schedule_id = command.schedule_id,
         };
     }
+
+    // 变更成功后追加取消日志；before 保存取消前的完整日程快照。
+    RecordScheduleMutation(operation_service_, OperationEntityType::kSchedule, ScheduleOperationType::kDelete,
+                           command.schedule_id, loaded.value->event, SerializeScheduleSnapshot(*loaded.value));
 
     return {
         .result = CommandResult<bool>::Success(true),
@@ -204,6 +239,10 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
             .conflicts = std::move(conflicts),
         };
     }
+
+    // 变更成功后追加修改日志；before 保存更新前的完整日程快照。
+    RecordScheduleMutation(operation_service_, OperationEntityType::kSchedule, ScheduleOperationType::kUpdate,
+                           updated.id, updated.event, SerializeScheduleSnapshot(*loaded.value));
 
     // 忽略冲突时仍返回冲突列表，便于调用方提示潜在影响
     return {

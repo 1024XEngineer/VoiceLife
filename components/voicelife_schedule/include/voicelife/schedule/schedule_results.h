@@ -37,19 +37,15 @@ struct QueryScheduleResult {
     int64_t total = 0;
 };
 
-/// 记录日程操作的返回数据。
-struct RecordScheduleOperationResult {
+/// 记录操作的返回数据。
+struct RecordOperationResult {
     CommandResult<std::optional<OperationRecord>> result;
 };
 
-/// 查询最近十五分钟内日程操作的返回数据。
-struct QueryRecentScheduleOperationResult {
+/// 查询操作的返回数据，total 不受分页影响。
+struct QueryOperationResult {
     CommandResult<std::vector<OperationRecord>> result;
-};
-
-/// 撤销日程操作的返回数据。
-struct UndoScheduleOperationResult {
-    CommandResult<std::optional<UndoOperationResult>> result;
+    int64_t total = 0;
 };
 
 }  // namespace voicelife::schedule

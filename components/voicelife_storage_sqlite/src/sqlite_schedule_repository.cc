@@ -28,18 +28,13 @@ Status DatabaseUnavailable() { return Status::Error(ErrorCode::kUnavailable, "SQ
 /** @brief 判断操作类型是否属于领域定义范围。 @param type 待判断类型。 @return 类型有效时返回 true。 */
 bool IsValidOperationType(schedule::ScheduleOperationType type) {
     return type == schedule::ScheduleOperationType::kCreate || type == schedule::ScheduleOperationType::kUpdate ||
-           type == schedule::ScheduleOperationType::kDelete || type == schedule::ScheduleOperationType::kUndo;
+           type == schedule::ScheduleOperationType::kDelete;
 }
 
-/**
- * @brief 判断操作是否位于十五分钟闭区间。
- * @param operation 操作记录。
- * @param now 窗口结束时间。
- * @return 位于窗口内时返回 true。
- */
-bool IsWithinUndoWindow(const OperationRecord& operation, DateTime now) {
-    const DateTime earliest = now - std::chrono::minutes{15};
-    return operation.operated_at >= earliest && operation.operated_at <= now;
+/** @brief 判断实体类型是否属于领域定义范围。 @param type 待判断类型。 @return 类型有效时返回 true。 */
+bool IsValidEntityType(schedule::OperationEntityType type) {
+    return type == schedule::OperationEntityType::kSchedule || type == schedule::OperationEntityType::kRule ||
+           type == schedule::OperationEntityType::kException;
 }
 
 /**
@@ -107,30 +102,46 @@ Status BindScheduleQueryFilters(SqliteStatement& statement, const QueryScheduleC
 }
 
 /**
- * @brief 从查询语句读取一行操作及其 active 状态。
- * @param statement 已执行的查询语句。
- * @param active 输出 active 标记。
- * @return 操作记录或映射错误。
+ * @brief 绑定操作查询共用的筛选参数。
+ * @param statement 已准备语句。
+ * @param query 查询条件。
+ * @param include_paging 是否绑定 limit/offset。
+ * @return 绑定成功时返回成功状态。
  */
-Result<OperationRecord> ReadOneOperation(SqliteStatement& statement, bool& active) {
-    const Result<SqliteStep> stepped = statement.Step();
-    if (!stepped.ok()) return Result<OperationRecord>::Failure(stepped.status.code, stepped.status.message);
-    if (*stepped.value != SqliteStep::kRow) {
-        return Result<OperationRecord>::Failure(ErrorCode::kNotFound, "操作不存在");
+Status BindOperationQueryFilters(SqliteStatement& statement, const schedule::QueryOperationCommand& query,
+                                 bool include_paging) {
+    Status status = BindOptionalInt64(statement, 1, query.operation_id);
+    if (!status.ok()) return status;
+    if (query.entity_type.has_value()) {
+        status = statement.BindInt(2, static_cast<int>(*query.entity_type));
+    } else {
+        status = statement.BindNull(2);
     }
-    active = statement.ColumnInt(5) != 0;
-    return mapping::ReadOperation(statement);
-}
-
-/**
- * @brief 将回滚失败信息附加到原始事务错误。
- * @param failure 原始错误状态。
- * @param rollback 回滚状态。
- * @return 组合后的错误状态。
- */
-Status CombineRollbackFailure(const Status& failure, const Status& rollback) {
-    if (rollback.ok()) return failure;
-    return Status::Error(failure.code, failure.message + "；事务回滚失败：" + rollback.message);
+    if (!status.ok()) return status;
+    status = BindOptionalInt64(statement, 3, query.entity_id);
+    if (!status.ok()) return status;
+    if (query.type.has_value()) {
+        status = statement.BindInt(4, static_cast<int>(*query.type));
+    } else {
+        status = statement.BindNull(4);
+    }
+    if (!status.ok()) return status;
+    status = query.operated_from.has_value() ? statement.BindInt64(5, query.operated_from->time_since_epoch().count())
+                                             : statement.BindNull(5);
+    if (!status.ok()) return status;
+    status = query.operated_to.has_value() ? statement.BindInt64(6, query.operated_to->time_since_epoch().count())
+                                           : statement.BindNull(6);
+    if (!status.ok()) return status;
+    if (query.keyword.has_value() && !query.keyword->empty()) {
+        status = statement.BindText(7, *query.keyword);
+    } else {
+        status = statement.BindNull(7);
+    }
+    if (!status.ok()) return status;
+    if (!include_paging) return Status::Ok();
+    status = statement.BindInt64(8, query.limit);
+    if (!status.ok()) return status;
+    return statement.BindInt64(9, query.offset);
 }
 
 }  // namespace
@@ -317,22 +328,20 @@ Status SqliteScheduleRepository::Delete(schedule::ScheduleId id) {
                : Status::Error(ErrorCode::kConflict, "日程取消未生效");
 }
 
-Result<std::vector<schedule::OperationRecord>> SqliteScheduleRepository::FindRecentOperations(DateTime now) const {
+Result<std::vector<schedule::OperationRecord>> SqliteScheduleRepository::FindOperations(
+    const schedule::QueryOperationCommand& query) const {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!database_.IsOpen()) {
         const Status status = DatabaseUnavailable();
         return Result<std::vector<OperationRecord>>::Failure(status.code, status.message);
     }
-    Result<SqliteStatement> prepared = database_.Prepare(sql::kFindRecentOperations);
+    Result<SqliteStatement> prepared = database_.Prepare(sql::BuildOperationFindSql(query));
     if (!prepared.ok()) {
         return Result<std::vector<OperationRecord>>::Failure(prepared.status.code, prepared.status.message);
     }
     SqliteStatement statement = std::move(*prepared.value);
-    const DateTime earliest = now - std::chrono::minutes{15};
-    Status status = statement.BindInt64(1, earliest.time_since_epoch().count());
-    if (!status.ok()) return Result<std::vector<OperationRecord>>::Failure(status.code, status.message);
-    status = statement.BindInt64(2, now.time_since_epoch().count());
-    if (!status.ok()) return Result<std::vector<OperationRecord>>::Failure(status.code, status.message);
+    const Status bound = BindOperationQueryFilters(statement, query, true);
+    if (!bound.ok()) return Result<std::vector<OperationRecord>>::Failure(bound.code, bound.message);
 
     std::vector<OperationRecord> operations;
     while (true) {
@@ -347,36 +356,45 @@ Result<std::vector<schedule::OperationRecord>> SqliteScheduleRepository::FindRec
     return Result<std::vector<OperationRecord>>::Success(std::move(operations));
 }
 
-Result<OperationRecord> SqliteScheduleRepository::InsertOperation(const OperationRecord& operation) {
+Result<int64_t> SqliteScheduleRepository::CountOperations(const schedule::QueryOperationCommand& query) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    OperationRecord normalized = operation;
-    normalized.operated_at = Now();
-    return InsertOperationLocked(normalized);
+    if (!database_.IsOpen()) {
+        const Status status = DatabaseUnavailable();
+        return Result<int64_t>::Failure(status.code, status.message);
+    }
+    Result<SqliteStatement> prepared = database_.Prepare(sql::BuildOperationCountSql(query));
+    if (!prepared.ok()) return Result<int64_t>::Failure(prepared.status.code, prepared.status.message);
+    SqliteStatement statement = std::move(*prepared.value);
+    const Status bound = BindOperationQueryFilters(statement, query, false);
+    if (!bound.ok()) return Result<int64_t>::Failure(bound.code, bound.message);
+    const Result<SqliteStep> stepped = statement.Step();
+    if (!stepped.ok()) return Result<int64_t>::Failure(stepped.status.code, stepped.status.message);
+    if (*stepped.value != SqliteStep::kRow) return Result<int64_t>::Failure(ErrorCode::kInternal, "统计操作未返回行");
+    return Result<int64_t>::Success(statement.ColumnInt64(0));
 }
 
-Result<OperationRecord> SqliteScheduleRepository::InsertOperationLocked(const OperationRecord& operation) {
+Result<OperationRecord> SqliteScheduleRepository::InsertOperation(const OperationRecord& operation) {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!database_.IsOpen()) {
         const Status status = DatabaseUnavailable();
         return Result<OperationRecord>::Failure(status.code, status.message);
     }
-    if (operation.schedule_id <= 0 || operation.schedule_event.empty() || !IsValidOperationType(operation.type)) {
+    if (!IsValidEntityType(operation.entity_type) || !IsValidOperationType(operation.type) ||
+        operation.entity_id <= 0 || operation.label.empty()) {
         return Result<OperationRecord>::Failure(ErrorCode::kInvalidArgument, "操作记录字段无效");
     }
-    if (operation.previous.has_value() && operation.previous->id != operation.schedule_id) {
-        return Result<OperationRecord>::Failure(ErrorCode::kInvalidArgument, "操作快照日程 ID 不一致");
-    }
-    if ((operation.type == schedule::ScheduleOperationType::kCreate) && operation.previous.has_value()) {
-        return Result<OperationRecord>::Failure(ErrorCode::kInvalidArgument, "创建操作不能携带 previous 快照");
+    if ((operation.type == schedule::ScheduleOperationType::kCreate) && operation.before.has_value()) {
+        return Result<OperationRecord>::Failure(ErrorCode::kInvalidArgument, "创建操作不能携带 before 快照");
     }
     if ((operation.type == schedule::ScheduleOperationType::kUpdate ||
          operation.type == schedule::ScheduleOperationType::kDelete) &&
-        !operation.previous.has_value()) {
-        return Result<OperationRecord>::Failure(ErrorCode::kInvalidArgument, "修改和删除操作必须携带 previous 快照");
+        !operation.before.has_value()) {
+        return Result<OperationRecord>::Failure(ErrorCode::kInvalidArgument, "修改和删除操作必须携带 before 快照");
     }
 
     OperationRecord normalized = operation;
     normalized.id = 0;
-    if (normalized.operated_at == DateTime{}) normalized.operated_at = Now();
+    normalized.operated_at = Now();
     Result<SqliteStatement> prepared = database_.Prepare(sql::kInsertOperation);
     if (!prepared.ok()) return Result<OperationRecord>::Failure(prepared.status.code, prepared.status.message);
     SqliteStatement statement = std::move(*prepared.value);
@@ -398,193 +416,6 @@ Result<Schedule> SqliteScheduleRepository::FindByIdLocked(schedule::ScheduleId i
     Status status = statement.BindInt64(1, id);
     if (!status.ok()) return Result<Schedule>::Failure(status.code, status.message);
     return ReadOneSchedule(statement);
-}
-
-Status SqliteScheduleRepository::RestoreScheduleLocked(const Schedule& snapshot, bool require_existing) {
-    if (snapshot.id <= 0 || snapshot.event.empty()) return Status::Error(ErrorCode::kInvalidArgument, "日程快照无效");
-    const Result<Schedule> current = FindByIdLocked(snapshot.id);
-    if (current.ok()) {
-        Result<SqliteStatement> prepared = database_.Prepare(sql::kRestoreScheduleUpdate);
-        if (!prepared.ok()) return prepared.status;
-        SqliteStatement statement = std::move(*prepared.value);
-        Status status = mapping::BindSchedule(statement, snapshot);
-        if (!status.ok()) return status;
-        status = statement.BindInt64(10, snapshot.id);
-        if (!status.ok()) return status;
-        const Result<SqliteStep> stepped = statement.Step();
-        if (!stepped.ok()) return stepped.status;
-        return statement.Changes() == 1 ? Status::Ok() : Status::Error(ErrorCode::kNotFound, "恢复日程未更新");
-    }
-    if (current.status.code != ErrorCode::kNotFound || require_existing) return current.status;
-
-    Result<SqliteStatement> prepared = database_.Prepare(sql::kRestoreScheduleInsert);
-    if (!prepared.ok()) return prepared.status;
-    SqliteStatement statement = std::move(*prepared.value);
-    Status status = mapping::BindScheduleWithId(statement, snapshot);
-    if (!status.ok()) return status;
-    const Result<SqliteStep> stepped = statement.Step();
-    if (!stepped.ok()) return stepped.status;
-    return *stepped.value == SqliteStep::kDone ? Status::Ok() : Status::Error(ErrorCode::kInternal, "恢复日程未完成");
-}
-
-Status SqliteScheduleRepository::RemoveScheduleLocked(schedule::ScheduleId id) {
-    Result<SqliteStatement> prepared = database_.Prepare(sql::kDeleteSchedulePhysical);
-    if (!prepared.ok()) return prepared.status;
-    SqliteStatement statement = std::move(*prepared.value);
-    Status status = statement.BindInt64(1, id);
-    if (!status.ok()) return status;
-    const Result<SqliteStep> stepped = statement.Step();
-    if (!stepped.ok()) return stepped.status;
-    return statement.Changes() == 1 ? Status::Ok() : Status::Error(ErrorCode::kNotFound, "日程不存在");
-}
-
-Status SqliteScheduleRepository::RollbackAfterFailure(const Status& failure) {
-    return CombineRollbackFailure(failure, database_.Rollback());
-}
-
-Result<schedule::UndoOperationResult> SqliteScheduleRepository::UndoOperation(schedule::OperationId operation_id,
-                                                                              DateTime now) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!database_.IsOpen()) {
-        const Status status = DatabaseUnavailable();
-        return Result<schedule::UndoOperationResult>::Failure(status.code, status.message);
-    }
-    if (operation_id <= 0) {
-        return Result<schedule::UndoOperationResult>::Failure(ErrorCode::kInvalidArgument, "操作标识无效");
-    }
-    const Status begin = database_.BeginTransaction();
-    if (!begin.ok()) return Result<schedule::UndoOperationResult>::Failure(begin.code, begin.message);
-
-    OperationRecord target;
-    bool active = false;
-    {
-        Result<SqliteStatement> prepared = database_.Prepare(sql::kFindOperationById);
-        if (!prepared.ok()) {
-            const Status failure = RollbackAfterFailure(prepared.status);
-            return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-        }
-        SqliteStatement statement = std::move(*prepared.value);
-        Status status = statement.BindInt64(1, operation_id);
-        if (!status.ok()) {
-            const Status failure = RollbackAfterFailure(status);
-            return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-        }
-        const Result<OperationRecord> row = ReadOneOperation(statement, active);
-        if (!row.ok()) {
-            const Status failure = RollbackAfterFailure(row.status);
-            return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-        }
-        target = *row.value;
-    }
-    if (!active) {
-        const Status failure = RollbackAfterFailure(Status::Error(ErrorCode::kNotFound, "操作不存在或已撤销"));
-        return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-    }
-    if (target.operated_at > now) {
-        const Status failure =
-            RollbackAfterFailure(Status::Error(ErrorCode::kConflict, "操作时间晚于当前时间，不能撤销"));
-        return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-    }
-    if (!IsWithinUndoWindow(target, now)) {
-        const Status failure = RollbackAfterFailure(Status::Error(ErrorCode::kConflict, "操作已超过十五分钟撤销期限"));
-        return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-    }
-
-    std::optional<Schedule> before;
-    {
-        const Result<Schedule> current = FindByIdLocked(target.schedule_id);
-        if (current.ok()) {
-            before = *current.value;
-        } else if (current.status.code != ErrorCode::kNotFound ||
-                   (target.type != schedule::ScheduleOperationType::kDelete &&
-                    target.type != schedule::ScheduleOperationType::kUndo)) {
-            const Status failure = RollbackAfterFailure(current.status);
-            return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-        }
-    }
-
-    std::optional<Schedule> after;
-    Status inverse = Status::Ok();
-    switch (target.type) {
-        case schedule::ScheduleOperationType::kCreate:
-            inverse = RemoveScheduleLocked(target.schedule_id);
-            break;
-        case schedule::ScheduleOperationType::kUpdate:
-            if (!target.previous.has_value()) {
-                inverse = Status::Error(ErrorCode::kInternal, "修改操作缺少可恢复快照");
-            } else {
-                inverse = RestoreScheduleLocked(*target.previous, true);
-                if (inverse.ok()) after = target.previous;
-            }
-            break;
-        case schedule::ScheduleOperationType::kDelete:
-            if (!target.previous.has_value()) {
-                inverse = Status::Error(ErrorCode::kInternal, "删除操作缺少可恢复快照");
-            } else {
-                inverse = RestoreScheduleLocked(*target.previous, false);
-                if (inverse.ok()) after = target.previous;
-            }
-            break;
-        case schedule::ScheduleOperationType::kUndo:
-            if (target.previous.has_value()) {
-                inverse = RestoreScheduleLocked(*target.previous, false);
-                if (inverse.ok()) after = target.previous;
-            } else {
-                inverse = RemoveScheduleLocked(target.schedule_id);
-            }
-            break;
-        default:
-            inverse = Status::Error(ErrorCode::kInternal, "操作记录包含不支持的类型");
-            break;
-    }
-    if (!inverse.ok()) {
-        const Status failure = RollbackAfterFailure(inverse);
-        return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-    }
-
-    OperationRecord undo_operation{
-        .id = 0,
-        .type = schedule::ScheduleOperationType::kUndo,
-        .schedule_id = target.schedule_id,
-        .schedule_event =
-            before.has_value() ? before->event : (after.has_value() ? after->event : target.schedule_event),
-        .operated_at = now,
-        .previous = before,
-    };
-    {
-        Result<SqliteStatement> prepared = database_.Prepare(sql::kDeactivateOperation);
-        if (!prepared.ok()) {
-            const Status failure = RollbackAfterFailure(prepared.status);
-            return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-        }
-        SqliteStatement statement = std::move(*prepared.value);
-        Status status = statement.BindInt64(1, target.id);
-        if (!status.ok()) {
-            const Status failure = RollbackAfterFailure(status);
-            return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-        }
-        const Result<SqliteStep> stepped = statement.Step();
-        if (!stepped.ok()) {
-            const Status failure = RollbackAfterFailure(stepped.status);
-            return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-        }
-        if (statement.Changes() != 1) {
-            const Status failure = RollbackAfterFailure(Status::Error(ErrorCode::kConflict, "操作已被其他请求撤销"));
-            return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-        }
-    }
-    const Result<OperationRecord> recorded = InsertOperationLocked(undo_operation);
-    if (!recorded.ok()) {
-        const Status failure = RollbackAfterFailure(recorded.status);
-        return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-    }
-    const Status committed = database_.Commit();
-    if (!committed.ok()) {
-        const Status failure = CombineRollbackFailure(committed, database_.Rollback());
-        return Result<schedule::UndoOperationResult>::Failure(failure.code, failure.message);
-    }
-    return Result<schedule::UndoOperationResult>::Success(
-        {.operation = std::move(target), .schedule = std::move(after)});
 }
 
 }  // namespace voicelife::storage_sqlite

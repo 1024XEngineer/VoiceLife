@@ -2,6 +2,7 @@
 #include "voicelife/schedule/schedule_service.h"
 
 using voicelife::schedule::CreateScheduleCommand;
+using voicelife::schedule::OperationEntityType;
 using voicelife::schedule::QueryScheduleCommand;
 using voicelife::schedule::ScheduleOperationType;
 using voicelife::schedule::ScheduleStatus;
@@ -23,6 +24,12 @@ int main() {
     Check(query.status == ScheduleStatusFilter::kActive, "查询日程命令应默认筛选有效状态");
     Check(static_cast<int>(ScheduleStatus::kCancelled) == 2 && static_cast<int>(ScheduleStatus::kCompleted) == 3,
           "新增完成状态不应改变已取消状态的持久化值");
-    Check(static_cast<int>(ScheduleOperationType::kUndo) == 4, "撤销操作应使用稳定的第四类持久化值");
+    Check(static_cast<int>(ScheduleOperationType::kCreate) == 1 &&
+              static_cast<int>(ScheduleOperationType::kUpdate) == 2 &&
+              static_cast<int>(ScheduleOperationType::kDelete) == 3,
+          "操作类型应使用稳定的持久化值");
+    Check(static_cast<int>(OperationEntityType::kSchedule) == 1 && static_cast<int>(OperationEntityType::kRule) == 2 &&
+              static_cast<int>(OperationEntityType::kException) == 3,
+          "实体类型应使用稳定的持久化值");
     return 0;
 }

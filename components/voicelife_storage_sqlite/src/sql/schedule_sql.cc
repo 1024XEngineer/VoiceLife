@@ -39,18 +39,6 @@ WHERE status = 1
 ORDER BY start_time, id
 )sql";
 
-const char kDeleteSchedulePhysical[] = "DELETE FROM schedule WHERE id = ?";
-
-const char kRestoreScheduleInsert[] = R"sql(
-INSERT INTO schedule (id, event, start_time, end_time, location, notes, rule_id, status, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-)sql";
-
-const char kRestoreScheduleUpdate[] = R"sql(
-UPDATE schedule SET event = ?, start_time = ?, end_time = ?, location = ?, notes = ?,
-rule_id = ?, status = ?, created_at = ?, updated_at = ? WHERE id = ?
-)sql";
-
 std::string BuildScheduleWhere() {
     return R"sql(
 WHERE (?1 IS NULL OR id = ?1)

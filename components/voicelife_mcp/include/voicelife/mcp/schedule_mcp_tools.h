@@ -7,6 +7,8 @@ namespace voicelife::schedule {
 class ScheduleService;
 /// 提供周期日程规则服务能力。
 class ScheduleRuleService;
+/// 提供日程操作记录服务能力。
+class ScheduleOperationService;
 }  // namespace voicelife::schedule
 
 namespace voicelife::mcp {
@@ -31,5 +33,17 @@ Status RegisterScheduleMcpTools(McpServer& server, schedule::ScheduleService& se
  */
 Status RegisterScheduleMcpTools(McpServer& server, schedule::ScheduleService& service,
                                 schedule::ScheduleRuleService& rule_service);
+
+/**
+ * @brief 向 MCP Server 注册包含周期日程与操作记录查询能力的日程工具。
+ * @param server 要注册工具的 MCP Server。
+ * @param service 一次性日程服务。
+ * @param rule_service 周期日程规则服务。
+ * @param operation_service 日程操作记录服务。
+ * @return 注册结果。
+ */
+Status RegisterScheduleMcpTools(McpServer& server, schedule::ScheduleService& service,
+                                schedule::ScheduleRuleService& rule_service,
+                                schedule::ScheduleOperationService& operation_service);
 
 }  // namespace voicelife::mcp

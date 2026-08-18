@@ -45,13 +45,22 @@ inline schedule::ScheduleId NextScheduleId(const std::vector<schedule::Schedule>
 }
 
 /**
- * @brief 判断操作是否位于撤销窗口内。
+ * @brief 判断操作记录是否匹配查询条件。
  * @param operation 操作记录。
- * @param now 当前时间。
- * @return 操作时间位于闭区间时返回 true。
+ * @param query 查询条件。
+ * @return 匹配时返回 true。
  */
-inline bool IsWithinUndoWindow(const schedule::OperationRecord& operation, schedule::DateTime now) {
-    return operation.operated_at >= now - std::chrono::minutes{15} && operation.operated_at <= now;
+inline bool MatchesOperation(const schedule::OperationRecord& operation, const schedule::QueryOperationCommand& query) {
+    if (query.operation_id.has_value() && operation.id != *query.operation_id) return false;
+    if (query.entity_type.has_value() && operation.entity_type != *query.entity_type) return false;
+    if (query.entity_id.has_value() && operation.entity_id != *query.entity_id) return false;
+    if (query.type.has_value() && operation.type != *query.type) return false;
+    if (query.operated_from.has_value() && operation.operated_at < *query.operated_from) return false;
+    if (query.operated_to.has_value() && operation.operated_at > *query.operated_to) return false;
+    if (query.keyword.has_value() && !query.keyword->empty()) {
+        if (!MatchesKeyword(operation.label, *query.keyword)) return false;
+    }
+    return true;
 }
 
 /** @brief 判断日程是否匹配查询条件。 @param schedule 日程。 @param query 查询条件。 @return 匹配时返回 true。 */

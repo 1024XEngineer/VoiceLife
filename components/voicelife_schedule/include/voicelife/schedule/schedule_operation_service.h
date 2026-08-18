@@ -6,7 +6,7 @@
 
 namespace voicelife::schedule {
 
-/** @brief 提供日程操作记录、近期操作查询和撤销业务。 */
+/** @brief 提供日程操作记录和查询业务。 */
 class ScheduleOperationService {
    public:
     /**
@@ -16,24 +16,18 @@ class ScheduleOperationService {
     explicit ScheduleOperationService(ScheduleOperationRepository& operation_repository);
 
     /**
-     * @brief 记录一次创建、修改、取消或撤销操作。
+     * @brief 记录一次创建、修改或删除操作。
      * @param command 要持久化的操作详情。
-     * @return 操作记录结果。
+     * @return 操作记录结果，成功时包含仓储盖章后的完整记录。
      */
-    RecordScheduleOperationResult record_schedule_operation(const RecordScheduleOperationCommand& command);
+    RecordOperationResult record_operation(const RecordOperationCommand& command);
 
     /**
-     * @brief 查询当前时间往前十五分钟内的可撤销操作。
-     * @return 按操作时间倒序排列的可撤销操作。
+     * @brief 按筛选条件查询操作记录。
+     * @param command 查询筛选和分页条件。
+     * @return 匹配的操作记录及不受分页影响的总体条数。
      */
-    QueryRecentScheduleOperationResult query_recent_schedule_operation() const;
-
-    /**
-     * @brief 在十五分钟窗口内撤销指定操作。
-     * @param command 要撤销的操作。
-     * @return 撤销结果，成功时包含恢复的数据。
-     */
-    UndoScheduleOperationResult undo_schedule_operation(const UndoScheduleOperationCommand& command);
+    QueryOperationResult query_operations(const QueryOperationCommand& command) const;
 
    private:
     ScheduleOperationRepository& operation_repository_;

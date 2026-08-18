@@ -15,6 +15,7 @@ using voicelife::schedule::CreateScheduleCommand;
 using voicelife::schedule::DateTime;
 using voicelife::schedule::OperationId;
 using voicelife::schedule::OperationRecord;
+using voicelife::schedule::QueryOperationCommand;
 using voicelife::schedule::QueryScheduleCommand;
 using voicelife::schedule::Schedule;
 using voicelife::schedule::ScheduleId;
@@ -23,7 +24,6 @@ using voicelife::schedule::ScheduleRepository;
 using voicelife::schedule::ScheduleService;
 using voicelife::schedule::ScheduleStatus;
 using voicelife::schedule::ScheduleStatusFilter;
-using voicelife::schedule::UndoOperationResult;
 using voicelife::schedule::UpdateScheduleCommand;
 using voicelife::test::Check;
 
@@ -228,25 +228,23 @@ class FakeScheduleOperationRepository final : public ScheduleOperationRepository
     }
 
     /**
-     * @brief 返回预设的近期操作记录。
-     * @param now 查询时间；该替身不按时间过滤。
+     * @brief 返回预设的操作记录，忽略筛选与分页。
+     * @param query 查询条件。
      * @return 操作记录集合。
      */
-    Result<std::vector<OperationRecord>> FindRecentOperations(DateTime now) const override {
-        (void)now;
+    Result<std::vector<OperationRecord>> FindOperations(const QueryOperationCommand& query) const override {
+        (void)query;
         return Result<std::vector<OperationRecord>>::Success(operations);
     }
 
     /**
-     * @brief 返回基础 CRUD 测试未配置撤销能力的错误。
-     * @param operation_id 操作标识。
-     * @param now 撤销时间。
-     * @return 不可用错误。
+     * @brief 返回预设操作的总条数，忽略筛选。
+     * @param query 查询条件。
+     * @return 操作总数。
      */
-    Result<UndoOperationResult> UndoOperation(OperationId operation_id, DateTime now) override {
-        (void)operation_id;
-        (void)now;
-        return Result<UndoOperationResult>::Failure(ErrorCode::kUnavailable, "未实现");
+    Result<int64_t> CountOperations(const QueryOperationCommand& query) const override {
+        (void)query;
+        return Result<int64_t>::Success(static_cast<int64_t>(operations.size()));
     }
 
     std::vector<OperationRecord> operations;
