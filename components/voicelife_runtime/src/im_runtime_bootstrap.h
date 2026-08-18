@@ -51,8 +51,7 @@ bool StartImProvisioningTask();
  * @param device_id 已认证的非敏感设备标识。
  * @param user_id 已配置的非敏感用户引用。
  */
-void RegisterImPairingAcceptance(im::ImPairingPort* client, std::string device_id,
-                                 std::optional<std::string> user_id);
+void RegisterImPairingAcceptance(im::ImPairingPort* client, std::string device_id, std::optional<std::string> user_id);
 
 /**
  * @brief 幂等地启动并等待一次 SNTP 时间同步。

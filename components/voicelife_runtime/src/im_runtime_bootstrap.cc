@@ -89,8 +89,7 @@ Status RunPairingAcceptance(uint8_t expires_in_minutes) {
         ESP_LOGW(kTag, "IM_PAIRING_STATUS=%s", PairingStatusName(begun.status));
         return Status::Error(ErrorCode::kUnavailable, "创建配对会话失败");
     }
-    ESP_LOGI(kTag, "IM_PAIRING_SCOPE device_id=%s user_id=%s", g_pairing_device_id.c_str(),
-             g_pairing_user_id->c_str());
+    ESP_LOGI(kTag, "IM_PAIRING_SCOPE device_id=%s user_id=%s", g_pairing_device_id.c_str(), g_pairing_user_id->c_str());
     ESP_LOGI(kTag, "IM_PAIRING_CODE=%s expires_at=%s", begun.display_code.c_str(), begun.expires_at.c_str());
     ESP_LOGI(kTag, "IM_PAIRING_STATUS=pending");
 
@@ -440,8 +439,7 @@ bool StartImProvisioningTask() {
     return true;
 }
 
-void RegisterImPairingAcceptance(im::ImPairingPort* client, std::string device_id,
-                                 std::optional<std::string> user_id) {
+void RegisterImPairingAcceptance(im::ImPairingPort* client, std::string device_id, std::optional<std::string> user_id) {
     if (client == nullptr) return;
     if (device_id.empty()) {
         ESP_LOGW(kTag, "IM_PAIRING_UNAVAILABLE=device_id_missing");
