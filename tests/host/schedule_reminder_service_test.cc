@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <utility>
@@ -31,7 +32,13 @@ using voicelife::schedule::ScheduleService;
 using voicelife::schedule::ScheduleStatus;
 using voicelife::test::Check;
 using voicelife::test::InMemoryScheduleRepository;
+using voicelife::timing::CancelTaskCommand;
+using voicelife::timing::CancelTaskResult;
+using voicelife::timing::CommandAcceptance;
 using voicelife::timing::InMemoryTimingTaskRunner;
+using voicelife::timing::RegisterTaskCommand;
+using voicelife::timing::RegisterTaskResult;
+using voicelife::timing::TaskCallback;
 using voicelife::timing::TriggerAt;
 
 namespace {
@@ -48,6 +55,34 @@ class FakeSpeech final : public ScheduleReminderSpeechPort {
 
     Status next_status = Status::Ok();
     std::vector<std::string> texts;
+};
+
+class ScriptedTimingService final : public voicelife::timing::TimingTaskService {
+   public:
+    CommandAcceptance RegisterTask(RegisterTaskCommand command) override {
+        ++register_calls;
+        if (report_register_result && command.on_result) command.on_result(register_result);
+        register_commands.push_back(std::move(command));
+        return register_acceptance;
+    }
+
+    CommandAcceptance CancelTask(CancelTaskCommand command) override {
+        ++cancel_calls;
+        if (report_cancel_result && command.on_result) command.on_result(cancel_result);
+        cancel_commands.push_back(std::move(command));
+        return cancel_acceptance;
+    }
+
+    CommandAcceptance register_acceptance = CommandAcceptance::kAccepted;
+    CommandAcceptance cancel_acceptance = CommandAcceptance::kAccepted;
+    bool report_register_result = false;
+    bool report_cancel_result = false;
+    RegisterTaskResult register_result = RegisterTaskResult::kRegistered;
+    CancelTaskResult cancel_result = CancelTaskResult::kCancelled;
+    int register_calls = 0;
+    int cancel_calls = 0;
+    std::vector<RegisterTaskCommand> register_commands;
+    std::vector<CancelTaskCommand> cancel_commands;
 };
 
 class FakeExceptionRepository final : public voicelife::schedule::ScheduleExceptionRepository {
@@ -213,6 +248,26 @@ struct Fixture {
     ScheduleReminderService reminder;
 };
 
+struct ScriptedFixture {
+    explicit ScriptedFixture(std::vector<Schedule> schedules, DateTime current = At(1'000))
+        : repository(std::move(schedules)),
+          rules(repository),
+          rule_service(rules, exceptions, repository),
+          schedule_service(repository),
+          now(current),
+          reminder(repository, schedule_service, rule_service, timing, speech, [this]() { return now; }) {}
+
+    InMemoryScheduleRepository repository;
+    FakeExceptionRepository exceptions;
+    FakeRuleRepository rules;
+    ScheduleRuleService rule_service;
+    ScheduleService schedule_service;
+    ScriptedTimingService timing;
+    FakeSpeech speech;
+    DateTime now;
+    ScheduleReminderService reminder;
+};
+
 void CheckFutureMemoAndExpiredRestoration() {
     Fixture fixture({
         MakeSchedule(1, "未来会议", At(1'100)),
@@ -304,6 +359,135 @@ void CheckGenerationRetryBackoff() {
     Check(fixture.rules.create_next_calls == 4, "第三次之后应继续按封顶间隔尝试而不是静默终止");
 }
 
+void CheckInvalidAndNotRunningPaths() {
+    Fixture fixture({MakeSchedule(1, "未来提醒", At(1'100))});
+    Check(!fixture.reminder.SynchronizeSchedule(1).ok(), "未启动时不应同步提醒");
+    Check(!fixture.reminder.SuspendRuleReminders(0).ok(), "SuspendRuleReminders 应拒绝非法规则 ID");
+    Check(!fixture.reminder.SynchronizeRule(0).ok(), "SynchronizeRule 应拒绝非法规则 ID");
+
+    Check(fixture.reminder.Start().ok(), "首次启动应成功");
+    Check(fixture.reminder.Start().ok(), "重复启动应保持幂等");
+    Check(!fixture.reminder.SynchronizeSchedule(999).ok(), "同步不存在日程应返回仓储错误");
+    Check(!fixture.reminder.CancelScheduleReminder(999).ok(), "取消不存在日程应返回仓储错误");
+}
+
+void CheckSuspendAndSynchronizeRule() {
+    Fixture fixture({
+        MakeSchedule(1, "规则实例一", At(1'100), 7),
+        MakeSchedule(2, "规则实例二", At(1'200), 7),
+        MakeSchedule(3, "其他规则", At(1'300), 8),
+    });
+    fixture.rules.rules.push_back(DailyRule(7));
+    fixture.rules.rules.push_back(DailyRule(8));
+    Check(fixture.reminder.Start().ok(), "规则同步测试应启动服务");
+    fixture.timing.ProcessPendingCommands(Trigger(1'000));
+
+    Check(fixture.reminder.SuspendRuleReminders(7).ok(), "撤销规则提醒应成功");
+    fixture.timing.ProcessPendingCommands(Trigger(1'001));
+    const auto first = fixture.repository.FindById(1);
+    const auto second = fixture.repository.FindById(2);
+    const auto other = fixture.repository.FindById(3);
+    Check(first.ok() && !first.value->reminder_task_id.has_value(), "规则实例一应清空提醒任务标识");
+    Check(second.ok() && !second.value->reminder_task_id.has_value(), "规则实例二应清空提醒任务标识");
+    Check(other.ok() && other.value->reminder_task_id.has_value(), "其他规则提醒不应被撤销");
+
+    Check(fixture.reminder.SynchronizeRule(7).ok(), "重新同步规则提醒应成功");
+    fixture.timing.ProcessPendingCommands(Trigger(1'002));
+    Check(fixture.repository.FindById(1).value->reminder_task_id.has_value() &&
+              fixture.repository.FindById(2).value->reminder_task_id.has_value(),
+          "规则内未来实例应重新注册提醒");
+}
+
+void CheckSuspendRetryTaskAndStopCancelsTasks() {
+    Fixture fixture({MakeSchedule(1, "重试实例", At(1'100), 9)});
+    fixture.rules.rules.push_back(DailyRule(9));
+    fixture.rules.fail_create_next_count = 1;
+    Check(fixture.reminder.Start().ok(), "撤销重试测试应启动服务");
+    fixture.timing.RunDueTasks(Trigger(1'100));
+    Check(fixture.timing.NextWakeAt().has_value(), "生成失败后应存在重试任务");
+
+    Check(fixture.reminder.SuspendRuleReminders(9).ok(), "撤销规则提醒和生成重试应成功");
+    fixture.timing.ProcessPendingCommands(Trigger(1'101));
+    Check(!fixture.timing.NextWakeAt().has_value(), "规则重试任务和实例提醒都应被撤销");
+
+    Fixture stop_fixture({MakeSchedule(2, "停止提醒", At(1'200))});
+    Check(stop_fixture.reminder.Start().ok(), "停止测试应启动服务");
+    stop_fixture.timing.ProcessPendingCommands(Trigger(1'000));
+    stop_fixture.reminder.Stop();
+    stop_fixture.timing.ProcessPendingCommands(Trigger(1'001));
+    Check(!stop_fixture.timing.NextWakeAt().has_value(), "Stop 后不应保留待触发提醒");
+}
+
+void CheckTimingFailureAndDuplicatePaths() {
+    ScriptedFixture fixture({MakeSchedule(1, "未来提醒", At(1'100))});
+    fixture.timing.register_acceptance = CommandAcceptance::kUnavailable;
+    Check(!fixture.reminder.Start().ok(), "注册命令不可用时启动应返回错误");
+    const auto unavailable_register = fixture.repository.FindById(1);
+    Check(unavailable_register.ok() && !unavailable_register.value->reminder_task_id.has_value(),
+          "注册命令不可用时应回滚持久化提醒任务标识");
+
+    ScriptedFixture duplicate_fixture({MakeSchedule(2, "重复提醒", At(1'100))});
+    duplicate_fixture.timing.report_register_result = true;
+    duplicate_fixture.timing.register_result = RegisterTaskResult::kDuplicate;
+    Check(duplicate_fixture.reminder.Start().ok(), "重复注册结果不应使启动失败");
+    const auto duplicate = duplicate_fixture.repository.FindById(2);
+    Check(duplicate.ok() && !duplicate.value->reminder_task_id.has_value(), "注册结果重复时应清空持久化提醒任务标识");
+
+    ScriptedFixture cancel_fixture({MakeSchedule(3, "取消失败", At(1'100))});
+    cancel_fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;
+    cancel_fixture.repository.Update([&] {
+        Schedule schedule = *cancel_fixture.repository.FindById(3).value;
+        schedule.reminder_task_id = 321;
+        return schedule;
+    }());
+    Check(!cancel_fixture.reminder.Start().ok(), "取消命令不可用时启动应返回错误");
+    const auto failed_cancel = cancel_fixture.repository.FindById(3);
+    Check(failed_cancel.ok() && failed_cancel.value->reminder_task_id == 321, "取消命令不可用时应保留原有提醒任务标识");
+
+    ScriptedFixture no_task_fixture({MakeSchedule(4, "无提醒任务", At(1'100))});
+    Check(no_task_fixture.reminder.CancelScheduleReminder(4).ok(), "无提醒任务标识时取消应幂等成功");
+    Check(no_task_fixture.timing.cancel_calls == 0, "无提醒任务标识时不应提交取消命令");
+}
+
+void CheckStaleReminderCallbackIsIgnored() {
+    ScriptedFixture fixture({MakeSchedule(1, "回调提醒", At(1'100))});
+    Check(fixture.reminder.Start().ok(), "回调测试应启动服务");
+    Check(fixture.timing.register_commands.size() == 1, "启动应提交一个提醒注册命令");
+
+    const RegisterTaskCommand& registered = fixture.timing.register_commands.front();
+    const auto task_id = voicelife::timing::TaskId::Create(registered.task_id.Value());
+    Check(task_id.has_value(), "注册命令应包含有效 TaskId");
+    const int64_t first_task_id = *fixture.repository.FindById(1).value->reminder_task_id;
+    Check(first_task_id > 0, "启动后应持久化提醒任务标识");
+
+    Schedule updated = *fixture.repository.FindById(1).value;
+    updated.reminder_task_id = first_task_id + 1;
+    Check(fixture.repository.Update(updated).ok(), "应模拟提醒任务已被替换");
+    registered.callback(*task_id, Trigger(1'100));
+    Check(fixture.speech.texts.empty(), "过期提醒回调不应触发 TTS");
+
+    fixture.reminder.Stop();
+    registered.callback(*task_id, Trigger(1'100));
+    Check(fixture.speech.texts.empty(), "服务停止后的回调不应触发 TTS");
+}
+
+void CheckGenerationRetryUnavailableAndStopCancelsRetry() {
+    ScriptedFixture fixture({MakeSchedule(1, "重试失败实例", At(1'100), 10)});
+    fixture.rules.rules.push_back(DailyRule(10));
+    fixture.rules.fail_create_next_count = 1;
+    Check(fixture.reminder.Start().ok(), "重试不可用测试应启动服务");
+    Check(fixture.timing.register_commands.size() == 1, "启动应先注册原实例提醒");
+
+    const RegisterTaskCommand& first = fixture.timing.register_commands.front();
+    const auto first_task_id = voicelife::timing::TaskId::Create(first.task_id.Value());
+    fixture.timing.register_acceptance = CommandAcceptance::kUnavailable;
+    first.callback(*first_task_id, Trigger(1'100));
+    Check(fixture.rules.create_next_calls == 1 && fixture.timing.register_calls == 2, "生成失败后应尝试注册重试任务");
+
+    fixture.reminder.Stop();
+    Check(fixture.timing.cancel_calls == 0, "原实例完成后且重试注册不可用时 Stop 不应提交无效取消");
+}
+
 }  // namespace
 
 int main() {
@@ -312,5 +496,11 @@ int main() {
     CheckCancellationAndRescheduleUseFreshIds();
     CheckRecurringFailureStillContinues();
     CheckGenerationRetryBackoff();
+    CheckInvalidAndNotRunningPaths();
+    CheckSuspendAndSynchronizeRule();
+    CheckSuspendRetryTaskAndStopCancelsTasks();
+    CheckTimingFailureAndDuplicatePaths();
+    CheckStaleReminderCallbackIsIgnored();
+    CheckGenerationRetryUnavailableAndStopCancelsRetry();
     return 0;
 }

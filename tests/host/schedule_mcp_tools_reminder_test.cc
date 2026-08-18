@@ -1,5 +1,6 @@
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <utility>
@@ -7,6 +8,7 @@
 
 #include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
+#include "voicelife/contracts/json.h"
 #include "voicelife/mcp/mcp_server.h"
 #include "voicelife/mcp/schedule_mcp_tools.h"
 #include "voicelife/schedule/schedule_exception_repository.h"
@@ -18,6 +20,7 @@
 #include "voicelife/timing/timing_task.h"
 
 using voicelife::ErrorCode;
+using voicelife::JsonValue;
 using voicelife::Result;
 using voicelife::Status;
 using voicelife::ToolResult;
@@ -35,7 +38,12 @@ using voicelife::schedule::ScheduleService;
 using voicelife::schedule::ScheduleStatus;
 using voicelife::test::Check;
 using voicelife::test::InMemoryScheduleRepository;
+using voicelife::timing::CancelTaskCommand;
+using voicelife::timing::CancelTaskResult;
+using voicelife::timing::CommandAcceptance;
 using voicelife::timing::InMemoryTimingTaskRunner;
+using voicelife::timing::RegisterTaskCommand;
+using voicelife::timing::RegisterTaskResult;
 using voicelife::timing::TriggerAt;
 
 namespace {
@@ -50,6 +58,34 @@ class FakeSpeech final : public ScheduleReminderSpeechPort {
     }
 
     std::vector<std::string> texts;
+};
+
+class ScriptedTimingService final : public voicelife::timing::TimingTaskService {
+   public:
+    CommandAcceptance RegisterTask(RegisterTaskCommand command) override {
+        ++register_calls;
+        if (report_register_result && command.on_result) command.on_result(register_result);
+        register_commands.push_back(std::move(command));
+        return register_acceptance;
+    }
+
+    CommandAcceptance CancelTask(CancelTaskCommand command) override {
+        ++cancel_calls;
+        if (report_cancel_result && command.on_result) command.on_result(cancel_result);
+        cancel_commands.push_back(std::move(command));
+        return cancel_acceptance;
+    }
+
+    CommandAcceptance register_acceptance = CommandAcceptance::kAccepted;
+    CommandAcceptance cancel_acceptance = CommandAcceptance::kAccepted;
+    bool report_register_result = false;
+    bool report_cancel_result = false;
+    RegisterTaskResult register_result = RegisterTaskResult::kRegistered;
+    CancelTaskResult cancel_result = CancelTaskResult::kCancelled;
+    int register_calls = 0;
+    int cancel_calls = 0;
+    std::vector<RegisterTaskCommand> register_commands;
+    std::vector<CancelTaskCommand> cancel_commands;
 };
 
 class FakeExceptionRepository final : public voicelife::schedule::ScheduleExceptionRepository {
@@ -194,6 +230,14 @@ std::string OutputString(const ToolResult& result, const std::string& key) {
     return {};
 }
 
+JsonValue DailyRepeat(const std::string& start_date = "2099-01-01") {
+    return JsonValue::Object({
+        {"freq_type", JsonValue::String("daily")},
+        {"start_date", JsonValue::String(start_date)},
+        {"start_time", JsonValue::String("09:00:00")},
+    });
+}
+
 void CheckOneShotReminderLifecycle() {
     InMemoryScheduleRepository schedules;
     FakeExceptionRepository exceptions;
@@ -252,9 +296,128 @@ void CheckOneShotReminderLifecycle() {
           "删除后的新提醒任务也不应触发");
 }
 
+struct ReminderToolFixture {
+    ReminderToolFixture()
+        : rules(schedules, exceptions),
+          rule_service(rules, exceptions, schedules),
+          service(schedules),
+          operation_service(schedules),
+          reminder(schedules, service, rule_service, timing, speech) {}
+
+    InMemoryScheduleRepository schedules;
+    FakeExceptionRepository exceptions;
+    FakeRuleRepository rules;
+    ScheduleRuleService rule_service;
+    ScheduleService service;
+    ScheduleOperationService operation_service;
+    ScriptedTimingService timing;
+    FakeSpeech speech;
+    ScheduleReminderService reminder;
+    McpServer server;
+};
+
+void CheckReminderSyncFailurePaths() {
+    ReminderToolFixture fixture;
+    fixture.timing.register_acceptance = CommandAcceptance::kUnavailable;
+    Check(fixture.reminder.Start().ok(), "工具失败测试应能启动空服务");
+    Check(voicelife::mcp::RegisterScheduleMcpTools(fixture.server, fixture.service, fixture.rule_service,
+                                                   fixture.operation_service, &fixture.reminder)
+              .ok(),
+          "带提醒服务工具应注册成功");
+
+    const auto create_failed = fixture.server.call({
+        .request_id = "create-sync-failed",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("创建同步失败")}, {"start_time", std::string("2030-01-01 09:00:00")}},
+    });
+    Check(create_failed.status.ok() && OutputString(create_failed, "status") == "failure" &&
+              OutputString(create_failed, "message").find("提醒同步失败") != std::string::npos,
+          "创建保存成功但提醒注册不可用时应返回同步失败");
+
+    fixture.timing.register_acceptance = CommandAcceptance::kAccepted;
+    const auto created = fixture.server.call({
+        .request_id = "create-then-update",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("待修改提醒")}, {"start_time", std::string("2030-01-02 09:00:00")}},
+    });
+    Check(created.status.ok() && OutputString(created, "status") == "success", "正常创建应成功");
+    fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;
+    const auto update_failed = fixture.server.call({
+        .request_id = "update-sync-failed",
+        .name = "schedule.update",
+        .arguments = {{"schedule_id", int64_t{2}}, {"start_time", std::string("2030-01-03 09:00:00")}},
+    });
+    Check(update_failed.status.ok() && OutputString(update_failed, "status") == "failure" &&
+              OutputString(update_failed, "message").find("提醒同步失败") != std::string::npos,
+          "修改保存成功但旧提醒取消失败时应返回同步失败");
+
+    const auto delete_failed = fixture.server.call({
+        .request_id = "delete-cancel-failed",
+        .name = "schedule.delete",
+        .arguments = {{"schedule_id", int64_t{2}}},
+    });
+    Check(delete_failed.status.ok() && OutputString(delete_failed, "status") == "failure" &&
+              OutputString(delete_failed, "message").find("提醒取消失败") != std::string::npos,
+          "删除保存成功但提醒取消失败时应返回取消失败");
+}
+
+void CheckRuleReminderSyncFailurePaths() {
+    ReminderToolFixture create_fail_fixture;
+    create_fail_fixture.timing.register_acceptance = CommandAcceptance::kUnavailable;
+    Check(create_fail_fixture.reminder.Start().ok(), "规则创建同步失败测试应启动服务");
+    Check(voicelife::mcp::RegisterScheduleMcpTools(create_fail_fixture.server, create_fail_fixture.service,
+                                                   create_fail_fixture.rule_service,
+                                                   create_fail_fixture.operation_service, &create_fail_fixture.reminder)
+              .ok(),
+          "带提醒服务工具应注册成功");
+
+    const auto rule_create_failed = create_fail_fixture.server.call({
+        .request_id = "create-rule-sync-failed",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("创建规则失败")}, {"repeat", DailyRepeat("2099-01-01")}},
+    });
+    Check(rule_create_failed.status.ok() && OutputString(rule_create_failed, "status") == "failure" &&
+              OutputString(rule_create_failed, "message").find("提醒同步失败") != std::string::npos,
+          "周期规则创建后提醒同步不可用时应返回失败");
+
+    ReminderToolFixture fixture;
+    Check(fixture.reminder.Start().ok(), "规则撤销失败测试应启动服务");
+    Check(voicelife::mcp::RegisterScheduleMcpTools(fixture.server, fixture.service, fixture.rule_service,
+                                                   fixture.operation_service, &fixture.reminder)
+              .ok(),
+          "带提醒服务工具应注册成功");
+    const auto rule_create = fixture.server.call({
+        .request_id = "create-rule-for-update",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("可更新规则")}, {"repeat", DailyRepeat("2099-01-01")}},
+    });
+    Check(rule_create.status.ok() && OutputString(rule_create, "status") == "success", "正常周期规则创建应成功");
+
+    fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;
+    const auto rule_update_failed = fixture.server.call({
+        .request_id = "update-rule-suspend-failed",
+        .name = "schedule.update",
+        .arguments = {{"rule_id", int64_t{600}}, {"event", std::string("更新规则失败")}},
+    });
+    Check(rule_update_failed.status.ok() && OutputString(rule_update_failed, "status") == "failure" &&
+              OutputString(rule_update_failed, "message").find("旧提醒撤销失败") != std::string::npos,
+          "规则修改前撤销旧提醒不可用时应返回失败");
+
+    const auto rule_delete_failed = fixture.server.call({
+        .request_id = "delete-rule-suspend-failed",
+        .name = "schedule.delete",
+        .arguments = {{"rule_id", int64_t{600}}},
+    });
+    Check(rule_delete_failed.status.ok() && OutputString(rule_delete_failed, "status") == "failure" &&
+              OutputString(rule_delete_failed, "message").find("旧提醒撤销失败") != std::string::npos,
+          "规则删除前撤销旧提醒不可用时应返回失败");
+}
+
 }  // namespace
 
 int main() {
     CheckOneShotReminderLifecycle();
+    CheckReminderSyncFailurePaths();
+    CheckRuleReminderSyncFailurePaths();
     return 0;
 }
