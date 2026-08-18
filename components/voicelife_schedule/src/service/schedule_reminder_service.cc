@@ -1,35 +1,33 @@
 #include "voicelife/schedule/schedule_reminder_service.h"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <limits>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
+
+#include "voicelife/timing/timing_task.h"
 
 namespace voicelife::schedule {
 namespace {
 
 using namespace std::chrono_literals;
 
-DateTime SystemNow() {
-    return std::chrono::time_point_cast<std::chrono::seconds>(
-        std::chrono::system_clock::now());
-}
+DateTime SystemNow() { return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()); }
 
-timing::TriggerAt ToTriggerAt(DateTime value) {
-    return std::chrono::time_point_cast<std::chrono::microseconds>(value);
-}
+timing::TriggerAt ToTriggerAt(DateTime value) { return std::chrono::time_point_cast<std::chrono::microseconds>(value); }
 
 std::optional<int64_t> ParseTaskId(const timing::TaskId& task_id) {
-    try {
-        std::size_t consumed = 0;
-        const int64_t value = std::stoll(task_id.Value(), &consumed);
-        if (consumed != task_id.Value().size() || value <= 0) return std::nullopt;
-        return value;
-    } catch (...) {
-        return std::nullopt;
-    }
+    const std::string& value = task_id.Value();
+    int64_t parsed = 0;
+    const char* const begin = value.data();
+    const char* const end = begin + value.size();
+    const auto [position, error] = std::from_chars(begin, end, parsed);
+    if (error != std::errc() || position != end || parsed <= 0) return std::nullopt;
+    return parsed;
 }
 
 std::chrono::minutes RetryDelay(int failure_count) {
@@ -40,17 +38,14 @@ std::chrono::minutes RetryDelay(int failure_count) {
 
 }  // namespace
 
-ScheduleReminderService::ScheduleReminderService(
-    ScheduleRepository& repository,
-    ScheduleService& schedule_service,
-    ScheduleRuleService& rule_service,
-    timing::TimingTaskService& timing_service,
-    ScheduleReminderSpeechPort& speech,
-    NowProvider now_provider)
+ScheduleReminderService::ScheduleReminderService(ScheduleRepository& repository, ScheduleService& schedule_service,
+                                                 ScheduleRuleService& rule_service,
+                                                 timing::TimingTaskService& timing_service,
+                                                 ScheduleReminderSpeechPort& speech, NowProvider now_provider)
     : repository_(repository),
       schedule_service_(schedule_service),
       rule_service_(rule_service),
-      timing_service_(timing_service),
+      timing_service_(&timing_service),
       speech_(speech),
       now_provider_(now_provider ? std::move(now_provider) : NowProvider{SystemNow}) {}
 
@@ -60,18 +55,15 @@ Status ScheduleReminderService::Start() {
 
     int64_t maximum_persisted_task_id = 0;
     for (const Schedule& schedule : *loaded.value) {
-        maximum_persisted_task_id =
-            std::max(maximum_persisted_task_id, schedule.reminder_task_id.value_or(0));
+        maximum_persisted_task_id = std::max(maximum_persisted_task_id, schedule.reminder_task_id.value_or(0));
     }
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (running_) return Status::Ok();
         running_ = true;
-        last_task_id_ = std::max(
-            maximum_persisted_task_id,
-            std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::system_clock::now().time_since_epoch())
-                .count());
+        last_task_id_ = std::max(maximum_persisted_task_id, std::chrono::duration_cast<std::chrono::microseconds>(
+                                                                std::chrono::system_clock::now().time_since_epoch())
+                                                                .count());
     }
 
     Status first_failure = Status::Ok();
@@ -107,7 +99,7 @@ void ScheduleReminderService::Stop() {
     for (int64_t value : task_ids) {
         const auto task_id = timing::TaskId::Create(std::to_string(value));
         if (!task_id.has_value()) continue;
-        (void)timing_service_.CancelTask({
+        (void)timing_service_->CancelTask({
             .task_id = *task_id,
             .on_result = {},
         });
@@ -126,8 +118,8 @@ Status ScheduleReminderService::SynchronizeSchedule(ScheduleId schedule_id) {
     if (!cancelled.ok()) return cancelled;
     schedule.reminder_task_id = std::nullopt;
 
-    if (schedule.status != ScheduleStatus::kActive ||
-        !schedule.start_time.has_value() || *schedule.start_time <= Now()) {
+    if (schedule.status != ScheduleStatus::kActive || !schedule.start_time.has_value() ||
+        *schedule.start_time <= Now()) {
         return Status::Ok();
     }
     return RegisterReminder(std::move(schedule));
@@ -165,7 +157,7 @@ Status ScheduleReminderService::SuspendRuleReminders(ScheduleRuleId rule_id) {
     if (retry_task_id.has_value()) {
         const auto task_id = timing::TaskId::Create(std::to_string(*retry_task_id));
         if (task_id.has_value() &&
-            timing_service_.CancelTask({.task_id = *task_id, .on_result = {}}) ==
+            timing_service_->CancelTask({.task_id = *task_id, .on_result = {}}) ==
                 timing::CommandAcceptance::kUnavailable &&
             first_failure.ok()) {
             first_failure = Status::Error(ErrorCode::kUnavailable, "周期生成重试取消命令未被接收");
@@ -202,9 +194,7 @@ int64_t ScheduleReminderService::AllocateTaskId() {
     return last_task_id_;
 }
 
-Status ScheduleReminderService::ClearReminderTaskIfCurrent(
-    ScheduleId schedule_id,
-    int64_t task_id) {
+Status ScheduleReminderService::ClearReminderTaskIfCurrent(ScheduleId schedule_id, int64_t task_id) {
     const Result<Schedule> loaded = repository_.FindById(schedule_id);
     if (!loaded.ok()) return loaded.status;
     if (loaded.value->reminder_task_id != task_id) return Status::Ok();
@@ -222,7 +212,7 @@ Status ScheduleReminderService::CancelPersistedReminder(Schedule schedule) {
         return Status::Error(ErrorCode::kInternal, "持久化的提醒任务标识无效");
     }
 
-    const timing::CommandAcceptance accepted = timing_service_.CancelTask({
+    const timing::CommandAcceptance accepted = timing_service_->CancelTask({
         .task_id = *task_id,
         .on_result = {},
     });
@@ -248,22 +238,21 @@ Status ScheduleReminderService::RegisterReminder(Schedule schedule) {
     const Status persisted = repository_.Update(schedule);
     if (!persisted.ok()) return persisted;
 
-    const timing::CommandAcceptance accepted = timing_service_.RegisterTask({
+    const timing::CommandAcceptance accepted = timing_service_->RegisterTask({
         .task_id = *task_id,
         .trigger_at = ToTriggerAt(*schedule.start_time),
-        .callback = [this, schedule_id = schedule.id](
-                        const timing::TaskId& fired_id,
-                        timing::TriggerAt trigger_at) {
-            (void)trigger_at;
-            const std::optional<int64_t> parsed = ParseTaskId(fired_id);
-            if (parsed.has_value()) HandleReminder(schedule_id, *parsed);
-        },
-        .on_result = [this, schedule_id = schedule.id, task_value](
-                         timing::RegisterTaskResult result) {
-            if (result == timing::RegisterTaskResult::kDuplicate) {
-                (void)ClearReminderTaskIfCurrent(schedule_id, task_value);
-            }
-        },
+        .callback =
+            [this, schedule_id = schedule.id](const timing::TaskId& fired_id, timing::TriggerAt trigger_at) {
+                (void)trigger_at;
+                const std::optional<int64_t> parsed = ParseTaskId(fired_id);
+                if (parsed.has_value()) HandleReminder(schedule_id, *parsed);
+            },
+        .on_result =
+            [this, schedule_id = schedule.id, task_value](timing::RegisterTaskResult result) {
+                if (result == timing::RegisterTaskResult::kDuplicate) {
+                    (void)ClearReminderTaskIfCurrent(schedule_id, task_value);
+                }
+            },
     });
     if (accepted == timing::CommandAcceptance::kUnavailable) {
         (void)ClearReminderTaskIfCurrent(schedule.id, task_value);
@@ -272,13 +261,10 @@ Status ScheduleReminderService::RegisterReminder(Schedule schedule) {
     return Status::Ok();
 }
 
-void ScheduleReminderService::HandleReminder(
-    ScheduleId schedule_id,
-    int64_t task_id) {
+void ScheduleReminderService::HandleReminder(ScheduleId schedule_id, int64_t task_id) {
     if (!IsRunning()) return;
     const Result<Schedule> loaded = repository_.FindById(schedule_id);
-    if (!loaded.ok() || loaded.value->status != ScheduleStatus::kActive ||
-        loaded.value->reminder_task_id != task_id) {
+    if (!loaded.ok() || loaded.value->status != ScheduleStatus::kActive || loaded.value->reminder_task_id != task_id) {
         return;
     }
 
@@ -296,9 +282,7 @@ void ScheduleReminderService::HandleReminder(
     }
 }
 
-void ScheduleReminderService::GenerateNextInstance(
-    ScheduleRuleId rule_id,
-    int prior_failure_count) {
+void ScheduleReminderService::GenerateNextInstance(ScheduleRuleId rule_id, int prior_failure_count) {
     if (!IsRunning()) return;
     const GenerateNextScheduleInstanceResult generated =
         rule_service_.generate_next_schedule_instance({.rule_id = rule_id});
@@ -316,9 +300,7 @@ void ScheduleReminderService::GenerateNextInstance(
     }
 }
 
-Status ScheduleReminderService::ScheduleGenerationRetry(
-    ScheduleRuleId rule_id,
-    int failure_count) {
+Status ScheduleReminderService::ScheduleGenerationRetry(ScheduleRuleId rule_id, int failure_count) {
     if (!IsRunning()) {
         return Status::Error(ErrorCode::kUnavailable, "日程提醒服务尚未启动");
     }
@@ -336,44 +318,40 @@ Status ScheduleReminderService::ScheduleGenerationRetry(
         };
     }
 
-    const timing::CommandAcceptance accepted = timing_service_.RegisterTask({
+    const timing::CommandAcceptance accepted = timing_service_->RegisterTask({
         .task_id = *task_id,
         .trigger_at = ToTriggerAt(Now() + RetryDelay(failure_count)),
-        .callback = [this, rule_id, task_value](
-                        const timing::TaskId& fired_id,
-                        timing::TriggerAt trigger_at) {
-            (void)trigger_at;
-            const std::optional<int64_t> parsed = ParseTaskId(fired_id);
-            if (!parsed.has_value() || *parsed != task_value) return;
-            int failure_count = 0;
-            {
+        .callback =
+            [this, rule_id, task_value](const timing::TaskId& fired_id, timing::TriggerAt trigger_at) {
+                (void)trigger_at;
+                const std::optional<int64_t> parsed = ParseTaskId(fired_id);
+                if (!parsed.has_value() || *parsed != task_value) return;
+                int failure_count = 0;
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    const auto found = generation_retries_.find(rule_id);
+                    if (found == generation_retries_.end() || found->second.task_id != task_value) {
+                        return;
+                    }
+                    failure_count = found->second.failure_count;
+                    generation_retries_.erase(found);
+                }
+                GenerateNextInstance(rule_id, failure_count);
+            },
+        .on_result =
+            [this, rule_id, task_value](timing::RegisterTaskResult result) {
+                if (result != timing::RegisterTaskResult::kDuplicate) return;
                 std::lock_guard<std::mutex> lock(mutex_);
                 const auto found = generation_retries_.find(rule_id);
-                if (found == generation_retries_.end() ||
-                    found->second.task_id != task_value) {
-                    return;
+                if (found != generation_retries_.end() && found->second.task_id == task_value) {
+                    generation_retries_.erase(found);
                 }
-                failure_count = found->second.failure_count;
-                generation_retries_.erase(found);
-            }
-            GenerateNextInstance(rule_id, failure_count);
-        },
-        .on_result = [this, rule_id, task_value](
-                         timing::RegisterTaskResult result) {
-            if (result != timing::RegisterTaskResult::kDuplicate) return;
-            std::lock_guard<std::mutex> lock(mutex_);
-            const auto found = generation_retries_.find(rule_id);
-            if (found != generation_retries_.end() &&
-                found->second.task_id == task_value) {
-                generation_retries_.erase(found);
-            }
-        },
+            },
     });
     if (accepted == timing::CommandAcceptance::kUnavailable) {
         std::lock_guard<std::mutex> lock(mutex_);
         const auto found = generation_retries_.find(rule_id);
-        if (found != generation_retries_.end() &&
-            found->second.task_id == task_value) {
+        if (found != generation_retries_.end() && found->second.task_id == task_value) {
             generation_retries_.erase(found);
         }
         return Status::Error(ErrorCode::kUnavailable, "周期生成重试注册命令未被接收");

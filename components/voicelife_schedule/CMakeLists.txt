@@ -19,5 +19,6 @@ idf_component_register(
         "src/rules/recurrence_planner.cc"
         "src/helpers/schedule_update_helpers.cc"
     INCLUDE_DIRS "include"
-    REQUIRES voicelife_contracts voicelife_timing
+    REQUIRES voicelife_contracts
+    PRIV_REQUIRES voicelife_timing
 )
