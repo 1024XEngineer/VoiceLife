@@ -24,7 +24,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.13.3",
-    "@types/pg": "^8.20.4",
+    "@types/pg": "^8.21.0",
     "c8": "^12.0.0",
     "eslint": "^10.8.0",
     "prettier": "^3.5.3",
@@ -34,6 +34,6 @@
   "dependencies": {
     "@koishijs/core": "4.18.11",
     "fast-xml-parser": "5.10.1",
-    "pg": "^8.22.0"
+    "pg": "^8.23.0"
   }
 }
