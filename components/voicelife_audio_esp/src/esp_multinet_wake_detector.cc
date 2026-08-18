@@ -2,12 +2,13 @@
 
 #ifdef ESP_PLATFORM
 
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <string>
 #include <utility>
-#include <vector>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_mn_iface.h"
 #include "esp_mn_models.h"
@@ -20,6 +21,8 @@ namespace {
 constexpr char kTag[] = "VoiceLifeWake";
 constexpr char kModelPartition[] = "model";
 constexpr char kModelLanguage[] = "cn";
+constexpr std::size_t kMaxFrameSamples = voice::AudioFrame::kMaxPayloadBytes / sizeof(int16_t);
+constexpr std::size_t kInputCapacitySamples = kMaxFrameSamples * 2;
 struct LocalCommand {
     int id;
     const char* grammar;
@@ -45,9 +48,11 @@ class EspMultiNetWakeDetector::Impl final {
     Status Start(LocalWakeDetectorPort::WakeSink sink) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!EnsureModelLocked().ok()) return model_status_;
+        const Status buffer_status = PrepareInputLocked();
+        if (!buffer_status.ok()) return buffer_status;
         sink_ = std::move(sink);
         running_ = true;
-        input_.clear();
+        ResetInputLocked();
         multinet_->clean(model_data_);
         return Status::Ok();
     }
@@ -55,7 +60,7 @@ class EspMultiNetWakeDetector::Impl final {
     Status Stop() {
         std::lock_guard<std::mutex> lock(mutex_);
         running_ = false;
-        input_.clear();
+        ResetInputLocked();
         if (multinet_ != nullptr && model_data_ != nullptr) multinet_->clean(model_data_);
         sink_ = {};
         return Status::Ok();
@@ -72,11 +77,13 @@ class EspMultiNetWakeDetector::Impl final {
             return DetectorError(ErrorCode::kInvalidArgument, "本地唤醒帧必须是 16 kHz S16LE 单声道 PCM");
         }
         const auto* samples = reinterpret_cast<const int16_t*>(frame.payload.data());
-        input_.insert(input_.end(), samples, samples + frame.payload.size() / sizeof(int16_t));
-        const int chunk_size = multinet_->get_samp_chunksize(model_data_);
-        if (chunk_size <= 0) return DetectorError(ErrorCode::kUnavailable, "MultiNet 分块大小无效");
-        while (input_.size() >= static_cast<size_t>(chunk_size) && running_) {
-            const esp_mn_state_t state = multinet_->detect(model_data_, input_.data());
+        const std::size_t sample_count = frame.payload.size() / sizeof(int16_t);
+        const Status append_status = AppendInputLocked(samples, sample_count);
+        if (!append_status.ok()) return append_status;
+        if (chunk_samples_ <= 0) return DetectorError(ErrorCode::kUnavailable, "MultiNet 分块大小无效");
+        while (input_available_ >= static_cast<std::size_t>(chunk_samples_) && running_) {
+            const esp_mn_state_t state = multinet_->detect(model_data_, ChunkInputLocked());
+            ConsumeChunkLocked();
             if (state == ESP_MN_STATE_DETECTED) {
                 const esp_mn_results_t* result = multinet_->get_results(model_data_);
                 if (result != nullptr) {
@@ -92,7 +99,7 @@ class EspMultiNetWakeDetector::Impl final {
                         if (matched != nullptr) {
                             running_ = false;
                             WakeSink sink = sink_;
-                            input_.clear();
+                            ResetInputLocked();
                             multinet_->clean(model_data_);
                             sink_ = {};
                             lock.unlock();
@@ -104,9 +111,6 @@ class EspMultiNetWakeDetector::Impl final {
                 multinet_->clean(model_data_);
             } else if (state == ESP_MN_STATE_TIMEOUT) {
                 multinet_->clean(model_data_);
-            }
-            if (input_.size() >= static_cast<size_t>(chunk_size)) {
-                input_.erase(input_.begin(), input_.begin() + chunk_size);
             }
         }
         return Status::Ok();
@@ -139,6 +143,11 @@ class EspMultiNetWakeDetector::Impl final {
             model_status_ = DetectorError(ErrorCode::kUnavailable, "MultiNet 模型实例创建失败");
             return model_status_;
         }
+        chunk_samples_ = multinet_->get_samp_chunksize(model_data_);
+        if (chunk_samples_ <= 0 || static_cast<std::size_t>(chunk_samples_) > kMaxFrameSamples) {
+            model_status_ = DetectorError(ErrorCode::kUnavailable, "MultiNet 模型分块大小不受支持");
+            return model_status_;
+        }
         // 对齐小智 CustomWakeWord 的默认阈值。MultiNet 命令词并非 WakeNet
         // 唤醒模型；0.5 会让短词“牛牛”在实际近讲场景明显漏检。
         const int threshold_status = multinet_->set_det_threshold(model_data_, 0.2f);
@@ -169,16 +178,71 @@ class EspMultiNetWakeDetector::Impl final {
         return model_status_;
     }
 
+    Status PrepareInputLocked() {
+        if (input_ != nullptr && chunk_scratch_ != nullptr) return Status::Ok();
+        input_ = static_cast<int16_t*>(
+            heap_caps_malloc(kInputCapacitySamples * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        chunk_scratch_ = static_cast<int16_t*>(heap_caps_malloc(
+            static_cast<std::size_t>(chunk_samples_) * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        if (input_ == nullptr || chunk_scratch_ == nullptr) {
+            heap_caps_free(input_);
+            heap_caps_free(chunk_scratch_);
+            input_ = nullptr;
+            chunk_scratch_ = nullptr;
+            return DetectorError(ErrorCode::kUnavailable, "MultiNet 实时 PCM 缓冲分配失败");
+        }
+        ResetInputLocked();
+        return Status::Ok();
+    }
+
+    Status AppendInputLocked(const int16_t* samples, std::size_t sample_count) {
+        if (input_ == nullptr || sample_count > kInputCapacitySamples - input_available_) {
+            return DetectorError(ErrorCode::kUnavailable, "MultiNet PCM 环形缓冲不可用或已满");
+        }
+        const std::size_t first = std::min(sample_count, kInputCapacitySamples - input_write_);
+        std::memcpy(input_ + input_write_, samples, first * sizeof(int16_t));
+        std::memcpy(input_, samples + first, (sample_count - first) * sizeof(int16_t));
+        input_write_ = (input_write_ + sample_count) % kInputCapacitySamples;
+        input_available_ += sample_count;
+        return Status::Ok();
+    }
+
+    int16_t* ChunkInputLocked() {
+        if (input_read_ + static_cast<std::size_t>(chunk_samples_) <= kInputCapacitySamples)
+            return input_ + input_read_;
+        const std::size_t first = kInputCapacitySamples - input_read_;
+        std::memcpy(chunk_scratch_, input_ + input_read_, first * sizeof(int16_t));
+        std::memcpy(chunk_scratch_ + first, input_,
+                    (static_cast<std::size_t>(chunk_samples_) - first) * sizeof(int16_t));
+        return chunk_scratch_;
+    }
+
+    void ConsumeChunkLocked() {
+        input_read_ = (input_read_ + static_cast<std::size_t>(chunk_samples_)) % kInputCapacitySamples;
+        input_available_ -= static_cast<std::size_t>(chunk_samples_);
+    }
+
+    void ResetInputLocked() {
+        input_read_ = 0;
+        input_write_ = 0;
+        input_available_ = 0;
+    }
+
     void ResetModel() {
         std::lock_guard<std::mutex> lock(mutex_);
         running_ = false;
-        input_.clear();
+        ResetInputLocked();
         (void)esp_mn_commands_free();
         if (multinet_ != nullptr && model_data_ != nullptr) multinet_->destroy(model_data_);
         model_data_ = nullptr;
         multinet_ = nullptr;
         if (models_ != nullptr) esp_srmodel_deinit(models_);
         models_ = nullptr;
+        heap_caps_free(input_);
+        heap_caps_free(chunk_scratch_);
+        input_ = nullptr;
+        chunk_scratch_ = nullptr;
+        chunk_samples_ = 0;
     }
 
     std::mutex mutex_;
@@ -186,7 +250,12 @@ class EspMultiNetWakeDetector::Impl final {
     srmodel_list_t* models_ = nullptr;
     esp_mn_iface_t* multinet_ = nullptr;
     model_iface_data_t* model_data_ = nullptr;
-    std::vector<int16_t> input_;
+    int16_t* input_ = nullptr;
+    int16_t* chunk_scratch_ = nullptr;
+    int chunk_samples_ = 0;
+    std::size_t input_read_ = 0;
+    std::size_t input_write_ = 0;
+    std::size_t input_available_ = 0;
     Status model_status_ = Status::Ok();
     bool running_ = false;
 };

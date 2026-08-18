@@ -51,6 +51,7 @@ Status PcmFrameAssembler::Prepare() {
     if (prepared_) {
         return Status::Ok();
     }
+#if defined(__cpp_exceptions) || defined(_CPPUNWIND)
     try {
         // 组帧器在端口打开时创建并准备，避免首个 I2S period 在实时采集任务扩容。
         pending_samples_.reserve(frame_samples_);
@@ -59,6 +60,11 @@ Status PcmFrameAssembler::Prepare() {
     } catch (const std::length_error&) {
         return Invalid("PCM 组帧缓存长度超出限制");
     }
+#else
+    // ESP-IDF firmware uses -fno-exceptions. Validate() limits this startup
+    // reserve to AudioFrame::kMaxPayloadBytes before it reaches the allocator.
+    pending_samples_.reserve(frame_samples_);
+#endif
     prepared_ = true;
     return Status::Ok();
 }

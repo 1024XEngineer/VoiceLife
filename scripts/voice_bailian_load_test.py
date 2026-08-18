@@ -7,6 +7,7 @@ import argparse
 import base64
 import concurrent.futures
 import json
+import mimetypes
 import os
 import statistics
 import sys
@@ -100,14 +101,14 @@ def synthesize(model: str, voice: str, text: str) -> tuple[bytes, float, float |
     return bytes(audio), elapsed_ms, float(first_package_delay) if first_package_delay is not None else None
 
 
-def transcribe(api_key: str, model: str, audio: bytes, timeout_seconds: int) -> tuple[str, float]:
+def transcribe(api_key: str, model: str, audio: bytes, mime_type: str, timeout_seconds: int) -> tuple[str, float]:
     payload = {
         "model": model,
         "input": {
             "messages": [
                 {
                     "role": "user",
-                    "content": [{"audio": "data:audio/mpeg;base64," + base64.b64encode(audio).decode("ascii")}],
+                    "content": [{"audio": f"data:{mime_type};base64," + base64.b64encode(audio).decode("ascii")}],
                 }
             ]
         },
@@ -146,13 +147,27 @@ def classify_error(error: Exception) -> str:
     return type(error).__name__
 
 
-def run_one(api_key: str, args: argparse.Namespace) -> Result:
+def run_one(api_key: str, args: argparse.Namespace, stt_audio: bytes | None, stt_mime_type: str | None) -> Result:
     stage = "tts"
     try:
         started = time.monotonic()
-        audio, tts_ms, first_package_ms = synthesize(args.tts_model, args.voice, args.text)
+        if args.mode == "stt":
+            if stt_audio is None or stt_mime_type is None:
+                raise RuntimeError("missing_stt_audio")
+            audio, tts_ms, first_package_ms = stt_audio, 0.0, None
+        else:
+            audio, tts_ms, first_package_ms = synthesize(args.tts_model, args.voice, args.text)
+        if args.mode == "tts":
+            return Result(
+                tts_ms=round(tts_ms, 2),
+                tts_first_package_ms=first_package_ms,
+                end_to_end_ms=round((time.monotonic() - started) * 1000, 2),
+                audio_bytes=len(audio),
+            )
         stage = "stt"
-        transcript, stt_ms = transcribe(api_key, args.stt_model, audio, args.timeout_seconds)
+        transcript, stt_ms = transcribe(
+            api_key, args.stt_model, audio, stt_mime_type or "audio/mpeg", args.timeout_seconds
+        )
         return Result(
             tts_ms=round(tts_ms, 2),
             tts_first_package_ms=round(first_package_ms, 2) if first_package_ms is not None else None,
@@ -174,6 +189,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stt-model", default="qwen3-asr-flash")
     parser.add_argument("--voice", default="longanhuan_v3")
     parser.add_argument("--text", default=DEFAULT_TEXT)
+    parser.add_argument(
+        "--mode",
+        choices=("tts-to-stt", "tts", "stt"),
+        default="tts-to-stt",
+        help="Run the end-to-end path, only TTS, or only STT with --stt-audio-path.",
+    )
+    parser.add_argument("--stt-audio-path", help="Local WAV/MP3/etc. used by --mode stt; never written to reports.")
     parser.add_argument("--result-json", help="Optional sanitized result path; never contains credentials or audio.")
     parser.add_argument(
         "--preflight",
@@ -183,6 +205,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.requests <= 0 or args.concurrency <= 0 or args.timeout_seconds <= 0 or not args.text.strip():
         parser.error("requests、concurrency、timeout-seconds 和 text 必须有效")
+    if args.mode == "stt" and not args.stt_audio_path:
+        parser.error("--mode stt 需要 --stt-audio-path")
     return args
 
 
@@ -203,8 +227,21 @@ def main() -> int:
         )
         return 2
     dashscope.api_key = api_key
+    stt_audio: bytes | None = None
+    stt_mime_type: str | None = None
+    if args.mode == "stt":
+        try:
+            with open(args.stt_audio_path, "rb") as source:
+                stt_audio = source.read()
+        except OSError as error:
+            print(f"cannot read --stt-audio-path: {error}", file=sys.stderr)
+            return 2
+        if not stt_audio:
+            print("--stt-audio-path must not be empty", file=sys.stderr)
+            return 2
+        stt_mime_type = mimetypes.guess_type(args.stt_audio_path)[0] or "audio/wav"
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as executor:
-        results = list(executor.map(lambda _: run_one(api_key, args), range(args.requests)))
+        results = list(executor.map(lambda _: run_one(api_key, args, stt_audio, stt_mime_type), range(args.requests)))
     report = summarize(results, args.tts_model, args.stt_model, args.concurrency)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if args.result_json:

@@ -272,10 +272,12 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
     }
     if (amplifier_callback_) {
         amplifier_callback_(true);  // 播放打开：经板级仲裁请求功放。
+        amplifier_enabled_ = true;
     }
     if (xTaskCreate(&OutputTaskEntry, "voice_audio_out", 4096, this, 4, &output_task_) != pdPASS) {
         if (amplifier_callback_) {
             amplifier_callback_(false);
+            amplifier_enabled_ = false;
         }
         if (profile_.topology == AudioBoardTopology::kExternalCodecDuplex && codec_dev_ != nullptr) {
             (void)DeinitializeEs8311(codec_dev_);
@@ -461,6 +463,10 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(voice::AudioFrame frame) {
     output_queue_.push_back(std::move(out));
     output_queue_duration_ms_ += frame_duration_ms;
     output_high_watermark_.store(std::max(output_high_watermark_.load(), output_queue_.size()));
+    if (!amplifier_enabled_ && amplifier_callback_) {
+        amplifier_callback_(true);
+        amplifier_enabled_ = true;
+    }
     output_cv_.notify_one();
     return Status::Ok();
 #endif
@@ -468,12 +474,13 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(voice::AudioFrame frame) {
 
 Status Esp32s3PcmAudioPorts::Impl::FlushOutput() {
 #ifdef ESP_PLATFORM
-    if (amplifier_callback_) {
-        amplifier_callback_(false);  // 播放打断/清空：经板级仲裁请求关闭功放。
-    }
     std::lock_guard<std::mutex> lock(mutex_);
     output_queue_.clear();
     output_queue_duration_ms_ = 0;
+    if (amplifier_enabled_ && amplifier_callback_) {
+        amplifier_callback_(false);  // 播放打断/清空：经板级仲裁请求关闭功放。
+        amplifier_enabled_ = false;
+    }
     return Status::Ok();
 #else
     return detail::Unavailable("ESP32-S3 PCM Audio Port 只能在 ESP-IDF 目标运行");
@@ -492,11 +499,12 @@ bool Esp32s3PcmAudioPorts::Impl::OutputIdle() const {
 
 Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
 #ifdef ESP_PLATFORM
-    if (amplifier_callback_) {
-        amplifier_callback_(false);  // 输出关闭：请求关闭功放。
-    }
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (amplifier_enabled_ && amplifier_callback_) {
+            amplifier_callback_(false);  // 输出关闭：请求关闭功放。
+            amplifier_enabled_ = false;
+        }
         if (output_open_) {
             output_running_ = false;
             output_queue_.clear();
