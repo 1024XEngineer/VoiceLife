@@ -714,6 +714,35 @@ void CheckDeleteFutureKeepsPastException(const std::filesystem::path& path) {
           "DeleteFuture 不应删除截止时间之前的历史例外");
 }
 
+/**
+ * @brief 验证规则和例外列表查询能够完整读取多行结果。
+ * @param path 临时数据库路径。
+ * @return 无。
+ */
+void CheckListQueriesReadMultipleRows(const std::filesystem::path& path) {
+    SqliteDatabase database(path.string());
+    Check(database.Open().ok(), "多行查询测试应打开数据库");
+    SqliteScheduleRuleRepository repository(database);
+    Check(repository.Initialize().ok(), "多行查询测试应初始化表结构");
+
+    const auto first = repository.Insert(DailyRule());
+    ScheduleRule second_rule = DailyRule();
+    second_rule.event = "第二条规则";
+    const auto second = repository.Insert(second_rule);
+    Check(first.ok() && second.ok(), "多行查询测试应插入两条规则");
+
+    ScheduleException first_exception = ModifyException(first.value->id);
+    ScheduleException second_exception = first_exception;
+    second_exception.original_start_time = DateTime{std::chrono::seconds{4'071'261'600}};
+    Check(repository.Upsert(first_exception).ok() && repository.Upsert(second_exception).ok(),
+          "多行查询测试应插入两个例外");
+
+    const auto rules = repository.FindAll();
+    Check(rules.ok() && rules.value->size() == 2, "FindAll 应读取全部规则行");
+    const auto exceptions = repository.FindByRule(first.value->id);
+    Check(exceptions.ok() && exceptions.value->size() == 2, "FindByRule 应读取同一规则的全部例外行");
+}
+
 }  // namespace
 
 /**
@@ -813,5 +842,7 @@ int main() {
     CheckRuleRepositoryStepFailures();
     const TemporaryDatabaseFile delete_future_file = MakeTemporaryDatabaseFile();
     CheckDeleteFutureKeepsPastException(delete_future_file.path);
+    const TemporaryDatabaseFile list_queries_file = MakeTemporaryDatabaseFile();
+    CheckListQueriesReadMultipleRows(list_queries_file.path);
     return 0;
 }
