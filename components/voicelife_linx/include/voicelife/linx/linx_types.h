@@ -13,6 +13,11 @@ namespace voicelife::linx {
 
 /** 保存 Linx WebSocket 连接所需的非敏感配置引用。 */
 struct LinxConnectionConfig {
+    // Linx uses this value to choose its downstream send strategy. Keep it in
+    // the same latency budget as the board playback queue rather than deriving
+    // an unbounded duration from the negotiated packet size.
+    static constexpr uint32_t kDefaultPlaybackBufferDurationMs = 200;
+
     std::string websocket_url;
     // A reference such as secret://linx/device-token. The resolved token is
     // owned by the platform transport and never enters this component's logs.
@@ -20,13 +25,15 @@ struct LinxConnectionConfig {
     std::string device_id;
     std::string client_id;
     std::optional<std::string> agent_id;
+    uint32_t playback_buffer_duration_ms = kDefaultPlaybackBufferDurationMs;
 
     /**
      * @brief 校验连接配置是否完整。
      * @return 必需字段均非空时返回 true。
      */
     [[nodiscard]] bool valid() const {
-        return !websocket_url.empty() && !token_ref.empty() && !device_id.empty() && !client_id.empty();
+        return !websocket_url.empty() && !token_ref.empty() && !device_id.empty() && !client_id.empty() &&
+               playback_buffer_duration_ms > 0;
     }
 };
 

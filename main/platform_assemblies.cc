@@ -20,6 +20,10 @@ namespace voicelife::runtime {
 
 namespace {
 
+// Match the Linx playback-buffer contract while keeping the board assembly
+// independent of the provider implementation.
+constexpr uint32_t kSparkBotPlaybackLatencyBudgetMs = 200;
+
 /** @brief 从官方 SparkBot 板级 Profile 填充 LVGL 显示配置。 */
 voicelife::display_sparkbot::SparkBotLcdConfig MakeSparkBotLcdConfig() {
     const auto profile = voicelife::board_esp::SparkBotProfile();
@@ -189,7 +193,8 @@ void VoiceLifePcbAssembly::LogAudioStats() {
 }
 
 SparkBotAssembly::SparkBotAssembly()
-    : audio_ports_(audio_esp::SparkBotEsp32s3AudioProfile(), {},
+    : audio_ports_(audio_esp::SparkBotEsp32s3AudioProfile(),
+                   {.maximum_playback_latency_ms = kSparkBotPlaybackLatencyBudgetMs},
                    [this](bool enabled) { (void)SetAudioOutputEnabled(enabled); }),
       arbiter_(voicelife::board_esp::SparkBotProfile().shared_power),
       adapter_(MakeSparkBotLcdConfig(), [this](bool enabled) { ApplyBacklight(enabled); }) {}

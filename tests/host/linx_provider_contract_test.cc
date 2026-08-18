@@ -110,6 +110,13 @@ int main() {
     Check(hello.value->find("\"transport\":\"websocket\"") != std::string::npos, "hello 必须声明 websocket transport");
     Check(hello.value->find("\"mcp\":true") != std::string::npos, "hello 必须声明 MCP 能力");
     Check(hello.value->find("\"sample_rate\":16000") != std::string::npos, "hello 必须声明采样率");
+    Check(hello.value->find("\"play_buffer_duration\":200") != std::string::npos,
+          "默认播放缓冲必须保持在 200ms 实时预算内");
+    auto larger_buffer_connection = connection;
+    larger_buffer_connection.playback_buffer_duration_ms = 320;
+    auto larger_buffer_hello = codec.EncodeHello(config, larger_buffer_connection);
+    Check(larger_buffer_hello.ok() && larger_buffer_hello.value->find("\"play_buffer_duration\":320") != std::string::npos,
+          "连接配置必须能显式控制 Linx 下行缓冲预算");
     auto detect = codec.EncodeListenDetect(config, "请播报\\测试", "收到！");
     Check(detect.ok() && detect.value->find("\\\\测试") != std::string::npos &&
               detect.value->find("\"text_response\":\"收到！\"") != std::string::npos,
@@ -301,6 +308,10 @@ int main() {
     invalid_audio.audio.sample_rate_hz = 0;
     Check(codec.EncodeHello(invalid_audio, connection).status.code == ErrorCode::kInvalidArgument,
           "hello 必须拒绝无效音频参数");
+    auto invalid_connection = connection;
+    invalid_connection.playback_buffer_duration_ms = 0;
+    Check(!invalid_connection.valid() && codec.EncodeHello(config, invalid_connection).status.code == ErrorCode::kInvalidArgument,
+          "零播放缓冲预算不能生成 Linx hello");
     Check(codec.EncodeAbort(config, "").status.code == ErrorCode::kInvalidArgument, "空 abort 原因必须拒绝");
     Check(codec.DecodeText("not-json").status.code == ErrorCode::kInvalidArgument, "非 JSON 输入必须拒绝");
     Check(codec.DecodeText(R"({"type":123})").status.code == ErrorCode::kInvalidArgument, "type 非字符串必须拒绝");

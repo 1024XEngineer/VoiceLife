@@ -114,8 +114,7 @@ Result<LinxAudioParams> ParseAudioParams(const cJSON* audio) {
 
 Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& config,
                                                const LinxConnectionConfig& connection) const {
-    (void)connection;
-    if (!config.audio.valid()) {
+    if (!config.audio.valid() || !connection.valid()) {
         return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx hello 音频参数无效");
     }
     JsonPtr root(cJSON_CreateObject());
@@ -135,10 +134,9 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
 
     if (config.audio.codec == voice::AudioCodec::kPcmS16Le) {
         const uint32_t frame_size = config.audio.sample_rate_hz * config.audio.frame_duration_ms / 1000U;
-        const uint32_t play_buffer_ms = config.audio.frame_duration_ms * 50U;
         cJSON_AddNumberToObject(audio, "frame_size", frame_size);
         cJSON_AddStringToObject(audio, "sample_format", "signed_int16");
-        cJSON_AddNumberToObject(audio, "play_buffer_duration", play_buffer_ms);
+        cJSON_AddNumberToObject(audio, "play_buffer_duration", connection.playback_buffer_duration_ms);
     }
 
     std::string result;
