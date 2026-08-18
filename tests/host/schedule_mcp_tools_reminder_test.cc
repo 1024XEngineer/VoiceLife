@@ -135,6 +135,10 @@ class FakeRuleRepository final : public voicelife::schedule::ScheduleRuleReposit
     }
 
     Status Update(const ScheduleRule& rule) override {
+        if (fail_update) {
+            fail_update = false;
+            return next_update_failure;
+        }
         for (ScheduleRule& existing : rules) {
             if (existing.id == rule.id) {
                 existing = rule;
@@ -182,6 +186,10 @@ class FakeRuleRepository final : public voicelife::schedule::ScheduleRuleReposit
     }
 
     Status CancelRuleAndInstances(ScheduleRuleId id, int64_t& cancelled_instance_count) override {
+        if (fail_cancel_rule) {
+            fail_cancel_rule = false;
+            return next_cancel_rule_failure;
+        }
         const auto loaded = FindById(id);
         if (!loaded.ok()) return loaded.status;
         ScheduleRule cancelled = *loaded.value;
@@ -216,6 +224,10 @@ class FakeRuleRepository final : public voicelife::schedule::ScheduleRuleReposit
 
     std::vector<ScheduleRule> rules;
     int64_t next_rule_id_ = 600;
+    bool fail_update = false;
+    Status next_update_failure = Status::Ok();
+    bool fail_cancel_rule = false;
+    Status next_cancel_rule_failure = Status::Ok();
 
    private:
     InMemoryScheduleRepository& schedules_;
@@ -411,6 +423,56 @@ void CheckRuleReminderSuccessPaths() {
     Check(deleted.status.ok() && OutputString(deleted, "status") == "success", "删除周期规则并撤销提醒应成功");
 }
 
+void CheckRuleReminderRollbackSyncPaths() {
+    ReminderToolFixture update_fixture;
+    Check(update_fixture.reminder.Start().ok(), "规则更新失败同步测试应启动服务");
+    Check(voicelife::mcp::RegisterScheduleMcpTools(update_fixture.server, update_fixture.service,
+                                                   update_fixture.rule_service, update_fixture.operation_service,
+                                                   &update_fixture.reminder)
+              .ok(),
+          "带提醒服务工具应注册成功");
+    const auto update_created = update_fixture.server.call({
+        .request_id = "create-rule-before-update-failure",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("更新失败前规则")}, {"repeat", DailyRepeat("2099-01-01")}},
+    });
+    Check(update_created.status.ok() && OutputString(update_created, "status") == "success",
+          "更新失败同步测试应先创建规则");
+    update_fixture.rules.fail_update = true;
+    update_fixture.rules.next_update_failure = Status::Error(ErrorCode::kUnavailable, "规则更新失败");
+    const auto update_failed = update_fixture.server.call({
+        .request_id = "update-rule-then-sync",
+        .name = "schedule.update",
+        .arguments = {{"rule_id", int64_t{update_fixture.rules.rules.back().id}}, {"event", std::string("更新失败")}},
+    });
+    Check(update_failed.status.ok() && OutputString(update_failed, "status") == "failure",
+          "规则更新失败时应返回失败并保留已撤销提醒的可恢复路径");
+
+    ReminderToolFixture delete_fixture;
+    Check(delete_fixture.reminder.Start().ok(), "规则删除失败同步测试应启动服务");
+    Check(voicelife::mcp::RegisterScheduleMcpTools(delete_fixture.server, delete_fixture.service,
+                                                   delete_fixture.rule_service, delete_fixture.operation_service,
+                                                   &delete_fixture.reminder)
+              .ok(),
+          "带提醒服务工具应注册成功");
+    const auto delete_created = delete_fixture.server.call({
+        .request_id = "create-rule-before-delete-failure",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("删除失败前规则")}, {"repeat", DailyRepeat("2099-01-01")}},
+    });
+    Check(delete_created.status.ok() && OutputString(delete_created, "status") == "success",
+          "删除失败同步测试应先创建规则");
+    delete_fixture.rules.fail_cancel_rule = true;
+    delete_fixture.rules.next_cancel_rule_failure = Status::Error(ErrorCode::kUnavailable, "规则删除失败");
+    const auto delete_failed = delete_fixture.server.call({
+        .request_id = "delete-rule-then-sync",
+        .name = "schedule.delete",
+        .arguments = {{"rule_id", int64_t{delete_fixture.rules.rules.back().id}}},
+    });
+    Check(delete_failed.status.ok() && OutputString(delete_failed, "status") == "failure",
+          "规则删除失败时应返回失败并保留提醒同步恢复路径");
+}
+
 void CheckRuleReminderSyncFailurePaths() {
     ReminderToolFixture create_fail_fixture;
     create_fail_fixture.timing.register_acceptance = CommandAcceptance::kUnavailable;
@@ -470,6 +532,7 @@ int main() {
     CheckReminderSyncFailurePaths();
     CheckOperationServiceOverloadWithoutReminder();
     CheckRuleReminderSuccessPaths();
+    CheckRuleReminderRollbackSyncPaths();
     CheckRuleReminderSyncFailurePaths();
     return 0;
 }

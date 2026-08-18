@@ -406,6 +406,9 @@ void CheckCompleteScheduleErrorPaths() {
     Check(completed_without_expected_task.ok() &&
               completed_without_expected_task.value->status == ScheduleStatus::kCompleted,
           "未传提醒任务标识时也应按普通完成路径更新状态");
+
+    fixture.repository.FailNextFindById(Status::Error(ErrorCode::kUnavailable, "完成查询失败"));
+    Check(!fixture.schedule_service.complete_schedule(1).ok(), "完成日程查询失败时应返回仓储错误");
 }
 
 void CheckRepositoryFailurePaths() {
@@ -448,12 +451,18 @@ void CheckAdditionalReminderBranchCoverage() {
     stop_fixture.repository.FailNextFindAll(Status::Error(ErrorCode::kUnavailable, "Stop FindAll 失败"));
     stop_fixture.reminder.Stop();
 
-    ScriptedFixture suspend_fixture({MakeSchedule(2, "撤销实例取消失败", At(1'200), 14)});
+    ScriptedFixture suspend_fixture({
+        MakeSchedule(2, "撤销实例取消失败", At(1'200), 14),
+        MakeSchedule(22, "撤销实例取消失败二", At(1'300), 14),
+    });
     Check(suspend_fixture.reminder.Start().ok(), "撤销实例取消失败测试应启动服务");
     suspend_fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;
     Check(!suspend_fixture.reminder.SuspendRuleReminders(14).ok(), "撤销规则实例取消失败时应返回错误");
 
-    ScriptedFixture sync_fixture({MakeSchedule(3, "规则同步取消失败", At(1'200), 15)});
+    ScriptedFixture sync_fixture({
+        MakeSchedule(3, "规则同步取消失败", At(1'200), 15),
+        MakeSchedule(33, "规则同步取消失败二", At(1'300), 15),
+    });
     Check(sync_fixture.reminder.Start().ok(), "规则同步取消失败测试应启动服务");
     sync_fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;
     Check(!sync_fixture.reminder.SynchronizeRule(15).ok(), "同步规则实例取消失败时应返回错误");
@@ -553,7 +562,10 @@ void CheckAllocationWrapAndInvalidCallback() {
 }
 
 void CheckTimingFailureAndDuplicatePaths() {
-    ScriptedFixture fixture({MakeSchedule(1, "未来提醒", At(1'100))});
+    ScriptedFixture fixture({
+        MakeSchedule(1, "未来提醒", At(1'100)),
+        MakeSchedule(11, "未来提醒二", At(1'200)),
+    });
     fixture.timing.register_acceptance = CommandAcceptance::kUnavailable;
     Check(!fixture.reminder.Start().ok(), "注册命令不可用时启动应返回错误");
     const auto unavailable_register = fixture.repository.FindById(1);
