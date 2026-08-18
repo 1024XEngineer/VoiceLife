@@ -168,7 +168,9 @@ add_voicelife_library(board_esp voicelife_board_esp
 target_link_libraries(board_esp PUBLIC contracts)
 add_voicelife_library(display_esp voicelife_display_esp
     "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_presentation_adapter.cc"
-    "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_status_display.cc")
+    "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_status_display.cc"
+    "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_glyphs.cc"
+    "${ROOT_DIR}/components/voicelife_display_esp/src/ssd1306_glyph_assets.cc")
 target_link_libraries(display_esp PUBLIC contracts voice)
 add_voicelife_library(display_sparkbot voicelife_display_sparkbot
     "${ROOT_DIR}/components/voicelife_display_sparkbot/src/sparkbot_lvgl_display.cc"
@@ -186,6 +188,11 @@ function(add_voicelife_test target labels)
     add_test(NAME ${target} COMMAND ${target})
     set_tests_properties(${target} PROPERTIES LABELS "${labels}")
 endfunction()
+
+add_voicelife_test(ssd1306_glyphs_test "unit;display"
+    "${CMAKE_CURRENT_LIST_DIR}/ssd1306_glyphs_test.cc")
+target_include_directories(ssd1306_glyphs_test PRIVATE "${ROOT_DIR}/components/voicelife_display_esp/src")
+target_link_libraries(ssd1306_glyphs_test PRIVATE display_esp)
 
 add_voicelife_test(schedule_contract_test "unit;schedule"
     "${ROOT_DIR}/components/voicelife_schedule/test/schedule_contract_test.cc")
