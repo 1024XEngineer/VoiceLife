@@ -3,7 +3,6 @@ import { test } from 'node:test';
 
 import {
     AesGcmExternalIdentityProtector,
-    BearerDeviceAuthenticationPort,
     HmacPairingCodePort,
     UuidIdGenerator,
 } from '../dist/infrastructure/security/production-ports.js';
@@ -12,21 +11,6 @@ import {
     DirectConversationResolver,
     SystemClock,
 } from '../dist/infrastructure/production-support.js';
-
-test('production device authentication accepts only the configured device token', async () => {
-    const authentication = new BearerDeviceAuthenticationPort(
-        'device-fixture',
-        'user-fixture',
-        'fixture-device-token-with-enough-entropy',
-    );
-
-    assert.deepEqual(await authentication.authenticate('Bearer fixture-device-token-with-enough-entropy'), {
-        deviceId: 'device-fixture',
-        userId: 'user-fixture',
-    });
-    await assert.rejects(authentication.authenticate('Bearer wrong-device-token-with-enough-entropy'));
-    await assert.rejects(authentication.authenticate('Basic fixture'));
-});
 
 test('production identity protection encrypts at rest and can reveal only valid ciphertext', async () => {
     const identities = new AesGcmExternalIdentityProtector('fixture-identity-secret-with-at-least-32-bytes');

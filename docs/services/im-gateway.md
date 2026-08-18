@@ -49,10 +49,9 @@ pnpm --dir services/im-gateway test
 `/wechat` 和 `/healthz`。生产进程不使用 `createMockImGateway()`。
 
 复制 [`.env.example`](../../.env.example) 后填入部署值；其中的 `replace-me` 会被生产配置故意拒绝，不能直接启动。
-`DEVICE_USER_ID` 必须与该设备安全存储中的 `userId` 一致，`DEVICE_TOKEN` 至少 24 字节，
-`ACTION_TOKEN_SECRET` 至少 32 字节；建议额外提供独立的 `IDENTITY_SECRET`，未提供时会从
-`ACTION_TOKEN_SECRET` 按用途派生不同密钥。凭据只从环境变量注入，结构化日志不会记录 Authorization、
-请求体、Action token、动态 URL 或 Secret。
+生产进程不再读取单例 `DEVICE_ID`、`DEVICE_USER_ID` 或 `DEVICE_TOKEN`。设备必须先通过下述 CLI 注册，Gateway
+只按数据库中的 SHA-256 摘要认证 43 字符 base64url Token。`ACTION_TOKEN_SECRET` 至少 32 字节；建议额外提供
+独立的 `IDENTITY_SECRET`。结构化日志不会记录 Authorization、请求体、Action token、动态 URL 或 Secret。
 
 配对 DTO 的隐私收紧必须先部署 Gateway，再发布依赖该 DTO 的固件；回滚时也应先停止固件放量。发布探针应确认
 `POST /v1/im/pairing-sessions` 的 `session` 只含公开字段且没有 `displayCodeHash`/外部身份，再开放 USB 配对验证。
@@ -108,6 +107,36 @@ Tunnel 或服务器反向代理，以免 Quick Tunnel 重启后域名改变。
 在重连时回放，HTTP 序列化会等待 socket 背压解除。
 
 跨端 JSON fixture 位于 `contracts/im-gateway/v1/fixtures`，由 C++ 主机测试与 TypeScript 测试共同消费。
+
+## 设备注册、轮换与吊销
+
+每台设备使用独立 Token；同一用户可拥有多台设备。所有命令都会先迁移数据库：
+
+```bash
+docker compose exec gateway pnpm device -- create --user-id user-1
+docker compose exec gateway pnpm device -- list --user-id user-1
+docker compose exec gateway pnpm device -- rotate-token --device-id <deviceId>
+docker compose exec gateway pnpm device -- revoke --device-id <deviceId>
+```
+
+`create`/`rotate-token` 只在 stdout 显示一次 43 字符 Token；数据库只保存 32 字节 SHA-256 摘要，丢失后只能轮换。
+`revoke` 幂等取消全部 pending 配对会话，但保留绑定、投递和回执历史。退出码固定为 0 成功、2 参数错误、3 不存在、
+4 重复或状态冲突、5 数据库/内部错误。
+
+服务器签发后，通过受控 USB 写入设备（Token 由隐藏提示读取，不进入 shell 参数）：
+
+```bash
+python3 scripts/provision_im_config.py --port /dev/ttyUSB0 \
+  --gateway-origin https://gateway.example.com --device-id <deviceId> --user-id <userId>
+```
+
+覆盖或凭据暴露时先轮换，再使用 `--force` 写入。仅清理/重配 Wi-Fi 不得清除 IM NVS；完整安全擦除是单独操作。
+交付前的真实设备认证冒烟必须核对订单中的不可变身份，并等待一分钟会话自然过期：
+
+```bash
+python3 scripts/start_im_pairing.py --port /dev/ttyUSB0 --auth-smoke \
+  --expected-device-id <deviceId> --expected-user-id <userId>
+```
 
 ## PostgreSQL 持久化
 
@@ -170,8 +199,8 @@ Infrastructure 内完成归一化后直接调用 `PlatformEventApplication`，�
 提示其以 `绑定 123456` 的格式发送六码绑定码；有效绑定会同步返回成功提示，无效或过期的绑定码会返回重新获取提示。
 这些被动回复均不依赖模板消息权限。
 
-同一用户、设备和微信身份重复配对时会复用已有有效绑定，不会生成重复提醒。启动迁移会将该组合的历史重复
-active 绑定保留最新一条，并把较早记录标记为 `unbound`。
+新的 pending 会话再次确认完全相同组合时复用已有有效绑定。设备改绑新身份或身份改绑新设备时，旧关系会保留为
+`unbound` 历史；任一设备和任一外部身份最多各有一条 active 绑定。设备吊销不会删除绑定或投递历史。
 
 `ChannelAccount.credentialRef` 只保存 `secret://...` 引用。部署层负责解析并注入 Webhook Token、App ID/AppSecret、模板 ID/字段映射、H5 HTTPS 基础地址以及外部身份解密函数；这些值不得写入 `capabilityConfig`、Profile、日志或 fixture。未配置 `outbound` 时 Adapter 继续只提供入站能力，并如实返回 `proactiveMessage: false`。
 
@@ -179,13 +208,13 @@ active 绑定保留最新一条，并把较早记录标记为 `unbound`。
 
 ### 微信测试号联调 harness
 
-`dev:wechat` 是 Issue #131 的本地联调入口，不是生产启动进程。它使用内存 Repository 和真实
-`WechatOfficialAdapter`，仅在 loopback 地址暴露微信 Webhook、H5 Action UI、健康检查以及 Bearer 保护的
-测试投递/状态查询端点。生产监听、PostgreSQL、Koishi 与部署装配仍由 Issue #152 负责。
+`dev:wechat` 是微信 Adapter 的本地联调入口，不是生产启动进程。它与 Gateway 共用 PostgreSQL、设备注册表、
+数据库认证和一对一绑定语义，仅在 loopback 地址暴露微信 Webhook、H5 Action UI、健康检查以及 Bearer 保护的
+测试投递/状态查询端点。
 
-先在仓库根目录 `.env` 填写测试号配置，并确保 `WECHAT_EXPECTED_TO_USERNAME` 是 `gh_` 开头的公众号原始
-ID，而不是显示名称。`DEVICE_TOKEN` 至少 24 字节，`ACTION_TOKEN_SECRET` 至少 32 字节；两者都可使用
-`openssl rand -hex 32` 生成。不要把 `.env`、AppSecret 或这些令牌提交到仓库或粘贴到日志。
+先运行 `pnpm --dir services/im-gateway device -- create --user-id <userId>` 注册测试设备，安全保存一次性输出的
+Token，并把非 Secret 的 deviceId 写入 `WECHAT_DEV_DEVICE_ID`，把测试用户 OpenID 写入
+`WECHAT_TEST_OPENID`。`.env` 还需 `DATABASE_URL`；不要把 Token、OpenID、AppSecret 或 `.env` 提交到仓库或粘贴到日志。
 
 由于 Quick Tunnel 域名在启动后才生成，可以先启动 Tunnel，再把其 HTTPS 域名写入 `.env`：
 
@@ -196,6 +225,8 @@ cloudflared tunnel --url http://127.0.0.1:3000
 ```dotenv
 WECHAT_DEV_HOST=127.0.0.1
 WECHAT_DEV_PORT=3000
+WECHAT_DEV_DEVICE_ID=<registered-device-id>
+WECHAT_TEST_OPENID=<test-user-openid>
 WECHAT_WEBHOOK_PUBLIC_URL=https://example.trycloudflare.com/wechat
 WECHAT_ACTION_UI_BASE_URL=https://example.trycloudflare.com/voicelife/reminder-actions
 ```

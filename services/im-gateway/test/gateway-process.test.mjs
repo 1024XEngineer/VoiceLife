@@ -19,9 +19,6 @@ function fixtureEnvironment(overrides = {}) {
         DATABASE_URL: 'postgres://user:password@postgres:5432/voicelife',
         GATEWAY_HOST: '127.0.0.1',
         GATEWAY_PORT: '3000',
-        DEVICE_ID: 'device-fixture',
-        DEVICE_USER_ID: 'user-fixture',
-        DEVICE_TOKEN: deviceToken,
         ACTION_TOKEN_SECRET: 'fixture-action-token-secret-with-32-bytes',
         IDENTITY_SECRET: 'fixture-identity-secret-with-at-least-32-bytes',
         WECHAT_CHANNEL_ACCOUNT_ID: 'wechat-production',
@@ -118,7 +115,6 @@ test('production configuration requires every secret without exposing its value'
     const config = readGatewayConfiguration(fixtureEnvironment());
     assert.equal(config.host, '127.0.0.1');
     assert.equal(config.port, 3000);
-    assert.equal(config.deviceUserId, 'user-fixture');
     assert.equal(config.wechat.channelAccountId, 'wechat-production');
     assert.equal(config.wechat.displayTimeZone, 'Asia/Shanghai');
     assert.equal(
@@ -138,15 +134,10 @@ test('production configuration requires every secret without exposing its value'
         () => readGatewayConfiguration(fixtureEnvironment({ ACTION_TOKEN_SECRET: 'too-short' })),
         /ACTION_TOKEN_SECRET must contain at least 32 bytes/u,
     );
-    assert.throws(
-        () => readGatewayConfiguration(fixtureEnvironment({ DEVICE_USER_ID: '' })),
-        /DEVICE_USER_ID is required/u,
-    );
 });
 
 test('production configuration rejects current and historical public example secrets', async () => {
     for (const [name, value] of [
-        ['DEVICE_TOKEN', 'replace-with-at-least-24-random-bytes'],
         ['ACTION_TOKEN_SECRET', 'replace-with-at-least-32-random-bytes'],
         ['IDENTITY_SECRET', 'replace-with-a-distinct-32-byte-random-secret'],
     ]) {
@@ -162,7 +153,7 @@ test('production configuration rejects current and historical public example sec
             .filter((line) => line !== '' && !line.startsWith('#'))
             .map((line) => line.split('=', 2)),
     );
-    for (const name of ['DEVICE_TOKEN', 'ACTION_TOKEN_SECRET', 'IDENTITY_SECRET']) {
+    for (const name of ['ACTION_TOKEN_SECRET', 'IDENTITY_SECRET']) {
         assert.throws(
             () => readGatewayConfiguration(fixtureEnvironment({ [name]: example[name] })),
             (error) => error.name === 'GatewayConfigurationError' && error.message.startsWith(`${name} `),

@@ -49,6 +49,8 @@ add_voicelife_library(contracts voicelife_contracts
     "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_submission.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/pairing_session.cc")
 target_link_libraries(contracts PRIVATE yyjson)
+add_voicelife_library(application voicelife_application
+    "${ROOT_DIR}/components/voicelife_application/src/interaction_orchestrator.cc")
 add_voicelife_library(im voicelife_im
     "${ROOT_DIR}/components/voicelife_im/src/im_reporting_channel.cc"
     "${ROOT_DIR}/components/voicelife_im/src/im_action_channel.cc"
@@ -317,6 +319,13 @@ target_link_libraries(wake_gate_audio_input_test PRIVATE voice)
 add_voicelife_test(voice_interaction_controller_test "unit;voice;interaction;contract"
     voice_interaction_controller_test.cc)
 target_link_libraries(voice_interaction_controller_test PRIVATE voice)
+
+add_voicelife_test(interaction_orchestrator_test "unit;application;interaction;contract"
+    interaction_orchestrator_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime_esp/src/esp_interaction_task_host.cc")
+target_include_directories(interaction_orchestrator_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_runtime_esp/include")
+target_link_libraries(interaction_orchestrator_test PRIVATE application)
 
 add_voicelife_test(linx_provider_contract_test "unit;voice;linx;contract" linx_provider_contract_test.cc)
 target_link_libraries(linx_provider_contract_test PRIVATE linx)

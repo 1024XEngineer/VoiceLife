@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { ImGatewayApplication } from '../application/api.js';
 import {
     DefaultActionApplication,
@@ -12,7 +14,7 @@ import {
     DefaultPlatformEventApplication,
     DefaultReceiptApplication,
 } from '../application/services.js';
-import type { DeviceId } from '../contracts/ids.js';
+import type { DeviceId, UserId } from '../contracts/ids.js';
 import { unsafeId } from '../contracts/ids.js';
 import {
     ActionUiController,
@@ -51,7 +53,7 @@ import type {
     ImChannelPort,
     PairingCodePort,
 } from '../ports/external.js';
-import type { ImUnitOfWork } from '../ports/repositories.js';
+import type { ImUnitOfWork, ImUnitOfWorkContext } from '../ports/repositories.js';
 
 /** 装配生产 Gateway 运行时所需的外部端口。 */
 export interface ImGatewayDependencies {
@@ -199,9 +201,43 @@ export function createMockImGateway(
     clock: FixedClock = new FixedClock(),
     overrides: Partial<ImGatewayDependencies> = {},
 ): ImGatewayRuntime {
+    const ports = mockImGatewayPorts(deviceId, clock);
+    const authentication = overrides.authentication ?? ports.authentication;
+    const userId =
+        authentication instanceof MockDeviceAuthenticationPort
+            ? authentication.principal.userId
+            : unsafeId<UserId>('user-fixture');
+    const underlying = overrides.unitOfWork ?? new InMemoryImUnitOfWork();
     return createImGateway({
-        unitOfWork: new InMemoryImUnitOfWork(),
-        ...mockImGatewayPorts(deviceId, clock),
+        ...ports,
         ...overrides,
+        unitOfWork: new MockDeviceSeedingUnitOfWork(underlying, deviceId, userId, clock),
     });
+}
+
+/** Mock/fixture 的每笔事务先保证其认证设备存在；生产组合根不会使用该包装。 */
+class MockDeviceSeedingUnitOfWork implements ImUnitOfWork {
+    public constructor(
+        private readonly underlying: ImUnitOfWork,
+        private readonly deviceId: DeviceId,
+        private readonly userId: UserId,
+        private readonly clock: Clock,
+    ) {}
+
+    public transaction<T>(work: (context: ImUnitOfWorkContext) => Promise<T>): Promise<T> {
+        return this.underlying.transaction(async (context) => {
+            if ((await context.devices.findById(this.deviceId)) === undefined) {
+                const now = this.clock.now();
+                await context.devices.create({
+                    deviceId: this.deviceId,
+                    userId: this.userId,
+                    tokenDigest: createHash('sha256').update(this.deviceId, 'utf8').digest(),
+                    status: 'active',
+                    createdAt: now,
+                    updatedAt: now,
+                });
+            }
+            return work(context);
+        });
+    }
 }

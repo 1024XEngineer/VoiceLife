@@ -49,7 +49,9 @@
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
 #include "mcp_worker_policy.h"
+#include "voicelife/application/interaction_orchestrator.h"
 #include "voicelife/mcp/schedule_mcp_tools.h"
+#include "voicelife/runtime_esp/esp_interaction_task_host.h"
 #include "voicelife/voice/display_snapshot.h"
 #include "voicelife/voice/voice_interaction_controller.h"
 #include "voicelife/voice/voice_ports.h"
@@ -257,6 +259,12 @@ class Runtime final {
             ShowDisplay(voice::VoiceMood::kSad, "错误", "");
             return fail_startup(secret_store);
         }
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        // USB IM provisioning 不依赖 Wi-Fi；即使网络配置缺失并进入 SoftAP，也必须开放物理恢复窗口。
+        if (!StartImProvisioningTask()) {
+            ESP_LOGW(kTag, "IM_PROVISION_TASK_FAILED=1");
+        }
+#endif
         auto connection = BootstrapLinxOtaConfig(assembly_->board_identity(),
                                                  [this](std::string_view title, std::string_view detail) {
                                                      ShowDisplay(voice::VoiceMood::kConnecting, title, detail);
@@ -534,10 +542,6 @@ class Runtime final {
 
     void StartImRuntime() {
 #if CONFIG_VOICELIFE_IM_GATEWAY
-        // 物理 USB 窗口也用于显式轮换 Quick Tunnel URL 与设备 Token，因此即使已有配置也启动。
-        if (!StartImProvisioningTask()) {
-            ESP_LOGW(kTag, "IM_PROVISION_TASK_FAILED=1");
-        }
         bool expected = false;
         if (!im_lifecycle_started_.compare_exchange_strong(expected, true)) return;
         if (xTaskCreate(&Runtime::ImLifecycleTaskEntry, "voicelife_im_lifecycle", 8192, this, 3, &im_lifecycle_task_) !=
@@ -577,7 +581,8 @@ class Runtime final {
                 // 明确语音命令会创建新会话，Gateway 会原子取消同设备旧 pending。
                 binding_use_case_.Bind(*im_runtime_.pairing_client(), im_pairing_clock_, im_runtime_.user_id());
                 EnqueueBindingReset(binding_use_case_.generation());
-                RegisterImPairingAcceptance(im_runtime_.pairing_client(), im_runtime_.user_id());
+                RegisterImPairingAcceptance(im_runtime_.pairing_client(), im_runtime_.device_id(),
+                                            im_runtime_.user_id());
                 ESP_LOGI(kTag, "IM_RUNTIME_READY=1");
                 break;
             }
@@ -1960,6 +1965,9 @@ class Runtime final {
     ScaffoldAudioInput audio_input_;
     ScaffoldAudioOutput audio_output_;
 #endif
+    // 仅完成依赖装配，现有事件循环尚未迁移到该路径。
+    application::InteractionOrchestrator interaction_orchestrator_;
+    runtime_esp::EspInteractionTaskHost interaction_task_host_{interaction_orchestrator_};
     voice::VoiceInteractionController interaction_;
     std::unique_ptr<voice::SpeechProviderAdapter> provider_;
     std::unique_ptr<voice::VoiceSession> session_;

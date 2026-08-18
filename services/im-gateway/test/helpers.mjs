@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { ImGatewayError, createMockImGateway } from '../dist/index.js';
+import { InMemoryImUnitOfWork } from '../dist/infrastructure/persistence/in-memory.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
 
 const fixtureRoot = new URL('../../../contracts/im-gateway/v1/fixtures/', import.meta.url);
@@ -34,8 +35,21 @@ export async function expectRejected(work, message) {
 /** 构建内存版 Gateway 运行时与确定性时钟。 */
 export function buildGateway(overrides = {}) {
     const clock = new FixedClock();
-    const gateway = createMockImGateway('device-fixture', clock, overrides);
-    return { gateway, clock };
+    const unitOfWork = overrides.unitOfWork ?? new InMemoryImUnitOfWork();
+    const gateway = createMockImGateway('device-fixture', clock, { ...overrides, unitOfWork });
+    return { gateway, clock, unitOfWork };
+}
+
+/** 在内存 fixture 中预置匹配所有者的 active 设备。 */
+export function seedDevice(unitOfWork, deviceId, userId = 'user-fixture', fill = 1) {
+    unitOfWork.seedDevice({
+        deviceId,
+        userId,
+        tokenDigest: new Uint8Array(32).fill(fill),
+        status: 'active',
+        createdAt: '2026-08-03T00:00:00.000Z',
+        updatedAt: '2026-08-03T00:00:00.000Z',
+    });
 }
 
 /** 注册一个微信公众号渠道账号。 */

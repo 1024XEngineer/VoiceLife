@@ -1,6 +1,6 @@
 import { createKoishiGatewayRuntime, type KoishiGatewayRuntime } from './create-koishi-gateway.js';
 import { Context } from '@koishijs/core';
-import { unsafeId, type ChannelAccountId, type DeviceId, type UserId } from '../contracts/ids.js';
+import { unsafeId, type ChannelAccountId } from '../contracts/ids.js';
 import type { ChannelAccount } from '../domain/models.js';
 import { DeliveryOutboxWorker } from '../infrastructure/delivery-outbox-worker.js';
 import {
@@ -18,7 +18,7 @@ import {
 import { AesGcmActionTokenPort } from '../infrastructure/security/aes-gcm-action-token.js';
 import {
     AesGcmExternalIdentityProtector,
-    BearerDeviceAuthenticationPort,
+    DatabaseDeviceAuthenticationPort,
     HmacPairingCodePort,
     UuidIdGenerator,
 } from '../infrastructure/security/production-ports.js';
@@ -37,7 +37,6 @@ export {
 export type GatewayEnvironment = Readonly<Record<string, string | undefined>>;
 
 const PUBLIC_EXAMPLE_SECRET_VALUES = new Set([
-    'replace-with-at-least-24-random-bytes',
     'replace-with-at-least-32-random-bytes',
     'replace-with-a-distinct-32-byte-random-secret',
 ]);
@@ -73,9 +72,6 @@ export interface GatewayConfiguration {
     readonly host: string;
     readonly port: number;
     readonly databaseUrl: string;
-    readonly deviceId: string;
-    readonly deviceUserId: string;
-    readonly deviceToken: string;
     readonly actionTokenSecret: string;
     readonly identitySecret: string;
     readonly wechat: GatewayWechatConfiguration;
@@ -103,15 +99,13 @@ export function readGatewayConfiguration(environment: GatewayEnvironment): Gatew
     if ((environment.WECHAT_WEBHOOK_MODE?.trim() || 'plain') !== 'plain') {
         throw new GatewayConfigurationError('WECHAT_WEBHOOK_MODE must be plain for the current adapter');
     }
-    const databaseUrl = databaseConnectionUrl(environment);
+    const databaseUrl = resolveDatabaseConnectionUrl(environment);
     const actionUiBaseUrl = requiredEnvironment(environment, 'WECHAT_ACTION_UI_BASE_URL');
     assertActionUiBaseUrl(actionUiBaseUrl);
     const expectedToUserName = requiredEnvironment(environment, 'WECHAT_EXPECTED_TO_USERNAME');
     if (!/^gh_[A-Za-z0-9_-]+$/u.test(expectedToUserName)) {
         throw new GatewayConfigurationError('WECHAT_EXPECTED_TO_USERNAME must be the gh_ prefixed original account ID');
     }
-    const deviceToken = requiredEnvironment(environment, 'DEVICE_TOKEN');
-    assertProductionSecret(deviceToken, 'DEVICE_TOKEN', 24);
     const actionTokenSecret = requiredEnvironment(environment, 'ACTION_TOKEN_SECRET');
     assertProductionSecret(actionTokenSecret, 'ACTION_TOKEN_SECRET', 32);
     const identitySecret = environment.IDENTITY_SECRET?.trim() || actionTokenSecret;
@@ -120,9 +114,6 @@ export function readGatewayConfiguration(environment: GatewayEnvironment): Gatew
         host,
         port,
         databaseUrl,
-        deviceId: requiredEnvironment(environment, 'DEVICE_ID'),
-        deviceUserId: requiredEnvironment(environment, 'DEVICE_USER_ID'),
-        deviceToken,
         actionTokenSecret,
         identitySecret,
         wechat: {
@@ -190,11 +181,7 @@ export async function startConfiguredGatewayProcess(
             dependencies: {
                 unitOfWork,
                 actionTokens: new AesGcmActionTokenPort(config.actionTokenSecret),
-                authentication: new BearerDeviceAuthenticationPort(
-                    unsafeId<DeviceId>(config.deviceId),
-                    unsafeId<UserId>(config.deviceUserId),
-                    config.deviceToken,
-                ),
+                authentication: new DatabaseDeviceAuthenticationPort(unitOfWork),
                 channelCapabilities: adapter,
                 channelHealth: new CapabilityChannelHealthPort(
                     adapter,
@@ -377,7 +364,12 @@ function assertDatabaseUrl(value: string): void {
     }
 }
 
-function databaseConnectionUrl(environment: GatewayEnvironment): string {
+/**
+ * 校验数据库 URL，并在容器运行时安全应用可选主机名覆盖。
+ * @param environment Gateway 或设备 CLI 的进程环境。
+ * @returns 可直接交给 PostgreSQL 客户端的连接 URL。
+ */
+export function resolveDatabaseConnectionUrl(environment: GatewayEnvironment): string {
     const value = requiredEnvironment(environment, 'DATABASE_URL');
     assertDatabaseUrl(value);
     const host = environment.DATABASE_HOST?.trim();

@@ -7,7 +7,7 @@ RUN corepack enable && corepack prepare pnpm@10.17.1 --activate
 
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json eslint.config.mjs prettier.config.mjs ./
+COPY package.json .npmrc pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json eslint.config.mjs prettier.config.mjs ./
 COPY patches ./patches
 RUN pnpm install --frozen-lockfile
 

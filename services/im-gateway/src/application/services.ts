@@ -193,6 +193,13 @@ export class DefaultPairingApplication implements PairingApplication {
                 createdAt: now,
             };
             const created = await this.unitOfWork.transaction(async (tx) => {
+                const device = await tx.devices.lockById(command.deviceId);
+                if (device === undefined || device.status !== 'active') {
+                    throw new ImGatewayError('unauthorized', 'Device authorization is invalid');
+                }
+                if (command.userId !== undefined && command.userId !== device.userId) {
+                    throw new ImGatewayError('invalid_transition', 'Pairing user does not own the device');
+                }
                 await tx.pairingSessions.cancelPendingByDevice(command.deviceId);
                 return tx.pairingSessions.createPendingIfAbsent(session);
             });
@@ -211,14 +218,21 @@ export class DefaultPairingApplication implements PairingApplication {
 
     /** {@inheritDoc PairingApplication.confirm} */
     public async confirm(command: ConfirmPairingCommand): Promise<ImBinding> {
-        await this.expireDue();
         const codeHash = await this.pairingCodes.hash(command.displayCode);
         const protectedIdentity = await this.identityProtector.protect(command.externalUserId);
         return this.unitOfWork.transaction(async (tx) => {
-            const session = await tx.pairingSessions.lockPendingByDisplayCodeHash(codeHash);
-            if (session === undefined || session.expiresAt <= this.clock.now()) {
+            // 普通预查询只用于取得锁顺序所需的设备与会话标识，不作为安全判断。
+            const candidate = await tx.pairingSessions.findPendingByDisplayCodeHash(codeHash);
+            if (candidate === undefined) {
                 throw new ImGatewayError('pairing_code_invalid', 'Pairing session is invalid or expired');
             }
+            const device = await tx.devices.lockById(candidate.deviceId);
+            const session = await tx.pairingSessions.lockPendingByIdAndDisplayCodeHash(candidate.id, codeHash);
+            const now = this.clock.now();
+            if (session === undefined || session.deviceId !== candidate.deviceId || session.expiresAt <= now) {
+                throw new ImGatewayError('pairing_code_invalid', 'Pairing session is invalid or expired');
+            }
+            await tx.bindings.acquireReplacementLock();
             const account = await tx.channelAccounts.findById(command.channelAccountId);
             if (account === undefined || account.status !== 'active') {
                 throw new ImGatewayError('binding_not_found', 'Channel account was not found');
@@ -237,8 +251,10 @@ export class DefaultPairingApplication implements PairingApplication {
             if (userId === undefined) {
                 throw new ImGatewayError('invalid_contract', 'Pairing confirmation requires an internal userId');
             }
+            if (device === undefined || device.status !== 'active' || device.userId !== userId) {
+                throw new ImGatewayError('invalid_transition', 'Pairing device is inactive or owned by another user');
+            }
 
-            const now = this.clock.now();
             let identity = await tx.identities.findByChannelAndHash(account.id, protectedIdentity.hash);
             if (identity === undefined) {
                 identity = await tx.identities.createIfAbsent({
@@ -256,7 +272,7 @@ export class DefaultPairingApplication implements PairingApplication {
                 throw new ImGatewayError('invalid_transition', 'External identity is not active');
             }
 
-            const binding = await tx.bindings.createActiveIfAbsent({
+            const binding = await tx.bindings.replaceActiveBinding({
                 id: this.ids.nextBindingId(),
                 userId,
                 deviceId: session.deviceId,
@@ -277,9 +293,7 @@ export class DefaultPairingApplication implements PairingApplication {
     /** {@inheritDoc PairingApplication.cancel} */
     public cancel(pairingSessionId: PairingSessionId): Promise<void> {
         return this.unitOfWork.transaction(async (tx) => {
-            const session = await tx.pairingSessions.findById(pairingSessionId);
-            if (session === undefined || session.status !== 'pending') return;
-            await tx.pairingSessions.save({ ...session, status: 'cancelled' });
+            await tx.pairingSessions.transitionPending(pairingSessionId, 'cancelled');
         });
     }
 
@@ -287,10 +301,11 @@ export class DefaultPairingApplication implements PairingApplication {
     public expireDue(): Promise<number> {
         return this.unitOfWork.transaction(async (tx) => {
             const sessions = await tx.pairingSessions.findExpiredPairingSessions(this.clock.now());
+            let expired = 0;
             for (const session of sessions) {
-                await tx.pairingSessions.save({ ...session, status: 'expired' });
+                if (await tx.pairingSessions.transitionPending(session.id, 'expired')) expired += 1;
             }
-            return sessions.length;
+            return expired;
         });
     }
 }

@@ -3,6 +3,7 @@ import type {
     BindingRepository,
     ChannelAccountRepository,
     DeliveryRepository,
+    DeviceRepository,
     IdentityRepository,
     ImUnitOfWorkContext,
     InboundEventRepository,
@@ -14,6 +15,7 @@ import { PostgresActionRepository } from './action-repository.js';
 import { PostgresBindingRepository } from './binding-repository.js';
 import { PostgresChannelAccountRepository } from './channel-account-repository.js';
 import { PostgresDeliveryRepository } from './delivery-repository.js';
+import { PostgresDeviceRepository } from './device-repository.js';
 import { PostgresIdentityRepository } from './identity-repository.js';
 import { PostgresInboundEventRepository } from './inbound-event-repository.js';
 import { PostgresIntentSubmissionRepository } from './intent-submission-repository.js';
@@ -23,6 +25,8 @@ import type { SqlExecutor } from './sql.js';
 
 /** 同一事务内可用的全部 PostgreSQL 仓储。 */
 export class PostgresUnitOfWorkContext implements ImUnitOfWorkContext {
+    /** 注册设备仓储。 */
+    public readonly devices: DeviceRepository;
     /** 渠道账号仓储。 */
     public readonly channelAccounts: ChannelAccountRepository;
     /** 配对会话仓储。 */
@@ -44,6 +48,7 @@ export class PostgresUnitOfWorkContext implements ImUnitOfWorkContext {
 
     /** @param executor 绑定到当前事务的客户端。 */
     public constructor(executor: SqlExecutor) {
+        this.devices = new PostgresDeviceRepository(executor);
         this.channelAccounts = new PostgresChannelAccountRepository(executor);
         this.pairingSessions = new PostgresPairingSessionRepository(executor);
         this.identities = new PostgresIdentityRepository(executor);

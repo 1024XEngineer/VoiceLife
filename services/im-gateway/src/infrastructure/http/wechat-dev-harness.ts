@@ -1,8 +1,9 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
 import type { ActionUiPageController, ActionUiPageResponse } from './action-ui-api.js';
 import type { WechatWebhookController } from './wechat-api.js';
+import type { DeviceId } from '../../contracts/ids.js';
+import type { DeviceAuthenticationPort } from '../../ports/external.js';
 import { ImGatewayError } from '../../shared/errors.js';
 
 const WECHAT_BODY_LIMIT = 64 * 1024;
@@ -23,7 +24,8 @@ export interface WechatDevDeliverySnapshot {
 export interface WechatDevHttpHarnessOptions {
     readonly host?: string;
     readonly port?: number;
-    readonly deviceToken: string;
+    readonly authentication: DeviceAuthenticationPort;
+    readonly expectedDeviceId: DeviceId;
     readonly webhookApi: Pick<WechatWebhookController, 'verify' | 'post'>;
     readonly actionUiPageApi: Pick<ActionUiPageController, 'get' | 'post'>;
     readonly sendTestNotification: () => Promise<WechatDevDeliverySnapshot>;
@@ -47,19 +49,14 @@ export async function startWechatDevHttpHarness(
 ): Promise<StartedWechatDevHttpHarness> {
     const host = options.host ?? '127.0.0.1';
     const port = options.port ?? 3000;
-    const deviceToken = options.deviceToken.trim();
     if (host !== '127.0.0.1' && host !== '::1') {
         throw new Error('WeChat development harness must bind to a loopback address');
     }
     if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
         throw new Error('WeChat development harness port is invalid');
     }
-    if (Buffer.byteLength(deviceToken, 'utf8') < 24) {
-        throw new Error('WeChat development harness device token must contain at least 24 bytes');
-    }
-
     const server = createServer((request, response) => {
-        void routeRequest(request, response, options, deviceToken).catch((error: unknown) => {
+        void routeRequest(request, response, options).catch((error: unknown) => {
             writeUnhandledError(response, error);
         });
     });
@@ -80,7 +77,6 @@ async function routeRequest(
     request: IncomingMessage,
     response: ServerResponse,
     options: WechatDevHttpHarnessOptions,
-    deviceToken: string,
 ): Promise<void> {
     const url = new URL(request.url ?? '/', 'http://localhost');
     const method = request.method ?? 'GET';
@@ -127,7 +123,7 @@ async function routeRequest(
     }
 
     if (url.pathname === '/__dev/wechat/send-test' && method === 'POST') {
-        if (!isAuthorized(request, deviceToken)) {
+        if (!(await isAuthorized(request, options))) {
             writeUnauthorized(response);
             return;
         }
@@ -137,7 +133,7 @@ async function routeRequest(
 
     const deliveryMatch = DELIVERY_PATH.exec(url.pathname);
     if (deliveryMatch !== null && method === 'GET') {
-        if (!isAuthorized(request, deviceToken)) {
+        if (!(await isAuthorized(request, options))) {
             writeUnauthorized(response);
             return;
         }
@@ -202,12 +198,15 @@ async function readBody(request: IncomingMessage, limit: number): Promise<Uint8A
     return Buffer.concat(chunks, size);
 }
 
-function isAuthorized(request: IncomingMessage, expectedToken: string): boolean {
+async function isAuthorized(request: IncomingMessage, options: WechatDevHttpHarnessOptions): Promise<boolean> {
     const authorization = request.headers.authorization;
-    if (authorization === undefined || !authorization.startsWith('Bearer ')) return false;
-    const actual = createHash('sha256').update(authorization.slice(7), 'utf8').digest();
-    const expected = createHash('sha256').update(expectedToken, 'utf8').digest();
-    return timingSafeEqual(actual, expected);
+    if (authorization === undefined) return false;
+    try {
+        const principal = await options.authentication.authenticate(authorization);
+        return principal.deviceId === options.expectedDeviceId;
+    } catch {
+        return false;
+    }
 }
 
 function decodePathSegment(value: string): string {

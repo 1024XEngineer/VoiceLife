@@ -47,6 +47,17 @@ export interface ChannelAccount {
     readonly updatedAt: IsoDateTime;
 }
 
+/** Gateway 注册且可独立吊销/轮换凭据的物理设备。 */
+export interface ImDevice {
+    readonly deviceId: DeviceId;
+    readonly userId: UserId;
+    /** SHA-256 原始 32 字节摘要；永不持久化或返回明文 Token。 */
+    readonly tokenDigest: Uint8Array;
+    readonly status: 'active' | 'revoked';
+    readonly createdAt: IsoDateTime;
+    readonly updatedAt: IsoDateTime;
+}
+
 /** 设备与外部 IM 身份建立绑定前的短期会话。 */
 export interface PairingSession {
     readonly id: PairingSessionId;

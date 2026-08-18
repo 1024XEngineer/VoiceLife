@@ -75,6 +75,7 @@ Status ImRuntime::Start() {
         start_status_ = Status::Error(ErrorCode::kInvalidArgument, "IM 设备凭据格式无效");
         return start_status_;
     }
+    device_id_ = device_id;
     SecureClear(device_token);
     if (!readiness_.NetworkReady()) {
         state_ = ImRuntimeState::kDegraded;

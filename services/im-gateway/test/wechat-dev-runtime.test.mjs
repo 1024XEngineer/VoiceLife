@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { tokenDigest } from '../dist/application/device-management.js';
 import { startConfiguredWechatDevHarness } from '../dist/app/wechat-dev-runtime.js';
+import { InMemoryImUnitOfWork } from '../dist/infrastructure/persistence/in-memory.js';
 
 const webhookToken = 'fixture-webhook-token';
-const deviceToken = 'fixture-device-token-with-enough-entropy';
+const deviceToken = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const platformMessageId = '90071992547409931234';
 
 function fixtureEnvironment(overrides = {}) {
@@ -23,8 +25,8 @@ function fixtureEnvironment(overrides = {}) {
         WECHAT_TEMPLATE_TIME_FIELD: 'keyword2',
         WECHAT_ACTION_UI_BASE_URL: 'https://public.example/voicelife/reminder-actions',
         WECHAT_TEST_OPENID: 'fixture-open-id',
-        DEVICE_ID: 'device-fixture',
-        DEVICE_TOKEN: deviceToken,
+        DATABASE_URL: 'postgres://fixture:fixture@localhost/fixture',
+        WECHAT_DEV_DEVICE_ID: 'device-fixture',
         ACTION_TOKEN_SECRET: 'fixture-action-token-secret-with-32-bytes',
         WECHAT_WEBHOOK_MODE: 'plain',
         ...overrides,
@@ -45,7 +47,16 @@ test('configured WeChat harness sends, receives a real-shaped receipt and serves
         platformRequests.push({ url: requestUrl, init });
         return new globalThis.Response(`{"errcode":0,"errmsg":"ok","msgid":${platformMessageId}}`);
     };
-    const harness = await startConfiguredWechatDevHarness(fixtureEnvironment(), { fetch: fetchImpl });
+    const unitOfWork = new InMemoryImUnitOfWork();
+    unitOfWork.seedDevice({
+        deviceId: 'device-fixture',
+        userId: 'user-fixture',
+        tokenDigest: tokenDigest(deviceToken),
+        status: 'active',
+        createdAt: '2026-08-03T00:00:00.000Z',
+        updatedAt: '2026-08-03T00:00:00.000Z',
+    });
+    const harness = await startConfiguredWechatDevHarness(fixtureEnvironment(), { fetch: fetchImpl, unitOfWork });
     try {
         const sent = await globalThis.fetch(`${harness.origin}/__dev/wechat/send-test`, {
             method: 'POST',
@@ -103,6 +114,24 @@ test('configured WeChat harness sends, receives a real-shaped receipt and serves
     } finally {
         await harness.close();
     }
+});
+
+test('configured WeChat harness closes its owned database resource when migration fails', async () => {
+    let closes = 0;
+    const unitOfWork = new InMemoryImUnitOfWork();
+    unitOfWork.migrate = async () => {
+        throw new Error('migration failed');
+    };
+    unitOfWork.close = async () => {
+        closes += 1;
+    };
+    await assert.rejects(
+        startConfiguredWechatDevHarness(fixtureEnvironment(), {
+            unitOfWorkFactory: () => unitOfWork,
+        }),
+        /migration failed/u,
+    );
+    assert.equal(closes, 1);
 });
 
 test('configured WeChat harness rejects incomplete or unsupported deployment settings', async () => {

@@ -33,6 +33,7 @@ import type {
     ExternalIdentity,
     ImAction,
     ImBinding,
+    ImDevice,
     ImOutboxEvent,
     InboundEventRecord,
     IntentSubmissionRecord,
@@ -68,6 +69,22 @@ export function mapChannelAccount(row: DbRow): ChannelAccount {
         connectionMode: row.connection_mode as ChannelAccount['connectionMode'],
         ...(row.capability_config === null ? {} : { capabilityConfig: row.capability_config as JsonValue }),
         status: row.status as ChannelAccount['status'],
+        createdAt: toIso(row.created_at),
+        updatedAt: toIso(row.updated_at),
+    };
+}
+
+/**
+ * 将设备行映射为领域模型。
+ * @param row PostgreSQL 设备表行。
+ * @returns 设备领域模型。
+ */
+export function mapDevice(row: DbRow): ImDevice {
+    return {
+        deviceId: row.device_id as DeviceId,
+        userId: row.user_id as UserId,
+        tokenDigest: row.token_digest as Uint8Array,
+        status: row.status as ImDevice['status'],
         createdAt: toIso(row.created_at),
         updatedAt: toIso(row.updated_at),
     };

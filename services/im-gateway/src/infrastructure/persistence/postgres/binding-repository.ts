@@ -4,6 +4,9 @@ import type { BindingRepository } from '../../../ports/repositories.js';
 import { mapBinding } from './mappers.js';
 import { queryOne, upsert, type SqlExecutor } from './sql.js';
 
+/** 与 migration lock 不同的事务级串行化键。 */
+export const BINDING_REPLACEMENT_LOCK_KEY = 727271001377;
+
 const BINDING_COLUMNS = [
     'id',
     'user_id',
@@ -18,22 +21,46 @@ const BINDING_COLUMNS = [
 
 /** 绑定关系的 PostgreSQL 实现。 */
 export class PostgresBindingRepository implements BindingRepository {
+    private replacementLocked = false;
+
     /** @param executor 事务客户端或连接池。 */
     public constructor(private readonly executor: SqlExecutor) {}
 
+    /** {@inheritDoc BindingRepository.acquireReplacementLock} */
+    public async acquireReplacementLock(): Promise<void> {
+        if (this.replacementLocked) return;
+        await this.executor.query('SELECT pg_advisory_xact_lock($1)', [BINDING_REPLACEMENT_LOCK_KEY]);
+        this.replacementLocked = true;
+    }
+
     /** {@inheritDoc BindingRepository.createActiveIfAbsent} */
-    public async createActiveIfAbsent(binding: ImBinding): Promise<ImBinding> {
+    public createActiveIfAbsent(binding: ImBinding): Promise<ImBinding> {
+        return this.replaceActiveBinding(binding);
+    }
+
+    /** {@inheritDoc BindingRepository.replaceActiveBinding} */
+    public async replaceActiveBinding(binding: ImBinding): Promise<ImBinding> {
         if (binding.status !== 'active' || binding.deviceId === undefined) {
-            throw new Error('Active idempotent binding creation requires an active binding with a device');
+            throw new Error('Active binding replacement requires an active binding with a device');
         }
+        await this.acquireReplacementLock();
+        const existing = await queryOne(
+            this.executor,
+            `SELECT * FROM im_bindings
+             WHERE user_id = $1 AND device_id = $2 AND external_identity_id = $3 AND status = 'active'
+             LIMIT 1`,
+            [binding.userId, binding.deviceId, binding.externalIdentityId],
+        );
+        if (existing !== undefined) return mapBinding(existing);
+        await this.executor.query(
+            `UPDATE im_bindings SET status = 'unbound', unbound_at = $3
+             WHERE status = 'active' AND (device_id = $1 OR external_identity_id = $2)`,
+            [binding.deviceId, binding.externalIdentityId, binding.boundAt],
+        );
         const row = await queryOne(
             this.executor,
             `INSERT INTO im_bindings (${BINDING_COLUMNS.join(', ')})
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-             ON CONFLICT (user_id, device_id, external_identity_id)
-             WHERE status = 'active' AND device_id IS NOT NULL
-             DO NOTHING
-             RETURNING *`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
             [
                 binding.id,
                 binding.userId,
@@ -46,16 +73,8 @@ export class PostgresBindingRepository implements BindingRepository {
                 binding.revokedAt ?? null,
             ],
         );
-        if (row !== undefined) return mapBinding(row);
-        const { rows } = await this.executor.query(
-            `SELECT * FROM im_bindings
-             WHERE user_id = $1 AND device_id = $2 AND external_identity_id = $3 AND status = 'active'
-             LIMIT 1`,
-            [binding.userId, binding.deviceId, binding.externalIdentityId],
-        );
-        const existing = rows[0];
-        if (existing === undefined) throw new Error('Binding conflict did not expose an existing row');
-        return mapBinding(existing);
+        if (row === undefined) throw new Error('Binding insertion returned no row');
+        return mapBinding(row);
     }
 
     /** {@inheritDoc BindingRepository.findById} */
