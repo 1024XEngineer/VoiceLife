@@ -460,6 +460,14 @@ void Esp32s3PcmAudioPorts::Impl::OutputLoop() {
         }
     }
     MarkTaskDone(&output_task_);
+    bool finalize_close = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        finalize_close = output_closing_;
+    }
+    if (finalize_close) {
+        (void)FinalizeOutputClose();
+    }
 }
 
 }  // namespace voicelife::audio_esp

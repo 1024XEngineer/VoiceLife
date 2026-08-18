@@ -124,6 +124,7 @@ class Esp32s3PcmAudioPorts::Impl final {
     void DeliveryLoop();
     Status WriteFrame(const voice::AudioFrame& frame);
     void OutputLoop();
+    Status FinalizeOutputClose();
 #endif
 
     AudioBoardProfile profile_;
@@ -154,6 +155,9 @@ class Esp32s3PcmAudioPorts::Impl final {
     bool output_open_ = false;
 #ifdef ESP_PLATFORM
     bool output_closing_ = false;
+    // A timeout may outlive the caller. Either CloseOutput or the late output
+    // task exit owns final cleanup, never both.
+    bool output_cleanup_started_ = false;
     // A barge-in flush powers down the amplifier. The next accepted TTS frame
     // must restore that request before it reaches I2S.
     bool amplifier_enabled_ = false;

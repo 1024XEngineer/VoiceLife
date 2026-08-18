@@ -224,6 +224,7 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
     }
     output_open_ = true;
     output_closing_ = false;
+    output_cleanup_started_ = false;
 #ifdef ESP_PLATFORM
     ESP_LOGI(voicelife::audio_esp::detail::kAudioRuntimeTag, "OUTPUT_OPEN sr=%u ch=%u bits=%u",
              playback_format_->sample_rate_hz, playback_format_->channels, playback_format_->bits_per_sample);
@@ -542,26 +543,7 @@ Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
         return detail::Unavailable("等待 I2S 播放任务退出超时");
     }
     lock.unlock();
-
-    // No PCM writer may race the codec data interface while it disables the
-    // full-duplex channels. The managed codec owns those channels after Open.
-    if (profile_.topology == AudioBoardTopology::kExternalCodecDuplex && codec_dev_ != nullptr) {
-        (void)DeinitializeEs8311(codec_dev_);
-        codec_dev_ = nullptr;
-        codec_initialized_ = false;
-    } else if (tx_channel_ != nullptr) {
-        (void)i2s_channel_disable(tx_channel_);
-    }
-
-    lock.lock();
-    output_open_ = false;
-    output_closing_ = false;
-    playback_format_.reset();
-    if (!input_open_) {
-        DestroyChannelsLocked();
-    }
-    done_cv_.notify_all();
-    return Status::Ok();
+    return FinalizeOutputClose();
 #else
     output_open_ = false;
     playback_format_.reset();
@@ -570,6 +552,51 @@ Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
     return detail::Unavailable("ESP32-S3 PCM Audio Port 只能在 ESP-IDF 目标运行");
 #endif
 }
+
+#ifdef ESP_PLATFORM
+Status Esp32s3PcmAudioPorts::Impl::FinalizeOutputClose() {
+    void* codec_to_deinitialize = nullptr;
+    i2s_chan_handle_t tx_to_disable = nullptr;
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!output_closing_) {
+            return Status::Ok();
+        }
+        if (output_cleanup_started_) {
+            const bool closed =
+                done_cv_.wait_for(lock, std::chrono::milliseconds(500), [this]() { return !output_closing_; });
+            return closed ? Status::Ok() : detail::Unavailable("等待 I2S 播放清理完成超时");
+        }
+        output_cleanup_started_ = true;
+        // No output writer remains once this finalizer is eligible. Detach the
+        // codec handle under the lock before releasing it outside the lock.
+        if (profile_.topology == AudioBoardTopology::kExternalCodecDuplex) {
+            codec_to_deinitialize = codec_dev_;
+            codec_dev_ = nullptr;
+            codec_initialized_ = false;
+        } else {
+            tx_to_disable = tx_channel_;
+        }
+    }
+
+    if (codec_to_deinitialize != nullptr) {
+        (void)DeinitializeEs8311(codec_to_deinitialize);
+    } else if (tx_to_disable != nullptr) {
+        (void)i2s_channel_disable(tx_to_disable);
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    output_open_ = false;
+    output_closing_ = false;
+    output_cleanup_started_ = false;
+    playback_format_.reset();
+    if (!input_open_) {
+        DestroyChannelsLocked();
+    }
+    done_cv_.notify_all();
+    return Status::Ok();
+}
+#endif
 
 Esp32s3PcmAudioPorts::Esp32s3PcmAudioPorts(AudioBoardProfile profile, AudioPortOptions options,
                                            AmplifierCallback amplifier_callback)
