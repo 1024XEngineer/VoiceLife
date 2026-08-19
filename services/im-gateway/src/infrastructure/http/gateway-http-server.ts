@@ -48,6 +48,8 @@ export interface GatewayHttpServerOptions {
     readonly logger: GatewayLogger;
     /** 通知生产 Outbox worker 已有新 Delivery 可领取。 */
     readonly deliveryAvailable?: () => void;
+    /** 可选的 SSE 心跳间隔，供基础设施层确定性验证使用。 */
+    readonly sseHeartbeatIntervalMs?: number;
     /**
      * 探测数据库等关键依赖是否仍可用。
      * @returns 健康响应；抛错时监听器返回 503。
@@ -220,6 +222,9 @@ async function routeRequest(
             correlationIdObserved: (value) => {
                 context.correlationId = value;
             },
+            ...(options.sseHeartbeatIntervalMs === undefined
+                ? {}
+                : { heartbeatIntervalMs: options.sseHeartbeatIntervalMs }),
         });
         return;
     }

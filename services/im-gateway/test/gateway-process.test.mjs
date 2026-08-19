@@ -239,6 +239,29 @@ test('production server reports exhausted SSE capacity as too many requests', as
     }
 });
 
+test('production server rejects invalid SSE heartbeat configuration before committing headers', async () => {
+    for (const heartbeatIntervalMs of [0, Number.NaN, 2_147_483_648]) {
+        const server = await startGatewayHttpServer({
+            host: '127.0.0.1',
+            port: 0,
+            runtime: fakeRuntime([]),
+            healthCheck: async () => ({ status: 'ok' }),
+            logger: { log: () => {} },
+            sseHeartbeatIntervalMs: heartbeatIntervalMs,
+        });
+        try {
+            const response = await globalThis.fetch(
+                `${server.origin}/v1/devices/device-fixture/reminder-actions/stream?reminderType=strong&reminderTriggerId=trigger-1`,
+                { headers: { authorization: `Bearer ${deviceToken}` } },
+            );
+            assert.equal(response.status, 400);
+            assert.equal(await response.text(), 'Bad Request');
+        } finally {
+            await server.close();
+        }
+    }
+});
+
 test('production server mounts health, device, Action UI and webhook routes', async () => {
     await withServer(async ({ origin, events }) => {
         const health = await globalThis.fetch(`${origin}/healthz`);
