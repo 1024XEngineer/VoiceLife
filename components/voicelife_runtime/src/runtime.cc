@@ -225,10 +225,37 @@ class Runtime final {
         };
         auto& registry = voice::SpeechProviderRegistry::Instance();
         if (!init_status_.ok()) return init_status_;
+        // NVS 加密初始化会创建 AES-XTS 中断处理器。必须在日程/MCP Schema
+        // 和任务创建前完成，避免启动分配峰值让底层中断分配器收到损坏状态。
+        {
+            esp_err_t nvs_error = nvs_flash_init();
+            if (nvs_error == ESP_ERR_NVS_NO_FREE_PAGES || nvs_error == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+                (void)nvs_flash_erase();
+                nvs_error = nvs_flash_init();
+            }
+            if (nvs_error != ESP_OK) {
+                ESP_LOGE(kTag, "STARTUP_ERROR stage=nvs_flash_init code=%d", static_cast<int>(nvs_error));
+                return Status::Error(ErrorCode::kInternal, "主 NVS 初始化失败");
+            }
+            ESP_LOGI(kTag, "NVS_READY=1");
+        }
         const Status storage_status = storage_.Start();
         if (!storage_status.ok()) return storage_status;
 #ifdef ESP_PLATFORM
+        // 显示在连接、MCP Schema 和提醒任务之前启动。这样既能尽早给出设备反馈，
+        // 也让 SPI 中断分配不与大批量动态对象构造交错。
+        assembly_->InitializeBoardLeds();
+        if (const Status display_status = assembly_->Start(); !display_status.ok()) {
+            ESP_LOGE(kTag, "STARTUP_ERROR stage=display_start code=%d msg=%s", static_cast<int>(display_status.code),
+                     display_status.message.c_str());
+            return display_status;
+        }
+        ESP_LOGI(kTag, "DISPLAY_READY=1");
+        ESP_LOGI(kTag, "STARTUP_STAGE=timing_create_begin main_stack_high_water=%u",
+                 static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
         auto timing_runtime = timing_esp::EspTimingTaskRuntime::Create();
+        ESP_LOGI(kTag, "STARTUP_STAGE=timing_create_end main_stack_high_water=%u",
+                 static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
         if (!timing_runtime.ok() || !timing_runtime.value.has_value()) {
             const Status failure = timing_runtime.ok()
                                        ? Status::Error(ErrorCode::kInternal, "ESP Timing 运行时创建结果为空")
@@ -247,13 +274,9 @@ class Runtime final {
         schedule_reminder_service_ = std::make_unique<schedule::ScheduleReminderService>(
             storage_.GetScheduleRepository(), schedule_service_, schedule_rule_service_, *timing_runtime_,
             *reminder_speech_);
-        const Status reminder_status = schedule_reminder_service_->Start();
-        if (!reminder_status.ok()) {
-            ESP_LOGE(kTag, "STARTUP_ERROR stage=schedule_reminder code=%d msg=%s",
-                     static_cast<int>(reminder_status.code), reminder_status.message.c_str());
-            return fail_startup(reminder_status);
-        }
-        ESP_LOGI(kTag, "SCHEDULE_REMINDER_READY=1");
+        // 先注册 MCP 工具契约，再启动提醒任务。工具注册会建立参数 Schema 和
+        // handler 闭包，属于一次性启动分配；提醒运行时随后启动，避免两者在
+        // 内部堆上同时竞争初始化峰值。回调只有在 MCP worker 启动后才会执行。
         if (!schedule_mcp_registered_) {
             init_status_ = mcp::RegisterScheduleMcpTools(mcp_server_, schedule_service_, schedule_rule_service_,
                                                          schedule_operation_service_, schedule_reminder_service_.get());
@@ -264,26 +287,14 @@ class Runtime final {
                      "MCP_TOOLS_READY count=6 names=schedule.create,schedule.query,schedule.update,schedule.delete,"
                      "schedule.operation_query,im.binding.start");
         }
+        const Status reminder_status = schedule_reminder_service_->Start();
+        if (!reminder_status.ok()) {
+            ESP_LOGE(kTag, "STARTUP_ERROR stage=schedule_reminder code=%d msg=%s",
+                     static_cast<int>(reminder_status.code), reminder_status.message.c_str());
+            return fail_startup(reminder_status);
+        }
+        ESP_LOGI(kTag, "SCHEDULE_REMINDER_READY=1");
         // 立创实战派 ESP32-S3 板载 WS2812 灯珠接 GPIO48（小智 BUILTIN_LED_GPIO）。
-        // 主 NVS 分区初始化（Wi-Fi 驱动/凭据等依赖；linx_secrets 为加密分区另行初始化）。
-        {
-            esp_err_t nvs_error = nvs_flash_init();
-            if (nvs_error == ESP_ERR_NVS_NO_FREE_PAGES || nvs_error == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-                (void)nvs_flash_erase();
-                nvs_error = nvs_flash_init();
-            }
-            if (nvs_error != ESP_OK) {
-                ESP_LOGE(kTag, "STARTUP_ERROR stage=nvs_flash_init code=%d", static_cast<int>(nvs_error));
-                return Status::Error(ErrorCode::kInternal, "主 NVS 初始化失败");
-            }
-        }
-        // 板级 LED 初始化（板型专属，Assembly 持有）。
-        assembly_->InitializeBoardLeds();
-        if (const Status display_status = assembly_->Start(); !display_status.ok()) {
-            ESP_LOGE(kTag, "STARTUP_ERROR stage=display_start code=%d msg=%s", static_cast<int>(display_status.code),
-                     display_status.message.c_str());
-            return display_status;
-        }
         // 显示启动后立即启动唯一的交互/显示语义写者。此后的启动、网络、音量
         // 和会话事件均只投递到该循环，不允许 Runtime 直接 Render。
         {

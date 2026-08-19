@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -17,6 +18,14 @@ namespace voicelife::mcp::schedule_tool_output {
 
 inline constexpr int64_t kTimezoneOffsetSeconds = 8 * 3600;
 
+inline bool IsAsciiDigits(const std::string& text, std::size_t begin, std::size_t count) {
+    if (begin + count > text.size()) return false;
+    for (std::size_t index = begin; index < begin + count; ++index) {
+        if (!std::isdigit(static_cast<unsigned char>(text[index]))) return false;
+    }
+    return true;
+}
+
 inline std::string FormatDateTime(schedule::DateTime value) {
     const int64_t local = value.time_since_epoch().count() + kTimezoneOffsetSeconds;
     int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
@@ -32,12 +41,17 @@ inline std::string FormatDateTime(schedule::DateTime value) {
 }
 
 inline std::optional<schedule::DateTime> ParseDateTime(const std::string& text) {
+    if (text.size() != 19 || text[4] != '-' || text[7] != '-' || text[10] != ' ' || text[13] != ':' ||
+        text[16] != ':' || !IsAsciiDigits(text, 0, 4) || !IsAsciiDigits(text, 5, 2) || !IsAsciiDigits(text, 8, 2) ||
+        !IsAsciiDigits(text, 11, 2) || !IsAsciiDigits(text, 14, 2) || !IsAsciiDigits(text, 17, 2)) {
+        return std::nullopt;
+    }
     int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
     if (std::sscanf(text.c_str(), "%d-%d-%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6) {
         return std::nullopt;
     }
-    if (month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59 ||
-        second < 0 || second > 59) {
+    if (year < 1 || month < 1 || month > 12 || day < 1 || day > schedule::DaysInMonth(year, month) || hour < 0 ||
+        hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
         return std::nullopt;
     }
     const int64_t days = schedule::DaysFromCivil(year, month, day);
@@ -46,16 +60,26 @@ inline std::optional<schedule::DateTime> ParseDateTime(const std::string& text) 
 }
 
 inline std::optional<schedule::LocalTime> ParseLocalTime(const std::string& text) {
+    if (text.size() != 8 || text[2] != ':' || text[5] != ':' || !IsAsciiDigits(text, 0, 2) ||
+        !IsAsciiDigits(text, 3, 2) || !IsAsciiDigits(text, 6, 2)) {
+        return std::nullopt;
+    }
     int hour = 0, minute = 0, second = 0;
-    if (std::sscanf(text.c_str(), "%d:%d:%d", &hour, &minute, &second) < 2) return std::nullopt;
+    if (std::sscanf(text.c_str(), "%d:%d:%d", &hour, &minute, &second) != 3) return std::nullopt;
     if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) return std::nullopt;
     return schedule::LocalTime{hour, minute, second};
 }
 
 inline std::optional<schedule::LocalDate> ParseLocalDate(const std::string& text) {
+    if (text.size() != 10 || text[4] != '-' || text[7] != '-' || !IsAsciiDigits(text, 0, 4) ||
+        !IsAsciiDigits(text, 5, 2) || !IsAsciiDigits(text, 8, 2)) {
+        return std::nullopt;
+    }
     int year = 0, month = 0, day = 0;
     if (std::sscanf(text.c_str(), "%d-%d-%d", &year, &month, &day) != 3) return std::nullopt;
-    if (month < 1 || month > 12 || day < 1 || day > 31) return std::nullopt;
+    if (year < 1 || month < 1 || month > 12 || day < 1 || day > schedule::DaysInMonth(year, month)) {
+        return std::nullopt;
+    }
     return schedule::LocalDate{year, month, day};
 }
 
