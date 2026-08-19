@@ -423,24 +423,48 @@ function writeUnhandledError(response: ServerResponse, error: unknown): void {
 }
 
 function writeGatewayError(response: ServerResponse, error: ImGatewayError): void {
-    const status =
-        error.code === 'unauthorized'
-            ? 401
-            : error.code === 'binding_not_found' ||
-                error.code === 'delivery_not_found' ||
-                error.code === 'action_not_found'
-              ? 404
-              : error.code === 'action_expired'
-                ? 410
-                : error.code === 'idempotency_conflict' || error.code === 'duplicate_event'
-                  ? 409
-                  : error.code === 'resource_exhausted'
-                    ? 429
-                    : error.code === 'invalid_transition'
-                      ? 403
-                      : 400;
-    if (status === 401) response.setHeader('www-authenticate', 'Bearer');
-    writeJson(response, status, { error: error.code });
+    switch (error.code) {
+        case 'unauthorized':
+            response.setHeader('www-authenticate', 'Bearer');
+            writeJson(response, 401, { error: 'unauthorized' });
+            return;
+        case 'binding_not_found':
+            writeJson(response, 404, { error: 'binding_not_found' });
+            return;
+        case 'delivery_not_found':
+            writeJson(response, 404, { error: 'delivery_not_found' });
+            return;
+        case 'action_not_found':
+            writeJson(response, 404, { error: 'action_not_found' });
+            return;
+        case 'action_expired':
+            writeJson(response, 410, { error: 'action_expired' });
+            return;
+        case 'idempotency_conflict':
+            writeJson(response, 409, { error: 'idempotency_conflict' });
+            return;
+        case 'duplicate_event':
+            writeJson(response, 409, { error: 'duplicate_event' });
+            return;
+        case 'resource_exhausted':
+            writeJson(response, 429, { error: 'resource_exhausted' });
+            return;
+        case 'invalid_transition':
+            writeJson(response, 403, { error: 'invalid_transition' });
+            return;
+        case 'invalid_contract':
+            writeJson(response, 400, { error: 'invalid_contract' });
+            return;
+        case 'pairing_code_invalid':
+            writeJson(response, 400, { error: 'pairing_code_invalid' });
+            return;
+        case 'capability_not_supported':
+            writeJson(response, 400, { error: 'capability_not_supported' });
+            return;
+        case 'not_implemented':
+            writeJson(response, 400, { error: 'not_implemented' });
+            return;
+    }
 }
 
 function safeErrorCode(error: unknown): string {

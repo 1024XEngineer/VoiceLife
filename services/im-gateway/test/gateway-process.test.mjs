@@ -188,7 +188,7 @@ test('production entry reports trusted configuration errors without logging thei
 test('production server returns a Bearer challenge for rejected device credentials', async () => {
     const runtime = fakeRuntime([]);
     runtime.deviceApi.postNotification = async () => {
-        throw new ImGatewayError('unauthorized', 'fixture credential rejected');
+        throw new ImGatewayError('unauthorized', '<img src=x onerror=alert(1)>');
     };
     const server = await startGatewayHttpServer({
         host: '127.0.0.1',
@@ -209,7 +209,7 @@ test('production server returns a Bearer challenge for rejected device credentia
         });
         assert.equal(response.status, 401);
         assert.equal(response.headers.get('www-authenticate'), 'Bearer');
-        assert.deepEqual(await response.json(), { error: 'unauthorized' });
+        assert.equal(await response.text(), '{"error":"unauthorized"}');
     } finally {
         await server.close();
     }
