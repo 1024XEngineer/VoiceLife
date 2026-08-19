@@ -144,9 +144,10 @@ void SparkBotPresentationAdapter::DisplayTaskLoop() {
                 // 锁内推进基准：锁失败时不推进，快照将在下次重试。
                 last_generation_ = snapshot.generation;
                 last_rendered_revision_ = snapshot.revision;
-                ESP_LOGI(kTag, "SPARKBOT_DISPLAY_SNAPSHOT_RENDERED generation=%llu revision=%llu",
+                ESP_LOGI(kTag, "SPARKBOT_DISPLAY_SNAPSHOT_RENDERED generation=%llu revision=%llu phase=%d mood=%d",
                          static_cast<unsigned long long>(snapshot.generation),
-                         static_cast<unsigned long long>(snapshot.revision));
+                         static_cast<unsigned long long>(snapshot.revision), static_cast<int>(snapshot.phase),
+                         static_cast<int>(snapshot.mood));
             }
             lvgl_port_unlock();
         }

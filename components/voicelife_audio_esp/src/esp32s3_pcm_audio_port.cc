@@ -117,6 +117,8 @@ AudioPortStats Esp32s3PcmAudioPorts::Impl::stats() const {
     result.input_i2s_errors = input_i2s_errors_.load();
     result.output_i2s_errors = output_i2s_errors_.load();
     result.output_volume = output_volume_.load();
+    result.test_injected_input_frames = test_injected_input_frames_.load();
+    result.test_injected_input_bytes = test_injected_input_bytes_.load();
 #ifdef ESP_PLATFORM
     result.minimum_free_heap_bytes = esp_get_minimum_free_heap_size();
 #endif
@@ -131,6 +133,44 @@ void Esp32s3PcmAudioPorts::Impl::SetOutputVolume(uint8_t volume) {
     if (profile_.topology == AudioBoardTopology::kExternalCodecDuplex && codec_dev_ != nullptr) {
         (void)SetEs8311OutputVolume(codec_dev_, normalized);
     }
+#endif
+}
+
+Status Esp32s3PcmAudioPorts::Impl::SetTestInputEnabled(bool enabled) {
+#ifndef ESP_PLATFORM
+    (void)enabled;
+    return detail::Unavailable("测试 PCM 注入只能在 ESP-IDF 目标运行");
+#else
+    test_input_enabled_.store(enabled);
+    return Status::Ok();
+#endif
+}
+
+Status Esp32s3PcmAudioPorts::Impl::InjectTestInput(voice::AudioFrame frame) {
+#ifndef ESP_PLATFORM
+    (void)frame;
+    return detail::Unavailable("测试 PCM 注入只能在 ESP-IDF 目标运行");
+#else
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!test_input_enabled_.load()) {
+        return detail::Unavailable("测试 PCM 注入未启用");
+    }
+    if (!input_running_ || !capture_format_.has_value()) {
+        return detail::Unavailable("测试 PCM 注入时采集尚未启动");
+    }
+    const auto& expected = *capture_format_;
+    const std::size_t expected_bytes = static_cast<std::size_t>(expected.sample_rate_hz) * expected.frame_duration_ms /
+                                       1000U * expected.channels * (expected.bits_per_sample / 8U);
+    if (!frame.format.valid() || frame.format.codec != expected.codec ||
+        frame.format.sample_rate_hz != expected.sample_rate_hz || frame.format.channels != expected.channels ||
+        frame.format.bits_per_sample != expected.bits_per_sample ||
+        frame.format.frame_duration_ms != expected.frame_duration_ms || frame.payload.size() != expected_bytes) {
+        return detail::Invalid("测试 PCM 帧与协商输入格式不一致");
+    }
+    ++test_injected_input_frames_;
+    test_injected_input_bytes_ += frame.payload.size();
+    EnqueueInputLocked(std::move(frame));
+    return Status::Ok();
 #endif
 }
 
@@ -611,5 +651,11 @@ AudioPortStats Esp32s3PcmAudioPorts::stats() const { return impl_->stats(); }
 void Esp32s3PcmAudioPorts::SetOutputVolume(uint8_t volume) { impl_->SetOutputVolume(volume); }
 
 uint8_t Esp32s3PcmAudioPorts::output_volume() const { return impl_->output_volume(); }
+
+Status Esp32s3PcmAudioPorts::SetTestInputEnabled(bool enabled) { return impl_->SetTestInputEnabled(enabled); }
+
+Status Esp32s3PcmAudioPorts::InjectTestInput(voice::AudioFrame frame) {
+    return impl_->InjectTestInput(std::move(frame));
+}
 
 }  // namespace voicelife::audio_esp

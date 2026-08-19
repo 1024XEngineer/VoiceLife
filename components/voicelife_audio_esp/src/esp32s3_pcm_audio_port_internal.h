@@ -96,6 +96,8 @@ class Esp32s3PcmAudioPorts::Impl final {
     AudioPortStats stats() const;
     void SetOutputVolume(uint8_t volume);
     uint8_t output_volume() const { return output_volume_.load(); }
+    Status SetTestInputEnabled(bool enabled);
+    Status InjectTestInput(voice::AudioFrame frame);
 
    private:
     friend class InputPort;
@@ -113,6 +115,7 @@ class Esp32s3PcmAudioPorts::Impl final {
 
 #ifdef ESP_PLATFORM
     void EnqueueInput(voice::AudioFrame frame);
+    void EnqueueInputLocked(voice::AudioFrame frame);
     Status TryInitializeChannelsLocked();
     void DestroyChannels();
     void DestroyChannelsLocked();
@@ -194,6 +197,9 @@ class Esp32s3PcmAudioPorts::Impl final {
     std::atomic<uint64_t> output_clipped_samples_{0};
     std::atomic<uint64_t> input_i2s_errors_{0};
     std::atomic<uint64_t> output_i2s_errors_{0};
+    std::atomic<uint64_t> test_injected_input_frames_{0};
+    std::atomic<uint64_t> test_injected_input_bytes_{0};
+    std::atomic_bool test_input_enabled_{false};
 
 #ifdef ESP_PLATFORM
     i2s_chan_handle_t tx_channel_ = nullptr;

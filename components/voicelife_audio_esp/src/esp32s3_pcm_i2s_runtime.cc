@@ -185,6 +185,10 @@ void Esp32s3PcmAudioPorts::Impl::DestroyChannelsLocked() {
 
 void Esp32s3PcmAudioPorts::Impl::EnqueueInput(voice::AudioFrame frame) {
     std::lock_guard<std::mutex> lock(mutex_);
+    EnqueueInputLocked(std::move(frame));
+}
+
+void Esp32s3PcmAudioPorts::Impl::EnqueueInputLocked(voice::AudioFrame frame) {
     if (!input_running_) {
         return;
     }
@@ -285,10 +289,12 @@ void Esp32s3PcmAudioPorts::Impl::CaptureLoop() {
         input_sum_squares_ += sum_squares;
         if (all_zero) ++input_zero_periods_;
         RaisePeak(input_peak_, peak);
-        const Status status = assembler_->Push(pcm.data(), pcm.size(), [this](voice::AudioFrame frame) {
-            EnqueueInput(std::move(frame));
-            return Status::Ok();
-        });
+        const Status status = test_input_enabled_.load()
+                                  ? Status::Ok()
+                                  : assembler_->Push(pcm.data(), pcm.size(), [this](voice::AudioFrame frame) {
+                                        EnqueueInput(std::move(frame));
+                                        return Status::Ok();
+                                    });
         if (!status.ok()) {
             ++dropped_input_frames_;
         }

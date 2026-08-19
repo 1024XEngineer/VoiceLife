@@ -106,6 +106,22 @@ class AudioInputPort {
     virtual void Close() = 0;
 };
 
+/**
+ * @brief 仅供受控硬件回归使用的采集注入端口。
+ *
+ * 实现必须把帧送入与物理采集相同的有界投递路径。正常产品流程不依赖此
+ * 端口；没有测试注入能力的平台返回空指针即可。
+ */
+class TestAudioInjectionPort {
+   public:
+    virtual ~TestAudioInjectionPort() = default;
+
+    /** @brief 启用或关闭测试输入对物理麦克风上行的排他保护。 */
+    virtual Status SetTestInputEnabled(bool enabled) = 0;
+    /** @brief 提交一帧已协商格式的测试 PCM。 */
+    virtual Status InjectTestInput(AudioFrame frame) = 0;
+};
+
 /** @brief 硬件音频播放设备抽象（I2S 扬声器、DAC 等）。 */
 class AudioOutputPort {
    public:

@@ -3,6 +3,7 @@ idf_component_register(
          "src/linx_mcp_bridge.cc" "src/linx_ota_bootstrap.cc" "src/wifi_provisioning.cc"
          "src/wifi_provisioning_esp.cc"
          "src/im_binding_mcp_tools.cc" "src/im_binding_presentation.cc"
+         "src/serial_voice_test.cc"
     INCLUDE_DIRS "include" "src"
     REQUIRES voicelife_contracts
     PRIV_REQUIRES voicelife_application voicelife_runtime_esp voicelife_mcp voicelife_voice voicelife_linx

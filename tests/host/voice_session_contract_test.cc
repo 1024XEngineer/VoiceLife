@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -186,6 +187,15 @@ voicelife::voice::AudioFrame Frame(uint64_t generation, uint64_t sequence) {
     return frame;
 }
 
+voicelife::voice::AudioFrame SpeechFrame(uint64_t generation, uint64_t sequence) {
+    auto frame = Frame(generation, sequence);
+    frame.payload.assign(640, 0);
+    for (std::size_t index = 0; index < frame.payload.size(); index += 2) {
+        frame.payload[index + 1] = 0x10;  // 4096 S16LE: definitively above VAD entry threshold.
+    }
+    return frame;
+}
+
 }  // namespace
 
 int main() {
@@ -284,11 +294,15 @@ int main() {
           "非播报状态的下行音频必须拒绝");
     Check(session.BeginCapture().ok(), "ready 会话应开始采集");
     Check(session.SubmitAudio(Frame(generation, 0)).ok(), "当前 generation 的首帧应发送");
-    auto captured = Frame(0, 0);
+    auto captured = SpeechFrame(0, 0);
     const auto* captured_data = captured.payload.data();
     Check(input.EmitCapture(std::move(captured)).ok() && provider.audio_frames == 2 &&
               provider.last_audio_frame.payload.data() == captured_data,
           "输入端口采集回调应转发为上行音频");
+    Check(std::count_if(evidence.begin(), evidence.end(), [](const voicelife::voice::VoiceEvidence& item) {
+              return item.event == "speech_started";
+          }) == 1,
+          "每轮首个有效语音帧必须只上报一次 speech_started");
     Check(provider.last_audio_frame.payload.data() == captured_data,
           "采集到 Provider 的上行 PCM 负载必须移动，不能复制每个音频帧");
     Check(provider.last_audio_frame.generation == generation && provider.last_audio_frame.sequence == 1,

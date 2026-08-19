@@ -130,7 +130,6 @@ class VoiceSession {
     // VAD 端点：本地静音检测（无 AFE，用 RMS 能量近似）。
     bool vad_speech_seen_ = false;
     bool vad_silence_emitted_ = false;
-    bool vad_silence_pending_ = false;
     std::chrono::steady_clock::time_point last_speech_at_{};
     uint64_t generation_ = 0;
     uint64_t next_sequence_ = 0;

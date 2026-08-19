@@ -79,6 +79,13 @@ class PlatformAssembly {
     virtual voicelife::voice::WakeGateAudioInput& wake_gate() = 0;
 
     /**
+     * @brief 返回可选的测试 PCM 注入端口。
+     *
+     * 仅测试 Profile 的串口回归工具使用；正常产品路径不得依赖它。
+     */
+    virtual voicelife::voice::TestAudioInjectionPort* test_audio_injection() { return nullptr; }
+
+    /**
      * @brief 是否在空闲态运行板载本地唤醒模型。
      *
      * 没有 ESP-SR model 分区的板型仍可经 BOOT 键进入云端采集；Runtime 依赖

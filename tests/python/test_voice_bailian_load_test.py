@@ -47,6 +47,12 @@ class MultiTurnSummaryTest(unittest.TestCase):
         self.assertEqual(conversation_metric["count"], 1)
         self.assertEqual(conversation_metric["p50_ms"], 360.0)
 
+    def test_fidelity_gate_rejects_successful_but_mismatched_transcripts(self) -> None:
+        report = {"failed": 0, "successful": 5, "transcript_matches": 4}
+        self.assertFalse(load_test.passes_acceptance(report, mode="tts-to-stt", allow_transcript_mismatch=False))
+        self.assertTrue(load_test.passes_acceptance(report, mode="tts-to-stt", allow_transcript_mismatch=True))
+        self.assertTrue(load_test.passes_acceptance(report, mode="tts", allow_transcript_mismatch=False))
+
 
 if __name__ == "__main__":
     unittest.main()

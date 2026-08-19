@@ -226,6 +226,14 @@ def run_conversation(
     ]
 
 
+def passes_acceptance(report: dict[str, Any], mode: str, allow_transcript_mismatch: bool) -> bool:
+    if report["failed"] != 0:
+        return False
+    if mode == "tts" or allow_transcript_mismatch:
+        return True
+    return report["transcript_matches"] == report["successful"]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--requests", type=int, default=10, help="Virtual conversations; must be positive.")
@@ -255,6 +263,11 @@ def parse_args() -> argparse.Namespace:
         "--preflight",
         action="store_true",
         help="Print local readiness without making a network request or exposing credentials.",
+    )
+    parser.add_argument(
+        "--allow-transcript-mismatch",
+        action="store_true",
+        help="Record but do not fail on STT text mismatches; disabled by default for fidelity stress tests.",
     )
     args = parser.parse_args()
     if (
@@ -327,7 +340,7 @@ def main() -> int:
                 ensure_ascii=False,
                 indent=2,
             )
-    return 0 if report["failed"] == 0 else 1
+    return 0 if passes_acceptance(report, args.mode, args.allow_transcript_mismatch) else 1
 
 
 if __name__ == "__main__":

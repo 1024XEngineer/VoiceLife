@@ -1,8 +1,5 @@
 set(voicelife_storage_sqlite_sources)
-set(voicelife_storage_sqlite_private_requires)
-
 if(CONFIG_VOICELIFE_STORAGE_SQLITE)
-    list(APPEND voicelife_storage_sqlite_private_requires sqlite3)
     list(APPEND voicelife_storage_sqlite_sources
         "src/mapping/schedule_row_mapper.cc"
         "src/mapping/operation_row_mapper.cc"
@@ -24,11 +21,14 @@ if(CONFIG_VOICELIFE_STORAGE_SQLITE)
     )
 endif()
 
-# SQLite 被禁用时不声明 managed component 依赖，内存 Storage Profile 不应解析无用的 sqlite3。
+# ESP-IDF 在 Kconfig 值可用前解析组件依赖图；不能用
+# CONFIG_VOICELIFE_STORAGE_SQLITE 条件化 sqlite3 依赖，否则启用 SQLite 的第二次
+# 配置会加入源码，却不会把 sqlite3 的 include path 和链接依赖带进来。
+# 固件构建入口会先运行 scripts/prepare_sqlite.py，提供这个固定本地组件。
 idf_component_register(
     SRCS ${voicelife_storage_sqlite_sources}
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "src"
     REQUIRES voicelife_contracts voicelife_schedule
-    PRIV_REQUIRES ${voicelife_storage_sqlite_private_requires}
+    PRIV_REQUIRES sqlite3
 )

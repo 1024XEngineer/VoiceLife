@@ -345,7 +345,6 @@ Status VoiceSession::BeginCapture() {
             response_armed_ = false;
             vad_speech_seen_ = false;
             vad_silence_emitted_ = false;
-            vad_silence_pending_ = false;
             last_speech_at_ = {};
             awaiting_final_asr_ = false;
         }
@@ -445,6 +444,8 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
     std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
     uint64_t generation = 0;
     uint64_t sequence = 0;
+    bool speech_started = false;
+    bool vad_silence = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (state_ != VoiceSessionState::kCapturing) {
@@ -477,19 +478,18 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
         constexpr int64_t kSpeechExitThreshold = 180 * 180;   // 迟滞下限约 -44 dBFS
         const auto now = std::chrono::steady_clock::now();
         if (rms >= kSpeechEnterThreshold || (vad_speech_seen_ && rms >= kSpeechExitThreshold)) {
+            speech_started = !vad_speech_seen_;
             vad_speech_seen_ = true;
             last_speech_at_ = now;
         } else if (vad_speech_seen_ && !vad_silence_emitted_ && last_speech_at_.time_since_epoch().count() > 0 &&
                    now - last_speech_at_ >= std::chrono::milliseconds(config_.vad_silence_ms)) {
             // 只在锁内置标志，锁外再 Emit，避免 Emit 重入 mutex_ 造成自死锁。
             vad_silence_emitted_ = true;
-            vad_silence_pending_ = true;
+            vad_silence = true;
         }
     }
-    if (vad_silence_pending_) {
-        vad_silence_pending_ = false;
-        Emit("vad_silence", "");
-    }
+    if (speech_started) Emit("speech_started", "");
+    if (vad_silence) Emit("vad_silence", "");
     Status status = provider_.SendAudio(std::move(frame));
     if (status.ok()) {
         std::lock_guard<std::mutex> lock(mutex_);

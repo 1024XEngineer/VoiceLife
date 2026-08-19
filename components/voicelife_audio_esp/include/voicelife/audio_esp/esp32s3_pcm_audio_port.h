@@ -67,6 +67,9 @@ struct AudioPortStats {
     uint64_t output_i2s_errors = 0;
     /** @brief 当前生效的板端输出音量。 */
     uint8_t output_volume = 0;
+    /** @brief 仅测试 Profile：串口注入并通过输入队列的 PCM 帧与字节数。 */
+    uint64_t test_injected_input_frames = 0;
+    uint64_t test_injected_input_bytes = 0;
 };
 
 /**
@@ -75,7 +78,7 @@ struct AudioPortStats {
  * 共享所有者对全双工 Codec Profile 很重要：两个通道必须作为一个
  * 硬件资源统一初始化和释放。
  */
-class Esp32s3PcmAudioPorts final {
+class Esp32s3PcmAudioPorts final : public voice::TestAudioInjectionPort {
    public:
     /** @brief 功放请求回调（经板级仲裁，不得直接写 GPIO）。 */
     using AmplifierCallback = std::function<void(bool)>;
@@ -107,6 +110,10 @@ class Esp32s3PcmAudioPorts final {
     void SetOutputVolume(uint8_t volume);
     /** @brief 返回当前板端 PCM 播放音量。 @return 当前音量百分比。 */
     [[nodiscard]] uint8_t output_volume() const;
+    /** @brief 启用测试 PCM 注入并隔离物理麦克风上行。 */
+    Status SetTestInputEnabled(bool enabled) override;
+    /** @brief 经现有输入有界队列提交测试 PCM。 */
+    Status InjectTestInput(voice::AudioFrame frame) override;
 
    private:
     /** @brief Pimpl 实现。 */

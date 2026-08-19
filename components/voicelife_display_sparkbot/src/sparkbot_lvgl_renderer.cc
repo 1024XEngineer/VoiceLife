@@ -1,5 +1,9 @@
 #include "voicelife/display_sparkbot/sparkbot_lvgl_renderer.h"
 
+#include <algorithm>
+#include <cctype>
+#include <vector>
+
 #ifdef ESP_PLATFORM
 #include <cbin_font.h>
 #include <esp_log.h>
@@ -31,6 +35,178 @@ constexpr const char* kTag = "sparkbot_renderer";
 // 官方 SparkBot 强制 dark 主题颜色（lcd_display.cc InitializeLcdThemes）。
 const lv_color_t kBackgroundColor = lv_color_hex(0x000000);
 const lv_color_t kTextColor = lv_color_hex(0xFFFFFF);
+
+// 240x240 屏幕上的 16px/25px 行高文本布局。底栏固定保留两行可读区，
+// 不侵入中央表情舞台；超出的内容由 LVGL 纵向滚动完整经过视区，不能静默
+// 裁掉第三行以后文本。
+constexpr lv_coord_t kMessageWidth = 208;
+constexpr lv_coord_t kMessageMaximumViewportHeight = 50;
+constexpr uint32_t kScrollMillisecondsPerExtraLine = 1600;
+
+std::size_t Utf8UnitBytes(std::string_view text, std::size_t offset) {
+    if (offset >= text.size()) return 0;
+    const uint8_t first = static_cast<uint8_t>(text[offset]);
+    std::size_t width = 1;
+    if ((first & 0xe0U) == 0xc0U) width = 2;
+    if ((first & 0xf0U) == 0xe0U) width = 3;
+    if ((first & 0xf8U) == 0xf0U) width = 4;
+    return std::min(width, text.size() - offset);
+}
+
+uint32_t Utf8Codepoint(std::string_view unit) {
+    if (unit.empty()) return 0;
+    const uint8_t first = static_cast<uint8_t>(unit[0]);
+    if (unit.size() == 1) return first;
+    if (unit.size() == 2) return ((first & 0x1fU) << 6U) | (static_cast<uint8_t>(unit[1]) & 0x3fU);
+    if (unit.size() == 3) {
+        return ((first & 0x0fU) << 12U) | ((static_cast<uint8_t>(unit[1]) & 0x3fU) << 6U) |
+               (static_cast<uint8_t>(unit[2]) & 0x3fU);
+    }
+    return ((first & 0x07U) << 18U) | ((static_cast<uint8_t>(unit[1]) & 0x3fU) << 12U) |
+           ((static_cast<uint8_t>(unit[2]) & 0x3fU) << 6U) | (static_cast<uint8_t>(unit[3]) & 0x3fU);
+}
+
+bool IsAsciiWordCodepoint(uint32_t codepoint) {
+    return codepoint < 0x80U && (std::isalnum(static_cast<unsigned char>(codepoint)) || codepoint == '_' ||
+                                 codepoint == '-' || codepoint == '.');
+}
+
+bool MustNotStartLine(uint32_t codepoint) {
+    switch (codepoint) {
+        case ',':
+        case '.':
+        case '!':
+        case '?':
+        case ':':
+        case ';':
+        case '(':
+        case '[':
+        case '{':
+        case ')':
+        case ']':
+        case '}':
+        case 0x3001:  // 、
+        case 0x3002:  // 。
+        case 0x2018:  // ‘
+        case 0xff01:  // ！
+        case 0xff0c:  // ，
+        case 0xff1a:  // ：
+        case 0xff1b:  // ；
+        case 0xff1f:  // ？
+        case 0x2019:  // ’
+        case 0x201d:  // ”
+        case 0x300b:  // 》
+        case 0x300a:  // 《
+        case 0x300d:  // 」
+        case 0x300c:  // 「
+        case 0x300f:  // 』
+        case 0x300e:  // 『
+        case 0x3011:  // 】
+        case 0x3010:  // 【
+        case 0xff08:  // （
+        case 0xff09:  // ）
+        case 0xff3d:  // ］
+        case 0xff5d:  // ｝
+            return true;
+        default:
+            return false;
+    }
+}
+
+std::string PopLastUtf8Unit(std::string* text) {
+    if (text == nullptr || text->empty()) return {};
+    std::size_t offset = text->size() - 1;
+    while (offset > 0 && (static_cast<uint8_t>((*text)[offset]) & 0xc0U) == 0x80U) {
+        --offset;
+    }
+    std::string unit = text->substr(offset);
+    text->erase(offset);
+    return unit;
+}
+
+int32_t TextWidth(std::string_view text, const lv_font_t* font) {
+    lv_point_t size{};
+    lv_text_get_size(&size, text.data(), font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    return size.x;
+}
+
+// 仅添加显式视觉换行，保留每个原始 UTF-8 字符。实际宽度由当前 LVGL
+// 字体计算，避免按字节数或“中文固定 16px”猜测而在字体 fallback 时断错。
+std::string FormatSubtitleLines(std::string_view text, const lv_font_t* font, int32_t max_width,
+                                uint32_t* manual_line_breaks) {
+    std::string result;
+    std::string line;
+    uint32_t breaks = 0;
+    const auto flush_line = [&]() {
+        if (!result.empty()) {
+            result.push_back('\n');
+            ++breaks;
+        }
+        result.append(line);
+        line.clear();
+    };
+    for (std::size_t offset = 0; offset < text.size();) {
+        const std::size_t width = Utf8UnitBytes(text, offset);
+        const std::string_view unit = text.substr(offset, width);
+        offset += width;
+        if (unit == "\n" || unit == "\r") {
+            flush_line();
+            continue;
+        }
+        const uint32_t codepoint = Utf8Codepoint(unit);
+        std::string candidate = line;
+        candidate.append(unit);
+        if (line.empty() || TextWidth(candidate, font) <= max_width) {
+            line = std::move(candidate);
+            continue;
+        }
+
+        // 英文词与数字串整体迁移到下一行，避免把 model、2026、URL 等切断。
+        if (IsAsciiWordCodepoint(codepoint) && !line.empty()) {
+            std::string trailing_word;
+            while (!line.empty()) {
+                const std::string trailing = PopLastUtf8Unit(&line);
+                if (!IsAsciiWordCodepoint(Utf8Codepoint(trailing))) {
+                    line.append(trailing);
+                    break;
+                }
+                trailing_word.insert(0, trailing);
+            }
+            if (!line.empty() && TextWidth(trailing_word + std::string(unit), font) <= max_width) {
+                flush_line();
+                line = std::move(trailing_word);
+                line.append(unit);
+                continue;
+            }
+            line.append(trailing_word);
+        }
+
+        // 中文标点或闭合括号不应成为下一行首字符。把上一字符一并迁移，
+        // 以保留语义相邻关系且不超过当前行宽度。
+        if (MustNotStartLine(codepoint) && !line.empty()) {
+            const std::string carry = PopLastUtf8Unit(&line);
+            if (!line.empty()) {
+                flush_line();
+                line = carry;
+                line.append(unit);
+                continue;
+            }
+            line = carry;
+            line.append(unit);
+            continue;
+        }
+
+        flush_line();
+        line.assign(unit);
+    }
+    if (!line.empty() || !text.empty()) {
+        flush_line();
+    }
+    if (manual_line_breaks != nullptr) {
+        *manual_line_breaks = breaks;
+    }
+    return result;
+}
 
 bool HasRenderableGlyph(const lv_font_t* font, uint32_t codepoint, uint16_t* advance) {
     if (font == nullptr) {
@@ -280,9 +456,12 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_obj_align(status_label, LV_ALIGN_CENTER, 0, 0);
     status_label_ = status_label;
 
-    // 底部消息栏：224x60 @ BOTTOM_MID，16px 文本可完整容纳两行（WRAP 居中）。
+    // 底部消息栏：高度在 Render 中按换行后的实际文本高度确定。固定高度会
+    // 静默裁掉第三行及之后的 STT/TTS 文本，不能把“已调用 Render”当作
+    // “用户已经看见完整内容”。
     auto* bottom_bar = lv_obj_create(screen);
-    lv_obj_set_size(bottom_bar, 224, 60);
+    lv_obj_set_width(bottom_bar, 224);
+    lv_obj_set_height(bottom_bar, text_font->line_height);
     lv_obj_set_style_radius(bottom_bar, 0, 0);
     lv_obj_set_style_bg_color(bottom_bar, kBackgroundColor, 0);
     lv_obj_set_style_bg_opa(bottom_bar, LV_OPA_TRANSP, 0);
@@ -292,13 +471,14 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_obj_set_style_pad_all(bottom_bar, 0, 0);
     lv_obj_set_style_border_width(bottom_bar, 0, 0);
     lv_obj_set_scrollbar_mode(bottom_bar, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_dir(bottom_bar, LV_DIR_VER);
     lv_obj_align(bottom_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
 
     auto* chat_message_label = lv_label_create(bottom_bar);
     lv_label_set_text(chat_message_label, "");
-    lv_obj_set_width(chat_message_label, LV_HOR_RES - 32);  // spacing(8) = 8*4
+    lv_obj_set_width(chat_message_label, kMessageWidth);
     lv_label_set_long_mode(chat_message_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_height(chat_message_label, 60);
+    lv_obj_set_height(chat_message_label, LV_SIZE_CONTENT);
     lv_obj_set_style_text_align(chat_message_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(chat_message_label, text_font, 0);
     lv_obj_set_style_text_color(chat_message_label, kTextColor, 0);
@@ -401,23 +581,60 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
         lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
     }
 
-    // 官方消息栏：有内容才显示（WRAP 换行）。
+    // 消息栏：使用标签的实际换行高度，而非字节数估计。内容超过两行时从
+    // 首行平滑滚到末行；整个原文始终保留在标签中，且不遮挡中央表情。
     auto* bottom_bar = static_cast<lv_obj_t*>(bottom_bar_);
     auto* chat_message_label = static_cast<lv_obj_t*>(chat_message_label_);
+    const auto* message_font = lv_obj_get_style_text_font(chat_message_label, LV_PART_MAIN);
+    lv_coord_t content_height = 0;
+    lv_coord_t viewport_height = 0;
+    lv_coord_t overflow_height = 0;
+    uint32_t scroll_duration_ms = 0;
+    uint32_t manual_line_breaks = 0;
     if (!snapshot.content_text.empty()) {
-        lv_label_set_text(chat_message_label, snapshot.content_text.c_str());
+        const std::string display_text =
+            FormatSubtitleLines(snapshot.content_text, message_font, kMessageWidth, &manual_line_breaks);
+        lv_label_set_text(chat_message_label, display_text.c_str());
+        lv_obj_set_height(chat_message_label, LV_SIZE_CONTENT);
+        lv_obj_align(chat_message_label, LV_ALIGN_TOP_MID, 0, 0);
+        lv_obj_update_layout(chat_message_label);
+        content_height = lv_obj_get_height(chat_message_label);
+        viewport_height = kMessageMaximumViewportHeight;
+        lv_obj_set_height(bottom_bar, viewport_height);
+        lv_obj_align(bottom_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_scroll_to_y(bottom_bar, 0, LV_ANIM_OFF);
+        overflow_height = std::max<lv_coord_t>(content_height - viewport_height, 0);
+        if (overflow_height > 0) {
+            const uint32_t line_height = std::max<uint32_t>(1, message_font == nullptr ? 1 : message_font->line_height);
+            const uint32_t extra_lines =
+                (static_cast<uint32_t>(overflow_height) + line_height - 1) / line_height;
+            scroll_duration_ms = extra_lines * kScrollMillisecondsPerExtraLine;
+            lv_obj_set_style_anim_duration(bottom_bar, scroll_duration_ms, 0);
+            lv_obj_scroll_to_y(bottom_bar, overflow_height, LV_ANIM_ON);
+        } else {
+            lv_obj_align(chat_message_label, LV_ALIGN_CENTER, 0, 0);
+        }
         lv_obj_remove_flag(bottom_bar, LV_OBJ_FLAG_HIDDEN);
     } else {
+        lv_obj_scroll_to_y(bottom_bar, 0, LV_ANIM_OFF);
         lv_obj_add_flag(bottom_bar, LV_OBJ_FLAG_HIDDEN);
     }
+
+    lv_obj_update_layout(lv_screen_active());
     ESP_LOGI(kTag,
-             "SPARKBOT_TEXT_RENDER status_bytes=%u content_bytes=%u status_visible=%d status_xywh=%d,%d,%d,%d "
-             "content_visible=%d common_font=%d",
+             "SPARKBOT_TEXT_RENDER generation=%llu revision=%llu status_bytes=%u content_bytes=%u "
+             "status_visible=%d status_xywh=%d,%d,%d,%d content_visible=%d content_height=%d viewport_height=%d "
+             "overflow_height=%d scroll_duration_ms=%u manual_line_breaks=%u common_font=%d status=%.*s content=%.*s",
+             static_cast<unsigned long long>(snapshot.generation), static_cast<unsigned long long>(snapshot.revision),
              static_cast<unsigned>(snapshot.status_text.size()), static_cast<unsigned>(snapshot.content_text.size()),
              !snapshot.status_text.empty(), static_cast<int>(lv_obj_get_x(status_label)),
              static_cast<int>(lv_obj_get_y(status_label)), static_cast<int>(lv_obj_get_width(status_label)),
              static_cast<int>(lv_obj_get_height(status_label)), !snapshot.content_text.empty(),
-             common_text_font_ != nullptr);
+             static_cast<int>(content_height), static_cast<int>(viewport_height), static_cast<int>(overflow_height),
+             static_cast<unsigned>(scroll_duration_ms), static_cast<unsigned>(manual_line_breaks),
+             common_text_font_ != nullptr,
+             static_cast<int>(snapshot.status_text.size()), snapshot.status_text.c_str(),
+             static_cast<int>(snapshot.content_text.size()), snapshot.content_text.c_str());
     return voicelife::Status::Ok();
 #else
     (void)snapshot;

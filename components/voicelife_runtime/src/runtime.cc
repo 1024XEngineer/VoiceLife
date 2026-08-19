@@ -50,6 +50,7 @@
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
 #include "mcp_worker_policy.h"
+#include "serial_voice_test.h"
 #include "voicelife/application/interaction_orchestrator.h"
 #include "voicelife/mcp/schedule_mcp_tools.h"
 #include "voicelife/runtime_esp/esp_interaction_task_host.h"
@@ -65,6 +66,7 @@ namespace {
 constexpr char kTag[] = "VoiceLifeRuntime";
 constexpr int64_t kWakeAckDisplayUs = 400 * 1000;
 constexpr int64_t kVolumeOverlayUs = 1500 * 1000;
+constexpr uint32_t kTerminalWakeGuardMs = 8000;
 // 唤醒或 follow-up 后的首次开口等待：6 秒足以让用户听清提示并开口，
 // 又不会让无输入回合长时间占住 UI。说话后的端点与最终 STT 分别处理。
 constexpr uint32_t kListenStartTimeoutMs = 6000;
@@ -335,8 +337,13 @@ class Runtime final {
         }
         EnqueueEvent(voice::VoiceInteractionEvent::kBootCompleted);
         const Status input_status =
-            assembly_->StartBoardInput([this](BoardInputAction action) { EnqueueBoardInput(action); });
+            assembly_->StartBoardInput([this](BoardInputAction action) { (void)EnqueueBoardInput(action); });
         if (!input_status.ok()) return fail_startup(input_status);
+#if CONFIG_VOICELIFE_SERIAL_VOICE_TEST
+        if (const Status serial_test_status = StartSerialVoiceTest(); !serial_test_status.ok()) {
+            return fail_startup(serial_test_status);
+        }
+#endif
 #if CONFIG_VOICELIFE_STATE_FLOW_TEST
         if (const Status state_flow_status = StartStateFlowDiagnostic(); !state_flow_status.ok()) {
             return fail_startup(state_flow_status);
@@ -625,16 +632,48 @@ class Runtime final {
         char wake_word[32];
         /** 物理唤醒门已就绪后是否需将 Controller 收口为 standby。 */
         bool settle_controller = true;
+        /** 请求创建时的控制器状态；过期请求不得覆盖新的语音回合。 */
+        voice::VoiceInteractionState expected_state = voice::VoiceInteractionState::kBooting;
         /** 当存在时，以 Provider 的正式 TTS 请求播报这段系统话术。 */
         char system_speech[kBindingSystemSpeechCapacity];
     };
 
-    void EnqueueBoardInput(BoardInputAction action) {
+    bool EnqueueBoardInput(BoardInputAction action) {
         InteractionEventItem item{};
         item.board_input = true;
         item.board_action = action;
-        EnqueueInteractionItem(item);
+        return EnqueueInteractionItem(item);
     }
+
+#if CONFIG_VOICELIFE_SERIAL_VOICE_TEST
+    Status StartSerialVoiceTest() {
+        if (assembly_ == nullptr || assembly_->test_audio_injection() == nullptr) {
+            return Status::Error(ErrorCode::kUnavailable, "当前板型不支持串口语音测试注入");
+        }
+        SerialVoiceTestCallbacks callbacks;
+        callbacks.begin_turn = [this]() {
+            auto* injection = assembly_ != nullptr ? assembly_->test_audio_injection() : nullptr;
+            if (injection == nullptr) return Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
+            const Status enabled = injection->SetTestInputEnabled(true);
+            if (!enabled.ok()) return enabled;
+            if (EnqueueBoardInput(BoardInputAction::kPressDown)) return Status::Ok();
+            (void)injection->SetTestInputEnabled(false);
+            return Status::Error(ErrorCode::kUnavailable, "语音测试开始事件未进入状态机队列");
+        };
+        callbacks.submit_pcm = [this](voice::AudioFrame frame) {
+            auto* injection = assembly_ != nullptr ? assembly_->test_audio_injection() : nullptr;
+            return injection != nullptr ? injection->InjectTestInput(std::move(frame))
+                                        : Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
+        };
+        callbacks.end_turn = [this]() {
+            return EnqueueBoardInput(BoardInputAction::kPressUp)
+                       ? Status::Ok()
+                       : Status::Error(ErrorCode::kUnavailable, "语音测试结束事件未进入状态机队列");
+        };
+        serial_voice_test_ = std::make_unique<SerialVoiceTest>(std::move(callbacks));
+        return serial_voice_test_->Start();
+    }
+#endif
 
     void SetVolume(int volume) {
         volume_ = std::clamp(volume, 0, 100);
@@ -709,6 +748,7 @@ class Runtime final {
     bool QueueStandbyRecovery(bool settle_controller = true) {
         BoardRequest recovery{};
         recovery.settle_controller = settle_controller;
+        recovery.expected_state = interaction_.state();
         return EnqueueBoardRequest(recovery, "restore_standby");
     }
 
@@ -886,6 +926,15 @@ class Runtime final {
 
     void RestoreStandby(const BoardRequest& request) {
         if (assembly_ == nullptr) return;
+        const auto actual_state = interaction_.state();
+        if (actual_state != request.expected_state) {
+            // The interaction loop owns the state machine while WakeTask owns
+            // hardware. A queued recovery must not stop a newer capture or
+            // put its obsolete kStandbyReady back into the event loop.
+            ESP_LOGW(kTag, "BOARD_REQUEST_STALE kind=restore_standby expected_state=%d actual_state=%d",
+                     static_cast<int>(request.expected_state), static_cast<int>(actual_state));
+            return;
+        }
         const Status stop_status = assembly_->wake_gate().StopCapture();
         if (!stop_status.ok()) {
             ESP_LOGW(kTag, "本地待机恢复停止上行失败: %s", stop_status.message.c_str());
@@ -917,6 +966,7 @@ class Runtime final {
         BoardRequest request{};
         request.kind = BoardRequestKind::kRestoreStandby;
         request.settle_controller = settle_controller;
+        request.expected_state = interaction_.state();
         RestoreStandby(request);
     }
 
@@ -1162,6 +1212,10 @@ class Runtime final {
             ESP_LOGW(kTag, "忽略乱序板端交互事件=%d: %s", static_cast<int>(event), transition.status.message.c_str());
             return transition.status;
         }
+#if CONFIG_VOICELIFE_SERIAL_VOICE_TEST
+        ESP_LOGI(kTag, "SERIAL_VOICE_STATE event=%d state=%d action=%d", static_cast<int>(event),
+                 static_cast<int>(interaction_.state()), static_cast<int>(transition.value->action));
+#endif
         // 新回合事件递增语义代次：显示任务按 generation -> revision 丢弃迟到快照。
         switch (event) {
             case voice::VoiceInteractionEvent::kToggleChat:
@@ -1296,6 +1350,12 @@ class Runtime final {
         if (evidence.event == "capture_started") {
             capture_started_us_.store(esp_timer_get_time());
             StartListenTimer(kListenStartTimeoutMs);
+        } else if (evidence.event == "speech_started") {
+            // The 6-second timer only bounds silence before the user begins.
+            // Once VAD has observed real speech, it must not expire during a
+            // long utterance or the later final-ASR stage.
+            CancelListenTimer();
+            ESP_LOGI(kTag, "VOICE_TIMEOUT_CANCELLED reason=speech_started");
         }
         const int64_t started_at = capture_started_us_.load();
         const int64_t now = esp_timer_get_time();
@@ -1313,6 +1373,25 @@ class Runtime final {
         ESP_LOGI(kTag, "VOICE_EVENT session=%s generation=%llu event=%s detail_present=%d latency_from_capture_ms=%llu",
                  evidence.session_id.c_str(), static_cast<unsigned long long>(evidence.generation),
                  evidence.event.c_str(), evidence.detail.empty() ? 0 : 1, static_cast<unsigned long long>(latency_ms));
+#if CONFIG_VOICELIFE_SERIAL_VOICE_TEST
+        ESP_LOGI(kTag, "SERIAL_VOICE_EVIDENCE event=%s generation=%llu detail=%s", evidence.event.c_str(),
+                 static_cast<unsigned long long>(evidence.generation), evidence.detail.c_str());
+        if (evidence.event == "capture_started") {
+            // 连续对话在 TTS 后会直接重新打开采集；测试输入必须随新的
+            // capture 生命周期重新获得排他权，不能依赖下一次 PressDown。
+            if (assembly_ != nullptr && assembly_->test_audio_injection() != nullptr) {
+                (void)assembly_->test_audio_injection()->SetTestInputEnabled(true);
+            }
+            ESP_LOGI(kTag, "SERIAL_VOICE_CAPTURE_READY generation=%llu",
+                     static_cast<unsigned long long>(evidence.generation));
+        } else if (evidence.event == "capture_stopped") {
+            if (assembly_ != nullptr && assembly_->test_audio_injection() != nullptr) {
+                (void)assembly_->test_audio_injection()->SetTestInputEnabled(false);
+            }
+            ESP_LOGI(kTag, "SERIAL_VOICE_CAPTURE_CLOSED generation=%llu",
+                     static_cast<unsigned long long>(evidence.generation));
+        }
+#endif
         if (evidence.event == "provider_error") {
             // 板端诊断：只输出本地错误消息（不包含 STT 文本、凭据或原始响应）。
             ESP_LOGW(kTag, "PROVIDER_ERROR_DETAIL=%.160s", evidence.detail.c_str());
@@ -1451,6 +1530,11 @@ class Runtime final {
             if (terminal_turn_ || binding_turn_awaiting_tts_completion_) {
                 // 告别或绑定码播报完成后直接恢复待机。绑定码页面会在
                 // HandleInteractionEvent 的待机呈现规则中立即恢复。
+                if (assembly_ != nullptr && assembly_->uses_local_wake_detector()) {
+                    assembly_->wake_gate().SuppressLocalWakeFor(kTerminalWakeGuardMs);
+                    ESP_LOGI(kTag, "WAKE_GUARD_ARMED ms=%u reason=terminal_tts",
+                             static_cast<unsigned>(kTerminalWakeGuardMs));
+                }
                 terminal_turn_ = false;
                 binding_turn_awaiting_tts_completion_ = false;
                 (void)EnqueueEvent(voice::VoiceInteractionEvent::kTerminalResponseCompleted);
@@ -1474,9 +1558,15 @@ class Runtime final {
                 (void)EnqueueEvent(voice::VoiceInteractionEvent::kFailure);
             }
         } else if (evidence.event == "capture_stopped") {
-            // kFinalizing（等最终 STT）时不得取消 5s 最终 STT 定时器，
-            // 否则服务端不返回 STT 时会永久悬挂；其余状态取消。
-            if (interaction_.state() != voice::VoiceInteractionState::kFinalizing) {
+            // EndCapture may be caused by button release instead of local
+            // VAD. Arm a complete final-ASR window only after the physical
+            // input and provider have both accepted listen.stop; retaining
+            // the original pre-speech timer cuts long utterances short.
+            if (interaction_.state() == voice::VoiceInteractionState::kFinalizing) {
+                StartListenTimer(kFinalSttTimeoutMs);
+                ESP_LOGI(kTag, "FINAL_STT_TIMEOUT_REARMED ms=%u source=capture_stopped",
+                         static_cast<unsigned>(kFinalSttTimeoutMs));
+            } else {
                 CancelListenTimer();
             }
         } else if (evidence.event == "vad_silence") {
@@ -1517,6 +1607,9 @@ class Runtime final {
     linx::LinxConnectionConfig linx_config_;
     std::unique_ptr<linx_esp::EspWebSocketTransport> linx_transport_ =
         std::make_unique<linx_esp::EspWebSocketTransport>(linx_secrets_);
+#if CONFIG_VOICELIFE_SERIAL_VOICE_TEST
+    std::unique_ptr<SerialVoiceTest> serial_voice_test_;
+#endif
     QueueHandle_t wake_queue_ = nullptr;
     TaskHandle_t wake_task_ = nullptr;
 #if CONFIG_VOICELIFE_STATE_FLOW_TEST
