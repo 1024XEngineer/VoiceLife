@@ -96,6 +96,52 @@ int main() {
                           .offset = 0})
                   .value == 2,
           "计数必须使用与查询相同的筛选条件");
+    Check(!repository.Insert(Schedule{}).ok() && !repository.FindById(9999).ok(), "空日程和不存在的日程必须被拒绝");
+    const auto active_only = repository.Find({.schedule_id = std::nullopt,
+                                              .rule_id = std::nullopt,
+                                              .keyword = "+下午 会议",
+                                              .start_from = std::nullopt,
+                                              .start_to = std::nullopt,
+                                              .status = ScheduleStatusFilter::kActive,
+                                              .limit = 10,
+                                              .offset = 0});
+    Check(active_only.ok() && active_only.value->empty(), "关键词和状态筛选必须同时生效");
+    const auto completed_only = repository.Find({.schedule_id = updated.id,
+                                                 .rule_id = std::nullopt,
+                                                 .keyword = "更新 内存",
+                                                 .start_from = std::nullopt,
+                                                 .start_to = std::nullopt,
+                                                 .status = ScheduleStatusFilter::kCompleted,
+                                                 .limit = 10,
+                                                 .offset = 0});
+    Check(completed_only.ok() && completed_only.value->size() == 1, "标识、关键词和完成状态筛选必须命中同一日程");
+    Check(repository
+              .Find({.schedule_id = std::nullopt,
+                     .rule_id = 9999,
+                     .keyword = std::nullopt,
+                     .start_from = std::nullopt,
+                     .start_to = std::nullopt,
+                     .status = ScheduleStatusFilter::kAll,
+                     .limit = 10,
+                     .offset = 0})
+              .value->empty(),
+          "规则筛选必须排除没有对应规则标识的日程");
+    Check(repository
+              .Find({.schedule_id = std::nullopt,
+                     .rule_id = std::nullopt,
+                     .keyword = "不存在",
+                     .start_from = DateTime{std::chrono::seconds{2'050'000'000}},
+                     .start_to = DateTime{std::chrono::seconds{2'050'000'000}},
+                     .status = ScheduleStatusFilter::kAll,
+                     .limit = 10,
+                     .offset = 100})
+              .value->empty(),
+          "时间窗、未命中关键词和越界分页必须返回空集合");
+    Check(repository.FindAll().value->size() == 3, "全量读取必须保留已取消和已完成的日程");
+    const auto excluded_overlap =
+        repository.FindOverlapping(DateTime{std::chrono::seconds{2'050'000'600}},
+                                   DateTime{std::chrono::seconds{2'050'001'200}}, timed_insert.value->id);
+    Check(excluded_overlap.ok() && excluded_overlap.value->empty(), "重叠查询必须支持排除自身");
 
     const auto rule = rules.create_schedule_rule({.event = "每日内存规则",
                                                   .freq_type = Frequency::kDaily,
@@ -114,6 +160,20 @@ int main() {
                                                   .ignore_conflict = false});
     Check(rule.status.ok() && rule.rule.has_value() && rule.schedules.size() == 1,
           "内存存储必须原子创建规则和首条实例");
+    ScheduleRule direct_rule;
+    direct_rule.event = "直接规则";
+    const auto inserted_rule = rule_repository.Insert(direct_rule);
+    Check(inserted_rule.ok() && rule_repository.FindAll().value->size() == 2 &&
+              rule_repository.FindById(inserted_rule.value->id).ok() && !rule_repository.FindById(9999).ok(),
+          "规则仓储必须支持插入、枚举和按标识读取");
+    Check(!rule_repository.Insert(ScheduleRule{}).ok(), "空规则必须被拒绝");
+    ScheduleRule invalid_update = *inserted_rule.value;
+    invalid_update.event.clear();
+    Check(!rule_repository.Update(invalid_update).ok(), "空规则更新必须被拒绝");
+    Check(!rule_repository.CreateWithFirstInstance(ScheduleRule{}, std::nullopt).ok(), "原子创建必须拒绝空规则");
+    Schedule invalid_first_instance;
+    Check(!rule_repository.CreateWithFirstInstance(*inserted_rule.value, invalid_first_instance).ok(),
+          "原子创建必须拒绝空首条实例");
 
     ScheduleException exception;
     exception.rule_id = rule.rule->id;
@@ -123,6 +183,13 @@ int main() {
     const auto second_exception = rule_repository.Upsert(exception);
     Check(first_exception.ok() && second_exception.ok() && first_exception.value->id == second_exception.value->id,
           "内存存储必须按规则和时间幂等 upsert 例外");
+    Check(!rule_repository.Upsert(ScheduleException{}).ok(), "无效例外规则标识必须被拒绝");
+    const auto found_exception = rule_repository.FindByRuleAndTime(rule.rule->id, exception.original_start_time);
+    const auto missing_exception =
+        rule_repository.FindByRuleAndTime(rule.rule->id, DateTime{std::chrono::seconds{2'000'000'001}});
+    Check(found_exception.ok() && found_exception.value->has_value() && missing_exception.ok() &&
+              !missing_exception.value->has_value(),
+          "例外必须支持按规则和发生时间读取");
 
     Schedule rebuilt_instance;
     rebuilt_instance.event = "重建后的实例";
@@ -141,6 +208,22 @@ int main() {
     ScheduleRule missing_rule{};
     missing_rule.id = 9999;
     Check(!rule_repository.Update(missing_rule).ok(), "不存在的规则必须拒绝更新");
+    Check(!rule_repository.UpdateAndRebuild(missing_rule, std::nullopt).ok(), "重建不存在的规则必须失败");
+    Schedule invalid_next_instance;
+    Check(!rule_repository.CreateNextInstance(invalid_next_instance, std::nullopt).ok(),
+          "下一实例必须包含名称和规则标识");
+    Schedule next_instance;
+    next_instance.event = "下一个实例";
+    next_instance.rule_id = inserted_rule.value->id;
+    next_instance.start_time = DateTime{std::chrono::seconds{2'200'000'000}};
+    ScheduleException linked_exception;
+    linked_exception.rule_id = inserted_rule.value->id;
+    linked_exception.original_start_time = *next_instance.start_time;
+    const auto next_created = rule_repository.CreateNextInstance(next_instance, linked_exception);
+    const auto linked_saved = rule_repository.FindByRuleAndTime(inserted_rule.value->id, *next_instance.start_time);
+    Check(next_created.ok() && linked_saved.ok() && linked_saved.value->has_value() &&
+              linked_saved.value->value().schedule_id == next_created.value->id,
+          "下一实例必须回写关联例外的日程标识");
 
     const auto operation = operations.record_operation({.entity_type = OperationEntityType::kSchedule,
                                                         .type = ScheduleOperationType::kCreate,
@@ -180,5 +263,34 @@ int main() {
                                         .offset = 0})
                       .value >= 2,
           "操作记录必须支持分页和计数");
+    const auto second_operation = repository.InsertOperation({.entity_type = OperationEntityType::kRule,
+                                                              .type = ScheduleOperationType::kUpdate,
+                                                              .entity_id = inserted_rule.value->id,
+                                                              .label = "Direct Rule",
+                                                              .before = "{}"});
+    Check(second_operation.ok() && repository
+                                           .FindOperations({.operation_id = std::nullopt,
+                                                            .entity_type = OperationEntityType::kRule,
+                                                            .entity_id = inserted_rule.value->id,
+                                                            .type = ScheduleOperationType::kUpdate,
+                                                            .operated_from = std::nullopt,
+                                                            .operated_to = std::nullopt,
+                                                            .keyword = "+direct rule",
+                                                            .limit = 10,
+                                                            .offset = 0})
+                                           .value->size() == 1,
+          "操作查询必须同时支持类型、实体和多词关键词筛选");
+    Check(repository
+              .FindOperations({.operation_id = std::nullopt,
+                               .entity_type = OperationEntityType::kException,
+                               .entity_id = std::nullopt,
+                               .type = std::nullopt,
+                               .operated_from = std::nullopt,
+                               .operated_to = std::nullopt,
+                               .keyword = std::nullopt,
+                               .limit = 10,
+                               .offset = 0})
+              .value->empty(),
+          "未命中的操作筛选必须返回空集合");
     return 0;
 }
