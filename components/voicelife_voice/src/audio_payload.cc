@@ -1,6 +1,7 @@
 #include "voicelife/voice/audio_payload.h"
 
 #include <algorithm>
+#include <bit>
 #include <limits>
 #include <new>
 #include <utility>
@@ -90,7 +91,8 @@ AudioPayloadPool::~AudioPayloadPool() {
 }
 
 std::shared_ptr<AudioPayloadPool> AudioPayloadPool::Create(std::size_t slot_count, std::size_t slot_bytes) {
-    if (slot_count == 0 || slot_bytes == 0 || slot_count > std::numeric_limits<std::size_t>::max() / slot_bytes) {
+    if (slot_count == 0 || slot_count > 32 || slot_bytes == 0 ||
+        slot_count > std::numeric_limits<std::size_t>::max() / slot_bytes) {
         return {};
     }
     std::shared_ptr<AudioPayloadPool> pool(new (std::nothrow) AudioPayloadPool(slot_count, slot_bytes));
@@ -98,48 +100,53 @@ std::shared_ptr<AudioPayloadPool> AudioPayloadPool::Create(std::size_t slot_coun
 }
 
 bool AudioPayloadPool::Initialize() noexcept {
-    used_.reset(new (std::nothrow) bool[slot_count_]{});
-    if (used_ == nullptr) return false;
     const std::size_t total_bytes = slot_count_ * slot_bytes_;
 #ifdef ESP_PLATFORM
     bytes_ = static_cast<uint8_t*>(heap_caps_malloc(total_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
 #else
     bytes_ = new (std::nothrow) uint8_t[total_bytes];
 #endif
-    return bytes_ != nullptr;
+    if (bytes_ == nullptr) return false;
+    const uint32_t mask =
+        slot_count_ == 32 ? std::numeric_limits<uint32_t>::max() : (uint32_t{1} << slot_count_) - uint32_t{1};
+    available_slots_.store(mask, std::memory_order_release);
+    return true;
 }
 
 AudioPayload AudioPayloadPool::TryAcquire() {
-    std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
-    if (!lock.owns_lock()) {
-        acquisition_failures_.fetch_add(1, std::memory_order_relaxed);
-        return {};
-    }
-    for (std::size_t slot = 0; slot < slot_count_; ++slot) {
-        if (used_[slot]) continue;
-        used_[slot] = true;
-        ++in_use_;
-        high_watermark_ = std::max(high_watermark_, in_use_);
-        return AudioPayload(shared_from_this(), slot, bytes_ + slot * slot_bytes_, slot_bytes_);
+    uint32_t available = available_slots_.load(std::memory_order_acquire);
+    while (available != 0) {
+        const uint32_t selected = available & (uint32_t{0} - available);
+        const uint32_t next = available & ~selected;
+        if (available_slots_.compare_exchange_weak(available, next, std::memory_order_acq_rel,
+                                                   std::memory_order_acquire)) {
+            const std::size_t in_use = in_use_.fetch_add(1, std::memory_order_relaxed) + 1;
+            std::size_t high_watermark = high_watermark_.load(std::memory_order_relaxed);
+            while (in_use > high_watermark &&
+                   !high_watermark_.compare_exchange_weak(high_watermark, in_use, std::memory_order_relaxed,
+                                                          std::memory_order_relaxed)) {
+            }
+            const std::size_t slot = static_cast<std::size_t>(std::countr_zero(selected));
+            return AudioPayload(shared_from_this(), slot, bytes_ + slot * slot_bytes_, slot_bytes_);
+        }
     }
     acquisition_failures_.fetch_add(1, std::memory_order_relaxed);
     return {};
 }
 
 void AudioPayloadPool::Release(std::size_t slot) noexcept {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (slot >= slot_count_ || !used_[slot]) return;
-    used_[slot] = false;
-    --in_use_;
+    if (slot >= slot_count_) return;
+    const uint32_t slot_bit = uint32_t{1} << slot;
+    const uint32_t previous = available_slots_.fetch_or(slot_bit, std::memory_order_release);
+    if ((previous & slot_bit) == 0) {
+        in_use_.fetch_sub(1, std::memory_order_relaxed);
+    }
 }
 
 std::size_t AudioPayloadPool::acquisition_failures() const {
     return acquisition_failures_.load(std::memory_order_relaxed);
 }
 
-std::size_t AudioPayloadPool::high_watermark() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return high_watermark_;
-}
+std::size_t AudioPayloadPool::high_watermark() const { return high_watermark_.load(std::memory_order_relaxed); }
 
 }  // namespace voicelife::voice

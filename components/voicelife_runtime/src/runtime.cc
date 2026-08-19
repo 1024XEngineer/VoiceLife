@@ -2244,9 +2244,9 @@ class Runtime final {
         vTaskDelete(nullptr);
 #endif
     }
-#if CONFIG_VOICELIFE_SERIAL_VOICE_TEST
-    // Test-only firmware must not disturb the surrounding environment. The
-    // production profile keeps its existing default at 70.
+    // Keep production at 70. Serial voice validation runs at half volume so
+    // physical-board stress tests do not disturb the surrounding environment.
+#if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_SERIAL_VOICE_TEST
     int volume_ = 35;
 #else
     int volume_ = 70;

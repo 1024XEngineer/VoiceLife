@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <chrono>
 #include <memory>
+#include <thread>
 #include <utility>
 
 #include "support/test_support.h"
@@ -196,6 +198,12 @@ voicelife::voice::AudioFrame SpeechFrame(uint64_t generation, uint64_t sequence)
     return frame;
 }
 
+voicelife::voice::AudioFrame SilenceFrame(uint64_t generation, uint64_t sequence) {
+    auto frame = Frame(generation, sequence);
+    frame.payload.assign(640, 0);
+    return frame;
+}
+
 }  // namespace
 
 int main() {
@@ -307,6 +315,33 @@ int main() {
           "采集到 Provider 的上行 PCM 负载必须移动，不能复制每个音频帧");
     Check(provider.last_audio_frame.generation == generation && provider.last_audio_frame.sequence == 1,
           "会话应为输入回调补齐当前 generation 和连续序号");
+
+    // A conversational turn may contain a brief natural pause. The default
+    // endpoint must not fire before speech resumes; the final silence still
+    // has to end the turn once it exceeds the configured window.
+    FakeInput vad_input;
+    FakeOutput vad_output;
+    FakeProvider vad_provider;
+    std::vector<voicelife::voice::VoiceEvidence> vad_evidence;
+    voicelife::voice::VoiceSession vad_session(
+        vad_input, vad_output, vad_provider,
+        [&vad_evidence](const voicelife::voice::VoiceEvidence& item) { vad_evidence.push_back(item); });
+    auto short_vad_config = Config();
+    short_vad_config.vad_silence_ms = 80;
+    Check(vad_session.Start(short_vad_config).ok() && vad_session.BeginCapture().ok(), "VAD 回归用例应启动采集");
+    Check(vad_input.EmitCapture(SpeechFrame(0, 0)).ok(), "VAD 回归用例应先发送语音帧");
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    Check(vad_input.EmitCapture(SilenceFrame(0, 0)).ok() &&
+              std::none_of(vad_evidence.begin(), vad_evidence.end(),
+                           [](const auto& item) { return item.event == "vad_silence"; }),
+          "小于端点窗口的自然停顿不得结束采集");
+    Check(vad_input.EmitCapture(SpeechFrame(0, 0)).ok(), "自然停顿后的后续语音必须继续上送");
+    std::this_thread::sleep_for(std::chrono::milliseconds(90));
+    Check(vad_input.EmitCapture(SilenceFrame(0, 0)).ok() &&
+              std::count_if(vad_evidence.begin(), vad_evidence.end(),
+                            [](const auto& item) { return item.event == "vad_silence"; }) == 1,
+          "超过端点窗口的连续静音必须只触发一次端点");
+    Check(vad_session.Stop().ok(), "VAD 回归会话应可停止");
     auto mismatched_format = Frame(generation, 1);
     mismatched_format.format.sample_rate_hz = 8000;
     Check(session.SubmitAudio(std::move(mismatched_format)).code == ErrorCode::kInvalidArgument,

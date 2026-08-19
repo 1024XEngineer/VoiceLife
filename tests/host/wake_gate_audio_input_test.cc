@@ -52,7 +52,7 @@ class FakeDetector final : public voicelife::voice::LocalWakeDetectorPort {
         running = false;
         return Status::Ok();
     }
-    Status Submit(const voicelife::voice::AudioFrame&) override {
+    Status Submit(voicelife::voice::AudioFrame) override {
         ++frames;
         return Status::Ok();
     }

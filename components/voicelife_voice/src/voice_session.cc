@@ -465,7 +465,8 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
         frame.sequence = sequence;
         // 本地 VAD 端点（无 AFE，用 RMS 能量近似，PCM 已右移 14 位幅度较小）：
         // 带迟滞：进入语音用较高阈值，一旦检测到语音后以更低阈值维持，静音超
-        // 端点窗口可按麦克风底噪和服务端 VAD 调整，避免固定长静音拖慢每轮回应。
+        // 端点窗口可按麦克风底噪和服务端 VAD 调整。默认 900 ms 要大于自然
+        // 句内停顿，避免把尚未说完的长句截断，同时不把轮次结束拖到数秒。
         const auto* pcm = reinterpret_cast<const int16_t*>(frame.payload.data());
         const std::size_t sample_count = frame.payload.size() / sizeof(int16_t);
         int64_t energy = 0;

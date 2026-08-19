@@ -376,12 +376,61 @@ int main() {
         .rule_id = created.rule->id,
         .keyword = std::nullopt,
         .status = ScheduleStatusFilter::kAll,
+        .occurrence_start = std::nullopt,
+        .occurrence_end = std::nullopt,
         .limit = 10,
         .offset = 0,
     });
     Check(queried.status.ok() && queried.total == 1 && queried.rules.size() == 1 &&
               queried.rules.front().upcoming_occurrences.size() == 3 && queried.rules.front().exceptions.size() == 1,
           "查询周期规则必须返回未来发生时间和例外");
+
+    // 明确的远期单日窗口必须直接规划目标 occurrence，不能被默认的未来三条预览截断。
+    const auto ranged_query = service.query_schedule_rules({
+        .rule_id = created.rule->id,
+        .keyword = std::nullopt,
+        .status = ScheduleStatusFilter::kAll,
+        .occurrence_start = At(UtcAtLocal(2099, 1, 31, 0)),
+        .occurrence_end = At(UtcAtLocal(2099, 2, 1, 0)),
+        .limit = 10,
+        .offset = 0,
+    });
+    Check(ranged_query.status.ok() && ranged_query.rules.size() == 1 &&
+              ranged_query.rules.front().upcoming_occurrences.size() == 1 &&
+              ranged_query.rules.front().upcoming_occurrences.front() == At(UtcAtLocal(2099, 1, 31, 9)),
+          "周期规则按远期单日窗口查询时必须返回目标 occurrence");
+
+    // 显式历史日期窗口也必须按窗口规划 occurrence，不能被“从现在开始”的默认预览逻辑吞掉。
+    const auto historical = service.create_schedule_rule({
+        .event = "历史周期回归",
+        .freq_type = Frequency::kDaily,
+        .start_time = LocalTime{9, 0, 0},
+        .start_date = LocalDate{2020, 1, 1},
+        .end_time = std::nullopt,
+        .location = std::nullopt,
+        .notes = std::nullopt,
+        .interval_val = 1,
+        .weekdays_mask = std::nullopt,
+        .day_of_month = std::nullopt,
+        .month_of_year = std::nullopt,
+        .monthly_mode = std::nullopt,
+        .end_date = std::nullopt,
+        .occurrence_count = std::nullopt,
+    });
+    Check(historical.status.ok() && historical.rule.has_value(), "历史周期规则应能建立查询回归数据");
+    const auto historical_query = service.query_schedule_rules({
+        .rule_id = historical.rule->id,
+        .keyword = std::nullopt,
+        .status = ScheduleStatusFilter::kAll,
+        .occurrence_start = At(UtcAtLocal(2020, 1, 2, 0)),
+        .occurrence_end = At(UtcAtLocal(2020, 1, 3, 0)),
+        .limit = 10,
+        .offset = 0,
+    });
+    Check(historical_query.status.ok() && historical_query.rules.size() == 1 &&
+              historical_query.rules.front().upcoming_occurrences.size() == 1 &&
+              historical_query.rules.front().upcoming_occurrences.front() == At(UtcAtLocal(2020, 1, 2, 9)),
+          "周期规则按历史单日窗口查询时必须返回目标 occurrence");
 
     const auto updated = service.update_schedule_rule({
         .rule_id = created.rule->id,
@@ -675,6 +724,8 @@ int main() {
                       .query_schedule_rules({.rule_id = std::nullopt,
                                              .keyword = std::nullopt,
                                              .status = ScheduleStatusFilter::kAll,
+                                             .occurrence_start = std::nullopt,
+                                             .occurrence_end = std::nullopt,
                                              .limit = 10,
                                              .offset = 0})
                       .status.code == ErrorCode::kUnavailable,
@@ -686,6 +737,8 @@ int main() {
                       .query_schedule_rules({.rule_id = err_created.rule->id,
                                              .keyword = std::nullopt,
                                              .status = ScheduleStatusFilter::kAll,
+                                             .occurrence_start = std::nullopt,
+                                             .occurrence_end = std::nullopt,
                                              .limit = 10,
                                              .offset = 0})
                       .status.code == ErrorCode::kUnavailable,
