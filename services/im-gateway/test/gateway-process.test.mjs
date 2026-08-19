@@ -14,6 +14,29 @@ import { ImGatewayError } from '../dist/shared/errors.js';
 
 const deviceToken = 'fixture-device-token-with-enough-entropy';
 
+class FakeWecomWebSocket {
+    sent = [];
+    listeners = new Map();
+
+    addEventListener(type, listener) {
+        const listeners = this.listeners.get(type) ?? [];
+        listeners.push(listener);
+        this.listeners.set(type, listeners);
+    }
+
+    send(data) {
+        this.sent.push(JSON.parse(data));
+    }
+
+    close() {
+        this.emit('close', {});
+    }
+
+    emit(type, event) {
+        for (const listener of this.listeners.get(type) ?? []) listener(event);
+    }
+}
+
 function fixtureEnvironment(overrides = {}) {
     return {
         DATABASE_URL: 'postgres://user:password@postgres:5432/voicelife',
@@ -117,6 +140,7 @@ test('production configuration requires every secret without exposing its value'
     assert.equal(config.port, 3000);
     assert.equal(config.wechat.channelAccountId, 'wechat-production');
     assert.equal(config.wechat.displayTimeZone, 'Asia/Shanghai');
+    assert.equal(config.wecom, undefined);
     assert.equal(
         new URL(readGatewayConfiguration(fixtureEnvironment({ DATABASE_HOST: 'postgres' })).databaseUrl).hostname,
         'postgres',
@@ -133,6 +157,24 @@ test('production configuration requires every secret without exposing its value'
     assert.throws(
         () => readGatewayConfiguration(fixtureEnvironment({ ACTION_TOKEN_SECRET: 'too-short' })),
         /ACTION_TOKEN_SECRET must contain at least 32 bytes/u,
+    );
+    assert.deepEqual(
+        readGatewayConfiguration(
+            fixtureEnvironment({
+                WECOM_AIBOT_CHANNEL_ACCOUNT_ID: 'wecom-production',
+                WECOM_AIBOT_BOT_ID: 'bot-fixture',
+                WECOM_AIBOT_SECRET: 'secret-fixture',
+            }),
+        ).wecom,
+        { channelAccountId: 'wecom-production', botId: 'bot-fixture', secret: 'secret-fixture' },
+    );
+    assert.throws(
+        () => readGatewayConfiguration(fixtureEnvironment({ WECOM_AIBOT_BOT_ID: 'bot-fixture' })),
+        /WECOM_AIBOT_CHANNEL_ACCOUNT_ID is required/u,
+    );
+    assert.throws(
+        () => readGatewayConfiguration(fixtureEnvironment({ WECOM_AIBOT_SECRET: 'secret-fixture' })),
+        /WECOM_AIBOT_CHANNEL_ACCOUNT_ID is required/u,
     );
 });
 
@@ -505,6 +547,67 @@ test('configured production process migrates Postgres, starts Koishi and closes 
 
     const restarted = await startConfiguredGatewayProcess(environment, { log: () => {} });
     await restarted.close();
+});
+
+test('configured production process registers and starts an optional WeCom AI Bot channel', async (context) => {
+    const databaseUrl = process.env.DATABASE_URL ?? 'postgres://voicelife:voicelife@127.0.0.1:5432/voicelife';
+    const probe = new PostgresImUnitOfWork(databaseUrl);
+    try {
+        await probe.migrate();
+    } catch (error) {
+        await probe.close().catch(() => undefined);
+        context.skip(`PostgreSQL unavailable: ${error instanceof Error ? error.name : 'unknown'}`);
+        return;
+    }
+    await probe.close();
+
+    const socket = new FakeWecomWebSocket();
+    const wecomChannelId = `wecom-process-${Date.now()}`;
+    const gateway = await startConfiguredGatewayProcess(
+        fixtureEnvironment({
+            DATABASE_URL: databaseUrl,
+            GATEWAY_PORT: '0',
+            WECHAT_CHANNEL_ACCOUNT_ID: `wechat-process-${Date.now()}`,
+            WECOM_AIBOT_CHANNEL_ACCOUNT_ID: wecomChannelId,
+            WECOM_AIBOT_BOT_ID: 'bot-fixture',
+            WECOM_AIBOT_SECRET: 'secret-fixture',
+        }),
+        { log: () => {} },
+        { createWecomWebSocket: () => socket },
+    );
+    try {
+        socket.emit('open', {});
+        const subscription = socket.sent[0];
+        assert.equal(subscription.cmd, 'aibot_subscribe');
+        socket.emit('message', {
+            data: JSON.stringify({ headers: { req_id: subscription.headers.req_id }, errcode: 0 }),
+        });
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+        assert.equal((await globalThis.fetch(`${gateway.origin}/healthz`)).status, 200);
+
+        const check = new PostgresImUnitOfWork(databaseUrl);
+        try {
+            const account = await check.transaction((tx) => tx.channelAccounts.findById(wecomChannelId));
+            assert.deepEqual(
+                {
+                    id: account?.id,
+                    platform: account?.platform,
+                    tenantExternalId: account?.tenantExternalId,
+                    connectionMode: account?.connectionMode,
+                },
+                {
+                    id: wecomChannelId,
+                    platform: 'wecom_aibot',
+                    tenantExternalId: 'bot-fixture',
+                    connectionMode: 'websocket',
+                },
+            );
+        } finally {
+            await check.close();
+        }
+    } finally {
+        await gateway.close();
+    }
 });
 
 test('production server serializes action commands as SSE and logs correlation ids safely', async () => {
