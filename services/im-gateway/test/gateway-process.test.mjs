@@ -188,7 +188,7 @@ test('production entry reports trusted configuration errors without logging thei
 test('production server returns a Bearer challenge for rejected device credentials', async () => {
     const runtime = fakeRuntime([]);
     runtime.deviceApi.postNotification = async () => {
-        throw new ImGatewayError('unauthorized', 'fixture credential rejected');
+        throw new ImGatewayError('unauthorized', '<img src=x onerror=alert(1)>');
     };
     const server = await startGatewayHttpServer({
         host: '127.0.0.1',
@@ -209,7 +209,55 @@ test('production server returns a Bearer challenge for rejected device credentia
         });
         assert.equal(response.status, 401);
         assert.equal(response.headers.get('www-authenticate'), 'Bearer');
-        assert.deepEqual(await response.json(), { error: 'unauthorized' });
+        assert.equal(await response.text(), '{"error":"unauthorized"}');
+    } finally {
+        await server.close();
+    }
+});
+
+test('production server maps every gateway error to a stable JSON response', async () => {
+    const runtime = fakeRuntime([]);
+    let errorCode = 'unauthorized';
+    runtime.deviceApi.postNotification = async () => {
+        throw new ImGatewayError(errorCode, '<img src=x onerror=alert(1)>');
+    };
+    const server = await startGatewayHttpServer({
+        host: '127.0.0.1',
+        port: 0,
+        runtime,
+        healthCheck: async () => ({ status: 'ok' }),
+        logger: { log: () => {} },
+    });
+    const cases = [
+        ['unauthorized', 401],
+        ['invalid_contract', 400],
+        ['pairing_code_invalid', 400],
+        ['capability_not_supported', 400],
+        ['not_implemented', 400],
+        ['binding_not_found', 404],
+        ['delivery_not_found', 404],
+        ['action_not_found', 404],
+        ['action_expired', 410],
+        ['idempotency_conflict', 409],
+        ['duplicate_event', 409],
+        ['invalid_transition', 403],
+        ['resource_exhausted', 429],
+    ];
+    try {
+        for (const [code, status] of cases) {
+            errorCode = code;
+            const response = await globalThis.fetch(`${server.origin}/v1/im/notifications`, {
+                method: 'POST',
+                headers: {
+                    authorization: 'Bearer invalid-token',
+                    'content-type': 'application/json',
+                    'idempotency-key': 'event-1',
+                },
+                body: JSON.stringify({ businessEventId: 'event-1' }),
+            });
+            assert.equal(response.status, status);
+            assert.equal(await response.text(), `{"error":"${code}"}`);
+        }
     } finally {
         await server.close();
     }
@@ -345,6 +393,44 @@ test('production server mounts health, device, Action UI and webhook routes', as
         assert.equal(webhookPost.headers.get('content-type'), 'text/plain; charset=utf-8');
         assert.equal(await webhookPost.text(), 'success');
     });
+});
+
+test('production server keeps JSON valid while escaping HTML metacharacters', async () => {
+    const server = await startGatewayHttpServer({
+        host: '127.0.0.1',
+        port: 0,
+        runtime: fakeRuntime([]),
+        healthCheck: async () => ({ message: '</script><img src=x onerror=alert(1)>&' }),
+        logger: { log: () => {} },
+    });
+    try {
+        const response = await globalThis.fetch(`${server.origin}/healthz`);
+        const body = await response.text();
+        assert.equal(body.includes('</script>'), false);
+        assert.equal(body.includes('<img'), false);
+        assert.deepEqual(JSON.parse(body), { message: '</script><img src=x onerror=alert(1)>&' });
+        assert.deepEqual(await new globalThis.Response(body).json(), {
+            message: '</script><img src=x onerror=alert(1)>&',
+        });
+    } finally {
+        await server.close();
+    }
+});
+
+test('production server serializes an undefined JSON value as null', async () => {
+    const server = await startGatewayHttpServer({
+        host: '127.0.0.1',
+        port: 0,
+        runtime: fakeRuntime([]),
+        healthCheck: async () => undefined,
+        logger: { log: () => {} },
+    });
+    try {
+        const response = await globalThis.fetch(`${server.origin}/healthz`);
+        assert.equal(await response.text(), 'null');
+    } finally {
+        await server.close();
+    }
 });
 
 test('production server bounds bodies and maps unsupported requests without leaking details', async () => {
