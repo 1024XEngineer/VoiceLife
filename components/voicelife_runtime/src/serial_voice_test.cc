@@ -49,10 +49,12 @@ class SerialVoiceTest::Impl final {
             }
         }
         stopping_.store(false);
-        if (xTaskCreate(&TaskEntry, "serial_voice_test", 4096, this, 3, &task_) != pdPASS) {
-            task_ = nullptr;
+        TaskHandle_t created_task = nullptr;
+        if (xTaskCreate(&TaskEntry, "serial_voice_test", 4096, this, 3, &created_task) != pdPASS) {
+            task_.store(nullptr);
             return Unavailable("创建串口语音测试任务失败");
         }
+        task_.store(created_task);
         return Status::Ok();
 #endif
     }
@@ -60,6 +62,11 @@ class SerialVoiceTest::Impl final {
     void Stop() {
 #ifdef ESP_PLATFORM
         stopping_.store(true);
+        const TaskHandle_t task = task_.load();
+        // Callbacks normally run outside this task, but a self-stop must not
+        // wait for the current task to return.
+        if (task == nullptr || task == xTaskGetCurrentTaskHandle()) return;
+        while (task_.load() != nullptr) vTaskDelay(1);
 #endif
     }
 
@@ -151,7 +158,7 @@ class SerialVoiceTest::Impl final {
             const Status status = callbacks_.submit_pcm(std::move(frame));
             if (!status.ok()) LogResult("PCM", status);
         }
-        task_ = nullptr;
+        task_.store(nullptr);
     }
 #endif
 
@@ -159,14 +166,14 @@ class SerialVoiceTest::Impl final {
     std::atomic_bool stopping_{false};
     std::shared_ptr<voice::AudioPayloadPool> payload_pool_;
 #ifdef ESP_PLATFORM
-    TaskHandle_t task_ = nullptr;
+    std::atomic<TaskHandle_t> task_{nullptr};
 #endif
 };
 
 SerialVoiceTest::SerialVoiceTest(SerialVoiceTestCallbacks callbacks)
     : impl_(std::make_unique<Impl>(std::move(callbacks))) {}
 
-SerialVoiceTest::~SerialVoiceTest() = default;
+SerialVoiceTest::~SerialVoiceTest() { impl_->Stop(); }
 
 Status SerialVoiceTest::Start() { return impl_->Start(); }
 
