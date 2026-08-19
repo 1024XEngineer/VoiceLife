@@ -185,14 +185,20 @@ export async function startConfiguredGatewayProcess(
                 revealExternalUserId: (ciphertext) => identities.reveal(ciphertext),
             },
         });
-        const channelAdapters = new ChannelAdapterRegistry([{ accountId: channelAccountId, adapter }]);
-        const wecomAdapter =
+        const wecomRegistration =
             config.wecom === undefined
                 ? undefined
-                : new WecomAibotInboundAdapter({
-                      channelAccountId: unsafeId<ChannelAccountId>(config.wecom.channelAccountId),
-                      botId: config.wecom.botId,
-                  });
+                : {
+                      accountId: unsafeId<ChannelAccountId>(config.wecom.channelAccountId),
+                      adapter: new WecomAibotInboundAdapter({
+                          channelAccountId: unsafeId<ChannelAccountId>(config.wecom.channelAccountId),
+                          botId: config.wecom.botId,
+                      }),
+                  };
+        const channelAdapters = new ChannelAdapterRegistry([
+            { accountId: channelAccountId, adapter },
+            ...(wecomRegistration === undefined ? [] : [wecomRegistration]),
+        ]);
         const context = new Context();
         const koishiBotId = `wechat:${channelAccountId}`;
         const wechatBot = new WechatOfficialKoishiBot(context, {
@@ -231,14 +237,14 @@ export async function startConfiguredGatewayProcess(
                     },
                 },
             },
-            capabilities: wecomAdapter === undefined ? [adapter] : [adapter, wecomAdapter],
+            capabilities: wecomRegistration === undefined ? [adapter] : [adapter, wecomRegistration.adapter],
             revealExternalUserId: (ciphertext) => identities.reveal(ciphertext),
         });
         await ensureConfiguredChannel(koishi.runtime, channelAccountId, config.wechat);
         const wecomWebhook =
-            config.wecom === undefined
+            config.wecom === undefined || wecomRegistration === undefined
                 ? undefined
-                : new WecomAibotUrlCallbackController(wecomAdapter!, {
+                : new WecomAibotUrlCallbackController(wecomRegistration.adapter, {
                       token: config.wecom.webhookToken,
                       encodingAesKey: config.wecom.encodingAesKey,
                       postEvent: async (event) => {

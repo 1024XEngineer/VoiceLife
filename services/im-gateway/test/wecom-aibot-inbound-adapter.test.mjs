@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { ImGatewayError, WecomAibotInboundAdapter } from '../dist/index.js';
+import { ChannelAdapterRegistry, ImGatewayError, WecomAibotInboundAdapter } from '../dist/index.js';
 
 function adapter(overrides = {}) {
     return new WecomAibotInboundAdapter({
@@ -62,6 +62,18 @@ test('WeCom AI Bot uses its receive time when a valid single-chat message omits 
     const event = await adapter().normalizeInbound(frame);
 
     assert.equal(event.occurredAt, '2026-08-18T00:00:00.000Z');
+});
+
+test('WeCom AI Bot resolves registered active accounts as unavailable for outbound delivery', async () => {
+    const registry = new ChannelAdapterRegistry([{ accountId: 'channel-wecom', adapter: adapter() }]);
+
+    assert.deepEqual(await registry.resolve({ id: 'channel-wecom', platform: 'wecom_aibot', status: 'active' }), {
+        proactiveMessage: false,
+        nativeAction: false,
+        actionUi: false,
+        deliveryReceipt: false,
+        presentationTypes: [],
+    });
 });
 
 test('WeCom AI Bot rejects a message for another bot, an empty userid, and group context', async () => {

@@ -2,7 +2,14 @@ import type { NotificationIntent, ScheduleReceiptIntent } from '../../contracts/
 import { unsafeId, type ChannelAccountId } from '../../contracts/ids.js';
 import type { NormalizedImEvent } from '../../contracts/platform-events.js';
 import type { PlatformCapabilityPort } from '../../ports/external.js';
-import type { ChannelAccount, ChannelCapabilities } from '../../domain/models.js';
+import type {
+    ChannelCapabilityResolver,
+    DeliveryRendererPort,
+    ImChannelPort,
+    ImSendAcceptance,
+    OutboundImMessage,
+} from '../../ports/external.js';
+import type { ChannelAccount, ChannelCapabilities, Delivery } from '../../domain/models.js';
 import { ImGatewayError } from '../../shared/errors.js';
 import type { IsoDateTime, JsonValue } from '../../shared/types.js';
 
@@ -23,7 +30,9 @@ export interface WecomAibotInboundAdapterOptions {
  *
  * 此适配器只实现入站绑定链路；主动投递由后续渠道切片提供。
  */
-export class WecomAibotInboundAdapter implements PlatformCapabilityPort {
+export class WecomAibotInboundAdapter
+    implements PlatformCapabilityPort, ChannelCapabilityResolver, DeliveryRendererPort, ImChannelPort
+{
     public readonly platform = 'wecom_aibot' as const;
 
     private readonly channelAccountId: ChannelAccountId;
@@ -49,6 +58,11 @@ export class WecomAibotInboundAdapter implements PlatformCapabilityPort {
         return Promise.resolve(unavailableCapabilities());
     }
 
+    /** {@inheritDoc ChannelCapabilityResolver.resolve} */
+    public resolve(account: ChannelAccount): Promise<ChannelCapabilities> {
+        return this.capabilities(account);
+    }
+
     /** {@inheritDoc PlatformCapabilityPort.renderScheduleReceipt} */
     public renderScheduleReceipt(intent: ScheduleReceiptIntent): Promise<JsonValue> {
         void intent;
@@ -63,6 +77,28 @@ export class WecomAibotInboundAdapter implements PlatformCapabilityPort {
         return Promise.reject(
             new ImGatewayError('capability_not_supported', 'WeCom AI Bot outbound delivery is not configured'),
         );
+    }
+
+    /** {@inheritDoc DeliveryRendererPort.render} */
+    public render(
+        delivery: Delivery,
+        account: ChannelAccount,
+        capabilities: ChannelCapabilities,
+        context: { readonly actionToken?: string },
+    ): Promise<JsonValue> {
+        void delivery;
+        void account;
+        void capabilities;
+        void context;
+        return Promise.reject(
+            new ImGatewayError('capability_not_supported', 'WeCom AI Bot outbound delivery is not configured'),
+        );
+    }
+
+    /** {@inheritDoc ImChannelPort.send} */
+    public send(message: OutboundImMessage): Promise<ImSendAcceptance> {
+        void message;
+        return Promise.resolve({ accepted: false, retryable: false, errorCode: 'wecom_aibot_not_configured' });
     }
 
     /** {@inheritDoc PlatformCapabilityPort.normalizeInbound} */
