@@ -54,6 +54,8 @@ class HilHardware(Protocol):
 
     def revoke(self, identity: TemporaryIdentity) -> None: ...
 
+    def revoke_device_id(self, device_id: str) -> None: ...
+
     def provision(self, descriptor: DeviceDescriptor, identity: TemporaryIdentity, timeout_s: float) -> None: ...
 
     def reboot_and_readiness(self, descriptor: DeviceDescriptor, timeout_s: float) -> list[dict[str, object]]: ...
@@ -91,6 +93,7 @@ class HilPairingAdapter:
         self._partitions: list[Partition] = []
         self._image: ApplicationImage | None = None
         self._identity: TemporaryIdentity | None = None
+        self._pending_device_id = ""
         self._readiness: list[dict[str, object]] = []
         self._pairing_markers: list[str] = []
         self._device_fingerprint = ""
@@ -104,7 +107,7 @@ class HilPairingAdapter:
             self.lease_held = True
             self._descriptor = descriptor
             self._lease = lease
-            context.cleanup.push("hil-device-lease", self._release_lease)
+            context.cleanup.push("hil-device-lease", self._release_lease, timeout_required=False)
             self._partitions = self._hardware.inspect(descriptor, context.temporary_directory)
             validate_device_layout(descriptor, self._partitions)
         except (HilConfigurationError, HilLeaseUnavailable, HilProfileMismatch) as error:
@@ -122,6 +125,8 @@ class HilPairingAdapter:
     def _revoke(self) -> None:
         if self._identity is not None:
             self._hardware.revoke(self._identity)
+        elif self._pending_device_id:
+            self._hardware.revoke_device_id(self._pending_device_id)
 
     def run(self, context: RunContext) -> dict[str, object]:
         if self._descriptor is None:
@@ -130,10 +135,11 @@ class HilPairingAdapter:
             build_directory = self._hardware.build(self._descriptor)
             self._image = self._hardware.image(build_directory, self._descriptor, self._partitions)
             self._hardware.flash(self._descriptor, self._image, context.remaining())
+            self._pending_device_id = f"e2e-{context.run_id}"
+            context.cleanup.push("gateway-device-revoke", self._revoke)
             identity = self._hardware.register(context.run_id)
             self._identity = identity
             self._device_fingerprint = device_fingerprint(identity.device_id, context.run_id)
-            context.cleanup.push("gateway-device-revoke", self._revoke)
             context.cleanup.push("hil-device-recovery", self._recover)
             self._hardware.provision(self._descriptor, identity, context.remaining())
             self._readiness = self._hardware.reboot_and_readiness(self._descriptor, context.remaining())
@@ -214,6 +220,8 @@ class RealHilHardware:
             from sqlite_board_probe_io import read_layout
 
             return read_layout(descriptor.port.as_posix(), 115200, temporary_directory / "partition-table.bin")
+        except RunnerDeadlineExceeded:
+            raise
         except Exception as error:
             raise RunnerFailure(FailureCategory.DEVICE, "device_layout_unavailable") from error
 
@@ -222,6 +230,8 @@ class RealHilHardware:
 
         try:
             return build(descriptor.firmware_profile)
+        except RunnerDeadlineExceeded:
+            raise
         except Exception as error:
             raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "firmware_build_failed") from error
 
@@ -260,13 +270,16 @@ class RealHilHardware:
             raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "device_registration_invalid") from error
 
     def revoke(self, identity: TemporaryIdentity) -> None:
-        from provision_device import server_revoke_script
-
         try:
-            self._remote(server_revoke_script(self._server_directory, identity.device_id))
+            self.revoke_device_id(identity.device_id)
         finally:
             for index in range(len(identity.token)):
                 identity.token[index] = 0
+
+    def revoke_device_id(self, device_id: str) -> None:
+        from provision_device import server_revoke_script
+
+        self._remote(server_revoke_script(self._server_directory, device_id))
 
     def provision(self, descriptor: DeviceDescriptor, identity: TemporaryIdentity, timeout_s: float) -> None:
         from provision_device import run_with_getpass

@@ -71,6 +71,10 @@ class FakeHardware:
         for index in range(len(identity.token)):
             identity.token[index] = 0
 
+    def revoke_device_id(self, device_id: str) -> None:
+        self.calls.append("revoke-id")
+        self.device_revoked = True
+
     def provision(self, descriptor: object, identity: object, timeout_s: float) -> None:
         self.calls.append("provision")
         self.serial_open = True
@@ -169,6 +173,40 @@ class HilPairingAdapterTest(unittest.TestCase):
         self.assertEqual(result.message_code, "device_profile_mismatch")
         self.assertNotIn("flash", hardware.calls)
         self.assertFalse(adapter.lease_held)
+
+    def test_registration_failure_revokes_run_scoped_device_and_releases_lease(self) -> None:
+        hardware = FakeHardware()
+        hardware.register = mock.Mock(
+            side_effect=RUNNER.RunnerFailure(RUNNER.FailureCategory.INFRASTRUCTURE, "invalid")
+        )
+        adapter, result = self.execute(hardware)
+        self.assertEqual(result.failure_category, RUNNER.FailureCategory.INFRASTRUCTURE)
+        self.assertEqual(result.message_code, "invalid")
+        self.assertIn("revoke-id", hardware.calls)
+        self.assertFalse(adapter.lease_held)
+
+    def test_cleanup_timeout_does_not_prevent_local_lease_release(self) -> None:
+        hardware = FakeHardware()
+
+        def timeout_revoke(identity: object) -> None:
+            hardware.calls.append("revoke")
+            raise RUNNER.RunnerDeadlineExceeded
+
+        hardware.revoke = timeout_revoke
+        adapter, result = self.execute(hardware)
+        self.assertEqual(result.failure_category, RUNNER.FailureCategory.CLEANUP)
+        self.assertEqual(result.message_code, "cleanup_timeout")
+        self.assertFalse(adapter.lease_held)
+
+    def test_device_inspection_and_build_deadlines_preserve_timeout_classification(self) -> None:
+        for operation in ("inspect", "build"):
+            with self.subTest(operation=operation):
+                hardware = FakeHardware()
+                setattr(hardware, operation, mock.Mock(side_effect=RUNNER.RunnerDeadlineExceeded))
+                adapter, result = self.execute(hardware)
+                self.assertEqual(result.failure_category, RUNNER.FailureCategory.TIMEOUT)
+                self.assertEqual(result.message_code, f"{'prepare' if operation == 'inspect' else 'run'}_timeout")
+                self.assertFalse(adapter.lease_held)
 
     def test_device_identifier_fingerprint_is_run_scoped_and_non_reversible(self) -> None:
         first = HIL.device_fingerprint("e2e-device", "a" * 32)
