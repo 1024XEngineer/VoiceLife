@@ -1,9 +1,12 @@
 #include "serial_voice_test.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
 #include <utility>
+
+#include "serial_voice_protocol.h"
 
 #ifdef ESP_PLATFORM
 #include "driver/usb_serial_jtag.h"
@@ -16,13 +19,6 @@ namespace voicelife::runtime {
 namespace {
 
 constexpr char kTag[] = "SerialVoiceTest";
-constexpr std::array<uint8_t, 4> kMagic = {'V', 'L', 'V', 'T'};
-constexpr uint8_t kVersion = 1;
-constexpr uint8_t kBegin = 1;
-constexpr uint8_t kPcm = 2;
-constexpr uint8_t kEnd = 3;
-constexpr std::size_t kPcmBytes = 16000U * 20U / 1000U * sizeof(int16_t);
-
 Status Unavailable(const char* message) { return Status::Error(ErrorCode::kUnavailable, message); }
 
 }  // namespace
@@ -81,6 +77,16 @@ class SerialVoiceTest::Impl final {
         return received == size;
     }
 
+    bool DiscardExact(std::size_t size) {
+        std::array<uint8_t, 64> discard{};
+        while (size != 0) {
+            const std::size_t chunk = std::min(size, discard.size());
+            if (!ReadExact(discard.data(), chunk)) return false;
+            size -= chunk;
+        }
+        return true;
+    }
+
     void LogResult(const char* event, const Status& status) {
         if (status.ok()) {
             ESP_LOGI(kTag, "SERIAL_VOICE_%s=ok", event);
@@ -91,45 +97,40 @@ class SerialVoiceTest::Impl final {
 
     void Run() {
         ESP_LOGI(kTag, "SERIAL_VOICE_TEST_READY=1 protocol=VLVT-v1 pcm=s16le-16000-mono-20ms payload_bytes=%u",
-                 static_cast<unsigned>(kPcmBytes));
-        std::size_t matched = 0;
+                 static_cast<unsigned>(detail::kSerialVoicePcmBytes));
+        detail::SerialVoiceMagicMatcher magic;
         while (!stopping_.load()) {
             uint8_t byte = 0;
             if (!ReadByte(&byte)) continue;
-            if (byte == kMagic[matched]) {
-                ++matched;
-            } else {
-                matched = byte == kMagic[0] ? 1 : 0;
-            }
-            if (matched != kMagic.size()) continue;
-            matched = 0;
+            if (!magic.Push(byte)) continue;
 
             std::array<uint8_t, 4> header{};
             if (!ReadExact(header.data(), header.size())) continue;
-            const uint8_t version = header[0];
-            const uint8_t kind = header[1];
-            const uint16_t length = static_cast<uint16_t>(header[2]) | (static_cast<uint16_t>(header[3]) << 8U);
-            if (version != kVersion || length > kPcmBytes ||
-                ((kind == kPcm && length != kPcmBytes) || (kind != kPcm && length != 0))) {
-                ESP_LOGW(kTag, "SERIAL_VOICE_FRAME_REJECT version=%u kind=%u length=%u", static_cast<unsigned>(version),
-                         static_cast<unsigned>(kind), static_cast<unsigned>(length));
-                std::array<uint8_t, kPcmBytes> discard{};
-                if (length > 0) (void)ReadExact(discard.data(), length);
+            const detail::SerialVoiceFrameHeader frame_header{
+                .version = header[0],
+                .kind = header[1],
+                .payload_bytes = static_cast<uint16_t>(header[2]) | (static_cast<uint16_t>(header[3]) << 8U),
+            };
+            if (!detail::IsValidSerialVoiceHeader(frame_header)) {
+                ESP_LOGW(kTag, "SERIAL_VOICE_FRAME_REJECT version=%u kind=%u length=%u",
+                         static_cast<unsigned>(frame_header.version), static_cast<unsigned>(frame_header.kind),
+                         static_cast<unsigned>(frame_header.payload_bytes));
+                (void)DiscardExact(frame_header.payload_bytes);
                 continue;
             }
-            if (kind == kBegin) {
+            if (frame_header.kind == detail::kSerialVoiceBegin) {
                 LogResult("TURN_BEGIN", callbacks_.begin_turn());
                 continue;
             }
-            if (kind == kEnd) {
+            if (frame_header.kind == detail::kSerialVoiceEnd) {
                 LogResult("TURN_END", callbacks_.end_turn());
                 continue;
             }
-            if (kind != kPcm) {
-                ESP_LOGW(kTag, "SERIAL_VOICE_FRAME_REJECT unknown_kind=%u", static_cast<unsigned>(kind));
+            if (frame_header.kind != detail::kSerialVoicePcm) {
+                ESP_LOGW(kTag, "SERIAL_VOICE_FRAME_REJECT unknown_kind=%u", static_cast<unsigned>(frame_header.kind));
                 continue;
             }
-            std::array<uint8_t, kPcmBytes> payload{};
+            std::array<uint8_t, detail::kSerialVoicePcmBytes> payload{};
             if (!ReadExact(payload.data(), payload.size())) continue;
             voice::AudioFrame frame;
             frame.format = {.codec = voice::AudioCodec::kPcmS16Le,

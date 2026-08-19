@@ -457,6 +457,9 @@ target_link_libraries(im_runtime_test PRIVATE im contracts)
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
 
+add_voicelife_test(serial_voice_protocol_test "unit;runtime;voice" serial_voice_protocol_test.cc)
+target_include_directories(serial_voice_protocol_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+
 add_voicelife_test(wifi_provisioning_test "unit;runtime;wifi;provisioning"
     wifi_provisioning_test.cc
     "${ROOT_DIR}/components/voicelife_runtime/src/wifi_provisioning.cc")
