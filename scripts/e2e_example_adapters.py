@@ -185,6 +185,14 @@ class HostImGatewayRecoveryE2EAdapter:
             stdout, stderr = process.communicate(timeout=max(1.0, context.remaining()))
         except subprocess.TimeoutExpired as error:
             raise RunnerFailure(FailureCategory.TIMEOUT, "host_recovery_timeout") from error
+        if process.returncode != 0:
+            marker = stderr.strip().splitlines()[-1] if stderr.strip() else ""
+            category = {
+                "host_recovery_cleanup_failed": FailureCategory.CLEANUP,
+                "host_recovery_infrastructure_failed": FailureCategory.INFRASTRUCTURE,
+                "host_recovery_e2e_failed": FailureCategory.PRODUCT,
+            }.get(marker, FailureCategory.INFRASTRUCTURE)
+            raise RunnerFailure(category, "host_recovery_journey_failed")
         try:
             value = json.loads(stdout.strip().splitlines()[-1])
         except (json.JSONDecodeError, IndexError, TypeError) as error:
@@ -192,13 +200,6 @@ class HostImGatewayRecoveryE2EAdapter:
         if not isinstance(value, dict):
             raise RunnerFailure(FailureCategory.PRODUCT, "host_recovery_invalid_result")
         self.result = value
-        if process.returncode != 0:
-            marker = stderr.strip().splitlines()[-1] if stderr.strip() else ""
-            category = {
-                "host_recovery_cleanup_failed": FailureCategory.CLEANUP,
-                "host_recovery_infrastructure_failed": FailureCategory.INFRASTRUCTURE,
-            }.get(marker, FailureCategory.PRODUCT)
-            raise RunnerFailure(category, "host_recovery_journey_failed")
         return value
 
     def assert_result(self, context: RunContext, result: object) -> list[AssertionResult]:

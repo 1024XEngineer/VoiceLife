@@ -75,6 +75,34 @@ class ExampleAdapterTest(unittest.TestCase):
             self.assertIsInstance(adapter, ADAPTERS.HostImGatewayRecoveryE2EAdapter)
             self.assertEqual(adapter.artifact_directory, Path(directory))
 
+    def test_recovery_adapter_classifies_process_failures_before_parsing_output(self) -> None:
+        class CompletedProcess:
+            returncode = 1
+
+            def __init__(self, stderr: str) -> None:
+                self.stderr = stderr
+
+            def communicate(self, timeout: float) -> tuple[str, str]:
+                del timeout
+                return "", self.stderr
+
+        class Context:
+            def remaining(self) -> float:
+                return 1.0
+
+        for stderr in (
+            "host_recovery_infrastructure_failed\n",
+            "",
+            "ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL build failed\n",
+        ):
+            adapter = ADAPTERS.HostImGatewayRecoveryE2EAdapter(Path("."))
+            adapter._process = CompletedProcess(stderr)
+            with self.subTest(stderr=stderr):
+                with self.assertRaises(ADAPTERS.RunnerFailure) as raised:
+                    adapter.run(Context())
+                self.assertEqual(raised.exception.category, RUNNER.FailureCategory.INFRASTRUCTURE)
+                self.assertEqual(raised.exception.message_code, "host_recovery_journey_failed")
+
 
 class RunE2eCliTest(unittest.TestCase):
     def run_cli(self, *arguments: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
