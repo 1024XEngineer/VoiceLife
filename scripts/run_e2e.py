@@ -10,7 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from e2e_evidence import EvidenceValidationError, EvidenceWriteError, write_evidence
-from e2e_example_adapters import HilLifecycleExampleAdapter, HostImGatewayE2EAdapter, HostLifecycleExampleAdapter
+from e2e_example_adapters import (
+    HilLifecycleExampleAdapter,
+    HostImGatewayE2EAdapter,
+    HostImGatewayRecoveryE2EAdapter,
+    HostLifecycleExampleAdapter,
+)
 from e2e_hil_adapters import HilPairingAdapter, RealHilHardware
 from e2e_runner import ExitCode, FailureCategory, RunnerConfig, RunnerResult, exit_code_for, run_e2e
 
@@ -54,12 +59,15 @@ def _required_hil_option(args: argparse.Namespace, name: str) -> object:
     return value
 
 
-def build_adapter(layer: str, journey: str, args: argparse.Namespace | None = None) -> object:
+def build_adapter(layer: str, journey: str, args: argparse.Namespace | Path | None = None) -> object:
+    artifact_directory = args.artifact_dir if isinstance(args, argparse.Namespace) else args
     hil_options = ("device", "lease_dir", "server", "server_dir", "gateway_origin", "user_id")
-    if journey != "im-pairing" and args is not None and any(getattr(args, name) is not None for name in hil_options):
+    if journey != "im-pairing" and isinstance(args, argparse.Namespace) and any(
+        getattr(args, name) is not None for name in hil_options
+    ):
         raise ValueError("HIL options require the im-pairing journey")
     if journey == "im-pairing":
-        if layer != "hil" or args is None:
+        if layer != "hil" or not isinstance(args, argparse.Namespace):
             raise ValueError("unknown journey")
         device = _required_hil_option(args, "device")
         server = _required_hil_option(args, "server")
@@ -71,6 +79,8 @@ def build_adapter(layer: str, journey: str, args: argparse.Namespace | None = No
         return HilPairingAdapter(Path(device), lease_directory, hardware=hardware)
     if journey == "im-gateway-strong-reminder" and layer == "host":
         return HostImGatewayE2EAdapter()
+    if journey == "im-gateway-recovery" and layer == "host":
+        return HostImGatewayRecoveryE2EAdapter(artifact_directory or Path("."))
     if journey != "lifecycle-example":
         raise ValueError("unknown journey")
     if layer == "host":
