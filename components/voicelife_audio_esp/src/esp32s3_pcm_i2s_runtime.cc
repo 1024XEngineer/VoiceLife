@@ -185,6 +185,10 @@ void Esp32s3PcmAudioPorts::Impl::DestroyChannelsLocked() {
 
 void Esp32s3PcmAudioPorts::Impl::EnqueueInput(voice::AudioFrame frame) {
     std::lock_guard<std::mutex> lock(mutex_);
+    EnqueueInputLocked(std::move(frame));
+}
+
+void Esp32s3PcmAudioPorts::Impl::EnqueueInputLocked(voice::AudioFrame frame) {
     if (!input_running_) {
         return;
     }
@@ -285,10 +289,12 @@ void Esp32s3PcmAudioPorts::Impl::CaptureLoop() {
         input_sum_squares_ += sum_squares;
         if (all_zero) ++input_zero_periods_;
         RaisePeak(input_peak_, peak);
-        const Status status = assembler_->Push(pcm.data(), pcm.size(), [this](voice::AudioFrame frame) {
-            EnqueueInput(std::move(frame));
-            return Status::Ok();
-        });
+        const Status status = test_input_enabled_.load()
+                                  ? Status::Ok()
+                                  : assembler_->Push(pcm.data(), pcm.size(), [this](voice::AudioFrame frame) {
+                                        EnqueueInput(std::move(frame));
+                                        return Status::Ok();
+                                    });
         if (!status.ok()) {
             ++dropped_input_frames_;
         }
@@ -324,14 +330,38 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
     if (playback_format_.has_value()) {
         endpoint.format = *playback_format_;
     }
-    const std::size_t sample_count = frame.payload.size() / (sizeof(int16_t) * endpoint.format.channels);
+    if (frame.format.codec != voice::AudioCodec::kPcmS16Le || frame.format.bits_per_sample != 16 ||
+        frame.format.channels != endpoint.format.channels || frame.format.sample_rate_hz == 0) {
+        return detail::Invalid("播放帧格式不支持");
+    }
+    std::size_t sample_count = frame.payload.size() / (sizeof(int16_t) * endpoint.format.channels);
     const auto* pcm = reinterpret_cast<const int16_t*>(frame.payload.data());
+    if (frame.format.sample_rate_hz != endpoint.format.sample_rate_hz) {
+        const uint64_t destination_samples =
+            static_cast<uint64_t>(sample_count) * endpoint.format.sample_rate_hz / frame.format.sample_rate_hz;
+        if (destination_samples == 0 || destination_samples > codec_pcm_scratch_.capacity()) {
+            return detail::Invalid("播放帧重采样超过启动期 PCM scratch 预算");
+        }
+        codec_pcm_scratch_.resize(static_cast<std::size_t>(destination_samples));
+        for (std::size_t index = 0; index < codec_pcm_scratch_.size(); ++index) {
+            const uint64_t source_position = static_cast<uint64_t>(index) * frame.format.sample_rate_hz;
+            const std::size_t lower = static_cast<std::size_t>(source_position / endpoint.format.sample_rate_hz);
+            const std::size_t upper = lower + 1 < sample_count ? lower + 1 : lower;
+            const uint32_t fraction = static_cast<uint32_t>(source_position % endpoint.format.sample_rate_hz);
+            const int64_t interpolated =
+                static_cast<int64_t>(pcm[lower]) * (endpoint.format.sample_rate_hz - fraction) +
+                static_cast<int64_t>(pcm[upper]) * fraction;
+            codec_pcm_scratch_[index] = static_cast<int16_t>(interpolated / endpoint.format.sample_rate_hz);
+        }
+        pcm = codec_pcm_scratch_.data();
+        sample_count = codec_pcm_scratch_.size();
+        ++resampled_frames_;
+    }
     if (profile_.topology == AudioBoardTopology::kExternalCodecDuplex) {
         // The ES8311 owns the I2S format after esp_codec_dev_open(). Feed its
         // single-channel PCM API directly, matching the official SparkBot
         // codec; do not recreate the stale physical slot layout here.
-        std::vector<int16_t> codec_pcm(pcm, pcm + sample_count);
-        if (!WriteEs8311Pcm(codec_dev_, codec_pcm.data(), codec_pcm.size()).ok()) {
+        if (!WriteEs8311Pcm(codec_dev_, pcm, sample_count).ok()) {
             ++short_writes_;
             ++output_i2s_errors_;
             return detail::Unavailable("ES8311 播放 PCM 失败");
@@ -339,14 +369,15 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
         uint64_t sum_squares = 0;
         uint16_t peak = 0;
         bool all_zero = true;
-        for (const int16_t sample : codec_pcm) {
+        for (std::size_t index = 0; index < sample_count; ++index) {
+            const int16_t sample = pcm[index];
             const uint16_t absolute = AbsolutePcm16(sample);
             peak = std::max(peak, absolute);
             sum_squares += static_cast<uint64_t>(static_cast<int32_t>(sample) * static_cast<int32_t>(sample));
             all_zero = all_zero && sample == 0;
         }
-        output_pcm_bytes_ += codec_pcm.size() * sizeof(int16_t);
-        output_samples_ += codec_pcm.size();
+        output_pcm_bytes_ += sample_count * sizeof(int16_t);
+        output_samples_ += sample_count;
         output_sum_squares_ += sum_squares;
         if (all_zero) ++output_zero_periods_;
         RaisePeak(output_peak_, peak);
@@ -367,9 +398,9 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
         const std::size_t count = std::min(period_samples, sample_count - offset);
         const std::size_t wire_samples = count * detail::WireSlotCount(endpoint) / endpoint.format.channels;
         const std::size_t bytes = wire_samples * detail::WireBytes(endpoint);
-        std::vector<uint8_t> wire(bytes);
+        wire_scratch_.resize(bytes);
         if (endpoint.wire_bits_per_sample == 32) {
-            auto* out = reinterpret_cast<int32_t*>(wire.data());
+            auto* out = reinterpret_cast<int32_t*>(wire_scratch_.data());
             const int volume = output_volume_.load();
             for (std::size_t i = 0; i < count; ++i) {
                 // 播放增益：MVP 用 (vol/100)^2*65536 满幅；语音信号约 -6~-12dBFS，
@@ -385,7 +416,7 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
             }
         } else {
             const int volume = output_volume_.load();
-            auto* out = reinterpret_cast<int16_t*>(wire.data());
+            auto* out = reinterpret_cast<int16_t*>(wire_scratch_.data());
             for (std::size_t i = 0; i < count; ++i) {
                 const int32_t scaled = static_cast<int32_t>(pcm[offset + i]) * volume / 100;
                 if (scaled > 32767 || scaled < -32768) ++output_clipped_samples_;
@@ -408,9 +439,9 @@ Status Esp32s3PcmAudioPorts::Impl::WriteFrame(const voice::AudioFrame& frame) {
             sum_squares += static_cast<uint64_t>(static_cast<int32_t>(clamped) * static_cast<int32_t>(clamped));
             all_zero = all_zero && clamped == 0;
         }
-        const esp_err_t error =
-            i2s_channel_write(tx_channel_, wire.data(), wire.size(), &bytes_written, options_.io_timeout_ms);
-        if (error != ESP_OK || bytes_written != wire.size()) {
+        const esp_err_t error = i2s_channel_write(tx_channel_, wire_scratch_.data(), wire_scratch_.size(),
+                                                  &bytes_written, options_.io_timeout_ms);
+        if (error != ESP_OK || bytes_written != wire_scratch_.size()) {
             ++short_writes_;
             if (error != ESP_OK) ++output_i2s_errors_;
             return detail::Unavailable("I2S 播放返回短写或超时");
@@ -435,6 +466,12 @@ void Esp32s3PcmAudioPorts::Impl::OutputLoop() {
             }
             frame = std::move(output_queue_.front());
             output_queue_.pop_front();
+            const uint64_t frame_duration_ms = detail::PcmDurationMs(frame);
+            if (frame_duration_ms <= output_queue_duration_ms_) {
+                output_queue_duration_ms_ -= frame_duration_ms;
+            } else {
+                output_queue_duration_ms_ = 0;
+            }
         }
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -446,9 +483,22 @@ void Esp32s3PcmAudioPorts::Impl::OutputLoop() {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             output_writing_ = false;
+            if (amplifier_disable_pending_ && output_queue_.empty() && amplifier_enabled_ && amplifier_callback_) {
+                amplifier_callback_(false);
+                amplifier_enabled_ = false;
+            }
+            amplifier_disable_pending_ = false;
         }
     }
     MarkTaskDone(&output_task_);
+    bool finalize_close = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        finalize_close = output_closing_;
+    }
+    if (finalize_close) {
+        (void)FinalizeOutputClose();
+    }
 }
 
 }  // namespace voicelife::audio_esp

@@ -52,6 +52,7 @@ constexpr std::array<uint8_t, 4> kProvisionMagic = {'V', 'L', 'W', '1'};
 constexpr size_t kMaxWifiSsidBytes = 32;
 constexpr size_t kMaxWifiPasswordBytes = 64;
 constexpr int kProvisionTimeoutMs = 45000;
+constexpr int kRecoverySerialProvisionTimeoutMs = 15000;
 constexpr size_t kMaxOtaResponseBytes = 16 * 1024;
 constexpr EventBits_t kWifiConnectedBit = BIT0;
 constexpr EventBits_t kWifiFailedBit = BIT1;
@@ -111,31 +112,41 @@ Status StoreWifiCredentials(std::string_view ssid, std::string_view password) {
 #endif
 }
 
-Status ProvisionWifiCredentialsFromConsole() {
-    ESP_LOGW(kTag, "LINX_WIFI_PROVISION_READY=1 timeout_ms=%d", kProvisionTimeoutMs);
+Status ProvisionWifiCredentialsFromConsole(int timeout_ms = kProvisionTimeoutMs) {
+    ESP_LOGW(kTag, "LINX_WIFI_PROVISION_READY=1 timeout_ms=%d", timeout_ms);
     std::array<uint8_t, kProvisionMagic.size() + 2 + kMaxWifiSsidBytes + kMaxWifiPasswordBytes> request{};
     const size_t header_size = kProvisionMagic.size() + 2;
-    if (!ReadConsoleBytes(request.data(), header_size, kProvisionTimeoutMs)) {
+    if (!ReadConsoleBytes(request.data(), header_size, timeout_ms)) {
+        ESP_LOGW(kTag, "LINX_WIFI_PROVISION_RESULT=header_timeout");
         return Status::Error(ErrorCode::kNotFound, "未收到物理串口 Wi-Fi 配网请求");
     }
     if (!std::equal(kProvisionMagic.begin(), kProvisionMagic.end(), request.begin())) {
+        ESP_LOGW(kTag, "LINX_WIFI_PROVISION_RESULT=invalid_magic");
         return Status::Error(ErrorCode::kInvalidArgument, "物理串口 Wi-Fi 配网请求无效");
     }
     const size_t ssid_size = request[kProvisionMagic.size()];
     const size_t password_size = request[kProvisionMagic.size() + 1];
     if (ssid_size == 0 || ssid_size > kMaxWifiSsidBytes || password_size == 0 ||
         password_size > kMaxWifiPasswordBytes) {
+        ESP_LOGW(kTag, "LINX_WIFI_PROVISION_RESULT=invalid_lengths ssid_bytes=%u password_bytes=%u",
+                 static_cast<unsigned>(ssid_size), static_cast<unsigned>(password_size));
         return Status::Error(ErrorCode::kInvalidArgument, "物理串口 Wi-Fi 配网字段长度无效");
     }
     const size_t payload_size = ssid_size + password_size;
-    if (!ReadConsoleBytes(request.data() + header_size, payload_size, kProvisionTimeoutMs)) {
+    if (!ReadConsoleBytes(request.data() + header_size, payload_size, timeout_ms)) {
+        ESP_LOGW(kTag, "LINX_WIFI_PROVISION_RESULT=payload_timeout payload_bytes=%u",
+                 static_cast<unsigned>(payload_size));
         return Status::Error(ErrorCode::kInvalidArgument, "物理串口 Wi-Fi 配网内容不完整");
     }
     const Status status = StoreWifiCredentials(
         std::string_view(reinterpret_cast<const char*>(request.data() + header_size), ssid_size),
         std::string_view(reinterpret_cast<const char*>(request.data() + header_size + ssid_size), password_size));
     std::fill(request.begin(), request.end(), 0);
-    if (status.ok()) ESP_LOGI(kTag, "LINX_WIFI_PROVISIONED=1");
+    if (status.ok()) {
+        ESP_LOGI(kTag, "LINX_WIFI_PROVISIONED=1");
+    } else {
+        ESP_LOGW(kTag, "LINX_WIFI_PROVISION_RESULT=store_failed code=%d", static_cast<int>(status.code));
+    }
     return status;
 }
 
@@ -247,6 +258,13 @@ Result<WifiProvisioningCredentials> GetSoftApCandidate(WifiProvisioningCause cau
 }
 
 Status EnsureWifiStaConnected(const WifiProvisioningStatusSink& status_sink) {
+    // OTA retries and WebSocket reconnects share this entry point. Do not
+    // reapply credentials or call esp_wifi_connect while an association is
+    // still usable: doing so creates needless roam churn during a voice turn.
+    wifi_ap_record_t active_access_point{};
+    if (!IsWifiProvisioningRequested() && esp_wifi_sta_get_ap_info(&active_access_point) == ESP_OK) {
+        return Status::Ok();
+    }
     const bool force_provisioning = IsWifiProvisioningRequested();
     auto stored_credentials = LoadWifiCredentials();
     bool candidate_requires_persistence = false;
@@ -291,6 +309,12 @@ Status EnsureWifiStaConnected(const WifiProvisioningStatusSink& status_sink) {
         if (const esp_err_t error = esp_wifi_set_storage(WIFI_STORAGE_RAM); error != ESP_OK) {
             return EspError("设置 Wi-Fi RAM 存储", error);
         }
+        // Voice turns maintain an interactive WSS stream. Disable modem power
+        // save so a weak but associated AP cannot defer beacons long enough to
+        // turn an otherwise recoverable transport retry into a STA disconnect.
+        if (const esp_err_t error = esp_wifi_set_ps(WIFI_PS_NONE); error != ESP_OK) {
+            return EspError("关闭 Wi-Fi 省电模式", error);
+        }
         initialized = true;
     }
 
@@ -300,6 +324,9 @@ Status EnsureWifiStaConnected(const WifiProvisioningStatusSink& status_sink) {
                     std::min(credentials.ssid.size(), sizeof(config.sta.ssid) - 1));
         std::memcpy(config.sta.password, credentials.password.data(),
                     std::min(credentials.password.size(), sizeof(config.sta.password) - 1));
+        config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+        config.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+        config.sta.failure_retry_cnt = 2;
         if (const esp_err_t error = esp_wifi_set_mode(WIFI_MODE_STA); error != ESP_OK)
             return EspError("设置 Wi-Fi STA 模式", error);
         if (const esp_err_t error = esp_wifi_set_config(WIFI_IF_STA, &config); error != ESP_OK)
@@ -328,6 +355,20 @@ Status EnsureWifiStaConnected(const WifiProvisioningStatusSink& status_sink) {
             return Status::Ok();
         }
         if (status_sink) status_sink("配网", "无法连接该 Wi-Fi，请重新输入");
+        // 已保存的凭据不可用时，优先给物理串口一个短恢复窗口。这样现场
+        // 维护可以直接写入已确认的 SSID，不必等待 SoftAP 浏览器配网超时。
+        // 正常启动不会走到这里，窗口超时或坏帧后仍保持原 SoftAP 回退。
+        const Status serial = ProvisionWifiCredentialsFromConsole(kRecoverySerialProvisionTimeoutMs);
+        if (serial.ok()) {
+            stored_credentials = LoadWifiCredentials();
+            if (!stored_credentials.ok() || !stored_credentials.value.has_value()) return stored_credentials.status;
+            credentials = std::move(*stored_credentials.value);
+            candidate_requires_persistence = false;
+            continue;
+        }
+        if (serial.code != ErrorCode::kNotFound) {
+            ESP_LOGW(kTag, "串口 Wi-Fi 恢复失败，回退热点: %s", serial.message.c_str());
+        }
         auto candidate = GetSoftApCandidate(WifiProvisioningCause::kConnectionFailed, status_sink);
         if (!candidate.ok() || !candidate.value.has_value()) return candidate.status;
         credentials = {.ssid = std::move(candidate.value->ssid), .password = std::move(candidate.value->password)};

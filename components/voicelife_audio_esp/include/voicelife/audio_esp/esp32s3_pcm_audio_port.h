@@ -17,7 +17,9 @@ struct AudioPortOptions {
     /** @brief 输入队列深度。 */
     std::size_t input_queue_depth = 4;
     /** @brief 输出队列深度。 */
-    std::size_t output_queue_depth = 50;
+    std::size_t output_queue_depth = 8;
+    /** @brief 名义播放队列允许的最大延迟（毫秒）。 */
+    uint32_t maximum_playback_latency_ms = 500;
 };
 
 /** @brief 音频端口统计。 */
@@ -30,12 +32,17 @@ struct AudioPortStats {
     std::size_t played_frames = 0;
     /** @brief 拒绝的输出帧数。 */
     std::size_t rejected_output_frames = 0;
+    /** @brief 已在输出任务完成重采样的帧数。 */
+    std::size_t resampled_frames = 0;
     /** @brief 短读次数。 */
     std::size_t short_reads = 0;
     /** @brief 短写次数。 */
     std::size_t short_writes = 0;
     /** @brief 输入队列高水位。 */
     std::size_t input_high_watermark = 0;
+    /** @brief 实时上行 payload pool 高水位与即时获取失败次数。 */
+    std::size_t input_payload_pool_high_watermark = 0;
+    std::size_t input_payload_pool_acquisition_failures = 0;
     /** @brief 输出队列高水位。 */
     std::size_t output_high_watermark = 0;
     /** @brief 最小空闲堆字节数。 */
@@ -63,6 +70,9 @@ struct AudioPortStats {
     uint64_t output_i2s_errors = 0;
     /** @brief 当前生效的板端输出音量。 */
     uint8_t output_volume = 0;
+    /** @brief 仅测试 Profile：串口注入并通过输入队列的 PCM 帧与字节数。 */
+    uint64_t test_injected_input_frames = 0;
+    uint64_t test_injected_input_bytes = 0;
 };
 
 /**
@@ -71,7 +81,7 @@ struct AudioPortStats {
  * 共享所有者对全双工 Codec Profile 很重要：两个通道必须作为一个
  * 硬件资源统一初始化和释放。
  */
-class Esp32s3PcmAudioPorts final {
+class Esp32s3PcmAudioPorts final : public voice::TestAudioInjectionPort {
    public:
     /** @brief 功放请求回调（经板级仲裁，不得直接写 GPIO）。 */
     using AmplifierCallback = std::function<void(bool)>;
@@ -103,6 +113,16 @@ class Esp32s3PcmAudioPorts final {
     void SetOutputVolume(uint8_t volume);
     /** @brief 返回当前板端 PCM 播放音量。 @return 当前音量百分比。 */
     [[nodiscard]] uint8_t output_volume() const;
+    /** @brief 启用测试 PCM 注入并隔离物理麦克风上行。
+     * @param enabled 为 true 时接收测试 PCM。
+     * @return 状态切换成功返回 Ok。
+     */
+    Status SetTestInputEnabled(bool enabled) override;
+    /** @brief 经现有输入有界队列提交测试 PCM。
+     * @param frame 已协商格式的测试音频帧，调用方交出负载所有权。
+     * @return 入队成功返回 Ok。
+     */
+    Status InjectTestInput(voice::AudioFrame frame) override;
 
    private:
     /** @brief Pimpl 实现。 */

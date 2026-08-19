@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <vector>
+#include <memory>
 
 #include "voicelife/contracts/status.h"
 #include "voicelife/voice/voice_types.h"
@@ -27,9 +27,24 @@ class PcmFrameAssembler final {
      * @param hardware_period_ms 硬件 period 时长（毫秒）。
      */
     PcmFrameAssembler(voice::AudioFormat frame_format, uint16_t hardware_period_ms);
+    /** @brief 释放启动期申请的 PCM 缓冲。 */
+    ~PcmFrameAssembler();
+    /** @brief 禁止复制，避免重复释放预分配 PCM 缓冲。 */
+    PcmFrameAssembler(const PcmFrameAssembler&) = delete;
+    /** @brief 禁止复制赋值，避免重复释放预分配 PCM 缓冲。 */
+    PcmFrameAssembler& operator=(const PcmFrameAssembler&) = delete;
 
     /** @brief 校验帧格式与 period 参数是否合法。 @return 合法返回 Ok。 */
     [[nodiscard]] Status Validate() const;
+
+    /**
+     * @brief 校验并为一个完整传输帧预留有界缓存。
+     *
+     * 必须在采集任务启动前调用。该步骤会把内存分配从实时 Push 路径移出，
+     * 并将分配失败转换为状态码而不是异常。
+     * @return 准备成功返回 Ok。
+     */
+    Status Prepare();
 
     /** @brief 目标传输帧格式。 @return 帧格式引用。 */
     [[nodiscard]] const voice::AudioFormat& frame_format() const { return frame_format_; }
@@ -38,7 +53,15 @@ class PcmFrameAssembler final {
     [[nodiscard]] std::size_t frame_samples() const { return frame_samples_; }
 
     /** @brief 当前待组装的样本数。 @return 挂起样本数。 */
-    [[nodiscard]] std::size_t pending_samples() const { return pending_samples_.size(); }
+    [[nodiscard]] std::size_t pending_samples() const { return pending_size_; }
+    /** @brief 当前上行 pool 的峰值已占用槽位。
+     * @return 峰值已占用槽位数。
+     */
+    [[nodiscard]] std::size_t payload_pool_high_watermark() const;
+    /** @brief 当前上行 pool 未能即时获取 slot 的次数。
+     * @return 获取失败累计次数。
+     */
+    [[nodiscard]] std::size_t payload_pool_acquisition_failures() const;
 
     /**
      * @brief 推送逻辑 S16 样本。
@@ -59,7 +82,10 @@ class PcmFrameAssembler final {
     voice::AudioFormat frame_format_;
     uint16_t hardware_period_ms_ = 0;
     std::size_t frame_samples_ = 0;
-    std::vector<int16_t> pending_samples_;
+    int16_t* pending_samples_ = nullptr;
+    std::shared_ptr<voice::AudioPayloadPool> payload_pool_;
+    std::size_t pending_size_ = 0;
+    bool prepared_ = false;
 };
 
 }  // namespace voicelife::audio_esp

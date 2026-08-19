@@ -114,6 +114,11 @@ int main() {
     Check(gate.StopCapture().ok() && !gate.standby(), "停止待机检测应使后续中间阶段保持静音门控");
     Check(gate.StartStandby().ok() && gate.standby(), "重复回待机必须恢复检测");
     Check(detector.starts == 3 && physical.starts == 1, "重复待机切换不得创建重复物理采集任务");
+    gate.SuppressLocalWakeFor(10'000);
+    Check(physical.Emit(Frame()).ok() && detector.frames == 2 && forwarded == 1,
+          "终结播报余响窗口内的 PCM 不得送入本地检测器");
+    detector.Detect("ni hao niu niu");
+    Check(wake_events == 1, "终结播报余响窗口必须丢弃检测器中已完成但晚到的唤醒回调");
 
     gate.Close();
     Check(physical.stops == 1 && physical.closes == 1 && detector.stops == 2,

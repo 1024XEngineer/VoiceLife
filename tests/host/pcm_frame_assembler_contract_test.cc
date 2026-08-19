@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include "support/test_support.h"
@@ -27,6 +28,7 @@ int main() {
 
     PcmFrameAssembler assembler(Pcm(60), 10);
     Check(assembler.Validate().ok(), "60 ms 传输帧应能由 10 ms 硬件 period 组装");
+    Check(assembler.Prepare().ok(), "合法 PCM 组帧器必须能在采集前准备缓存");
     Check(assembler.frame_samples() == 960, "16 kHz 单声道 60 ms 应包含 960 个样本");
 
     std::vector<voicelife::voice::AudioFrame> frames;
@@ -45,10 +47,58 @@ int main() {
     Check(frames.front().format.frame_duration_ms == 60, "组帧不能改变协商帧时长");
     Check(assembler.pending_samples() == 0, "完整帧投递后不能残留样本");
 
+    PcmFrameAssembler segmented(Pcm(60), 10);
+    Check(segmented.Prepare().ok(), "分段 PCM 组帧器必须能在采集前准备缓存");
+    std::vector<voicelife::voice::AudioFrame> segmented_frames;
+    const PcmFrameAssembler::Sink segmented_sink = [&segmented_frames](voicelife::voice::AudioFrame frame) {
+        segmented_frames.push_back(std::move(frame));
+        return Status::Ok();
+    };
+    std::vector<std::int16_t> sequential(1920);
+    for (std::size_t i = 0; i < sequential.size(); ++i) {
+        sequential[i] = static_cast<std::int16_t>(i);
+    }
+    Check(segmented.Push(sequential.data(), 400, segmented_sink).ok(), "首段样本应暂存");
+    Check(segmented.Push(sequential.data() + 400, 800, segmented_sink).ok(), "跨帧第二段应完成首帧");
+    Check(segmented.pending_samples() == 240, "跨帧输入后的尾部样本必须保留");
+    Check(segmented.Push(sequential.data() + 1200, 720, segmented_sink).ok(), "第三段应完成第二帧");
+    Check(segmented_frames.size() == 2 && segmented.pending_samples() == 0, "分段输入必须产生两帧且不残留");
+    std::int16_t first_sample = 0;
+    std::int16_t last_first_frame_sample = 0;
+    std::int16_t first_second_frame_sample = 0;
+    std::memcpy(&first_sample, segmented_frames[0].payload.data(), sizeof(first_sample));
+    std::memcpy(&last_first_frame_sample, segmented_frames[0].payload.data() + 959 * sizeof(std::int16_t),
+                sizeof(last_first_frame_sample));
+    std::memcpy(&first_second_frame_sample, segmented_frames[1].payload.data(), sizeof(first_second_frame_sample));
+    Check(first_sample == 0 && last_first_frame_sample == 959 && first_second_frame_sample == 960,
+          "分段组帧不能改变 PCM 样本顺序");
+
+    PcmFrameAssembler pooled(Pcm(20), 10);
+    Check(pooled.Prepare().ok(), "实时 PCM 组帧器必须在采集前建立固定 payload pool");
+    std::vector<voicelife::voice::AudioFrame> retained_frames;
+    const PcmFrameAssembler::Sink retain_sink = [&retained_frames](voicelife::voice::AudioFrame frame) {
+        retained_frames.push_back(std::move(frame));
+        return Status::Ok();
+    };
+    for (int index = 0; index < 16; ++index) {
+        Check(pooled.Push(period.data(), period.size(), retain_sink).ok(), "固定 pool 容量内首个 period 必须被暂存");
+        Check(pooled.Push(period.data(), period.size(), retain_sink).ok(), "固定 pool 容量内必须交付完整 PCM 帧");
+    }
+    Check(pooled.payload_pool_high_watermark() == 16, "pool 高水位必须反映全部在途 PCM lease");
+    Check(pooled.Push(period.data(), period.size(), retain_sink).ok(), "耗尽前的首个 period 必须仍可被组装");
+    Check(pooled.Push(period.data(), period.size(), retain_sink).code == ErrorCode::kUnavailable,
+          "pool 耗尽时采集路径必须立即失败，不能退回堆分配或等待消费者");
+    Check(pooled.payload_pool_acquisition_failures() == 1, "pool 耗尽必须留下可观测计数");
+    retained_frames.erase(retained_frames.begin());
+    Check(pooled.Push(period.data(), period.size(), retain_sink).ok(), "释放后的首个 period 必须被组装");
+    Check(pooled.Push(period.data(), period.size(), retain_sink).ok(),
+          "异步消费者释放 lease 后必须能再次取得固定 pool slot");
+
     Check(assembler.Push(nullptr, 1, sink).code == ErrorCode::kInvalidArgument, "非零样本数不能搭配空指针");
     Check(assembler.Push(period.data(), period.size(), {}).code == ErrorCode::kInvalidArgument, "组帧必须拒绝空 sink");
 
     PcmFrameAssembler partial(Pcm(60), 10);
+    Check(partial.Prepare().ok(), "部分 PCM 组帧器必须能在采集前准备缓存");
     Check(partial.Push(period.data(), 80, sink).ok(), "半帧样本应暂存");
     Check(partial.pending_samples() == 80, "半帧样本必须保留在缓存中");
     partial.Reset();
@@ -62,8 +112,16 @@ int main() {
     invalid_samples.channels = 2;
     PcmFrameAssembler stereo(invalid_samples, 10);
     Check(stereo.Validate().ok(), "双声道 PCM 组帧格式应合法");
+    Check(stereo.Prepare().ok(), "双声道 PCM 组帧器必须能在采集前准备缓存");
     Check(stereo.Push(period.data(), 161, sink).code == ErrorCode::kInvalidArgument,
           "双声道组帧不能接受非整声道样本数");
+
+    auto oversized = Pcm(1000);
+    oversized.sample_rate_hz = UINT32_MAX;
+    PcmFrameAssembler oversized_assembler(oversized, 10);
+    Check(oversized_assembler.Validate().code == ErrorCode::kInvalidArgument,
+          "超过 AudioFrame 负载上限的远端协商格式必须在分配前拒绝");
+    Check(oversized_assembler.Prepare().code == ErrorCode::kInvalidArgument, "超大协商格式不能触发组帧缓存分配");
 
     const auto profile = voicelife::audio_esp::VoiceLifePcbEsp32s3Profile();
     Esp32s3PcmAudioPorts ports(profile);
@@ -74,6 +132,11 @@ int main() {
     Check(ports.input().Open(capture).code == ErrorCode::kUnavailable, "主机 Audio Port 不能伪造 ESP32-S3 采集已打开");
     Check(ports.output().Open(playback).code == ErrorCode::kUnavailable,
           "主机 Audio Port 不能伪造 ESP32-S3 播放已打开");
+    auto oversized_playback = playback;
+    oversized_playback.channels = 2;
+    oversized_playback.frame_duration_ms = UINT16_MAX;
+    Check(ports.output().Open(oversized_playback).code == ErrorCode::kInvalidArgument,
+          "超过 AudioFrame 负载上限的下行协商格式必须在 scratch 分配前拒绝");
     Check(ports.input().StartCapture(voicelife::voice::VoiceMode::kManual).code == ErrorCode::kUnavailable,
           "主机 Audio Port 不能伪造 ESP32-S3 采集已启动");
 

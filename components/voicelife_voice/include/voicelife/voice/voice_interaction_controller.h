@@ -20,6 +20,8 @@ enum class VoiceInteractionEvent {
     /** 触摸松开：结束手动聆听。 */
     kPressUp,
     kWakeDetected,
+    /** 打断确认已成功提交给 Provider：kInterrupting → kListening。 */
+    kInterruptAcknowledged,
     kCaptureStarted,
     /** VAD 检测到语音端点（说话结束）：发 listen.stop，等待最终 STT，不回待机。 */
     kEndpointDetected,
