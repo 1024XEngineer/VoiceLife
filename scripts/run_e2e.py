@@ -62,8 +62,10 @@ def _required_hil_option(args: argparse.Namespace, name: str) -> object:
 def build_adapter(layer: str, journey: str, args: argparse.Namespace | Path | None = None) -> object:
     artifact_directory = args.artifact_dir if isinstance(args, argparse.Namespace) else args
     hil_options = ("device", "lease_dir", "server", "server_dir", "gateway_origin", "user_id")
-    if journey != "im-pairing" and isinstance(args, argparse.Namespace) and any(
-        getattr(args, name) is not None for name in hil_options
+    if (
+        journey != "im-pairing"
+        and isinstance(args, argparse.Namespace)
+        and any(getattr(args, name) is not None for name in hil_options)
     ):
         raise ValueError("HIL options require the im-pairing journey")
     if journey == "im-pairing":
