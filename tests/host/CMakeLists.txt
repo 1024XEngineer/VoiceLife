@@ -281,6 +281,10 @@ add_voicelife_test(schedule_reminder_uncovered_branch_test "unit;schedule;timing
     schedule_reminder_uncovered_branch_test.cc)
 target_link_libraries(schedule_reminder_uncovered_branch_test PRIVATE schedule timing)
 
+add_voicelife_test(schedule_reminder_edge_cases_test "unit;schedule;timing;reminder"
+    schedule_reminder_edge_cases_test.cc)
+target_link_libraries(schedule_reminder_edge_cases_test PRIVATE schedule timing)
+
 add_voicelife_test(schedule_rule_service_test "unit;schedule" schedule_rule_service_test.cc)
 target_link_libraries(schedule_rule_service_test PRIVATE schedule)
 
