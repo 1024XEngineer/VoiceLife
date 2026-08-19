@@ -109,7 +109,16 @@ Status BindSchedule(SqliteStatement& statement, const schedule::Schedule& schedu
     if (!status.ok()) return status;
     status = WithField(statement.BindInt64(index++, schedule.created_at.time_since_epoch().count()), "created_at");
     if (!status.ok()) return status;
-    return WithField(statement.BindInt64(index, schedule.updated_at.time_since_epoch().count()), "updated_at");
+    status = WithField(statement.BindInt64(index++, schedule.updated_at.time_since_epoch().count()), "updated_at");
+    if (!status.ok()) return status;
+    status = WithField(statement.BindInt(index++, schedule.snooze_count), "snooze_count");
+    if (!status.ok()) return status;
+    status = BindOptionalInt64(statement, index++, schedule.repeat_task_id, "repeat_task_id");
+    if (!status.ok()) return status;
+    return BindOptionalInt64(statement, index, schedule.repeat_trigger_at.has_value()
+                                                     ? std::optional<int64_t>{schedule.repeat_trigger_at->time_since_epoch().count()}
+                                                     : std::nullopt,
+                             "repeat_trigger_at");
 }
 
 Result<schedule::Schedule> ReadSchedule(const SqliteStatement& statement) {
@@ -130,6 +139,9 @@ Result<schedule::Schedule> ReadSchedule(const SqliteStatement& statement) {
         .notes = ReadOptionalText(statement, 5),
         .rule_id = std::nullopt,
         .reminder_task_id = std::nullopt,
+        .snooze_count = statement.ColumnInt(11),
+        .repeat_task_id = std::nullopt,
+        .repeat_trigger_at = ReadOptionalTime(statement, 13),
         .status = static_cast<schedule::ScheduleStatus>(status_value),
         .created_at = schedule::DateTime{std::chrono::seconds{statement.ColumnInt64(9)}},
         .updated_at = schedule::DateTime{std::chrono::seconds{statement.ColumnInt64(10)}},
@@ -139,6 +151,9 @@ Result<schedule::Schedule> ReadSchedule(const SqliteStatement& statement) {
     }
     if (!statement.IsNull(7)) {
         schedule.reminder_task_id = statement.ColumnInt64(7);
+    }
+    if (!statement.IsNull(12)) {
+        schedule.repeat_task_id = statement.ColumnInt64(12);
     }
     return Result<schedule::Schedule>::Success(std::move(schedule));
 }

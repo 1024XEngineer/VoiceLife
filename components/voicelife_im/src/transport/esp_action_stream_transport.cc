@@ -27,6 +27,8 @@ EspActionStreamTransport::EspActionStreamTransport(std::string base_url, ImCrede
                                                    std::string reminder_trigger_id)
     : base_url_(std::move(base_url)), credentials_(credentials), reminder_trigger_id_(std::move(reminder_trigger_id)) {}
 
+void EspActionStreamTransport::SetStopCheck(std::function<bool()> check) { stop_check_ = std::move(check); }
+
 bool EspActionStreamTransport::Open(const std::string& last_event_id) {
     CloseConnection();
     if (!IsHttpsGatewayUrl(base_url_)) {
@@ -94,6 +96,11 @@ StreamRead EspActionStreamTransport::Next() {
         return {StreamReadStatus::kNetworkError, {}};
     }
     while (true) {
+        // 停止检查优先于一切：心跳使读取永不超时时，这是停止请求的必经之路。
+        if (stop_check_ && stop_check_()) {
+            CloseConnection();
+            return {StreamReadStatus::kNetworkError, {}};
+        }
         // 优先消费上次读取已解码但未取走的帧。
         while (!pending_.empty()) {
             SseFrame frame = std::move(pending_.front());

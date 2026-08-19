@@ -381,6 +381,37 @@ void TestFactoryFailureIsDegraded() {
           "Transport factory 失败不得留下半初始化上报通道");
 }
 
+void TestGatewayOriginAccessor() {
+    RuntimeFixture fixture;
+    Check(fixture.runtime.gateway_origin().empty(), "启动前不得暴露 Gateway origin");
+    Check(fixture.runtime.Start().ok() && fixture.runtime.state() == ImRuntimeState::kProbing,
+          "有效配置应进入探测阶段");
+    Check(fixture.runtime.gateway_origin() == "https://gateway.example",
+          "通过 HTTPS 校验后必须缓存 Gateway origin");
+    (void)fixture.runtime.ProbeGateway();
+    Check(fixture.runtime.state() == ImRuntimeState::kReady &&
+              fixture.runtime.gateway_origin() == "https://gateway.example",
+          "ready 后必须继续保留已校验 origin");
+
+    RuntimeFixture disabled;
+    disabled.config.result = Result<ImRuntimeConfig>::Success(
+        {.enabled = false, .gateway_origin = "https://gateway.example", .user_id = std::nullopt});
+    Check(disabled.runtime.Start().ok() && disabled.runtime.gateway_origin().empty(),
+          "disabled 配置不得缓存 origin");
+
+    RuntimeFixture invalid;
+    invalid.config.result = Result<ImRuntimeConfig>::Success(
+        {.enabled = true, .gateway_origin = "http://gateway.example", .user_id = "user-test"});
+    Check(invalid.runtime.Start().code == ErrorCode::kInvalidArgument && invalid.runtime.gateway_origin().empty(),
+          "未通过 HTTPS 校验的 origin 不得缓存");
+
+    RuntimeFixture no_network;
+    no_network.readiness.network_ready = false;
+    Check(no_network.runtime.Start().code == ErrorCode::kUnavailable &&
+              no_network.runtime.gateway_origin() == "https://gateway.example",
+          "origin 校验先于就绪检查，校验通过即应缓存");
+}
+
 void TestTrustedSystemTimeBoundary() {
     Check(!voicelife::im::IsTrustedSystemTime(0), "1970 默认 epoch 不得视为可信时间");
     Check(!voicelife::im::IsTrustedSystemTime(1704067199), "2024-01-01 前一秒不得视为可信时间");
@@ -471,6 +502,7 @@ int main() {
     TestArbitraryNotFoundResponseDoesNotMakeRuntimeReady();
     TestAuthenticatedNotFoundWithoutRetainedBodyMakesRuntimeReady();
     TestFactoryFailureIsDegraded();
+    TestGatewayOriginAccessor();
     TestTrustedSystemTimeBoundary();
     TestStoredConfigurationReadsSecretsOnlyWhenEnabled();
     TestStoredConfigurationFailsClosedOnMissingFields();

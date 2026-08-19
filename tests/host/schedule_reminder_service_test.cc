@@ -22,8 +22,10 @@ using voicelife::schedule::DateTime;
 using voicelife::schedule::Frequency;
 using voicelife::schedule::LocalDate;
 using voicelife::schedule::LocalTime;
+using voicelife::schedule::ReminderFireNotice;
 using voicelife::schedule::Schedule;
 using voicelife::schedule::ScheduleException;
+using voicelife::schedule::ScheduleReminderNotificationPort;
 using voicelife::schedule::ScheduleReminderService;
 using voicelife::schedule::ScheduleReminderSpeechPort;
 using voicelife::schedule::ScheduleRule;
@@ -56,6 +58,13 @@ class FakeSpeech final : public ScheduleReminderSpeechPort {
 
     Status next_status = Status::Ok();
     std::vector<std::string> texts;
+};
+
+class FakeNotificationPort final : public ScheduleReminderNotificationPort {
+   public:
+    void NotifyReminderFired(const ReminderFireNotice& notice) override { notices.push_back(notice); }
+
+    std::vector<ReminderFireNotice> notices;
 };
 
 class ScriptedTimingService final : public voicelife::timing::TimingTaskService {
@@ -194,7 +203,7 @@ class FakeRuleRepository final : public voicelife::schedule::ScheduleRuleReposit
 Schedule MakeSchedule(int64_t id, std::string event, std::optional<DateTime> start,
                       std::optional<ScheduleRuleId> rule_id = std::nullopt,
                       std::optional<int64_t> reminder_task_id = std::nullopt,
-                      ScheduleStatus status = ScheduleStatus::kActive) {
+                      ScheduleStatus status = ScheduleStatus::kActive, int32_t snooze_count = 0) {
     return {
         .id = id,
         .event = std::move(event),
@@ -204,6 +213,7 @@ Schedule MakeSchedule(int64_t id, std::string event, std::optional<DateTime> sta
         .notes = std::nullopt,
         .rule_id = rule_id,
         .reminder_task_id = reminder_task_id,
+        .snooze_count = snooze_count,
         .status = status,
         .created_at = At(900),
         .updated_at = At(900),
@@ -240,7 +250,8 @@ struct Fixture {
           rule_service(rules, exceptions, repository),
           schedule_service(repository),
           now(current),
-          reminder(repository, schedule_service, rule_service, timing, speech, [this]() { return now; }) {}
+          reminder(repository, schedule_service, rule_service, timing, speech, [this]() { return now; },
+                  &notification) {}
 
     InMemoryScheduleRepository repository;
     FakeExceptionRepository exceptions;
@@ -250,6 +261,7 @@ struct Fixture {
     InMemoryTimingTaskRunner timing;
     FakeSpeech speech;
     DateTime now;
+    FakeNotificationPort notification;
     ScheduleReminderService reminder;
 };
 
@@ -260,7 +272,8 @@ struct ScriptedFixture {
           rule_service(rules, exceptions, repository),
           schedule_service(repository),
           now(current),
-          reminder(repository, schedule_service, rule_service, timing, speech, [this]() { return now; }) {}
+          reminder(repository, schedule_service, rule_service, timing, speech, [this]() { return now; },
+                  &notification) {}
 
     InMemoryScheduleRepository repository;
     FakeExceptionRepository exceptions;
@@ -270,6 +283,7 @@ struct ScriptedFixture {
     ScriptedTimingService timing;
     FakeSpeech speech;
     DateTime now;
+    FakeNotificationPort notification;
     ScheduleReminderService reminder;
 };
 
@@ -704,6 +718,297 @@ void CheckSuspendRetryTaskUnavailable() {
     Check(!fixture.reminder.SuspendRuleReminders(13).ok(), "撤销重试取消命令不可用时应返回错误");
 }
 
+void CheckSnoozeSuccessAndRepeatFires() {
+    Fixture fixture({MakeSchedule(1, "可推迟提醒", At(1'100))});
+    Check(fixture.reminder.Start().ok(), "推迟测试应启动服务");
+    fixture.timing.ProcessPendingCommands(Trigger(1'000));
+    fixture.now = At(1'100);
+    const int64_t first_task_id = *fixture.repository.FindById(1).value->reminder_task_id;
+
+    fixture.timing.RunDueTasks(Trigger(1'100));
+    Check(fixture.speech.texts.size() == 1, "首轮应播报一次");
+    Check(fixture.notification.notices.size() == 1 &&
+              fixture.notification.notices.front().task_id == first_task_id &&
+              fixture.notification.notices.front().event == "可推迟提醒" &&
+              fixture.notification.notices.front().trigger_time == At(1'100),
+          "首轮触发应通知端口且计划时间为开始时间");
+
+    const auto snoozed = fixture.reminder.SnoozeScheduleReminder(1);
+    Check(snoozed.ok() && *snoozed.value == At(1'700), "推迟应返回十分钟后的触发时间");
+    fixture.timing.ProcessPendingCommands(Trigger(1'101));
+    const auto stored = fixture.repository.FindById(1);
+    Check(stored.ok() && stored.value->snooze_count == 1 && stored.value->repeat_task_id.has_value() &&
+              stored.value->repeat_trigger_at == At(1'700),
+          "推迟后应持久化次数与重复提醒信息");
+    Check(fixture.timing.NextWakeAt() == Trigger(1'700), "重复提醒应在十分钟后到点");
+
+    const int64_t repeat_task_id = *stored.value->repeat_task_id;
+    fixture.timing.RunDueTasks(Trigger(1'700));
+    Check(fixture.speech.texts.size() == 2 && fixture.speech.texts.back() == "提醒：现在是「可推迟提醒」时间了",
+          "重复提醒应再次播报同一文案");
+    const auto fired = fixture.repository.FindById(1);
+    Check(fired.ok() && !fired.value->repeat_task_id.has_value() && !fired.value->repeat_trigger_at.has_value() &&
+              fired.value->snooze_count == 1,
+          "重复提醒触发后应清空重复任务但保留推迟次数");
+    Check(fired.value->status == ScheduleStatus::kCompleted, "重复提醒不应改变日程完成状态");
+    Check(fixture.notification.notices.size() == 2 &&
+              fixture.notification.notices.back().task_id == repeat_task_id &&
+              fixture.notification.notices.back().trigger_time == At(1'700),
+          "重复提醒应通知端口且计划时间为推迟触发时间");
+}
+
+void CheckSnoozeLimitRejected() {
+    ScriptedFixture fixture(
+        {MakeSchedule(1, "推迟上限", At(1'100), std::nullopt, std::nullopt, ScheduleStatus::kCompleted, 3)});
+    Check(fixture.reminder.Start().ok(), "推迟上限测试应启动服务");
+    const auto rejected = fixture.reminder.SnoozeScheduleReminder(1);
+    Check(!rejected.ok() && rejected.status.code == ErrorCode::kConflict, "达到上限后推迟应被拒绝");
+    Check(fixture.repository.FindById(1).value->snooze_count == 3, "拒绝后次数应保持为三");
+    Check(fixture.timing.register_commands.empty(), "拒绝后不应提交新注册命令");
+    Check(fixture.timing.cancel_commands.empty(), "拒绝后不应提交取消命令");
+}
+
+void CheckSnoozeReplacesOldRepeat() {
+    Fixture fixture({MakeSchedule(1, "连续推迟", At(1'100))});
+    Check(fixture.reminder.Start().ok(), "连续推迟测试应启动服务");
+    fixture.timing.ProcessPendingCommands(Trigger(1'000));
+    fixture.now = At(1'100);
+    fixture.timing.RunDueTasks(Trigger(1'100));
+
+    const auto first = fixture.reminder.SnoozeScheduleReminder(1);
+    Check(first.ok() && *first.value == At(1'700), "第一次推迟应返回十分钟后");
+    fixture.timing.ProcessPendingCommands(Trigger(1'101));
+    const int64_t first_repeat = *fixture.repository.FindById(1).value->repeat_task_id;
+
+    fixture.now = At(1'150);
+    const auto second = fixture.reminder.SnoozeScheduleReminder(1);
+    Check(second.ok() && *second.value == At(1'750), "第二次推迟应替换原重复提醒");
+    fixture.timing.ProcessPendingCommands(Trigger(1'151));
+    const auto stored = fixture.repository.FindById(1);
+    Check(stored.ok() && stored.value->snooze_count == 2 && *stored.value->repeat_task_id != first_repeat &&
+              stored.value->repeat_trigger_at == At(1'750),
+          "第二次推迟应递增次数并替换重复任务");
+    Check(fixture.timing.NextWakeAt() == Trigger(1'750), "旧重复任务取消后只应保留新触发时间");
+    Check(fixture.timing.RunDueTasks(Trigger(1'700)).processed_count == 0, "旧重复任务取消后不应在旧时间触发");
+    Check(fixture.timing.RunDueTasks(Trigger(1'750)).processed_count == 1, "新重复任务应在替换后时间触发");
+    Check(fixture.speech.texts.size() == 2, "首轮与最终有效的重复提醒应共播报两次");
+}
+
+void CheckAcknowledgeClearsRepeat() {
+    Fixture fixture({MakeSchedule(1, "确认提醒", At(1'100))});
+    Check(fixture.reminder.Start().ok(), "确认测试应启动服务");
+    fixture.timing.ProcessPendingCommands(Trigger(1'000));
+    fixture.now = At(1'100);
+    fixture.timing.RunDueTasks(Trigger(1'100));
+    const auto snoozed = fixture.reminder.SnoozeScheduleReminder(1);
+    Check(snoozed.ok(), "确认前应能推迟一次");
+    fixture.timing.ProcessPendingCommands(Trigger(1'101));
+
+    Check(fixture.reminder.AcknowledgeScheduleReminder(1).ok(), "确认提醒应成功");
+    fixture.timing.ProcessPendingCommands(Trigger(1'102));
+    const auto stored = fixture.repository.FindById(1);
+    Check(stored.ok() && !stored.value->repeat_task_id.has_value() && !stored.value->repeat_trigger_at.has_value() &&
+              stored.value->snooze_count == 0,
+          "确认后应清空重复任务与推迟次数");
+    Check(!fixture.timing.NextWakeAt().has_value(), "确认后不应保留待触发的重复提醒");
+
+    Check(fixture.reminder.AcknowledgeScheduleReminder(1).ok(), "无推迟状态时确认应幂等成功");
+}
+
+void CheckPrimaryNotificationOnSpeechFailure() {
+    Fixture fixture({MakeSchedule(1, "失败通知", At(1'100))});
+    fixture.speech.next_status = Status::Error(ErrorCode::kUnavailable, "TTS 不可用");
+    Check(fixture.reminder.Start().ok(), "失败通知测试应启动服务");
+    fixture.timing.ProcessPendingCommands(Trigger(1'000));
+    const int64_t task_id = *fixture.repository.FindById(1).value->reminder_task_id;
+    fixture.timing.RunDueTasks(Trigger(1'100));
+    Check(fixture.notification.notices.size() == 1 && fixture.notification.notices.front().task_id == task_id &&
+              fixture.notification.notices.front().trigger_time == At(1'100),
+          "语音失败时仍应通知端口");
+    Check(fixture.repository.FindById(1).value->status == ScheduleStatus::kActive, "语音失败不应改变日程状态");
+}
+
+void CheckSnoozeAndAcknowledgeInvalidStates() {
+    ScriptedFixture fixture(
+        {MakeSchedule(1, "已取消推迟", At(1'100), std::nullopt, std::nullopt, ScheduleStatus::kCancelled)});
+    Check(!fixture.reminder.SnoozeScheduleReminder(1).ok(), "未启动时推迟应返回不可用");
+    Check(!fixture.reminder.AcknowledgeScheduleReminder(1).ok(), "未启动时确认应返回不可用");
+    Check(fixture.reminder.Start().ok(), "非法状态测试应启动服务");
+
+    const auto cancelled = fixture.reminder.SnoozeScheduleReminder(1);
+    Check(!cancelled.ok() && cancelled.status.code == ErrorCode::kConflict, "已取消日程的推迟应返回冲突");
+    Check(!fixture.reminder.SnoozeScheduleReminder(999).ok(), "推迟不存在日程应返回仓储错误");
+    Check(!fixture.reminder.AcknowledgeScheduleReminder(999).ok(), "确认不存在日程应返回仓储错误");
+}
+
+void CheckStartRestoresRepeat() {
+    Fixture future_fixture(
+        {MakeSchedule(1, "恢复重复", At(1'100), std::nullopt, std::nullopt, ScheduleStatus::kCompleted, 2)});
+    future_fixture.repository.Update([&] {
+        Schedule schedule = *future_fixture.repository.FindById(1).value;
+        schedule.repeat_task_id = 100'005;
+        schedule.repeat_trigger_at = At(1'500);
+        return schedule;
+    }());
+    Check(future_fixture.reminder.Start().ok(), "未来重复提醒恢复应成功");
+    future_fixture.timing.ProcessPendingCommands(Trigger(1'001));
+    Check(future_fixture.timing.NextWakeAt() == Trigger(1'500), "未来重复提醒应重新注册");
+    future_fixture.now = At(1'500);
+    future_fixture.timing.RunDueTasks(Trigger(1'500));
+    Check(future_fixture.speech.texts.size() == 1, "恢复的重复提醒到点应播报");
+    const auto fired = future_fixture.repository.FindById(1);
+    Check(fired.ok() && !fired.value->repeat_task_id.has_value() && fired.value->snooze_count == 2,
+          "恢复的重复提醒触发后应清空字段并保留次数");
+    Check(future_fixture.notification.notices.size() == 1 &&
+              future_fixture.notification.notices.front().trigger_time == At(1'500),
+          "恢复的重复提醒触发应通知端口");
+
+    Fixture expired_fixture(
+        {MakeSchedule(2, "过期重复", At(1'100), std::nullopt, std::nullopt, ScheduleStatus::kCompleted, 1)});
+    expired_fixture.repository.Update([&] {
+        Schedule schedule = *expired_fixture.repository.FindById(2).value;
+        schedule.repeat_task_id = 100'006;
+        schedule.repeat_trigger_at = At(900);
+        return schedule;
+    }());
+    Check(expired_fixture.reminder.Start().ok(), "过期重复提醒启动应成功");
+    expired_fixture.timing.ProcessPendingCommands(Trigger(1'001));
+    Check(!expired_fixture.timing.NextWakeAt().has_value(), "过期重复提醒不应重新注册");
+    const auto expired = expired_fixture.repository.FindById(2);
+    Check(expired.ok() && !expired.value->repeat_task_id.has_value() && !expired.value->repeat_trigger_at.has_value() &&
+              expired.value->snooze_count == 0,
+          "过期重复提醒应被丢弃并清空字段");
+
+    Fixture cancelled_fixture(
+        {MakeSchedule(3, "取消重复", At(1'100), std::nullopt, std::nullopt, ScheduleStatus::kCancelled, 1)});
+    cancelled_fixture.repository.Update([&] {
+        Schedule schedule = *cancelled_fixture.repository.FindById(3).value;
+        schedule.repeat_task_id = 100'007;
+        schedule.repeat_trigger_at = At(1'500);
+        return schedule;
+    }());
+    Check(cancelled_fixture.reminder.Start().ok(), "已取消日程的重复提醒启动应成功");
+    cancelled_fixture.timing.ProcessPendingCommands(Trigger(1'001));
+    Check(!cancelled_fixture.timing.NextWakeAt().has_value(), "已取消日程的重复提醒不应重新注册");
+    const auto cancelled = cancelled_fixture.repository.FindById(3);
+    Check(cancelled.ok() && !cancelled.value->repeat_task_id.has_value() && !cancelled.value->repeat_trigger_at.has_value(),
+          "已取消日程的重复状态应被清理");
+}
+
+void CheckSynchronizeCancelSuspendClearRepeat() {
+    ScriptedFixture sync_fixture({MakeSchedule(1, "同步清空", At(1'100))});
+    sync_fixture.repository.Update([&] {
+        Schedule schedule = *sync_fixture.repository.FindById(1).value;
+        schedule.repeat_task_id = 7'007;
+        schedule.repeat_trigger_at = At(1'500);
+        schedule.snooze_count = 2;
+        return schedule;
+    }());
+    Check(sync_fixture.reminder.Start().ok(), "同步清空测试应启动服务");
+    const auto synced = sync_fixture.repository.FindById(1);
+    Check(synced.ok() && !synced.value->repeat_task_id.has_value() && !synced.value->repeat_trigger_at.has_value() &&
+              synced.value->snooze_count == 0,
+          "启动同步应清空 Active 日程的重复状态");
+
+    ScriptedFixture cancel_fixture({MakeSchedule(2, "取消清空", At(1'200))});
+    cancel_fixture.repository.Update([&] {
+        Schedule schedule = *cancel_fixture.repository.FindById(2).value;
+        schedule.repeat_task_id = 7'008;
+        schedule.repeat_trigger_at = At(1'500);
+        schedule.snooze_count = 1;
+        return schedule;
+    }());
+    Check(cancel_fixture.reminder.Start().ok(), "取消清空测试应启动服务");
+    Check(cancel_fixture.reminder.CancelScheduleReminder(2).ok(), "取消日程提醒应成功");
+    const auto cancelled = cancel_fixture.repository.FindById(2);
+    Check(cancelled.ok() && !cancelled.value->repeat_task_id.has_value() && !cancelled.value->repeat_trigger_at.has_value() &&
+              cancelled.value->snooze_count == 0 && !cancelled.value->reminder_task_id.has_value(),
+          "取消日程提醒应清空重复状态与提醒任务");
+
+    ScriptedFixture suspend_fixture({MakeSchedule(3, "撤销清空", At(1'300), 21)});
+    suspend_fixture.repository.Update([&] {
+        Schedule schedule = *suspend_fixture.repository.FindById(3).value;
+        schedule.repeat_task_id = 7'009;
+        schedule.repeat_trigger_at = At(1'500);
+        schedule.snooze_count = 2;
+        return schedule;
+    }());
+    suspend_fixture.rules.rules.push_back(DailyRule(21));
+    Check(suspend_fixture.reminder.Start().ok(), "撤销清空测试应启动服务");
+    Check(suspend_fixture.reminder.SuspendRuleReminders(21).ok(), "撤销规则提醒应成功");
+    const auto suspended = suspend_fixture.repository.FindById(3);
+    Check(suspended.ok() && !suspended.value->repeat_task_id.has_value() &&
+              !suspended.value->repeat_trigger_at.has_value() && suspended.value->snooze_count == 0 &&
+              !suspended.value->reminder_task_id.has_value(),
+          "撤销规则提醒应清空实例的重复状态与提醒任务");
+
+    Fixture stop_fixture({MakeSchedule(4, "停止清空", At(1'100))});
+    Check(stop_fixture.reminder.Start().ok(), "停止清空测试应启动服务");
+    stop_fixture.timing.ProcessPendingCommands(Trigger(1'000));
+    stop_fixture.now = At(1'100);
+    stop_fixture.timing.RunDueTasks(Trigger(1'100));
+    Check(stop_fixture.reminder.SnoozeScheduleReminder(4).ok(), "停止前应能推迟");
+    stop_fixture.timing.ProcessPendingCommands(Trigger(1'101));
+    Check(stop_fixture.timing.NextWakeAt().has_value(), "推迟后应有待触发重复提醒");
+    stop_fixture.reminder.Stop();
+    stop_fixture.timing.ProcessPendingCommands(Trigger(1'102));
+    Check(!stop_fixture.timing.NextWakeAt().has_value(), "停止应取消重复提醒任务");
+}
+
+void CheckSnoozeRollbackOnUnavailable() {
+    ScriptedFixture fixture({MakeSchedule(1, "回滚推迟", At(1'100))});
+    Check(fixture.reminder.Start().ok(), "回滚测试应启动服务");
+    fixture.now = At(1'100);
+    fixture.timing.register_acceptance = CommandAcceptance::kUnavailable;
+    const auto rejected = fixture.reminder.SnoozeScheduleReminder(1);
+    Check(!rejected.ok() && rejected.status.code == ErrorCode::kUnavailable, "注册不可用时推迟应返回不可用");
+    const auto stored = fixture.repository.FindById(1);
+    Check(stored.ok() && stored.value->snooze_count == 0 && !stored.value->repeat_task_id.has_value() &&
+              !stored.value->repeat_trigger_at.has_value(),
+          "注册不可用时应回滚推迟次数与重复字段");
+
+    ScriptedFixture duplicate_fixture({MakeSchedule(2, "重复推迟", At(1'100))});
+    duplicate_fixture.timing.report_register_result = true;
+    duplicate_fixture.timing.register_result = RegisterTaskResult::kDuplicate;
+    Check(duplicate_fixture.reminder.Start().ok(), "重复注册测试应启动服务");
+    duplicate_fixture.now = At(1'100);
+    const auto duplicated = duplicate_fixture.reminder.SnoozeScheduleReminder(2);
+    Check(duplicated.ok(), "注册结果重复不应使推迟失败");
+    const auto dup_stored = duplicate_fixture.repository.FindById(2);
+    Check(dup_stored.ok() && !dup_stored.value->repeat_task_id.has_value() &&
+              !dup_stored.value->repeat_trigger_at.has_value() && dup_stored.value->snooze_count == 1,
+          "注册结果重复时应清空重复任务字段但保留次数");
+}
+
+void CheckRepeatCallbackGuards() {
+    ScriptedFixture fixture({MakeSchedule(1, "重复回调", At(1'100))});
+    Check(fixture.reminder.Start().ok(), "重复回调测试应启动服务");
+    fixture.now = At(1'100);
+    const auto snoozed = fixture.reminder.SnoozeScheduleReminder(1);
+    Check(snoozed.ok(), "回调守卫测试应能推迟");
+    const RegisterTaskCommand& repeat = fixture.timing.register_commands.back();
+    const auto repeat_id = voicelife::timing::TaskId::Create(repeat.task_id.Value());
+    const int64_t repeat_value = *fixture.repository.FindById(1).value->repeat_task_id;
+
+    const auto wrong_repeat = voicelife::timing::TaskId::Create("999");
+    repeat.callback(*wrong_repeat, Trigger(1'200));
+    Check(fixture.speech.texts.empty(), "不匹配的重复回调不应播报");
+    Check(fixture.repository.FindById(1).value->repeat_task_id == repeat_value, "不匹配回调不应清空重复字段");
+
+    fixture.repository.Update([&] {
+        Schedule schedule = *fixture.repository.FindById(1).value;
+        schedule.status = ScheduleStatus::kCancelled;
+        return schedule;
+    }());
+    repeat.callback(*repeat_id, Trigger(1'200));
+    Check(fixture.speech.texts.empty(), "日程取消后重复回调不应播报");
+    Check(fixture.repository.FindById(1).value->repeat_task_id == repeat_value, "日程取消后重复字段应保留");
+
+    fixture.reminder.Stop();
+    repeat.callback(*repeat_id, Trigger(1'200));
+    Check(fixture.speech.texts.empty(), "停止后重复回调不应播报");
+}
+
 }  // namespace
 
 int main() {
@@ -726,5 +1031,15 @@ int main() {
     CheckGenerationRetryUnavailableAndStopCancelsRetry();
     CheckGenerationRetryDuplicateAndStaleCallbacks();
     CheckSuspendRetryTaskUnavailable();
+    CheckSnoozeSuccessAndRepeatFires();
+    CheckSnoozeLimitRejected();
+    CheckSnoozeReplacesOldRepeat();
+    CheckAcknowledgeClearsRepeat();
+    CheckPrimaryNotificationOnSpeechFailure();
+    CheckSnoozeAndAcknowledgeInvalidStates();
+    CheckStartRestoresRepeat();
+    CheckSynchronizeCancelSuspendClearRepeat();
+    CheckSnoozeRollbackOnUnavailable();
+    CheckRepeatCallbackGuards();
     return 0;
 }

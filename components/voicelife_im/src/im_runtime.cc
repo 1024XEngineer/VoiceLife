@@ -60,6 +60,8 @@ Status ImRuntime::Start() {
         start_status_ = Status::Error(ErrorCode::kInvalidArgument, "IM Gateway origin 必须是安全的 HTTPS origin");
         return start_status_;
     }
+    // 校验通过后缓存 origin，供下游（如动作流传输）在无配置依赖下复用。
+    gateway_origin_ = config.value->gateway_origin;
     user_id_ = config.value->user_id;
     const std::string device_id = credentials_.DeviceId();
     std::string device_token = credentials_.DeviceToken();

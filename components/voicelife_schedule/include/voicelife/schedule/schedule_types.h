@@ -41,6 +41,12 @@ struct Schedule {
     std::optional<ScheduleId> rule_id;
     /// 当前已注册的一次性提醒任务标识；仅由 ScheduleReminderService 维护。
     std::optional<int64_t> reminder_task_id;
+    /// 已接受的推迟次数（0..3）；仅由 ScheduleReminderService 维护。
+    int32_t snooze_count = 0;
+    /// 当前已注册的推迟重复提醒任务标识；仅由 ScheduleReminderService 维护。
+    std::optional<int64_t> repeat_task_id;
+    /// 推迟重复提醒的计划触发时间；设备重启后恢复使用。仅由 ScheduleReminderService 维护。
+    std::optional<DateTime> repeat_trigger_at;
     ScheduleStatus status = ScheduleStatus::kActive;
     DateTime created_at;
     DateTime updated_at;

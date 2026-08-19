@@ -69,12 +69,24 @@ void CheckVersionOneSchema(const std::filesystem::path& path) {
     Check(version.ok() && *version.value == VoiceLifeSchema::kCurrentVersion, "数据库应记录当前产品 Schema 版本");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schedule'") == 1,
           "版本一应创建日程实例表");
-    Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule')") == 11,
-          "日程实例表应包含提醒任务标识在内的十一个字段");
+    Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule')") == 14,
+          "日程实例表应包含推迟状态在内的十四个字段");
     Check(ScalarInt64(database,
                       "SELECT COUNT(*) FROM pragma_table_info('schedule') "
                       "WHERE name='reminder_task_id' AND type='INTEGER'") == 1,
           "版本五应增加可空 INTEGER reminder_task_id 字段");
+    Check(ScalarInt64(database,
+                      "SELECT COUNT(*) FROM pragma_table_info('schedule') "
+                      "WHERE name='snooze_count' AND type='INTEGER' AND \"notnull\"=1 AND dflt_value='0'") == 1,
+          "版本六应增加非空且默认零的 INTEGER snooze_count 字段");
+    Check(ScalarInt64(database,
+                      "SELECT COUNT(*) FROM pragma_table_info('schedule') "
+                      "WHERE name='repeat_task_id' AND type='INTEGER' AND \"notnull\"=0") == 1,
+          "版本六应增加可空 INTEGER repeat_task_id 字段");
+    Check(ScalarInt64(database,
+                      "SELECT COUNT(*) FROM pragma_table_info('schedule') "
+                      "WHERE name='repeat_trigger_at' AND type='INTEGER' AND \"notnull\"=0") == 1,
+          "版本六应增加可空 INTEGER repeat_trigger_at 字段");
 
     {
         auto foreign_keys = database.Prepare("PRAGMA foreign_key_list(schedule)");

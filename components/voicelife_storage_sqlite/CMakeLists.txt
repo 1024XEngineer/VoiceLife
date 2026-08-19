@@ -11,6 +11,7 @@ if(CONFIG_VOICELIFE_STORAGE_SQLITE)
         "src/schema/migrations/v003_create_schedule_rule.cc"
         "src/schema/migrations/v004_create_operation_record.cc"
         "src/schema/migrations/v005_add_schedule_reminder_task_id.cc"
+        "src/schema/migrations/v006_add_schedule_snooze_state.cc"
         "src/schema/sqlite_schema.cc"
         "src/schema/voicelife_schema.cc"
         "src/sql/operation_sql.cc"

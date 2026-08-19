@@ -91,6 +91,10 @@ add_voicelife_library(schedule voicelife_schedule
     "${ROOT_DIR}/components/voicelife_schedule/src/helpers/schedule_update_helpers.cc")
 target_include_directories(schedule PRIVATE "${ROOT_DIR}/components/voicelife_schedule/src")
 target_link_libraries(schedule PUBLIC contracts timing Threads::Threads)
+add_voicelife_library(reminder_im voicelife_reminder_im
+    "${ROOT_DIR}/components/voicelife_reminder_im/src/im_reminder_bridge.cc")
+target_link_libraries(reminder_im PUBLIC im schedule contracts)
+target_link_libraries(reminder_im PRIVATE Threads::Threads)
 add_voicelife_library(timing_esp voicelife_timing_esp
     "${ROOT_DIR}/components/voicelife_timing_esp/src/esp_timing_runtime.cc")
 target_link_libraries(timing_esp PUBLIC timing contracts)
@@ -127,6 +131,7 @@ add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v003_create_schedule_rule.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v004_create_operation_record.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v005_add_schedule_reminder_task_id.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v006_add_schedule_snooze_state.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/sqlite_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/voicelife_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/operation_sql.cc"
@@ -457,6 +462,10 @@ target_link_libraries(mcp_worker_policy_test PRIVATE im)
 
 add_voicelife_test(im_runtime_test "unit;im;runtime" im_runtime_test.cc)
 target_link_libraries(im_runtime_test PRIVATE im contracts)
+
+add_voicelife_test(im_reminder_bridge_test "unit;im;reminder" im_reminder_bridge_test.cc)
+target_link_libraries(im_reminder_bridge_test PRIVATE reminder_im im schedule contracts)
+target_compile_definitions(im_reminder_bridge_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
 
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)

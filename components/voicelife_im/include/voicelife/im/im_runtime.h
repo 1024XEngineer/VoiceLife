@@ -126,6 +126,12 @@ class ImRuntime {
     /** @brief 返回已验证的设备标识。 @return 不包含 Token 的 deviceId。 */
     [[nodiscard]] const std::string& device_id() const { return device_id_; }
 
+    /**
+     * @brief 返回通过 HTTPS 校验并缓存的 Gateway origin。
+     * @return Start 校验通过后的 origin；disabled/未配置/校验失败时为空字符串。
+     */
+    [[nodiscard]] const std::string& gateway_origin() const { return gateway_origin_; }
+
    private:
     ImConfigProvider& config_;
     ImCredentialProvider& credentials_;
@@ -138,6 +144,7 @@ class ImRuntime {
     std::unique_ptr<ImPairingClient> pairing_;
     std::optional<std::string> user_id_;
     std::string device_id_;
+    std::string gateway_origin_;
 };
 
 }  // namespace voicelife::im

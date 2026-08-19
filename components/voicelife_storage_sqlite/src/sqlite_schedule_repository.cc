@@ -298,7 +298,7 @@ Status SqliteScheduleRepository::Update(const Schedule& schedule) {
     SqliteStatement statement = std::move(*prepared.value);
     Status status = mapping::BindSchedule(statement, schedule);
     if (!status.ok()) return status;
-    status = statement.BindInt64(11, schedule.id);
+    status = statement.BindInt64(14, schedule.id);
     if (!status.ok()) return status;
     const Result<SqliteStep> stepped = statement.Step();
     if (!stepped.ok()) return stepped.status;

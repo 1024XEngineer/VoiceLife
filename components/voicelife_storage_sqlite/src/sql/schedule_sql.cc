@@ -7,33 +7,37 @@ namespace voicelife::storage_sqlite::sql {
 const char kInsertSchedule[] = R"sql(
 INSERT INTO schedule (
     event, start_time, end_time, location, notes, rule_id, reminder_task_id,
-    status, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    status, created_at, updated_at, snooze_count, repeat_task_id, repeat_trigger_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 )sql";
 
 const char kFindAllSchedules[] = R"sql(
 SELECT id, event, start_time, end_time, location, notes, rule_id,
-       reminder_task_id, status, created_at, updated_at
+       reminder_task_id, status, created_at, updated_at, snooze_count,
+       repeat_task_id, repeat_trigger_at
 FROM schedule
 ORDER BY start_time IS NULL, start_time, id
 )sql";
 
 const char kUpdateSchedule[] = R"sql(
 UPDATE schedule SET event = ?, start_time = ?, end_time = ?, location = ?, notes = ?,
-rule_id = ?, reminder_task_id = ?, status = ?, created_at = ?, updated_at = ? WHERE id = ?
+rule_id = ?, reminder_task_id = ?, status = ?, created_at = ?, updated_at = ?,
+snooze_count = ?, repeat_task_id = ?, repeat_trigger_at = ? WHERE id = ?
 )sql";
 
 const char kCancelSchedule[] = "UPDATE schedule SET status = 2, updated_at = ? WHERE id = ? AND status <> 2";
 
 const char kFindScheduleById[] = R"sql(
 SELECT id, event, start_time, end_time, location, notes, rule_id,
-       reminder_task_id, status, created_at, updated_at
+       reminder_task_id, status, created_at, updated_at, snooze_count,
+       repeat_task_id, repeat_trigger_at
 FROM schedule WHERE id = ?
 )sql";
 
 const char kFindOverlappingSchedules[] = R"sql(
 SELECT id, event, start_time, end_time, location, notes, rule_id,
-       reminder_task_id, status, created_at, updated_at
+       reminder_task_id, status, created_at, updated_at, snooze_count,
+       repeat_task_id, repeat_trigger_at
 FROM schedule
 WHERE status = 1
   AND start_time IS NOT NULL
@@ -58,7 +62,8 @@ std::string BuildScheduleFindSql(const schedule::QueryScheduleCommand& query) {
     (void)query;
     return R"sql(
 SELECT id, event, start_time, end_time, location, notes, rule_id,
-       reminder_task_id, status, created_at, updated_at
+       reminder_task_id, status, created_at, updated_at, snooze_count,
+       repeat_task_id, repeat_trigger_at
 FROM schedule
 )sql" + BuildScheduleWhere() +
            R"sql(

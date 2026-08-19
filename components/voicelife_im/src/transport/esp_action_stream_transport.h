@@ -1,6 +1,7 @@
 #pragma once
 
 #include <deque>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -32,12 +33,22 @@ class EspActionStreamTransport : public ImActionCommandStream {
     StreamRead Next() override;
     void Close() override;
 
+    /**
+     * @brief 设置停止检查回调。
+     *
+     * 网关心跳使 Next 的阻塞读取永不超时；设置后每次读取前检查，命中时
+     * 关闭连接并返回网络错误，使停止延迟有界（不超过一次读取）。可为空清除检查。
+     * @param check 返回 true 表示应停止读取并断开连接。
+     */
+    void SetStopCheck(std::function<bool()> check);
+
    private:
     void CloseConnection();
 
     std::string base_url_;
     ImCredentialProvider& credentials_;
     std::string reminder_trigger_id_;
+    std::function<bool()> stop_check_;
     esp_http_client_handle_t client_ = nullptr;
     SseDecoder decoder_;
     std::deque<SseFrame> pending_;
