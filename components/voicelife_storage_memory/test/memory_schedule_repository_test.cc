@@ -174,6 +174,12 @@ int main() {
     Schedule invalid_first_instance;
     Check(!rule_repository.CreateWithFirstInstance(*inserted_rule.value, invalid_first_instance).ok(),
           "原子创建必须拒绝空首条实例");
+    ScheduleRule no_instance_rule;
+    no_instance_rule.event = "无首条实例规则";
+    const auto no_instance_created = rule_repository.CreateWithFirstInstance(no_instance_rule, std::nullopt);
+    Check(no_instance_created.ok() && no_instance_created.value->id > 0, "原子创建必须支持没有下一实例的有效规则");
+    Check(rule_repository.UpdateAndRebuild(*inserted_rule.value, std::nullopt).ok(),
+          "规则重建必须支持暂时没有下一实例");
 
     ScheduleException exception;
     exception.rule_id = rule.rule->id;
@@ -190,6 +196,18 @@ int main() {
     Check(found_exception.ok() && found_exception.value->has_value() && missing_exception.ok() &&
               !missing_exception.value->has_value(),
           "例外必须支持按规则和发生时间读取");
+    ScheduleException stamped_exception;
+    stamped_exception.rule_id = inserted_rule.value->id;
+    stamped_exception.original_start_time = DateTime{std::chrono::seconds{2'300'000'000}};
+    stamped_exception.created_at = DateTime{std::chrono::seconds{2'200'000'000}};
+    stamped_exception.updated_at = DateTime{std::chrono::seconds{2'200'000'001}};
+    const auto stamped_created = rule_repository.Upsert(stamped_exception);
+    stamped_exception.override_event = "已修改";
+    stamped_exception.updated_at = DateTime{std::chrono::seconds{2'200'000'002}};
+    const auto stamped_updated = rule_repository.Upsert(stamped_exception);
+    Check(stamped_created.ok() && stamped_updated.ok() && stamped_created.value->id == stamped_updated.value->id &&
+              stamped_updated.value->updated_at == stamped_exception.updated_at,
+          "例外 upsert 必须保留调用方提供的时间戳");
 
     Schedule rebuilt_instance;
     rebuilt_instance.event = "重建后的实例";
@@ -224,6 +242,14 @@ int main() {
     Check(next_created.ok() && linked_saved.ok() && linked_saved.value->has_value() &&
               linked_saved.value->value().schedule_id == next_created.value->id,
           "下一实例必须回写关联例外的日程标识");
+    Schedule unlinked_next_instance = next_instance;
+    unlinked_next_instance.start_time = DateTime{std::chrono::seconds{2'200'003'600}};
+    Check(rule_repository.CreateNextInstance(unlinked_next_instance, std::nullopt).ok(),
+          "下一实例必须支持没有关联例外的正常发生时间");
+    Check(rule_repository.DeleteFuture(inserted_rule.value->id, *next_instance.start_time).ok() &&
+              !rule_repository.FindByRuleAndTime(inserted_rule.value->id, *unlinked_next_instance.start_time)
+                   .value->has_value(),
+          "删除未来例外必须保留时间边界并删除其后的记录");
 
     const auto operation = operations.record_operation({.entity_type = OperationEntityType::kSchedule,
                                                         .type = ScheduleOperationType::kCreate,
@@ -281,6 +307,16 @@ int main() {
                                                             .offset = 0})
                                            .value->size() == 1,
           "操作查询必须同时支持类型、实体和多词关键词筛选");
+    const auto operation_window = repository.FindOperations({.operation_id = std::nullopt,
+                                                             .entity_type = std::nullopt,
+                                                             .entity_id = std::nullopt,
+                                                             .type = std::nullopt,
+                                                             .operated_from = operation.result.value->operated_at,
+                                                             .operated_to = second_operation.value->operated_at,
+                                                             .keyword = std::nullopt,
+                                                             .limit = 10,
+                                                             .offset = 0});
+    Check(operation_window.ok() && operation_window.value->size() >= 2, "操作查询必须支持包含边界的时间窗口");
     Check(repository
               .FindOperations({.operation_id = std::nullopt,
                                .entity_type = OperationEntityType::kException,
