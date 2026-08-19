@@ -606,8 +606,7 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
         overflow_height = std::max<lv_coord_t>(content_height - viewport_height, 0);
         if (overflow_height > 0) {
             const uint32_t line_height = std::max<uint32_t>(1, message_font == nullptr ? 1 : message_font->line_height);
-            const uint32_t extra_lines =
-                (static_cast<uint32_t>(overflow_height) + line_height - 1) / line_height;
+            const uint32_t extra_lines = (static_cast<uint32_t>(overflow_height) + line_height - 1) / line_height;
             scroll_duration_ms = extra_lines * kScrollMillisecondsPerExtraLine;
             lv_obj_set_style_anim_duration(bottom_bar, scroll_duration_ms, 0);
             lv_obj_scroll_to_y(bottom_bar, overflow_height, LV_ANIM_ON);
@@ -632,8 +631,7 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
              static_cast<int>(lv_obj_get_height(status_label)), !snapshot.content_text.empty(),
              static_cast<int>(content_height), static_cast<int>(viewport_height), static_cast<int>(overflow_height),
              static_cast<unsigned>(scroll_duration_ms), static_cast<unsigned>(manual_line_breaks),
-             common_text_font_ != nullptr,
-             static_cast<int>(snapshot.status_text.size()), snapshot.status_text.c_str(),
+             common_text_font_ != nullptr, static_cast<int>(snapshot.status_text.size()), snapshot.status_text.c_str(),
              static_cast<int>(snapshot.content_text.size()), snapshot.content_text.c_str());
     return voicelife::Status::Ok();
 #else

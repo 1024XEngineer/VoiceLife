@@ -118,8 +118,7 @@ int main() {
     Check(physical.Emit(Frame()).ok() && detector.frames == 2 && forwarded == 1,
           "终结播报余响窗口内的 PCM 不得送入本地检测器");
     detector.Detect("ni hao niu niu");
-    Check(wake_events == 1,
-          "终结播报余响窗口必须丢弃检测器中已完成但晚到的唤醒回调");
+    Check(wake_events == 1, "终结播报余响窗口必须丢弃检测器中已完成但晚到的唤醒回调");
 
     gate.Close();
     Check(physical.stops == 1 && physical.closes == 1 && detector.stops == 2,

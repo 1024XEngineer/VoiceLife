@@ -209,9 +209,7 @@ def parse_audio_stats(line: str) -> dict[str, int]:
     return {key: int(value) for key, value in re.findall(r"(\w+)=([0-9]+)", line)}
 
 
-def prepare_turns(
-    texts: list[str], input_tts: str, model: str, voice: str, say_voice: str
-) -> list[PreparedTurn]:
+def prepare_turns(texts: list[str], input_tts: str, model: str, voice: str, say_voice: str) -> list[PreparedTurn]:
     """Generate every host utterance before opening the first device capture.
 
     The firmware reopens capture immediately after each non-terminal reply. Cloud
@@ -436,28 +434,31 @@ def main() -> int:
     interaction_keys = ("control_dropped", "best_effort_dropped", "board_dropped")
     serial_pcm_rejections = [line for line in raw_lines if "SERIAL_VOICE_PCM=reject" in line]
     required_active_phases = (3, 4, 5, 6)
-    state_lines = [line for line in raw_lines if "SERIAL_VOICE_STATE" in line]
-    rendered_lines = [line for line in raw_lines if "SPARKBOT_DISPLAY_SNAPSHOT_RENDERED" in line]
     rendered_text_lines = [line for line in raw_lines if "SPARKBOT_TEXT_RENDER" in line]
     content_render_lines = [line for line in rendered_text_lines if "content_visible=1" in line]
-    display_text_trace_complete = bool(rendered_text_lines) and all(
-        "generation=" in line
-        and "revision=" in line
-        and "content_height=" in line
-        and "viewport_height=" in line
-        and "overflow_height=" in line
-        and "manual_line_breaks=" in line
-        and " status=" in line
-        and " content=" in line
-        for line in rendered_text_lines
-    ) and all(
-        "viewport_height=50" in line and "content_height=0" not in line for line in content_render_lines
+    display_text_trace_complete = (
+        bool(rendered_text_lines)
+        and all(
+            "generation=" in line
+            and "revision=" in line
+            and "content_height=" in line
+            and "viewport_height=" in line
+            and "overflow_height=" in line
+            and "manual_line_breaks=" in line
+            and " status=" in line
+            and " content=" in line
+            for line in rendered_text_lines
+        )
+        and all("viewport_height=50" in line and "content_height=0" not in line for line in content_render_lines)
     )
     display_scroll_observed = any(re.search(r"overflow_height=[1-9][0-9]*", line) for line in content_render_lines)
+
     def turn_phases_complete(marker: str) -> bool:
         return len(results) == len(texts) and all(
-            all(any(f"{marker}={phase} " in line for line in raw_lines[result.log_start : result.log_end])
-                for phase in required_active_phases)
+            all(
+                any(f"{marker}={phase} " in line for line in raw_lines[result.log_start : result.log_end])
+                for phase in required_active_phases
+            )
             for result in results
         )
 

@@ -52,7 +52,9 @@ int main() {
     Check(updated_schedule.ok() && updated_schedule.value->event == updated.event &&
               updated_schedule.value->status == ScheduleStatus::kCompleted,
           "更新必须保留新的名称和状态");
-    Check(!repository.Update(Schedule{.id = 9999}).ok(), "更新不存在的日程必须失败");
+    Schedule missing_schedule{};
+    missing_schedule.id = 9999;
+    Check(!repository.Update(missing_schedule).ok(), "更新不存在的日程必须失败");
 
     Schedule timed_schedule;
     timed_schedule.event = "下午会议";
@@ -136,7 +138,9 @@ int main() {
     const Status cancelled = rule_repository.CancelRuleAndInstances(rule.rule->id, cancelled_count);
     Check(cancelled.ok() && cancelled_count == 1 && rule_repository.FindByRule(rule.rule->id).value->empty(),
           "取消规则必须同时取消实例并清理例外");
-    Check(!rule_repository.Update(ScheduleRule{.id = 9999}).ok(), "不存在的规则必须拒绝更新");
+    ScheduleRule missing_rule{};
+    missing_rule.id = 9999;
+    Check(!rule_repository.Update(missing_rule).ok(), "不存在的规则必须拒绝更新");
 
     const auto operation = operations.record_operation({.entity_type = OperationEntityType::kSchedule,
                                                         .type = ScheduleOperationType::kCreate,
