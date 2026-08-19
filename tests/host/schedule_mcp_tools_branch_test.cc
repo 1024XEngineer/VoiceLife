@@ -24,8 +24,7 @@ void CheckRuleUpdateReminderResyncFailure() {
     const auto updated = fixture.server.call({
         .request_id = "update-rule-resync-failure",
         .name = "schedule.update",
-        .arguments = {{"rule_id", int64_t{fixture.rules.rules.back().id}},
-                      {"event", std::string("重同步失败规则")}},
+        .arguments = {{"rule_id", int64_t{fixture.rules.rules.back().id}}, {"event", std::string("重同步失败规则")}},
     });
     Check(updated.status.ok() && OutputString(updated, "status") == "failure" &&
               OutputString(updated, "message").find("提醒同步失败") != std::string::npos,
