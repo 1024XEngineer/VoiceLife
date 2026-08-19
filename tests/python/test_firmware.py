@@ -39,6 +39,24 @@ class ProfileValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(firmware.ProfileError, "sdkconfig 只能包含"):
             firmware.validate_profile(profile, Path("invalid.json"))
 
+    def test_partition_tables_are_kept_under_config(self) -> None:
+        defaults = (ROOT / "sdkconfig.defaults").read_text(encoding="utf-8").splitlines()
+        profiles = [
+            json.loads(path.read_text(encoding="utf-8"))["sdkconfig"] for path in firmware.PROFILES.glob("*.json")
+        ]
+        settings = defaults + [setting for profile in profiles for setting in profile]
+        partition_tables = [
+            setting.split("=", 1)[1].strip('"')
+            for setting in settings
+            if setting.startswith("CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=")
+        ]
+
+        self.assertTrue(partition_tables)
+        for table in partition_tables:
+            path = ROOT / table
+            self.assertTrue(path.is_file(), f"分区表不存在: {table}")
+            self.assertEqual(path.parent, ROOT / "config" / "partitions")
+
     @mock.patch("firmware.subprocess.run", side_effect=FileNotFoundError)
     def test_reports_missing_tool_without_traceback(self, _: mock.Mock) -> None:
         with self.assertRaisesRegex(firmware.ProfileError, "找不到命令 idf.py"):
