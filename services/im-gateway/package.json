@@ -35,6 +35,7 @@
   "dependencies": {
     "@koishijs/core": "4.18.11",
     "fast-xml-parser": "5.10.1",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "wxcrypt": "1.4.3"
   }
 }

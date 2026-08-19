@@ -25,6 +25,8 @@ import {
 } from '../infrastructure/security/production-ports.js';
 import { WechatOfficialAdapter } from '../infrastructure/wechat/wechat-official-adapter.js';
 import { WechatOfficialKoishiBot } from '../infrastructure/koishi/wechat-official-koishi-bot.js';
+import { WecomAibotUrlCallbackController } from '../infrastructure/http/wecom-aibot-url-callback.js';
+import { WecomAibotInboundAdapter } from '../infrastructure/wecom/wecom-aibot-inbound-adapter.js';
 
 export {
     startGatewayHttpServer,
@@ -68,6 +70,14 @@ export interface GatewayWechatConfiguration {
     readonly actionUiBaseUrl: string;
 }
 
+/** 生产进程经过校验且仅驻留内存的企业微信 AI Bot 配置。 */
+export interface GatewayWecomAibotConfiguration {
+    readonly channelAccountId: string;
+    readonly botId: string;
+    readonly webhookToken: string;
+    readonly encodingAesKey: string;
+}
+
 /** 生产进程经过校验且仅驻留内存的配置。 */
 export interface GatewayConfiguration {
     readonly host: string;
@@ -76,6 +86,8 @@ export interface GatewayConfiguration {
     readonly actionTokenSecret: string;
     readonly identitySecret: string;
     readonly wechat: GatewayWechatConfiguration;
+    /** 未配置时不影响已有微信公众号部署。 */
+    readonly wecom?: GatewayWecomAibotConfiguration;
 }
 
 /** 已启动且托管全部依赖生命周期的生产 Gateway 进程。 */
@@ -111,6 +123,7 @@ export function readGatewayConfiguration(environment: GatewayEnvironment): Gatew
     assertProductionSecret(actionTokenSecret, 'ACTION_TOKEN_SECRET', 32);
     const identitySecret = environment.IDENTITY_SECRET?.trim() || actionTokenSecret;
     assertProductionSecret(identitySecret, 'IDENTITY_SECRET', 32);
+    const wecom = optionalWecomAibotConfiguration(environment);
     return {
         host,
         port,
@@ -132,6 +145,7 @@ export function readGatewayConfiguration(environment: GatewayEnvironment): Gatew
             displayTimeZone: displayTimeZone(environment),
             actionUiBaseUrl,
         },
+        ...(wecom === undefined ? {} : { wecom }),
     };
 }
 
@@ -139,6 +153,7 @@ export function readGatewayConfiguration(environment: GatewayEnvironment): Gatew
  * 使用 PostgreSQL、Koishi、SSE Hub、微信 Adapter 与生产安全端口启动 Gateway。
  * @param environment 只通过环境或容器 Secret 注入的进程配置。
  * @param logger 可替换的脱敏结构化日志器。
+ * @param options 可替换的基础设施依赖，仅用于测试或受控部署。
  * @returns 已监听并可优雅关闭的生产进程。
  */
 export async function startConfiguredGatewayProcess(
@@ -170,7 +185,20 @@ export async function startConfiguredGatewayProcess(
                 revealExternalUserId: (ciphertext) => identities.reveal(ciphertext),
             },
         });
-        const channelAdapters = new ChannelAdapterRegistry([{ accountId: channelAccountId, adapter }]);
+        const wecomRegistration =
+            config.wecom === undefined
+                ? undefined
+                : {
+                      accountId: unsafeId<ChannelAccountId>(config.wecom.channelAccountId),
+                      adapter: new WecomAibotInboundAdapter({
+                          channelAccountId: unsafeId<ChannelAccountId>(config.wecom.channelAccountId),
+                          botId: config.wecom.botId,
+                      }),
+                  };
+        const channelAdapters = new ChannelAdapterRegistry([
+            { accountId: channelAccountId, adapter },
+            ...(wecomRegistration === undefined ? [] : [wecomRegistration]),
+        ]);
         const context = new Context();
         const koishiBotId = `wechat:${channelAccountId}`;
         const wechatBot = new WechatOfficialKoishiBot(context, {
@@ -209,10 +237,23 @@ export async function startConfiguredGatewayProcess(
                     },
                 },
             },
-            capabilities: [adapter],
+            capabilities: wecomRegistration === undefined ? [adapter] : [adapter, wecomRegistration.adapter],
             revealExternalUserId: (ciphertext) => identities.reveal(ciphertext),
         });
         await ensureConfiguredChannel(koishi.runtime, channelAccountId, config.wechat);
+        const wecomWebhook =
+            config.wecom === undefined || wecomRegistration === undefined
+                ? undefined
+                : new WecomAibotUrlCallbackController(wecomRegistration.adapter, {
+                      token: config.wecom.webhookToken,
+                      encodingAesKey: config.wecom.encodingAesKey,
+                      postEvent: async (event) => {
+                          await koishi!.runtime.application.platformEvents.postEvent(event);
+                      },
+                  });
+        if (config.wecom !== undefined) {
+            await ensureConfiguredWecomChannel(unitOfWork, clock, config.wecom);
+        }
         await koishi.start();
         deliveryWorker = new DeliveryOutboxWorker({
             unitOfWork,
@@ -227,6 +268,7 @@ export async function startConfiguredGatewayProcess(
             runtime: koishi.runtime,
             logger: processLogger,
             deliveryAvailable: () => deliveryWorker!.wake(),
+            ...(wecomWebhook === undefined ? {} : { wecomAibotApi: wecomWebhook }),
             healthCheck: async () => {
                 const account = await koishi!.runtime.application.channels.find(channelAccountId);
                 if (account === undefined || account.status !== 'active') throw new Error('channel unavailable');
@@ -250,6 +292,48 @@ export async function startConfiguredGatewayProcess(
         if (koishi !== undefined) await koishi.close().catch(() => undefined);
         await unitOfWork.close().catch(() => undefined);
         throw error;
+    }
+}
+
+async function ensureConfiguredWecomChannel(
+    unitOfWork: PostgresImUnitOfWork,
+    clock: SystemClock,
+    wecom: GatewayWecomAibotConfiguration,
+): Promise<void> {
+    const channelAccountId = unsafeId<ChannelAccountId>(wecom.channelAccountId);
+    await unitOfWork.transaction(async (tx) => {
+        const existing = await tx.channelAccounts.findById(channelAccountId);
+        if (existing === undefined) {
+            const now = clock.now();
+            await tx.channelAccounts.save({
+                id: channelAccountId,
+                platform: 'wecom_aibot',
+                tenantExternalId: wecom.botId,
+                koishiBotId: `wecom:${channelAccountId}`,
+                credentialRef: 'secret://env/WECOM_AIBOT_WEBHOOK_TOKEN',
+                connectionMode: 'webhook',
+                status: 'active',
+                createdAt: now,
+                updatedAt: now,
+            });
+            return;
+        }
+        assertConfiguredWecomChannel(existing, wecom);
+    });
+}
+
+function assertConfiguredWecomChannel(account: ChannelAccount, wecom: GatewayWecomAibotConfiguration): void {
+    if (
+        account.platform !== 'wecom_aibot' ||
+        account.tenantExternalId !== wecom.botId ||
+        account.credentialRef !== 'secret://env/WECOM_AIBOT_WEBHOOK_TOKEN' ||
+        account.koishiBotId !== `wecom:${account.id}` ||
+        account.connectionMode !== 'webhook' ||
+        account.status !== 'active'
+    ) {
+        throw new GatewayConfigurationError(
+            'Configured WeCom AI Bot channel account conflicts with the persisted deployment metadata',
+        );
     }
 }
 
@@ -327,6 +411,24 @@ function requiredEnvironment(environment: GatewayEnvironment, name: string): str
     const value = environment[name]?.trim();
     if (value === undefined || value === '') throw new GatewayConfigurationError(`${name} is required`);
     return value;
+}
+
+function optionalWecomAibotConfiguration(environment: GatewayEnvironment): GatewayWecomAibotConfiguration | undefined {
+    const names = [
+        'WECOM_AIBOT_CHANNEL_ACCOUNT_ID',
+        'WECOM_AIBOT_BOT_ID',
+        'WECOM_AIBOT_WEBHOOK_TOKEN',
+        'WECOM_AIBOT_ENCODING_AES_KEY',
+    ] as const;
+    if (names.every((name) => environment[name] === undefined)) {
+        return undefined;
+    }
+    return {
+        channelAccountId: requiredEnvironment(environment, 'WECOM_AIBOT_CHANNEL_ACCOUNT_ID'),
+        botId: requiredEnvironment(environment, 'WECOM_AIBOT_BOT_ID'),
+        webhookToken: requiredEnvironment(environment, 'WECOM_AIBOT_WEBHOOK_TOKEN'),
+        encodingAesKey: requiredEnvironment(environment, 'WECOM_AIBOT_ENCODING_AES_KEY'),
+    };
 }
 
 function assertProductionSecret(value: string, name: string, minimum: number): void {

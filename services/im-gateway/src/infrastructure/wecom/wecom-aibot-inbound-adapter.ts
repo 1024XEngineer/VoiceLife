@@ -2,7 +2,14 @@ import type { NotificationIntent, ScheduleReceiptIntent } from '../../contracts/
 import { unsafeId, type ChannelAccountId } from '../../contracts/ids.js';
 import type { NormalizedImEvent } from '../../contracts/platform-events.js';
 import type { PlatformCapabilityPort } from '../../ports/external.js';
-import type { ChannelAccount, ChannelCapabilities } from '../../domain/models.js';
+import type {
+    ChannelCapabilityResolver,
+    DeliveryRendererPort,
+    ImChannelPort,
+    ImSendAcceptance,
+    OutboundImMessage,
+} from '../../ports/external.js';
+import type { ChannelAccount, ChannelCapabilities, Delivery } from '../../domain/models.js';
 import { ImGatewayError } from '../../shared/errors.js';
 import type { IsoDateTime, JsonValue } from '../../shared/types.js';
 
@@ -19,11 +26,13 @@ export interface WecomAibotInboundAdapterOptions {
 }
 
 /**
- * 将企业微信 AI Bot WSS 单聊文本帧归一化为 Gateway 入站事件。
+ * 将企业微信 AI Bot URL 回调解密后的单聊文本消息归一化为 Gateway 入站事件。
  *
- * 此适配器只实现入站绑定链路；主动投递和 WebSocket 生命周期由后续渠道切片提供。
+ * 此适配器只实现入站绑定链路；主动投递由后续渠道切片提供。
  */
-export class WecomAibotInboundAdapter implements PlatformCapabilityPort {
+export class WecomAibotInboundAdapter
+    implements PlatformCapabilityPort, ChannelCapabilityResolver, DeliveryRendererPort, ImChannelPort
+{
     public readonly platform = 'wecom_aibot' as const;
 
     private readonly channelAccountId: ChannelAccountId;
@@ -49,6 +58,11 @@ export class WecomAibotInboundAdapter implements PlatformCapabilityPort {
         return Promise.resolve(unavailableCapabilities());
     }
 
+    /** {@inheritDoc ChannelCapabilityResolver.resolve} */
+    public resolve(account: ChannelAccount): Promise<ChannelCapabilities> {
+        return this.capabilities(account);
+    }
+
     /** {@inheritDoc PlatformCapabilityPort.renderScheduleReceipt} */
     public renderScheduleReceipt(intent: ScheduleReceiptIntent): Promise<JsonValue> {
         void intent;
@@ -65,13 +79,31 @@ export class WecomAibotInboundAdapter implements PlatformCapabilityPort {
         );
     }
 
+    /** {@inheritDoc DeliveryRendererPort.render} */
+    public render(
+        delivery: Delivery,
+        account: ChannelAccount,
+        capabilities: ChannelCapabilities,
+        context: { readonly actionToken?: string },
+    ): Promise<JsonValue> {
+        void delivery;
+        void account;
+        void capabilities;
+        void context;
+        return Promise.reject(
+            new ImGatewayError('capability_not_supported', 'WeCom AI Bot outbound delivery is not configured'),
+        );
+    }
+
+    /** {@inheritDoc ImChannelPort.send} */
+    public send(message: OutboundImMessage): Promise<ImSendAcceptance> {
+        void message;
+        return Promise.resolve({ accepted: false, retryable: false, errorCode: 'wecom_aibot_not_configured' });
+    }
+
     /** {@inheritDoc PlatformCapabilityPort.normalizeInbound} */
     public async normalizeInbound(rawEvent: unknown): Promise<NormalizedImEvent> {
-        const frame = requiredRecord(rawEvent, 'WeCom AI Bot frame');
-        if (requiredString(frame, 'cmd', 'WeCom AI Bot command') !== 'aibot_msg_callback') {
-            throw new ImGatewayError('invalid_contract', 'WeCom AI Bot frame is not a message callback');
-        }
-        const body = requiredRecord(frame.body, 'WeCom AI Bot message body');
+        const body = requiredRecord(rawEvent, 'WeCom AI Bot callback');
         if (requiredString(body, 'aibotid', 'WeCom AI Bot ID') !== this.botId) {
             throw new ImGatewayError('invalid_contract', 'WeCom AI Bot callback targets another bot');
         }
