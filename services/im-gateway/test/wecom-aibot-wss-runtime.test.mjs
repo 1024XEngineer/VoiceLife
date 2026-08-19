@@ -6,6 +6,8 @@ import { WecomAibotInboundAdapter, WecomAibotWssRuntime } from '../dist/index.js
 class FakeWebSocket {
     sent = [];
     listeners = new Map();
+    closeEmits = true;
+    terminateCalls = 0;
 
     addEventListener(type, listener) {
         const listeners = this.listeners.get(type) ?? [];
@@ -18,6 +20,11 @@ class FakeWebSocket {
     }
 
     close() {
+        if (this.closeEmits) this.emit('close', {});
+    }
+
+    terminate() {
+        this.terminateCalls += 1;
         this.emit('close', {});
     }
 
@@ -133,4 +140,68 @@ test('WeCom AI Bot WSS runtime reconnects after the platform rejects its subscri
 
     assert.equal(runtime.healthy, false);
     assert.equal(created, 2);
+});
+
+test('WeCom AI Bot WSS runtime reconnects when the platform never acknowledges its subscription', async (context) => {
+    const sockets = [new FakeWebSocket(), new FakeWebSocket()];
+    let created = 0;
+    const runtime = new WecomAibotWssRuntime({
+        adapter: new WecomAibotInboundAdapter({ channelAccountId: 'channel-wecom', botId: 'bot-fixture' }),
+        botId: 'bot-fixture',
+        secret: 'secret-fixture',
+        postEvent: async () => {},
+        createWebSocket: () => sockets[created++],
+        reconnectDelayMilliseconds: 1,
+        subscriptionAckTimeoutMilliseconds: 1,
+    });
+    context.after(() => runtime.close());
+
+    runtime.start();
+    sockets[0].emit('open', {});
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 5));
+
+    assert.equal(runtime.healthy, false);
+    assert.equal(created, 2);
+});
+
+test('WeCom AI Bot WSS runtime waits for its socket close event during shutdown', async () => {
+    const socket = new FakeWebSocket();
+    socket.closeEmits = false;
+    const runtime = new WecomAibotWssRuntime({
+        adapter: new WecomAibotInboundAdapter({ channelAccountId: 'channel-wecom', botId: 'bot-fixture' }),
+        botId: 'bot-fixture',
+        secret: 'secret-fixture',
+        postEvent: async () => {},
+        createWebSocket: () => socket,
+        closeGraceMilliseconds: 50,
+    });
+    runtime.start();
+
+    let closed = false;
+    const closing = runtime.close().then(() => {
+        closed = true;
+    });
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+    assert.equal(closed, false);
+
+    socket.emit('close', {});
+    await closing;
+    assert.equal(socket.terminateCalls, 0);
+});
+
+test('WeCom AI Bot WSS runtime terminates an unresponsive socket after the shutdown grace period', async () => {
+    const socket = new FakeWebSocket();
+    socket.closeEmits = false;
+    const runtime = new WecomAibotWssRuntime({
+        adapter: new WecomAibotInboundAdapter({ channelAccountId: 'channel-wecom', botId: 'bot-fixture' }),
+        botId: 'bot-fixture',
+        secret: 'secret-fixture',
+        postEvent: async () => {},
+        createWebSocket: () => socket,
+        closeGraceMilliseconds: 1,
+    });
+    runtime.start();
+
+    await runtime.close();
+    assert.equal(socket.terminateCalls, 1);
 });

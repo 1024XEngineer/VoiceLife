@@ -8,6 +8,8 @@ const DEFAULT_ENDPOINT = 'wss://openws.work.weixin.qq.com';
 const HEARTBEAT_MILLISECONDS = 30_000;
 const INITIAL_RECONNECT_MILLISECONDS = 1_000;
 const MAX_RECONNECT_MILLISECONDS = 30_000;
+const CLOSE_GRACE_MILLISECONDS = 5_000;
+const SUBSCRIPTION_ACK_TIMEOUT_MILLISECONDS = 10_000;
 
 /** 企业微信 AI Bot WSS 连接所需的最小 WebSocket 接口。 */
 export interface WecomAibotWebSocket {
@@ -27,6 +29,8 @@ export interface WecomAibotWebSocket {
     send(data: string): void;
     /** 主动关闭连接。 */
     close(): void;
+    /** 立即终止无法完成关闭握手的连接。 */
+    terminate(): void;
 }
 
 /** 创建企业微信 AI Bot WebSocket 客户端的可替换工厂。 */
@@ -45,6 +49,10 @@ export interface WecomAibotWssRuntimeOptions {
     readonly heartbeatMilliseconds?: number;
     /** 仅用于受控测试的首次重连延迟；生产默认 1 秒。 */
     readonly reconnectDelayMilliseconds?: number;
+    /** 仅用于受控测试的关闭等待时间；生产默认 5 秒。 */
+    readonly closeGraceMilliseconds?: number;
+    /** 仅用于受控测试的订阅 ACK 等待时间；生产默认 10 秒。 */
+    readonly subscriptionAckTimeoutMilliseconds?: number;
 }
 
 /**
@@ -63,9 +71,15 @@ export class WecomAibotWssRuntime {
 
     private readonly initialReconnectMilliseconds: number;
 
+    private readonly closeGraceMilliseconds: number;
+
+    private readonly subscriptionAckTimeoutMilliseconds: number;
+
     private socket: WecomAibotWebSocket | undefined;
 
     private subscriptionRequestId: string | undefined;
+
+    private subscriptionAckTimeout: ReturnType<typeof setTimeout> | undefined;
 
     private heartbeat: ReturnType<typeof setInterval> | undefined;
 
@@ -91,6 +105,11 @@ export class WecomAibotWssRuntime {
             options.reconnectDelayMilliseconds,
             INITIAL_RECONNECT_MILLISECONDS,
         );
+        this.closeGraceMilliseconds = positiveMilliseconds(options.closeGraceMilliseconds, CLOSE_GRACE_MILLISECONDS);
+        this.subscriptionAckTimeoutMilliseconds = positiveMilliseconds(
+            options.subscriptionAckTimeoutMilliseconds,
+            SUBSCRIPTION_ACK_TIMEOUT_MILLISECONDS,
+        );
         this.nextReconnectMilliseconds = this.initialReconnectMilliseconds;
     }
 
@@ -115,7 +134,7 @@ export class WecomAibotWssRuntime {
         this.reconnect = undefined;
         const socket = this.socket;
         this.unavailable(socket);
-        socket?.close();
+        if (socket !== undefined) await this.closeSocket(socket);
     }
 
     private subscribe(socket: WecomAibotWebSocket): void {
@@ -129,6 +148,10 @@ export class WecomAibotWssRuntime {
                 body: { bot_id: this.options.botId, secret: this.options.secret },
             }),
         );
+        this.subscriptionAckTimeout = setTimeout(() => {
+            if (socket !== this.socket || this.closed || this.subscriptionRequestId !== requestId) return;
+            socket.close();
+        }, this.subscriptionAckTimeoutMilliseconds);
     }
 
     private async receive(socket: WecomAibotWebSocket, data: unknown): Promise<void> {
@@ -142,6 +165,7 @@ export class WecomAibotWssRuntime {
             return;
         }
         if (this.isSubscriptionResponse(frame)) {
+            this.clearSubscriptionAckTimeout();
             if (frame.errcode === 0) {
                 this.healthy = true;
                 this.nextReconnectMilliseconds = this.initialReconnectMilliseconds;
@@ -192,10 +216,34 @@ export class WecomAibotWssRuntime {
     private unavailable(socket: WecomAibotWebSocket | undefined): void {
         if (socket !== undefined && socket !== this.socket) return;
         this.healthy = false;
+        this.clearSubscriptionAckTimeout();
         this.subscriptionRequestId = undefined;
         if (this.heartbeat !== undefined) clearInterval(this.heartbeat);
         this.heartbeat = undefined;
         this.socket = undefined;
+    }
+
+    private clearSubscriptionAckTimeout(): void {
+        if (this.subscriptionAckTimeout !== undefined) clearTimeout(this.subscriptionAckTimeout);
+        this.subscriptionAckTimeout = undefined;
+    }
+
+    private closeSocket(socket: WecomAibotWebSocket): Promise<void> {
+        return new Promise((resolve) => {
+            let closed = false;
+            const finish = (): void => {
+                if (closed) return;
+                closed = true;
+                clearTimeout(timeout);
+                resolve();
+            };
+            socket.addEventListener('close', finish);
+            const timeout = setTimeout(() => {
+                socket.terminate();
+                finish();
+            }, this.closeGraceMilliseconds);
+            socket.close();
+        });
     }
 }
 
@@ -216,6 +264,9 @@ function defaultWebSocket(endpoint: string): WecomAibotWebSocket {
         },
         close(): void {
             socket.close();
+        },
+        terminate(): void {
+            socket.terminate();
         },
     };
 }
