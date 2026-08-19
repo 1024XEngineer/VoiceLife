@@ -444,6 +444,39 @@ void CheckRepositoryFailurePaths() {
     Check(!clear_fixture.reminder.Start().ok(), "取消持久化提醒时清理更新失败应返回错误");
 }
 
+/**
+ * @brief 验证批量同步遇到单项失败时仍会继续处理后续日程。
+ * @return 无。
+ */
+void CheckPartialSynchronizationContinues() {
+    Fixture start_fixture({
+        MakeSchedule(1, "首项同步失败", At(1'100)),
+        MakeSchedule(2, "后续提醒", At(1'200)),
+    });
+    start_fixture.repository.FailNextFindById(Status::Error(ErrorCode::kUnavailable, "首项查询失败"));
+    Check(!start_fixture.reminder.Start().ok(), "首项同步失败时启动应返回首个错误");
+    Check(start_fixture.reminder.SynchronizeSchedule(2).ok(), "启动失败后服务仍应保持运行");
+    start_fixture.timing.ProcessPendingCommands(Trigger(1'000));
+    const auto second = start_fixture.repository.FindById(2);
+    Check(second.ok() && second.value->reminder_task_id.has_value(), "首项失败不应阻断后续日程提醒注册");
+
+    Fixture rule_fixture({
+        MakeSchedule(3, "规则首项失败", At(1'300), 21),
+        MakeSchedule(4, "规则后续提醒", At(1'400), 21),
+    });
+    rule_fixture.rules.rules.push_back(DailyRule(21));
+    Check(rule_fixture.reminder.Start().ok(), "规则同步测试应启动服务");
+    rule_fixture.timing.ProcessPendingCommands(Trigger(1'000));
+    rule_fixture.repository.FailNextFindById(Status::Error(ErrorCode::kUnavailable, "规则首项查询失败"));
+    Check(!rule_fixture.reminder.SynchronizeRule(21).ok(), "规则首项同步失败时应返回错误");
+    const auto rule_second = rule_fixture.repository.FindById(4);
+    Check(rule_second.ok() && rule_second.value->reminder_task_id.has_value(), "规则同步失败不应阻断后续实例");
+
+    rule_fixture.reminder.Stop();
+    rule_fixture.reminder.Stop();
+    Check(!rule_fixture.reminder.SynchronizeSchedule(4).ok(), "停止后不应继续同步提醒");
+}
+
 void CheckAdditionalReminderBranchCoverage() {
     Fixture stop_fixture({MakeSchedule(1, "停止读取失败", At(1'200))});
     Check(stop_fixture.reminder.Start().ok(), "停止读取失败测试应启动服务");
@@ -682,6 +715,7 @@ int main() {
     CheckInvalidAndNotRunningPaths();
     CheckCompleteScheduleErrorPaths();
     CheckRepositoryFailurePaths();
+    CheckPartialSynchronizationContinues();
     CheckAdditionalReminderBranchCoverage();
     CheckSuspendAndSynchronizeRule();
     CheckSuspendRetryTaskAndStopCancelsTasks();
