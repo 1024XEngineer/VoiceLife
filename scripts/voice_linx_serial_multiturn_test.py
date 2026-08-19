@@ -25,17 +25,9 @@ except ImportError:
     SpeechSynthesizer = None
 
 
-MAGIC = b"VLVT"
-VERSION = 1
-BEGIN = 1
-PCM = 2
-END = 3
+MAGIC, VERSION, BEGIN, PCM, END = b"VLVT", 1, 1, 2, 3
 PCM_FRAME_BYTES = 640
-DEFAULT_TURNS = [
-    "你好牛牛，请介绍一下你自己。",
-    "把刚才的回答再简短一点。",
-    "请用一句话总结我们刚才的对话。",
-]
+DEFAULT_TURNS = ["你好牛牛，请介绍一下你自己。", "把刚才的回答再简短一点。", "请用一句话总结我们刚才的对话。"]
 
 
 @dataclass
