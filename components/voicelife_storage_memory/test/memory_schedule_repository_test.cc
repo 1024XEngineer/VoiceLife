@@ -266,6 +266,7 @@ int main() {
     const auto second_operation = repository.InsertOperation({.entity_type = OperationEntityType::kRule,
                                                               .type = ScheduleOperationType::kUpdate,
                                                               .entity_id = inserted_rule.value->id,
+                                                              .operated_at = DateTime{},
                                                               .label = "Direct Rule",
                                                               .before = "{}"});
     Check(second_operation.ok() && repository
