@@ -114,11 +114,18 @@ class AudioInputPort {
  */
 class TestAudioInjectionPort {
    public:
+    /** @brief 虚析构函数。 */
     virtual ~TestAudioInjectionPort() = default;
 
-    /** @brief 启用或关闭测试输入对物理麦克风上行的排他保护。 */
+    /** @brief 启用或关闭测试输入对物理麦克风上行的排他保护。
+     * @param enabled 为 true 时由测试输入独占上行。
+     * @return 状态切换成功返回 Ok。
+     */
     virtual Status SetTestInputEnabled(bool enabled) = 0;
-    /** @brief 提交一帧已协商格式的测试 PCM。 */
+    /** @brief 提交一帧已协商格式的测试 PCM。
+     * @param frame 要注入的音频帧，调用方交出负载所有权。
+     * @return 帧被接收或拒绝时对应的状态。
+     */
     virtual Status InjectTestInput(AudioFrame frame) = 0;
 };
 

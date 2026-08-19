@@ -63,6 +63,7 @@ class WakeGateAudioInput final : public AudioInputPort {
      * @brief 暂时丢弃本地唤醒检测帧，但保持物理采集可用。
      *
      * 终结型 TTS 可能包含本地命令词；无 AEC 板型必须在其后留出余响窗口。
+     * @param duration_ms 丢弃本地唤醒检测帧的持续时间（毫秒）。
      */
     void SuppressLocalWakeFor(uint32_t duration_ms);
     /** @brief 查询当前是否只运行本地待机检测。

@@ -113,9 +113,15 @@ class Esp32s3PcmAudioPorts final : public voice::TestAudioInjectionPort {
     void SetOutputVolume(uint8_t volume);
     /** @brief 返回当前板端 PCM 播放音量。 @return 当前音量百分比。 */
     [[nodiscard]] uint8_t output_volume() const;
-    /** @brief 启用测试 PCM 注入并隔离物理麦克风上行。 */
+    /** @brief 启用测试 PCM 注入并隔离物理麦克风上行。
+     * @param enabled 为 true 时接收测试 PCM。
+     * @return 状态切换成功返回 Ok。
+     */
     Status SetTestInputEnabled(bool enabled) override;
-    /** @brief 经现有输入有界队列提交测试 PCM。 */
+    /** @brief 经现有输入有界队列提交测试 PCM。
+     * @param frame 已协商格式的测试音频帧，调用方交出负载所有权。
+     * @return 入队成功返回 Ok。
+     */
     Status InjectTestInput(voice::AudioFrame frame) override;
 
    private:

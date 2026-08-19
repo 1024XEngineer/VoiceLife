@@ -54,9 +54,13 @@ class PcmFrameAssembler final {
 
     /** @brief 当前待组装的样本数。 @return 挂起样本数。 */
     [[nodiscard]] std::size_t pending_samples() const { return pending_size_; }
-    /** @brief 当前上行 pool 的峰值已占用槽位。 */
+    /** @brief 当前上行 pool 的峰值已占用槽位。
+     * @return 峰值已占用槽位数。
+     */
     [[nodiscard]] std::size_t payload_pool_high_watermark() const;
-    /** @brief 当前上行 pool 未能即时获取 slot 的次数。 */
+    /** @brief 当前上行 pool 未能即时获取 slot 的次数。
+     * @return 获取失败累计次数。
+     */
     [[nodiscard]] std::size_t payload_pool_acquisition_failures() const;
 
     /**

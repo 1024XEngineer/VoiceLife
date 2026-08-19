@@ -82,6 +82,7 @@ class PlatformAssembly {
      * @brief 返回可选的测试 PCM 注入端口。
      *
      * 仅测试 Profile 的串口回归工具使用；正常产品路径不得依赖它。
+     * @return 平台支持时返回注入端口，否则返回空指针。
      */
     virtual voicelife::voice::TestAudioInjectionPort* test_audio_injection() { return nullptr; }
 
