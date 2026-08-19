@@ -127,6 +127,10 @@ class HilProfileGuardTest(unittest.TestCase):
         self.assertEqual([operation.kind for operation in operations], ["write", "verify"])
         self.assertTrue(all(operation.offset == 0x10000 for operation in operations))
         rendered = " ".join(argument for operation in operations for argument in operation.argv)
+        self.assertIn("write-flash", rendered)
+        self.assertIn("verify-flash", rendered)
+        self.assertNotIn("write_flash", rendered)
+        self.assertNotIn("verify_flash", rendered)
         for forbidden in ("0x8000", "0xd000", "partition-table", "bootloader", "otadata", "nvs"):
             self.assertNotIn(forbidden, rendered.lower())
 

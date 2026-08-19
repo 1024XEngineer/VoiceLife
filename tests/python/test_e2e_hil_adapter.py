@@ -216,6 +216,14 @@ class HilPairingAdapterTest(unittest.TestCase):
         self.assertNotIn("device", first)
         self.assertEqual(first, hashlib.sha256(("a" * 32 + ":e2e-device").encode()).hexdigest()[:16])
 
+    def test_real_hardware_classifies_missing_command_as_infrastructure(self) -> None:
+        hardware = HIL.RealHilHardware("runner@example.test", "/srv/voicelife", "https://gateway.example.test", "user-test")
+        with mock.patch.object(HIL.subprocess, "run", side_effect=FileNotFoundError):
+            with self.assertRaises(RUNNER.RunnerFailure) as raised:
+                hardware._run(["missing-command"], 1.0)
+        self.assertEqual(raised.exception.category, RUNNER.FailureCategory.INFRASTRUCTURE)
+        self.assertEqual(raised.exception.message_code, "hil_command_unavailable")
+
 
 if __name__ == "__main__":
     unittest.main()

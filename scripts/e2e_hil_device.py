@@ -268,15 +268,15 @@ def application_flash_operations(port: Path, image: ApplicationImage, baud: int 
             argv=common
             + (
                 "--before",
-                "default_reset",
+                "default-reset",
                 "--after",
-                "hard_reset",
-                "write_flash",
-                "--flash_mode",
+                "hard-reset",
+                "write-flash",
+                "--flash-mode",
                 "dio",
-                "--flash_size",
+                "--flash-size",
                 "16MB",
-                "--flash_freq",
+                "--flash-freq",
                 "80m",
                 offset,
                 str(image.path),
@@ -286,6 +286,6 @@ def application_flash_operations(port: Path, image: ApplicationImage, baud: int 
             kind="verify",
             offset=image.offset,
             argv=common
-            + ("--before", "default_reset", "--after", "hard_reset", "verify_flash", offset, str(image.path)),
+            + ("--before", "default-reset", "--after", "hard-reset", "verify-flash", offset, str(image.path)),
         ),
     )

@@ -211,6 +211,8 @@ class RealHilHardware:
             )
         except subprocess.TimeoutExpired as error:
             raise RunnerDeadlineExceeded from error
+        except OSError as error:
+            raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "hil_command_unavailable") from error
         if result.returncode != 0:
             raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "hil_command_failed")
         return result.stdout
