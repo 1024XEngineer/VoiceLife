@@ -25,6 +25,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -478,17 +479,19 @@ class Runtime final {
 
     // ---- im.binding.start 有界后台轮询 ----
     static constexpr uint32_t kBindingPollIntervalMs = 3000;
-    // Poll 内含 HTTPS 查询与 JSON 解析，但无 MCP/Linx 调用链；栈按 16KB 预留，
+    // Poll 内含 HTTPS 查询与 JSON 解析，但无 MCP/Linx 调用链；栈按 24KB 预留，
     // 需以真机 uxTaskGetStackHighWaterMark 实测校准（任务退出时已上报高水位）。
-    static constexpr uint32_t kBindingPollStackBytes = 16384;
+    // 交互期间内部 RAM 最大连续块可低于 16KB，栈必须分配到已启用的 PSRAM；
+    // TCB 仍由 FreeRTOS 放在内部 RAM。WithCaps 创建的任务须配对 WithCaps 删除。
+    static constexpr uint32_t kBindingPollStackBytes = 24 * 1024;
 
     void StartBindingPolling(uint64_t generation) {
         if (!binding_poll_lease_.Acquire(generation)) {
             ESP_LOGI(kTag, "IM_BINDING_POLL_ADOPTED generation=%llu", static_cast<unsigned long long>(generation));
             return;
         }
-        if (xTaskCreate(&Runtime::BindingPollTaskEntry, "voicelife_binding_poll", kBindingPollStackBytes, this, 2,
-                        nullptr) != pdPASS) {
+        if (xTaskCreateWithCaps(&Runtime::BindingPollTaskEntry, "voicelife_binding_poll", kBindingPollStackBytes, this,
+                                2, nullptr, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
             if (binding_poll_lease_.Release(generation)) {
                 EnqueueBindingResult(binding_use_case_.AbortPending(generation));
             }
@@ -522,7 +525,7 @@ class Runtime final {
             }
         }
         ESP_LOGI(kTag, "IM_BINDING_POLL_STOPPED=1");
-        vTaskDelete(nullptr);
+        vTaskDeleteWithCaps(nullptr);
     }
 
     static std::string TruncateUtf8(std::string_view value, std::size_t max_bytes) {
