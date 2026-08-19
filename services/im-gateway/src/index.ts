@@ -28,6 +28,7 @@ export * from './infrastructure/security/production-ports.js';
 export * from './infrastructure/production-support.js';
 export * from './infrastructure/wechat/wechat-official-adapter.js';
 export * from './infrastructure/wecom/wecom-aibot-inbound-adapter.js';
+export * from './infrastructure/wecom/wecom-aibot-wss-runtime.js';
 export * from './ports/external.js';
 export * from './ports/repositories.js';
 export * from './shared/errors.js';
