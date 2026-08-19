@@ -311,6 +311,51 @@ int main() {
     });
     Check(OutputString(bad_query_date, "status") == "failure", "非法 start_date 应失败");
 
+    // 日期边界：真实日历日期与完整字符串都必须通过边界解析器校验，不能把 sscanf 的尾随内容带入领域层。
+    const auto impossible_query_date = server.call({
+        .request_id = "query-impossible-date",
+        .name = "schedule.query",
+        .arguments = {{"start_date", std::string("2099-02-29")}},
+    });
+    Check(OutputString(impossible_query_date, "status") == "failure", "不存在的日历日期应失败");
+
+    const auto trailing_query_date = server.call({
+        .request_id = "query-trailing-date",
+        .name = "schedule.query",
+        .arguments = {{"start_date", std::string("2099-01-01垃圾")}},
+    });
+    Check(OutputString(trailing_query_date, "status") == "failure", "带尾随文本的日期应失败");
+
+    const auto trailing_create_time = server.call({
+        .request_id = "create-trailing-time",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("非法时间")}, {"start_time", std::string("2099-01-01 09:00:00extra")}},
+    });
+    Check(OutputString(trailing_create_time, "status") == "failure", "带尾随文本的时间应失败");
+
+    const auto impossible_repeat_date = server.call({
+        .request_id = "create-impossible-repeat-date",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("非法周期日期")},
+                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("daily")},
+                                                    {"start_date", JsonValue::String("2099-02-29")},
+                                                    {"start_time", JsonValue::String("09:00:00")}})}},
+    });
+    Check(OutputString(impossible_repeat_date, "status") == "failure", "不存在的周期起始日期应失败");
+
+    const auto unsupported_repeat_field = server.call({
+        .request_id = "create-unsupported-repeat-field",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("不支持的相对周期")},
+                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("monthly")},
+                                                    {"start_date", JsonValue::String("2099-01-01")},
+                                                    {"start_time", JsonValue::String("09:00:00")},
+                                                    {"monthly_mode", JsonValue::String("ordinal_weekday")},
+                                                    {"weekday_ordinal", JsonValue::Number(2)}})}},
+    });
+    Check(!unsupported_repeat_field.status.ok() || OutputString(unsupported_repeat_field, "status") == "failure",
+          "未声明的周期字段不得被静默忽略");
+
     const auto reversed_date = server.call({
         .request_id = "query-reversed",
         .name = "schedule.query",
