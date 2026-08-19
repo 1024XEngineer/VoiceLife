@@ -217,7 +217,10 @@ class Runtime final {
         auto& registry = voice::SpeechProviderRegistry::Instance();
         if (!init_status_.ok()) return init_status_;
         const Status storage_status = storage_.Start();
-        if (!storage_status.ok()) return storage_status;
+        if (!storage_status.ok()) {
+            ESP_LOGE(kTag, "STARTUP_ERROR stage=storage_start code=%d", static_cast<int>(storage_status.code));
+            return storage_status;
+        }
 #ifdef ESP_PLATFORM
         // 立创实战派 ESP32-S3 板载 WS2812 灯珠接 GPIO48（小智 BUILTIN_LED_GPIO）。
         // 主 NVS 分区初始化（Wi-Fi 驱动/凭据等依赖；linx_secrets 为加密分区另行初始化）。
@@ -567,6 +570,10 @@ class Runtime final {
 
             if (im_readiness_.NetworkReady() && !im_readiness_.SystemTimeReady()) {
                 status = SynchronizeSystemTime();
+            }
+            if (im_readiness_.SystemTimeReady() && !im_system_time_logged_) {
+                ESP_LOGI(kTag, "SNTP_SYNCED=1");
+                im_system_time_logged_ = true;
             }
             status = im_runtime_.Start();
             if (im_runtime_.state() == im::ImRuntimeState::kProbing) {
@@ -1465,6 +1472,7 @@ class Runtime final {
     std::optional<BindingPresentation> deferred_binding_presentation_;
     std::string deferred_binding_speech_;
     std::atomic_bool im_lifecycle_started_{false};
+    bool im_system_time_logged_ = false;
     TaskHandle_t im_lifecycle_task_ = nullptr;
     mcp::McpServer mcp_server_;
     schedule::ScheduleOperationService schedule_operation_service_;

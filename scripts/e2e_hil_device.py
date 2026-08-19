@@ -7,7 +7,9 @@ import hashlib
 import json
 import os
 import re
+import struct
 import sys
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -220,6 +222,37 @@ def validate_device_layout(descriptor: DeviceDescriptor, partitions: list[Partit
     ):
         raise HilProfileMismatch("application partition does not match profile")
     return application
+
+
+def active_application_partition(partitions: list[Partition], otadata: bytes) -> Partition:
+    """Select the bootloader's current application slot from read-only OTA metadata."""
+    ota_partitions = {
+        partition.subtype - 0x10: partition
+        for partition in partitions
+        if partition.type == 0 and partition.subtype >= 0x10
+    }
+    if not ota_partitions:
+        return partition_by_label(partitions, "factory")
+    entry_size = 32
+    sector_size = 0x1000
+    if len(otadata) < sector_size + entry_size:
+        raise HilProfileMismatch("otadata image is too small")
+
+    candidates: list[int] = []
+    for index in range(2):
+        entry = otadata[index * sector_size : index * sector_size + entry_size]
+        sequence, state, stored_crc = struct.unpack_from("<I20xII", entry)
+        computed_crc = zlib.crc32(struct.pack("<I", sequence), 0xFFFFFFFF)
+        if sequence in (0, 0xFFFFFFFF) or state in (0x3, 0x4) or stored_crc != computed_crc:
+            continue
+        candidates.append(sequence)
+    if not candidates:
+        raise HilProfileMismatch("otadata has no valid active slot")
+    slot_index = (max(candidates) - 1) % len(ota_partitions)
+    try:
+        return ota_partitions[slot_index]
+    except KeyError as error:
+        raise HilProfileMismatch("otadata selects an unavailable application slot") from error
 
 
 def _sha256(path: Path) -> str:

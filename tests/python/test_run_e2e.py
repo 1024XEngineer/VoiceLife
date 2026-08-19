@@ -253,6 +253,44 @@ class RunE2eCliTest(unittest.TestCase):
         self.assertEqual(stages["run"]["code"], "journey_assertion_failed")
         self.assertEqual(stages["cleanup"]["status"], "failed")
 
+    def test_hil_collect_then_cleanup_failure_downgrades_evidence_scope(self) -> None:
+        class HilAdapter:
+            def prepare(self, context: object) -> None:
+                context.cleanup.push("cleanup-failure", lambda: (_ for _ in ()).throw(RuntimeError("private")))
+
+            def run(self, context: object) -> dict[str, object]:
+                return {"complete": True}
+
+            def assert_result(self, context: object, result: object) -> list[object]:
+                return []
+
+            def collect(self, context: object, result: object, assertions: list[object]) -> dict[str, object]:
+                return {
+                    "scope": "hil_im_pairing",
+                    "hardware_verified": True,
+                    "firmware_sha256": "a" * 64,
+                    "gateway_commit": "b" * 40,
+                    "device_fingerprint": "c" * 16,
+                    "readiness_markers": ["provisioned", "wifi_ready", "sntp_synced", "ready"],
+                    "pairing_markers": ["scope_matched", "code_valid", "pending", "expired"],
+                    "metrics": {"resource_count": 4},
+                }
+
+        config = RUNNER.RunnerConfig(
+            layer="hil",
+            journey="im-pairing",
+            profile="pcb",
+            hard_timeout_s=1.0,
+            phase_timeout_s=0.5,
+            cleanup_timeout_s=0.2,
+        )
+        result = RUNNER.run_e2e(config, HilAdapter())
+        self.assertEqual(result.message_code, "cleanup_callback_failed")
+        document = RUN_E2E.build_evidence(result, config)
+        EVIDENCE.validate_evidence(document)
+        self.assertEqual(document["scope"], "runner_contract_only")
+        self.assertIsNone(document["hil"])
+
     def test_two_processes_run_in_parallel_without_artifact_collisions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             command = [sys.executable, str(CLI), *self.base_args(Path(directory))]

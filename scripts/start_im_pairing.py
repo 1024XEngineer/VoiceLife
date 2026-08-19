@@ -36,6 +36,8 @@ class PairingLifecycle:
     def observe(self, event: dict[str, str]) -> None:
         if self.complete:
             raise PairingLifecycleError("pairing marker appeared after expiry")
+        if event.get("status") == "pending" and "pending" in self.public_markers:
+            return
         expected = ("scope_matched", "code_valid", "pending", "expired")
         position = len(self.public_markers)
         if "failure_code" in event:

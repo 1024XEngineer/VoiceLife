@@ -425,7 +425,6 @@ Status SynchronizeSystemTime() {
         ESP_LOGW(kTag, "SNTP_SYNC_UNCERTAIN now=%lld", static_cast<long long>(now));
         return Status::Error(ErrorCode::kUnavailable, "SNTP 同步后的时间仍不可信");
     }
-    ESP_LOGI(kTag, "SNTP_SYNCED=1");
     return Status::Ok();
 }
 

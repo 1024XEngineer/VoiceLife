@@ -60,6 +60,8 @@ class StartImPairingTest(unittest.TestCase):
         lifecycle.observe({"device_id": "device-1", "user_id": "user-1"})
         lifecycle.observe({"code": "123456", "expires_at": "2026-08-03T00:01:00.000Z"})
         lifecycle.observe({"status": "pending"})
+        lifecycle.observe({"status": "pending"})
+        lifecycle.observe({"status": "pending"})
         lifecycle.observe({"status": "expired"})
         self.assertTrue(lifecycle.complete)
         self.assertEqual(lifecycle.public_markers, ["scope_matched", "code_valid", "pending", "expired"])

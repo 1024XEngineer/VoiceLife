@@ -124,7 +124,11 @@ def build_evidence(result: RunnerResult, config: RunnerConfig) -> dict[str, obje
     )
     collected = result.collected
     metrics = collected.get("metrics", {}) if isinstance(collected, dict) else {}
-    scope = collected.get("scope", "runner_contract_only") if isinstance(collected, dict) else "runner_contract_only"
+    scope = (
+        collected.get("scope", "runner_contract_only")
+        if isinstance(collected, dict) and result.status.value == "passed"
+        else "runner_contract_only"
+    )
     hardware_verified = (
         collected.get("hardware_verified", False)
         if isinstance(collected, dict) and result.status.value == "passed"
@@ -207,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
             profile=profile,
             hard_timeout_s=args.timeout,
             phase_timeout_s=args.timeout,
-            cleanup_timeout_s=min(5.0, args.timeout),
+            cleanup_timeout_s=min(30.0 if args.layer == "hil" else 5.0, args.timeout),
             retries=args.retries,
         )
         adapter = build_adapter(args.layer, args.journey, args)

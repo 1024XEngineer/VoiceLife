@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import sys
 import tempfile
 import unittest
@@ -133,6 +134,14 @@ class HilProfileGuardTest(unittest.TestCase):
         self.assertNotIn("verify_flash", rendered)
         for forbidden in ("0x8000", "0xd000", "partition-table", "bootloader", "otadata", "nvs"):
             self.assertNotIn(forbidden, rendered.lower())
+
+    def test_active_application_partition_follows_read_only_ota_metadata(self) -> None:
+        partitions = self.pcb_layout()
+        otadata = bytearray(b"\xff" * 0x2000)
+        struct.pack_into("<I", otadata, 0, 1)
+        struct.pack_into("<I", otadata, 0x1000, 2)
+        struct.pack_into("<I", otadata, 0x1000 + 28, 0x55F63774)
+        self.assertEqual(HIL.active_application_partition(partitions, bytes(otadata)).label, "ota_1")
 
 
 if __name__ == "__main__":

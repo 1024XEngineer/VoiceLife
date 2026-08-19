@@ -20,6 +20,7 @@ from e2e_hil_device import (
     HilLeaseUnavailable,
     HilProfileMismatch,
     Partition,
+    active_application_partition,
     application_flash_operations,
     load_application_image,
     load_device_descriptor,
@@ -197,6 +198,7 @@ class RealHilHardware:
         self._server_directory = server_directory
         self._gateway_origin = gateway_origin
         self._user_id = user_id
+        self._active_application_offset: int | None = None
 
     def _run(self, command: list[str], timeout_s: float, *, input_text: str | None = None) -> str:
         try:
@@ -219,10 +221,24 @@ class RealHilHardware:
 
     def inspect(self, descriptor: DeviceDescriptor, temporary_directory: Path) -> list[Partition]:
         try:
-            from sqlite_board_probe_io import read_layout
+            from sqlite_board_probe_io import read_flash, read_layout
 
-            return read_layout(descriptor.port.as_posix(), 115200, temporary_directory / "partition-table.bin")
-        except RunnerDeadlineExceeded:
+            partitions = read_layout(descriptor.port.as_posix(), 115200, temporary_directory / "partition-table.bin")
+            application = validate_device_layout(descriptor, partitions)
+            if descriptor.profile == "pcb":
+                otadata = next(partition for partition in partitions if partition.label == "otadata")
+                otadata_path = temporary_directory / "otadata.bin"
+                read_flash(
+                    descriptor.port.as_posix(),
+                    115200,
+                    otadata.offset,
+                    otadata.size,
+                    otadata_path,
+                )
+                application = active_application_partition(partitions, otadata_path.read_bytes())
+            self._active_application_offset = application.offset
+            return partitions
+        except (RunnerDeadlineExceeded, HilProfileMismatch):
             raise
         except Exception as error:
             raise RunnerFailure(FailureCategory.DEVICE, "device_layout_unavailable") from error
@@ -243,6 +259,10 @@ class RealHilHardware:
         return load_application_image(build_directory, descriptor, partitions)
 
     def flash(self, descriptor: DeviceDescriptor, image: ApplicationImage, timeout_s: float) -> None:
+        if self._active_application_offset is None:
+            raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "active_application_unknown")
+        if image.offset != self._active_application_offset:
+            image = ApplicationImage(image.path, self._active_application_offset, image.size, image.sha256)
         for operation in application_flash_operations(descriptor.port, image):
             self._run(list(operation.argv), timeout_s)
 
@@ -319,7 +339,7 @@ class RealHilHardware:
             raise RunnerFailure(FailureCategory.CONFIGURATION, "pyserial_unavailable") from error
         signals: list[dict[str, object]] = [{"signal": "provisioned"}]
         deadline = time.monotonic() + timeout_s
-        with serial.Serial(descriptor.port, 115200, timeout=0.2, write_timeout=2) as device:
+        with serial.Serial(descriptor.port.as_posix(), 115200, timeout=0.2, write_timeout=2) as device:
             device.dtr = False
             device.rts = True
             time.sleep(0.15)
@@ -348,7 +368,7 @@ class RealHilHardware:
             raise RunnerFailure(FailureCategory.CONFIGURATION, "pyserial_unavailable") from error
         events: list[dict[str, str]] = []
         deadline = time.monotonic() + timeout_s
-        with serial.Serial(descriptor.port, 115200, timeout=0.2, write_timeout=2) as device:
+        with serial.Serial(descriptor.port.as_posix(), 115200, timeout=0.2, write_timeout=2) as device:
             device.write(trigger_payload(1))
             device.flush()
             while time.monotonic() < deadline:
@@ -373,7 +393,7 @@ class RealHilHardware:
             import serial
         except ImportError as error:
             raise RunnerFailure(FailureCategory.CONFIGURATION, "pyserial_unavailable") from error
-        with serial.Serial(descriptor.port, 115200, timeout=0.2, write_timeout=2) as device:
+        with serial.Serial(descriptor.port.as_posix(), 115200, timeout=0.2, write_timeout=2) as device:
             device.dtr = False
             device.rts = True
             time.sleep(0.15)

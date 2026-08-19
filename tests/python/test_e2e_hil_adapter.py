@@ -4,6 +4,7 @@ import hashlib
 import json
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -227,6 +228,23 @@ class HilPairingAdapterTest(unittest.TestCase):
             hardware._run(["missing-command"], 1.0)
         self.assertEqual(raised.exception.category, RUNNER.FailureCategory.INFRASTRUCTURE)
         self.assertEqual(raised.exception.message_code, "hil_command_unavailable")
+
+    def test_real_hardware_passes_serial_path_as_string(self) -> None:
+        serial_port = mock.Mock()
+        serial_port.__enter__ = mock.Mock(return_value=serial_port)
+        serial_port.__exit__ = mock.Mock(return_value=False)
+        serial_port.readline.return_value = b"I IM_RUNTIME_READY=1\n"
+        serial_module = types.SimpleNamespace(Serial=mock.Mock(return_value=serial_port))
+        descriptor = HIL.DeviceDescriptor("bench", Path("/dev/cu.test"), "pcb", "firmware", "ota_0")
+        hardware = HIL.RealHilHardware(
+            "runner@example.test", "/srv/voicelife", "https://gateway.example.test", "user-test"
+        )
+        with mock.patch.dict(sys.modules, {"serial": serial_module}):
+            self.assertEqual(
+                hardware.reboot_and_readiness(descriptor, 1.0),
+                [{"signal": "provisioned"}, {"signal": "ready"}],
+            )
+        serial_module.Serial.assert_called_once_with("/dev/cu.test", 115200, timeout=0.2, write_timeout=2)
 
 
 if __name__ == "__main__":
