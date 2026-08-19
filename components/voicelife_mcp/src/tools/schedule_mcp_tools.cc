@@ -13,6 +13,7 @@
 #include "voicelife/schedule/calendar.h"
 #include "voicelife/schedule/schedule_commands.h"
 #include "voicelife/schedule/schedule_operation_service.h"
+#include "voicelife/schedule/schedule_reminder_service.h"
 #include "voicelife/schedule/schedule_results.h"
 #include "voicelife/schedule/schedule_rule_commands.h"
 #include "voicelife/schedule/schedule_rule_results.h"
@@ -114,6 +115,38 @@ std::optional<DateTime> ParseDateEnd(const PropertyList& properties) {
     return schedule_tool_output::ParseDateTime(FormatDateEnd(*date));
 }
 
+std::optional<ToolResult> SynchronizeReminder(schedule::ScheduleReminderService* reminder_service,
+                                              schedule::ScheduleId schedule_id) {
+    if (reminder_service == nullptr) return std::nullopt;
+    const Status status = reminder_service->SynchronizeSchedule(schedule_id);
+    if (status.ok()) return std::nullopt;
+    return FailureOutput("日程已保存，但提醒同步失败：" + status.message);
+}
+
+std::optional<ToolResult> CancelReminder(schedule::ScheduleReminderService* reminder_service,
+                                         schedule::ScheduleId schedule_id) {
+    if (reminder_service == nullptr) return std::nullopt;
+    const Status status = reminder_service->CancelScheduleReminder(schedule_id);
+    if (status.ok()) return std::nullopt;
+    return FailureOutput("日程已取消，但提醒取消失败：" + status.message);
+}
+
+std::optional<ToolResult> SuspendRuleReminders(schedule::ScheduleReminderService* reminder_service,
+                                               schedule::ScheduleRuleId rule_id) {
+    if (reminder_service == nullptr) return std::nullopt;
+    const Status status = reminder_service->SuspendRuleReminders(rule_id);
+    if (status.ok()) return std::nullopt;
+    return FailureOutput("周期规则已修改，但旧提醒撤销失败：" + status.message);
+}
+
+std::optional<ToolResult> SynchronizeRule(schedule::ScheduleReminderService* reminder_service,
+                                          schedule::ScheduleRuleId rule_id) {
+    if (reminder_service == nullptr) return std::nullopt;
+    const Status status = reminder_service->SynchronizeRule(rule_id);
+    if (status.ok()) return std::nullopt;
+    return FailureOutput("周期规则已修改，但提醒同步失败：" + status.message);
+}
+
 bool WithinRange(const std::optional<DateTime>& start, const std::optional<DateTime>& end, DateTime value) {
     if (start.has_value() && value < *start) return false;
     if (end.has_value() && value >= *end) return false;
@@ -123,12 +156,13 @@ bool WithinRange(const std::optional<DateTime>& start, const std::optional<DateT
 }  // namespace
 
 Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, ScheduleRuleService* rule_service,
-                                schedule::ScheduleOperationService* operation_service) {
+                                schedule::ScheduleOperationService* operation_service,
+                                schedule::ScheduleReminderService* reminder_service) {
     // schedule.create 根据是否传入 repeat 拆成两条业务路径：
     // 一次性日程走 ScheduleService，周期日程走 ScheduleRuleService。
     Status status = server.add_tool(
         "schedule.create", "创建一次性日程或周期日程。", CreateProperties(),
-        [&service, rule_service](const PropertyList& properties) {
+        [&service, rule_service, reminder_service](const PropertyList& properties) {
             const auto repeat = properties.value<JsonValue>("repeat");
             const ParsedRepeat parsed_repeat = ParseRepeat(repeat, true);
             if (!parsed_repeat.ok()) return FailureOutput(parsed_repeat.error);
@@ -145,6 +179,12 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                                               schedule_tool_output::ScheduleArrayOutput(result.conflicts));
                     }
                     return FailureOutput(result.status.message);
+                }
+
+                if (result.rule.has_value()) {
+                    const std::optional<ToolResult> reminder_status =
+                        SynchronizeRule(reminder_service, result.rule->id);
+                    if (reminder_status.has_value()) return *reminder_status;
                 }
 
                 ToolOutputObject fields = {
@@ -189,6 +229,11 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                                           schedule_tool_output::ScheduleArrayOutput(result.conflicts));
                 }
                 return FailureOutput(result.result.status.message);
+            }
+            if (result.result.value.has_value()) {
+                const std::optional<ToolResult> reminder_status =
+                    SynchronizeReminder(reminder_service, result.result.value->id);
+                if (reminder_status.has_value()) return *reminder_status;
             }
             return Output({
                 MakeToolOutput("status", ToolOutputValue::String("success")),
@@ -273,7 +318,7 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
 
     status = server.add_tool(
         "schedule.update", "更新日程、更新周期规则、取消或跳过某次日程。", UpdateProperties(),
-        [&service, rule_service](const PropertyList& properties) {
+        [&service, rule_service, reminder_service](const PropertyList& properties) {
             // update 根据定位参数识别目标：schedule_id 改实例，rule_id 改规则，rule_id + original_start_time
             // 改未来单次。
             const bool has_schedule_id = properties.value<int64_t>("schedule_id").has_value();
@@ -296,6 +341,9 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                     command.schedule_id = properties.value<int64_t>("schedule_id").value_or(0);
                     const auto result = service.cancel_schedule(command);
                     if (!result.result.ok()) return FailureOutput(result.result.status.message);
+                    const std::optional<ToolResult> reminder_status =
+                        CancelReminder(reminder_service, command.schedule_id);
+                    if (reminder_status.has_value()) return *reminder_status;
                     return Output({
                         MakeToolOutput("status", ToolOutputValue::String("success")),
                         MakeToolOutput("message", ToolOutputValue::String("deleted success")),
@@ -334,6 +382,11 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                                               schedule_tool_output::ScheduleArrayOutput(result.conflicts));
                     }
                     return FailureOutput(result.result.status.message);
+                }
+                if (result.result.value.has_value()) {
+                    const std::optional<ToolResult> reminder_status =
+                        SynchronizeReminder(reminder_service, result.result.value->id);
+                    if (reminder_status.has_value()) return *reminder_status;
                 }
                 return Output({
                     MakeToolOutput("status", ToolOutputValue::String("success")),
@@ -417,14 +470,20 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
             // 只有 rule_id 时按整条周期规则更新；repeat 提供新规则字段，未传字段由 service 保持原值。
             const ParsedRepeat parsed_repeat = ParseRepeat(repeat, false);
             if (!parsed_repeat.ok()) return FailureOutput(parsed_repeat.error);
+            const schedule::ScheduleRuleId rule_id = properties.value<int64_t>("rule_id").value_or(0);
+            const std::optional<ToolResult> suspended = SuspendRuleReminders(reminder_service, rule_id);
+            if (suspended.has_value()) return *suspended;
             const auto result = rule_service->update_schedule_rule(UpdateRuleCommand(properties, parsed_repeat));
             if (!result.status.ok()) {
+                (void)SynchronizeRule(reminder_service, rule_id);
                 if (result.status.code == ErrorCode::kConflict) {
                     return ConflictOutput(result.status.message,
                                           schedule_tool_output::ScheduleArrayOutput(result.conflicts));
                 }
                 return FailureOutput(result.status.message);
             }
+            const std::optional<ToolResult> reminder_status = SynchronizeRule(reminder_service, rule_id);
+            if (reminder_status.has_value()) return *reminder_status;
             return Output({
                 MakeToolOutput("status", ToolOutputValue::String("success")),
                 MakeToolOutput("message", ToolOutputValue::String("updated success")),
@@ -440,7 +499,7 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
 
     return server.add_tool(
         "schedule.delete", "删除单次日程、未来周期单次或整条周期规则。", DeleteProperties(),
-        [&service, rule_service](const PropertyList& properties) {
+        [&service, rule_service, reminder_service](const PropertyList& properties) {
             // delete 根据定位参数拆三条路径：schedule_id 删实例，rule_id 删规则，rule_id + original_start_time
             // 跳过未来单次。
             const bool has_schedule_id = properties.value<int64_t>("schedule_id").has_value();
@@ -461,6 +520,8 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                 if (!loaded.result.ok() || loaded.result.value.empty()) return FailureOutput("日程不存在");
                 const auto result = service.cancel_schedule({.schedule_id = schedule_id});
                 if (!result.result.ok()) return FailureOutput(result.result.status.message);
+                const std::optional<ToolResult> reminder_status = CancelReminder(reminder_service, schedule_id);
+                if (reminder_status.has_value()) return *reminder_status;
                 schedule::Schedule deleted = loaded.result.value.front();
                 deleted.status = schedule::ScheduleStatus::kCancelled;
                 return Output({
@@ -499,8 +560,13 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
             // 仅 rule_id 时取消整条周期规则及其未来实例。
             schedule::CancelScheduleRuleCommand command;
             command.rule_id = properties.value<int64_t>("rule_id").value_or(0);
+            const std::optional<ToolResult> suspended = SuspendRuleReminders(reminder_service, command.rule_id);
+            if (suspended.has_value()) return *suspended;
             const auto result = rule_service->cancel_schedule_rule(command);
-            if (!result.status.ok()) return FailureOutput(result.status.message);
+            if (!result.status.ok()) {
+                (void)SynchronizeRule(reminder_service, command.rule_id);
+                return FailureOutput(result.status.message);
+            }
             return Output({
                 MakeToolOutput("status", ToolOutputValue::String("success")),
                 MakeToolOutput("message", ToolOutputValue::String("deleted success")),
@@ -552,16 +618,22 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
 }
 
 Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service) {
-    return RegisterScheduleMcpTools(server, service, nullptr, nullptr);
+    return RegisterScheduleMcpTools(server, service, nullptr, nullptr, nullptr);
 }
 
 Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, ScheduleRuleService& rule_service) {
-    return RegisterScheduleMcpTools(server, service, &rule_service, nullptr);
+    return RegisterScheduleMcpTools(server, service, &rule_service, nullptr, nullptr);
 }
 
 Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, ScheduleRuleService& rule_service,
                                 schedule::ScheduleOperationService& operation_service) {
-    return RegisterScheduleMcpTools(server, service, &rule_service, &operation_service);
+    return RegisterScheduleMcpTools(server, service, &rule_service, &operation_service, nullptr);
+}
+
+Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, ScheduleRuleService& rule_service,
+                                schedule::ScheduleOperationService& operation_service,
+                                schedule::ScheduleReminderService* reminder_service) {
+    return RegisterScheduleMcpTools(server, service, &rule_service, &operation_service, reminder_service);
 }
 
 }  // namespace voicelife::mcp

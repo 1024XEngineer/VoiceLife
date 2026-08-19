@@ -76,13 +76,34 @@ jobs:
             build-mode: none
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+      - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
       - name: 安装 SQLite 开发库
         if: matrix.id == 'cpp'
-        run: sudo apt-get update && sudo apt-get install --yes libsqlite3-dev
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # GitHub 托管 Runner 通常已预装该依赖，避免无必要地访问外部软件源。
+          if dpkg-query --show --showformat='${Status}\n' libsqlite3-dev 2>/dev/null \
+            | grep --quiet '^install ok installed$'; then
+            echo "libsqlite3-dev 已安装，跳过 APT 更新。"
+            exit 0
+          fi
+
+          # 软件源异常时在 3 分钟内明确失败，避免 CodeQL job 一直等待到总超时。
+          sudo timeout --kill-after=15s 3m apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 \
+            update
+          sudo timeout --kill-after=15s 3m apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 \
+            install --yes libsqlite3-dev
       - name: 构建主机 C++ 测试
         if: matrix.id == 'cpp'
         run: ./scripts/run_host_tests.sh
@@ -104,4 +125,4 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm run build
-      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+      - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4

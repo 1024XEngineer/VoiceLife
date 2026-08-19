@@ -92,6 +92,15 @@ jobs:
             --profile host \
             --artifact-dir artifacts/im-gateway-e2e \
             --timeout 60
+      - name: 运行 Host 快速恢复 E2E
+        run: |
+          E2E_RECOVERY_SUITE=quick python3 scripts/run_e2e.py \
+            --layer host \
+            --journey im-gateway-recovery \
+            --profile host \
+            --artifact-dir artifacts/im-gateway-e2e \
+            --timeout 120 \
+            --retries 0
       - name: 上传 Host E2E 脱敏证据
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

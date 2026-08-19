@@ -73,6 +73,11 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
      */
     Status Update(const schedule::Schedule& input) override {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (next_update_failure_.has_value()) {
+            Status failure = std::move(*next_update_failure_);
+            next_update_failure_.reset();
+            return failure;
+        }
         schedule::Schedule* stored = FindScheduleLocked(input.id);
         if (stored == nullptr) return Status::Error(ErrorCode::kNotFound, "日程不存在");
         *stored = input;
@@ -102,11 +107,21 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
      */
     [[nodiscard]] Result<std::vector<schedule::Schedule>> FindAll() const override {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (next_find_all_failure_.has_value()) {
+            Status failure = std::move(*next_find_all_failure_);
+            next_find_all_failure_.reset();
+            return Result<std::vector<schedule::Schedule>>::Failure(failure.code, failure.message);
+        }
         return Result<std::vector<schedule::Schedule>>::Success(schedules_);
     }
 
     [[nodiscard]] Result<schedule::Schedule> FindById(schedule::ScheduleId id) const override {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (next_find_by_id_failure_.has_value()) {
+            Status failure = std::move(*next_find_by_id_failure_);
+            next_find_by_id_failure_.reset();
+            return Result<schedule::Schedule>::Failure(failure.code, failure.message);
+        }
         const auto found = std::find_if(schedules_.begin(), schedules_.end(),
                                         [id](const schedule::Schedule& stored) { return stored.id == id; });
         if (found == schedules_.end())
@@ -259,6 +274,9 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
         operations_.clear();
         next_schedule_id_ = in_memory_schedule_repository_helpers::NextScheduleId(schedules_);
         next_operation_id_ = 1;
+        next_find_all_failure_.reset();
+        next_find_by_id_failure_.reset();
+        next_update_failure_.reset();
         next_find_overlapping_failure_.reset();
         next_find_failure_.reset();
         next_count_failure_.reset();
@@ -309,6 +327,36 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
     void FailNextFindOverlapping(Status status) {
         std::lock_guard<std::mutex> lock(mutex_);
         next_find_overlapping_failure_ = std::move(status);
+    }
+
+    /**
+     * @brief 注入下一次 FindAll 失败状态。
+     * @param status 下一次 FindAll 返回的错误。
+     * @return 无。
+     */
+    void FailNextFindAll(Status status) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        next_find_all_failure_ = std::move(status);
+    }
+
+    /**
+     * @brief 注入下一次 FindById 失败状态。
+     * @param status 下一次 FindById 返回的错误。
+     * @return 无。
+     */
+    void FailNextFindById(Status status) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        next_find_by_id_failure_ = std::move(status);
+    }
+
+    /**
+     * @brief 注入下一次 Update 失败状态。
+     * @param status 下一次 Update 返回的错误。
+     * @return 无。
+     */
+    void FailNextUpdate(Status status) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        next_update_failure_ = std::move(status);
     }
 
     /**
@@ -401,6 +449,9 @@ class InMemoryScheduleRepository final : public schedule::ScheduleRepository,
     std::vector<schedule::OperationRecord> operations_;
     schedule::ScheduleId next_schedule_id_ = 1;
     schedule::OperationId next_operation_id_ = 1;
+    mutable std::optional<Status> next_find_all_failure_;
+    mutable std::optional<Status> next_find_by_id_failure_;
+    std::optional<Status> next_update_failure_;
     mutable std::optional<Status> next_find_overlapping_failure_;
     mutable std::optional<Status> next_find_failure_;
     mutable std::optional<Status> next_count_failure_;
