@@ -120,7 +120,8 @@ class SerialVoiceTest::Impl final {
             const detail::SerialVoiceFrameHeader frame_header{
                 .version = header[0],
                 .kind = header[1],
-                .payload_bytes = static_cast<uint16_t>(header[2]) | (static_cast<uint16_t>(header[3]) << 8U),
+                .payload_bytes =
+                    static_cast<uint16_t>(static_cast<uint16_t>(header[2]) | (static_cast<uint16_t>(header[3]) << 8U)),
             };
             if (!detail::IsValidSerialVoiceHeader(frame_header)) {
                 ESP_LOGW(kTag, "SERIAL_VOICE_FRAME_REJECT version=%u kind=%u length=%u",
