@@ -1,4 +1,7 @@
-import { createDecipheriv, createHash, timingSafeEqual } from 'node:crypto';
+import { createRequire } from 'node:module';
+import type WXBizMsgCryptType from 'wxcrypt';
+
+const WXBizMsgCrypt = createRequire(import.meta.url)('wxcrypt') as typeof WXBizMsgCryptType;
 
 import type { NormalizedImEvent } from '../../contracts/platform-events.js';
 import { ImGatewayError } from '../../shared/errors.js';
@@ -32,9 +35,9 @@ export interface WecomAibotUrlCallbackOptions {
  * 控制器只接受通过 Token 签名验证且能用 EncodingAESKey 解密的请求，原始密文和消息正文不会被记录。
  */
 export class WecomAibotUrlCallbackController {
-    private readonly token: string;
-
-    private readonly aesKey: Buffer;
+    private readonly crypt: {
+        verifyURL(msgSignature: string, timestamp: string, nonce: string, echostr: string): string;
+    };
 
     /**
      * @param adapter 企业微信消息归一化适配器。
@@ -44,8 +47,10 @@ export class WecomAibotUrlCallbackController {
         private readonly adapter: WecomAibotInboundAdapter,
         private readonly options: WecomAibotUrlCallbackOptions,
     ) {
-        this.token = requiredOption(options.token, 'token');
-        this.aesKey = decodeEncodingAesKey(options.encodingAesKey);
+        const token = requiredOption(options.token, 'token');
+        const encodingAesKey = requiredOption(options.encodingAesKey, 'encodingAesKey');
+        validateEncodingAesKey(encodingAesKey);
+        this.crypt = new WXBizMsgCrypt(token, encodingAesKey, '');
     }
 
     /**
@@ -55,8 +60,7 @@ export class WecomAibotUrlCallbackController {
      */
     public verify(request: WecomAibotUrlCallbackRequest): string {
         const echostr = requiredString(request.echostr, 'echostr');
-        this.verifySignature(request, echostr);
-        return this.decrypt(echostr);
+        return this.decrypt(request, echostr);
     }
 
     /**
@@ -67,48 +71,22 @@ export class WecomAibotUrlCallbackController {
     public async post(request: WecomAibotUrlCallbackRequest): Promise<WecomAibotUrlCallbackResponse> {
         const body = requiredStringBody(request.body);
         const encrypted = encryptedBody(body);
-        this.verifySignature(request, encrypted);
-        const rawEvent = parseJson(this.decrypt(encrypted));
+        const rawEvent = parseJson(this.decrypt(request, encrypted));
         await this.options.postEvent(await this.adapter.normalizeInbound(rawEvent));
         return { status: 200, body: 'success' };
     }
 
-    private verifySignature(request: WecomAibotUrlCallbackRequest, encrypted: string): void {
+    private decrypt(request: WecomAibotUrlCallbackRequest, encrypted: string): string {
         const timestamp = requiredString(request.timestamp, 'timestamp');
         const nonce = requiredString(request.nonce, 'nonce');
         const signature = requiredString(request.msg_signature, 'msg_signature');
-        const expected = createHash('sha1')
-            .update([this.token, timestamp, nonce, encrypted].sort().join(''))
-            .digest('hex');
-        if (!safeEqual(signature, expected)) {
-            throw new ImGatewayError('invalid_contract', 'WeCom AI Bot callback signature is invalid');
-        }
-    }
-
-    private decrypt(encrypted: string): string {
-        const ciphertext = decodeCiphertext(encrypted);
-        let plaintext: Buffer;
         try {
-            const decipher = createDecipheriv('aes-256-cbc', this.aesKey, this.aesKey.subarray(0, 16));
-            plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+            return this.crypt.verifyURL(signature, timestamp, nonce, encrypted);
         } catch {
-            throw new ImGatewayError('invalid_contract', 'WeCom AI Bot callback cannot be decrypted');
-        }
-        if (plaintext.length < 20) {
-            throw new ImGatewayError('invalid_contract', 'WeCom AI Bot callback plaintext is invalid');
-        }
-        const messageLength = plaintext.readUInt32BE(16);
-        const messageEnd = 20 + messageLength;
-        if (!Number.isSafeInteger(messageEnd) || messageEnd > plaintext.length) {
-            throw new ImGatewayError('invalid_contract', 'WeCom AI Bot callback plaintext is invalid');
-        }
-        if (plaintext.subarray(messageEnd).length !== 0) {
-            throw new ImGatewayError('invalid_contract', 'WeCom AI Bot callback targets another receive ID');
-        }
-        try {
-            return new TextDecoder('utf-8', { fatal: true }).decode(plaintext.subarray(20, messageEnd));
-        } catch {
-            throw new ImGatewayError('invalid_contract', 'WeCom AI Bot callback message is not UTF-8');
+            throw new ImGatewayError(
+                'invalid_contract',
+                'WeCom AI Bot callback signature is invalid or cannot be decrypted',
+            );
         }
     }
 }
@@ -119,16 +97,14 @@ function requiredOption(value: string, name: string): string {
     return normalized;
 }
 
-function decodeEncodingAesKey(value: string): Buffer {
-    const normalized = value.trim();
-    if (!/^[A-Za-z0-9+/]{43}$/u.test(normalized)) {
+function validateEncodingAesKey(value: string): void {
+    if (!/^[A-Za-z0-9+/]{43}$/u.test(value)) {
         throw new ImGatewayError('invalid_contract', 'WeCom AI Bot EncodingAESKey must be 43 base64 characters');
     }
-    const key = Buffer.from(`${normalized}=`, 'base64');
+    const key = Buffer.from(`${value}=`, 'base64');
     if (key.length !== 32) {
         throw new ImGatewayError('invalid_contract', 'WeCom AI Bot EncodingAESKey must decode to 32 bytes');
     }
-    return key;
 }
 
 function requiredString(value: string | undefined, name: string): string {
@@ -166,21 +142,4 @@ function parseJson(value: string): Record<string, unknown> {
     } catch {
         throw new ImGatewayError('invalid_contract', 'WeCom AI Bot callback JSON is invalid');
     }
-}
-
-function decodeCiphertext(value: string): Buffer {
-    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)) {
-        throw new ImGatewayError('invalid_contract', 'WeCom AI Bot callback ciphertext is invalid');
-    }
-    const ciphertext = Buffer.from(value, 'base64');
-    if (ciphertext.length === 0 || ciphertext.length % 16 !== 0) {
-        throw new ImGatewayError('invalid_contract', 'WeCom AI Bot callback ciphertext is invalid');
-    }
-    return ciphertext;
-}
-
-function safeEqual(actual: string, expected: string): boolean {
-    const actualBytes = Buffer.from(actual, 'utf8');
-    const expectedBytes = Buffer.from(expected, 'utf8');
-    return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
 }
