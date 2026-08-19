@@ -6,7 +6,7 @@
 
 ## 1. 分区表（官方实板布局）
 
-`partitions_sparkbot.csv`（VoiceLife SparkBot Profile）：
+`config/partitions/sparkbot.csv`（VoiceLife SparkBot Profile）：
 
 | Name | Type | SubType | Offset | Size |
 | --- | --- | --- | --- | --- |
