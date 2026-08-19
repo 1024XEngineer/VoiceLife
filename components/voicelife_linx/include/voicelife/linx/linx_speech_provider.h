@@ -57,7 +57,7 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
      * @param frame 待发送的音频帧。
      * @return 发送结果。
      */
-    Status SendAudio(const voice::AudioFrame& frame) override;
+    Status SendAudio(voice::AudioFrame frame) override;
     /** @brief 中止当前 Linx 会话。 @param reason 中止原因。 @return 中止结果。 */
     Status Abort(std::string_view reason) override;
     /** @brief 请求 Linx 合成文本。 @param text 待合成文本。 @return 请求结果。 */
@@ -83,7 +83,7 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
 
    private:
     void OnText(std::string_view message);
-    void OnBinary(const std::vector<uint8_t>& payload);
+    void OnBinary(std::vector<uint8_t> payload);
     void OnTransportConnected();
     void OnTransportDisconnected();
     [[nodiscard]] voice::VoiceSessionConfig ActiveSessionConfig() const;

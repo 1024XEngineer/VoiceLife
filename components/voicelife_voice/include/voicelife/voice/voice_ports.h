@@ -106,6 +106,29 @@ class AudioInputPort {
     virtual void Close() = 0;
 };
 
+/**
+ * @brief 仅供受控硬件回归使用的采集注入端口。
+ *
+ * 实现必须把帧送入与物理采集相同的有界投递路径。正常产品流程不依赖此
+ * 端口；没有测试注入能力的平台返回空指针即可。
+ */
+class TestAudioInjectionPort {
+   public:
+    /** @brief 虚析构函数。 */
+    virtual ~TestAudioInjectionPort() = default;
+
+    /** @brief 启用或关闭测试输入对物理麦克风上行的排他保护。
+     * @param enabled 为 true 时由测试输入独占上行。
+     * @return 状态切换成功返回 Ok。
+     */
+    virtual Status SetTestInputEnabled(bool enabled) = 0;
+    /** @brief 提交一帧已协商格式的测试 PCM。
+     * @param frame 要注入的音频帧，调用方交出负载所有权。
+     * @return 帧被接收或拒绝时对应的状态。
+     */
+    virtual Status InjectTestInput(AudioFrame frame) = 0;
+};
+
 /** @brief 硬件音频播放设备抽象（I2S 扬声器、DAC 等）。 */
 class AudioOutputPort {
    public:
@@ -117,10 +140,10 @@ class AudioOutputPort {
      *  @return 打开成功返回 Ok。 */
     virtual Status Open(const AudioFormat& format) = 0;
 
-    /** @brief 将解码后的音频帧推入播放队列。
-     *  @param frame 要播放的音频帧。
+    /** @brief 将解码后的音频帧移入播放队列。
+     *  @param frame 要播放的音频帧，调用方交出其负载所有权。
      *  @return 推送成功返回 Ok。 */
-    virtual Status Push(const AudioFrame& frame) = 0;
+    virtual Status Push(AudioFrame frame) = 0;
 
     /** @brief 丢弃所有缓冲帧，在打断或代次失效时调用。
      *  @return 刷新成功返回 Ok。 */
@@ -152,9 +175,9 @@ class VoiceTransportPort {
     virtual Status SendText(std::string_view message) = 0;
 
     /** @brief 通过传输发送音频帧。
-     *  @param frame 要发送的音频帧。
+     *  @param frame 要发送的音频帧，调用方交出其负载所有权。
      *  @return 发送成功返回 Ok。 */
-    virtual Status SendAudio(const AudioFrame& frame) = 0;
+    virtual Status SendAudio(AudioFrame frame) = 0;
 
     /** @brief 拆除传输连接。
      *  @return 关闭成功返回 Ok。 */
@@ -270,7 +293,7 @@ class SpeechProviderAdapter {
     /** @brief 向 Provider 发送音频帧。
      *  @param frame 要发送的音频帧。
      *  @return 发送成功返回 Ok。 */
-    virtual Status SendAudio(const AudioFrame& frame) = 0;
+    virtual Status SendAudio(AudioFrame frame) = 0;
 
     /** @brief 以指定原因中止当前操作（播放或采集）。
      *  @param reason 中止原因。

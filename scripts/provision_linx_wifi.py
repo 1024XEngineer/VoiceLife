@@ -46,8 +46,28 @@ def main() -> None:
         time.sleep(0.15)
         device.rts = False
         deadline = time.monotonic() + args.timeout
+        observed: list[str] = []
+        safe_markers = (
+            b"LINX_WIFI_PROVISIONED=1",
+            b"WIFI_STA_GOT_IP=1",
+            b"WIFI_STA_DISCONNECTED",
+            b"STARTUP_ERROR",
+            b"NVS",
+            b"LINX_WIFI_PROVISION_RESULT=",
+            "保存 Wi-Fi 加密凭据".encode(),
+        )
         while time.monotonic() < deadline:
             line = device.readline()
+            if line:
+                # Keep provisioning diagnostics credential-free. These markers make
+                # encryption, association, and startup failures distinguishable
+                # without forwarding arbitrary serial output or Wi-Fi secrets.
+                for marker in safe_markers:
+                    if marker in line:
+                        text = line.decode("utf-8", "replace").strip()
+                        if text not in observed:
+                            observed.append(text)
+                            print(text)
             if READY_MARKER not in line:
                 continue
             device.write(payload)
@@ -56,13 +76,19 @@ def main() -> None:
             print("Provisioning request sent; waiting for a credential-free result.")
             while time.monotonic() < deadline:
                 line = device.readline()
+                if line and any(marker in line for marker in safe_markers):
+                    text = line.decode("utf-8", "replace").strip()
+                    if text not in observed:
+                        observed.append(text)
+                        print(text)
                 if b"LINX_WIFI_PROVISIONED=1" in line:
                     print("Provisioning completed.")
                     return
                 if b"\xe5\x90\xaf\xe5\x8a\xa8\xe5\xa4\xb1\xe8\xb4\xa5" in line:
                     raise SystemExit("Board rejected provisioning; inspect sanitized serial status.")
             break
-    raise SystemExit("Timed out waiting for the board provisioning window")
+    detail = "; ".join(observed[-4:])
+    raise SystemExit("Timed out waiting for the board provisioning window" + (f": {detail}" if detail else ""))
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@
 | 读者 | 入口 |
 | --- | --- |
 | 使用者与新贡献者 | [项目 README](../README.md)、[参与开发](../CONTRIBUTING.md) |
-| 硬件调试与烧录 | [硬件调试与日志规则](engineering/hardware-debugging.md)、[SparkBot 刷写与资源清单](engineering/sparkbot-flash-and-assets.md)、[SQLite 实板验证与恢复](engineering/board-storage-validation.md) |
+| 硬件调试与烧录 | [硬件调试与日志规则](engineering/hardware-debugging.md)、[SparkBot 刷写与资源清单](engineering/sparkbot-flash-and-assets.md)、[SQLite 实板验证与恢复](engineering/board-storage-validation.md)、[百炼与 SparkBot 语音实板验证](engineering/bailian-sparkbot-voice-validation.md) |
 | 架构维护者 | [架构与适配器设计](architecture/design-guidelines.md)、[语音子架构](architecture/voice-subarchitecture.md)、[SQLite 存储子架构](architecture/storage-subarchitecture.md)、[ADR](adr/) |
 | 组件与服务维护者 | [SparkBot 显示组件](components/sparkbot-display.md)、[IM Gateway](services/im-gateway.md) |
 | 协作与交付 | [协同开发](engineering/collaboration.md)、[质量门禁](engineering/ci-quality-gates.md)、[契约版本](engineering/contract-versioning.md)、[提交规范](engineering/commit-convention.md) |

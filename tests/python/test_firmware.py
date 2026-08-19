@@ -50,6 +50,8 @@ class ProfileValidationTest(unittest.TestCase):
 
         self.assertEqual(profile["adapters"]["im"]["driver"], "voicelife-gateway")
         self.assertEqual(profile["adapters"]["im"]["configRef"], "nvs://im")
+        self.assertIn("CONFIG_COMPILER_OPTIMIZATION_SIZE=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y", profile["sdkconfig"])
         self.assertIn("CONFIG_VOICELIFE_BOARD_ESP_SPARKBOT=y", profile["sdkconfig"])
         self.assertIn("CONFIG_VOICELIFE_IM_GATEWAY=y", profile["sdkconfig"])
         self.assertNotIn("CONFIG_VOICELIFE_BOARD_VOICELIFE_PCB=y", profile["sdkconfig"])

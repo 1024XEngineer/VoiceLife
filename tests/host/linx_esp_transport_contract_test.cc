@@ -1,13 +1,23 @@
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "support/test_support.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
+#include "voicelife/linx_esp/linx_tx_generation_gate.h"
+#include "voicelife/linx_esp/linx_tx_policy.h"
 #include "voicelife/linx_esp/websocket_fragment_assembler.h"
 
 using voicelife::ErrorCode;
 using voicelife::linx_esp::IsWebSocketDataOpcode;
+using voicelife::linx_esp::LinxTextTxLane;
+using voicelife::linx_esp::LinxTxGenerationGate;
+using voicelife::linx_esp::SelectLinxTextTxLane;
 using voicelife::linx_esp::WebSocketFragment;
 using voicelife::linx_esp::WebSocketFragmentAssembler;
 using voicelife::linx_esp::WebSocketOpcode;
@@ -31,6 +41,52 @@ WebSocketFragment Chunk(uint64_t generation, WebSocketOpcode opcode, std::string
 int main() {
     Check(voicelife::linx_esp::EspWebSocketTransportOptions{}.max_message_bytes == 64 * 1024,
           "Linx WebSocket 默认消息上限必须为 64 KiB");
+    const voicelife::linx_esp::EspWebSocketTransportOptions defaults{};
+    Check(defaults.network_timeout_ms == 10000, "Linx 网络超时必须保留 10 秒，避免慢速下行分片被错误重连");
+    Check(defaults.tx_timeout_ms == 1000, "Linx 默认同步写超时必须限制在 1 秒，避免 generation 切换拖慢本地打断");
+    Check(SelectLinxTextTxLane("{\"type\":\"listen\",\"state\":\"stop\"}") == LinxTextTxLane::kMediaOrdered,
+          "listen.stop 必须排在已经入队的 PCM 之后，不能由控制队列越过尾音");
+    Check(SelectLinxTextTxLane("{\"type\":\"listen\",\"state\":\"start\"}") == LinxTextTxLane::kControl &&
+              SelectLinxTextTxLane("{\"type\":\"listen\",\"state\":\"detect\"}") == LinxTextTxLane::kControl &&
+              SelectLinxTextTxLane("{\"type\":\"abort\"}") == LinxTextTxLane::kControl,
+          "开始、检测和 abort 必须保留控制通道的低延迟抢占能力");
+
+    LinxTxGenerationGate generation_gate;
+    generation_gate.SetGeneration(1);
+    std::mutex generation_mutex;
+    std::condition_variable generation_cv;
+    bool old_write_started = false;
+    bool release_old_write = false;
+    std::atomic<bool> generation_switched = false;
+    std::thread old_write([&]() {
+        Check(generation_gate.SendIfCurrent(1,
+                                            [&]() {
+                                                std::unique_lock<std::mutex> lock(generation_mutex);
+                                                old_write_started = true;
+                                                generation_cv.notify_all();
+                                                generation_cv.wait(lock, [&]() { return release_old_write; });
+                                            }),
+              "当前 generation 的写入必须允许开始");
+    });
+    {
+        std::unique_lock<std::mutex> lock(generation_mutex);
+        generation_cv.wait(lock, [&]() { return old_write_started; });
+    }
+    std::thread switch_generation([&]() {
+        generation_gate.SetGeneration(2);
+        generation_switched.store(true);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    Check(!generation_switched.load(), "generation 切换必须等待已经开始的同步写完成");
+    {
+        std::lock_guard<std::mutex> lock(generation_mutex);
+        release_old_write = true;
+    }
+    generation_cv.notify_all();
+    old_write.join();
+    switch_generation.join();
+    Check(generation_switched.load() && !generation_gate.SendIfCurrent(1, []() {}),
+          "generation 切换完成后已经出队的旧帧不得再开始写入");
 
     WebSocketFragmentAssembler assembler(8);
 

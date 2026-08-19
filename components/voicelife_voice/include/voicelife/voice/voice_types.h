@@ -4,7 +4,8 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include <vector>
+
+#include "voicelife/voice/audio_payload.h"
 
 namespace voicelife::voice {
 
@@ -72,7 +73,7 @@ struct AudioFrame {
     /** @brief 帧格式。 */
     AudioFormat format;
     /** @brief 帧载荷。 */
-    std::vector<uint8_t> payload;
+    AudioPayload payload;
 };
 
 /**
@@ -103,6 +104,8 @@ struct VoiceSessionConfig {
     AudioFormat audio;
     /** @brief hello 握手超时（毫秒）。 */
     uint32_t hello_timeout_ms = 10000;
+    /** @brief 本地 VAD 端点静音窗口（毫秒），用于触发 listen.stop。 */
+    uint32_t vad_silence_ms = 700;
     /** @brief 重连退避（毫秒）。 */
     uint32_t reconnect_backoff_ms = 250;
     /** @brief 是否启用 MCP。 */

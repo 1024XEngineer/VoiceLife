@@ -123,10 +123,11 @@ void EspWebSocketTransport::Impl::TxEntry(void* argument) {
 
 void EspWebSocketTransport::Impl::TxLoop() {
     // 唯一 TX 任务：按队列顺序发送文本/音频，TLS 只在本任务运行。
-    // 短超时（network_timeout_ms 已配置，通常 ≤1s）避免写阻塞拖垮采集。
+    // 独立的短 TX 超时避免写阻塞拖垮采集；网络接收仍使用其正常预算。
     while (running_.load()) {
         detail::LinxTxItem* item = nullptr;
-        // 高优先级控制队列优先（listen.stop/abort 不被音频队列阻塞）。
+        // 控制命令优先；作为音频结束边界的 listen.stop 已进入媒体 FIFO，
+        // 因而仍排在本轮已入队 PCM 之后。
         if (tx_control_queue_ != nullptr && xQueueReceive(tx_control_queue_, &item, 0) == pdTRUE) {
             // 从控制队列取到 item，直接发送。
         } else if (tx_queue_ != nullptr && xQueueReceive(tx_queue_, &item, pdMS_TO_TICKS(100)) != pdTRUE) {
@@ -137,19 +138,25 @@ void EspWebSocketTransport::Impl::TxLoop() {
         }
         if (item->kind == detail::LinxTxItem::Kind::kBarrier) {
             // barrier：文本/音频序列的分界（如 listen.stop 排在本轮音频之后）。
-            delete item;
+            ReleaseTxItem(item);
             continue;
         }
-        const int sent = item->kind == detail::LinxTxItem::Kind::kText
-                             ? esp_websocket_client_send_text(
-                                   client_, reinterpret_cast<const char*>(item->payload.data()),
-                                   static_cast<int>(item->payload.size()), pdMS_TO_TICKS(options_.network_timeout_ms))
-                             : esp_websocket_client_send_bin(
-                                   client_, reinterpret_cast<const char*>(item->payload.data()),
-                                   static_cast<int>(item->payload.size()), pdMS_TO_TICKS(options_.network_timeout_ms));
+        int sent = -1;
+        const bool sent_current = tx_generation_gate_.SendIfCurrent(item->generation, [this, &item, &sent]() {
+            sent = item->kind == detail::LinxTxItem::Kind::kText
+                       ? esp_websocket_client_send_text(client_, reinterpret_cast<const char*>(item->payload.data()),
+                                                        static_cast<int>(item->payload.size()),
+                                                        pdMS_TO_TICKS(options_.tx_timeout_ms))
+                       : esp_websocket_client_send_bin(client_, reinterpret_cast<const char*>(item->payload.data()),
+                                                       static_cast<int>(item->payload.size()),
+                                                       pdMS_TO_TICKS(options_.tx_timeout_ms));
+        });
         const size_t want = item->payload.size();
-        delete item;
+        ReleaseTxItem(item);
         item = nullptr;
+        if (!sent_current) {
+            continue;
+        }
         if (sent < 0 || static_cast<size_t>(sent) != want) {
             // 发送失败（写阻塞/短写/连接已断）：不能直接 esp_websocket_client_stop
             // ——stop 会停止客户端，ESP 内建自动重连（disable_auto_reconnect=false）
@@ -163,13 +170,22 @@ void EspWebSocketTransport::Impl::TxLoop() {
                 // 重启以恢复内建自动重连；start 会重新进入连接流程并自动重连。
                 (void)esp_websocket_client_start(client_);
             }
-            // 清理队列中剩余项，避免堆积。
+            // 本次连接的媒体和控制命令都不能穿过重连边界。仅清理 PCM
+            // 会让失效的 listen.start/abort 在新连接上被错误发送。
             detail::LinxTxItem* remaining = nullptr;
             while (tx_queue_ != nullptr && xQueueReceive(tx_queue_, &remaining, 0) == pdTRUE) {
-                delete remaining;
+                ReleaseTxItem(remaining);
+                remaining = nullptr;
+            }
+            while (tx_control_queue_ != nullptr && xQueueReceive(tx_control_queue_, &remaining, 0) == pdTRUE) {
+                ReleaseTxItem(remaining);
+                remaining = nullptr;
             }
             continue;
         }
+    }
+    if (tx_stopped_ != nullptr) {
+        xSemaphoreGive(tx_stopped_);
     }
 }
 
@@ -221,6 +237,16 @@ void EspWebSocketTransport::Impl::HandleData(const detail::EventEnvelope& envelo
         return;
     }
     const linx::LinxTransportSink sink = SinkSnapshot();
+    if (envelope.opcode == static_cast<uint8_t>(WebSocketOpcode::kBinary) &&
+        envelope.payload_len > voice::AudioFrame::kMaxPayloadBytes) {
+        const Status failure = Status::Error(ErrorCode::kInvalidArgument, "Linx 二进制音频消息超过单帧内存上限");
+        {
+            std::lock_guard<std::mutex> status_lock(status_mutex_);
+            error_status_ = failure;
+        }
+        if (sink.on_error) sink.on_error(failure);
+        return;
+    }
     WebSocketAssemblyResult assembled;
     Status failure = Status::Ok();
     {
@@ -258,7 +284,7 @@ void EspWebSocketTransport::Impl::HandleData(const detail::EventEnvelope& envelo
         }
     } else if (assembled.message.opcode == WebSocketOpcode::kBinary) {
         if (sink.on_binary) {
-            sink.on_binary(assembled.message.payload);
+            sink.on_binary(std::move(assembled.message.payload));
         }
     }
 }
