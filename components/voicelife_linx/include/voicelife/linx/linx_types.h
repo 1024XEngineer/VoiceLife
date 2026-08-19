@@ -13,6 +13,11 @@ namespace voicelife::linx {
 
 /** 保存 Linx WebSocket 连接所需的非敏感配置引用。 */
 struct LinxConnectionConfig {
+    // Linx uses this value to choose its downstream send strategy. Keep it in
+    // the same latency budget as the board playback queue rather than deriving
+    // an unbounded duration from the negotiated packet size.
+    static constexpr uint32_t kDefaultPlaybackBufferDurationMs = 200;
+
     std::string websocket_url;
     // A reference such as secret://linx/device-token. The resolved token is
     // owned by the platform transport and never enters this component's logs.
@@ -20,13 +25,15 @@ struct LinxConnectionConfig {
     std::string device_id;
     std::string client_id;
     std::optional<std::string> agent_id;
+    uint32_t playback_buffer_duration_ms = kDefaultPlaybackBufferDurationMs;
 
     /**
      * @brief 校验连接配置是否完整。
      * @return 必需字段均非空时返回 true。
      */
     [[nodiscard]] bool valid() const {
-        return !websocket_url.empty() && !token_ref.empty() && !device_id.empty() && !client_id.empty();
+        return !websocket_url.empty() && !token_ref.empty() && !device_id.empty() && !client_id.empty() &&
+               playback_buffer_duration_ms > 0;
     }
 };
 
@@ -71,7 +78,9 @@ struct LinxTransportSink {
     std::function<void()> on_connected;
     std::function<void()> on_disconnected;
     std::function<void(std::string_view)> on_text;
-    std::function<void(const std::vector<uint8_t>&)> on_binary;
+    // Binary audio is owned by the receiver so a WebSocket assembly buffer can
+    // move directly into the provider instead of being copied on every frame.
+    std::function<void(std::vector<uint8_t>)> on_binary;
     std::function<void(Status)> on_error;
 };
 
@@ -98,7 +107,7 @@ class LinxTransportPort {
      * @param frame 待发送音频帧。
      * @return 发送结果。
      */
-    virtual Status SendAudio(const voice::AudioFrame& frame) = 0;
+    virtual Status SendAudio(voice::AudioFrame frame) = 0;
     /**
      * @brief 关闭 Linx 连接。
      * @return 关闭结果。

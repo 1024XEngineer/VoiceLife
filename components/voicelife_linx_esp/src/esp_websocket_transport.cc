@@ -17,7 +17,7 @@ Status EspWebSocketTransport::Connect(const linx::LinxConnectionConfig& config, 
 
 Status EspWebSocketTransport::SendText(std::string_view message) { return impl_->SendText(message); }
 
-Status EspWebSocketTransport::SendAudio(const voice::AudioFrame& frame) { return impl_->SendAudio(frame); }
+Status EspWebSocketTransport::SendAudio(voice::AudioFrame frame) { return impl_->SendAudio(std::move(frame)); }
 
 Status EspWebSocketTransport::Close() { return impl_->Close(); }
 

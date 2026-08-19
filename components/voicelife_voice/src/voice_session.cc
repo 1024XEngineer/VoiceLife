@@ -60,7 +60,7 @@ bool VoiceSession::AcceptFrameLocked(const AudioFrame& frame) const {
 Status VoiceSession::Start(const VoiceSessionConfig& config) {
     std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
     if (config.session_id.empty() || config.provider_id.empty() || !config.audio.valid() ||
-        config.hello_timeout_ms == 0) {
+        config.hello_timeout_ms == 0 || config.vad_silence_ms == 0 || config.vad_silence_ms > 5000) {
         return Status::Error(ErrorCode::kInvalidArgument, "语音会话配置无效");
     }
     if (provider_.capabilities().provider_id != config.provider_id) {
@@ -345,7 +345,6 @@ Status VoiceSession::BeginCapture() {
             response_armed_ = false;
             vad_speech_seen_ = false;
             vad_silence_emitted_ = false;
-            vad_silence_pending_ = false;
             last_speech_at_ = {};
             awaiting_final_asr_ = false;
         }
@@ -433,7 +432,7 @@ Status VoiceSession::SubmitAudio(AudioFrame frame) {
             return Status::Error(ErrorCode::kConflict, "音频帧序号不连续");
         }
     }
-    Status status = provider_.SendAudio(frame);
+    Status status = provider_.SendAudio(std::move(frame));
     if (status.ok()) {
         std::lock_guard<std::mutex> lock(mutex_);
         ++next_sequence_;
@@ -445,6 +444,8 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
     std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
     uint64_t generation = 0;
     uint64_t sequence = 0;
+    bool speech_started = false;
+    bool vad_silence = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (state_ != VoiceSessionState::kCapturing) {
@@ -464,7 +465,7 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
         frame.sequence = sequence;
         // 本地 VAD 端点（无 AFE，用 RMS 能量近似，PCM 已右移 14 位幅度较小）：
         // 带迟滞：进入语音用较高阈值，一旦检测到语音后以更低阈值维持，静音超
-        // 1200ms 发一次 vad_silence 供上层进入最终 STT 等待。
+        // 端点窗口可按麦克风底噪和服务端 VAD 调整，避免固定长静音拖慢每轮回应。
         const auto* pcm = reinterpret_cast<const int16_t*>(frame.payload.data());
         const std::size_t sample_count = frame.payload.size() / sizeof(int16_t);
         int64_t energy = 0;
@@ -477,20 +478,19 @@ Status VoiceSession::HandleInputAudio(AudioFrame frame) {
         constexpr int64_t kSpeechExitThreshold = 180 * 180;   // 迟滞下限约 -44 dBFS
         const auto now = std::chrono::steady_clock::now();
         if (rms >= kSpeechEnterThreshold || (vad_speech_seen_ && rms >= kSpeechExitThreshold)) {
+            speech_started = !vad_speech_seen_;
             vad_speech_seen_ = true;
             last_speech_at_ = now;
         } else if (vad_speech_seen_ && !vad_silence_emitted_ && last_speech_at_.time_since_epoch().count() > 0 &&
-                   now - last_speech_at_ >= std::chrono::milliseconds(1200)) {
+                   now - last_speech_at_ >= std::chrono::milliseconds(config_.vad_silence_ms)) {
             // 只在锁内置标志，锁外再 Emit，避免 Emit 重入 mutex_ 造成自死锁。
             vad_silence_emitted_ = true;
-            vad_silence_pending_ = true;
+            vad_silence = true;
         }
     }
-    if (vad_silence_pending_) {
-        vad_silence_pending_ = false;
-        Emit("vad_silence", "");
-    }
-    Status status = provider_.SendAudio(frame);
+    if (speech_started) Emit("speech_started", "");
+    if (vad_silence) Emit("vad_silence", "");
+    Status status = provider_.SendAudio(std::move(frame));
     if (status.ok()) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (state_ == VoiceSessionState::kCapturing && generation_ == generation && next_sequence_ == sequence) {
@@ -516,7 +516,7 @@ Status VoiceSession::HandleAudio(AudioFrame frame) {
             frame.payload.size() > AudioFrame::kMaxPayloadBytes) {
             return Status::Error(ErrorCode::kInvalidArgument, "播放帧不属于当前会话");
         }
-        status = output_.Push(frame);
+        status = output_.Push(std::move(frame));
         if (status.ok() && first_tts_audio_pending_) {
             first_tts_audio_pending_ = false;
             first_audio = true;
@@ -636,17 +636,19 @@ Status VoiceSession::Interrupt() {
     std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
     bool capturing = false;
     bool needs_interrupt_fence = false;
+    bool finalizing = false;
     uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (state_ != VoiceSessionState::kCapturing && state_ != VoiceSessionState::kSpeaking) {
+        finalizing = state_ == VoiceSessionState::kReady && awaiting_final_asr_;
+        if (state_ != VoiceSessionState::kCapturing && state_ != VoiceSessionState::kSpeaking && !finalizing) {
             return Status::Ok();
         }
         capturing = state_ == VoiceSessionState::kCapturing;
         needs_interrupt_fence = state_ == VoiceSessionState::kSpeaking;
-        // Invalidate the old generation first. Late frames that arrive during
-        // the subsequent Abort/Flush window are rejected by HandleAudio (which
-        // checks generation_) and HandleInputAudio (which checks state_).
+        // Invalidate the old generation first. This also cancels a pending
+        // final ASR before a new manual turn can reuse the session. Late frames
+        // during the subsequent Abort/Flush window are rejected by generation.
         ++generation_;
         config_.generation = generation_;
         next_sequence_ = 0;

@@ -13,6 +13,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
+#include "voicelife/linx_esp/linx_tx_policy.h"
 
 namespace voicelife::linx_esp {
 namespace {
@@ -158,25 +159,39 @@ Status EspWebSocketTransport::Impl::SendText(std::string_view message) {
     }
     // 脱敏诊断：仅记录控制消息的 type/state 字段，不输出 token、设备 ID 或完整消息。
     const bool is_listen = message.find("\"type\":\"listen\"") != std::string_view::npos;
+    const bool is_listen_stop = SelectLinxTextTxLane(message) == LinxTextTxLane::kMediaOrdered;
     const bool is_abort = message.find("\"type\":\"abort\"") != std::string_view::npos;
-    const bool is_control = is_listen || is_abort;
-    // 统一 TX 队列：文本也入队，由 TxTask 顺序发送（TLS 只在 TxTask 运行）。
-    // 控制帧（listen.stop/abort）走高优先级队列，音频占满时仍能排队发送。
-    QueueHandle_t target = is_control ? tx_control_queue_ : tx_queue_;
+    const bool is_control = (is_listen && !is_listen_stop) || is_abort;
+    // abort 可以抢占旧音频；listen.stop 则必须位于已采集 PCM 之后，否则
+    // 服务端会先封口再收到尾音。stop 进入媒体 FIFO，而其他文本继续走控制 FIFO。
+    QueueHandle_t target = is_listen_stop ? tx_queue_ : tx_control_queue_;
     if (target == nullptr) {
         return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列未就绪");
     }
-    auto* item = new detail::LinxTxItem();
+    auto* item = TryAcquireTxItem();
+    if (item == nullptr) return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX item pool 已满");
     item->kind = detail::LinxTxItem::Kind::kText;
+    item->generation = generation_.load();
     item->payload.assign(message.begin(), message.end());
-    // 非控制文本（工具结果、状态等协议消息）可短暂等待 TX 队列空位再入队：音频帧或
-    // 慢网络占满队列时若 0 超时立即失败，会把 provider_error 打到 phase=9 打断交互
-    // （实测：工具执行成功后的结果回传频繁撞满队列，增删改查确认链不稳）。控制帧
-    // （listen.stop/abort）保持非阻塞，确保可随时打断。
-    const TickType_t wait_ticks = is_control ? 0 : pdMS_TO_TICKS(150);
+    // 非控制文本可短暂等待 TX 队列空位，避免工具结果因慢网络而打断交互。
+    // listen.stop 是实时音频的结束边界，必须保持非阻塞并留在媒体 FIFO。
+    const TickType_t wait_ticks = (is_control || is_listen_stop) ? 0 : pdMS_TO_TICKS(150);
     if (xQueueSend(target, &item, wait_ticks) != pdTRUE) {
-        delete item;
-        return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列已满");
+        if (!is_listen_stop) {
+            ReleaseTxItem(item);
+            return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列已满");
+        }
+        // 音频 FIFO 满载时为结束标记保留一个槽位。丢弃最旧 PCM 保留最近语音，
+        // 然后由同一 FIFO 在最后一帧之后发送 stop，既有界又不截断当前尾音。
+        detail::LinxTxItem* stale = nullptr;
+        if (xQueueReceive(tx_queue_, &stale, 0) == pdTRUE) {
+            ReleaseTxItem(stale);
+        }
+        if (xQueueSend(tx_queue_, &item, 0) != pdTRUE) {
+            ReleaseTxItem(item);
+            return Status::Error(ErrorCode::kUnavailable, "ESP Linx 音频 TX 队列已满");
+        }
+        ESP_LOGW(detail::kTag, "LINX_TX_STOP_EVICTED_OLDEST_PCM");
     }
     // 入队成功后打印（此前在入队前打印，队列满时会误报“已发送”）。
     if (is_listen) {
@@ -191,24 +206,33 @@ Status EspWebSocketTransport::Impl::SendText(std::string_view message) {
     return Status::Ok();
 }
 
-Status EspWebSocketTransport::Impl::SendAudio(const voice::AudioFrame& frame) {
+Status EspWebSocketTransport::Impl::SendAudio(voice::AudioFrame frame) {
     std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mutex_);
     if (closing_.load() || client_ == nullptr || state_ != TransportState::kConnected || frame.payload.empty() ||
         frame.payload.size() > static_cast<size_t>(INT_MAX)) {
         return Status::Error(ErrorCode::kUnavailable, "ESP Linx Transport 尚未连接");
     }
-    // 统一 TX 队列：音频帧复制入队后立即返回，网络写由 TxTask 执行，
+    // 统一 TX 队列：音频帧移入队后立即返回，网络写由 TxTask 执行，
     // 避免 esp_websocket_client_send_bin 同步阻塞 I2S 采集链导致大量丢帧。
     if (tx_queue_ == nullptr) {
         return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列未就绪");
     }
-    auto* item = new detail::LinxTxItem();
+    auto* item = TryAcquireTxItem();
+    if (item == nullptr) return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX item pool 已满");
     item->kind = detail::LinxTxItem::Kind::kAudio;
     item->generation = frame.generation;
-    item->payload = frame.payload;
+    item->payload = std::move(frame.payload);
     if (xQueueSend(tx_queue_, &item, 0) != pdTRUE) {
-        delete item;
-        return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列已满");
+        // Capture is a real-time producer. Preserve the newest audio instead
+        // of retaining stale speech that makes the interaction feel delayed.
+        detail::LinxTxItem* stale = nullptr;
+        if (xQueueReceive(tx_queue_, &stale, 0) == pdTRUE) {
+            ReleaseTxItem(stale);
+        }
+        if (xQueueSend(tx_queue_, &item, 0) != pdTRUE) {
+            ReleaseTxItem(item);
+            return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列已满");
+        }
     }
     return Status::Ok();
 }
@@ -248,6 +272,17 @@ Status EspWebSocketTransport::Impl::Close() {
         }
         worker_ = nullptr;
     }
+    if (tx_task_ != nullptr) {
+        // `esp_websocket_client_send_*` may still be executing after the
+        // receive worker has drained. Wait for TxLoop to leave that call before
+        // destroying the client handle it uses.
+        const uint32_t wait_ms = options_.tx_timeout_ms + 1000U;
+        if (xSemaphoreTake(tx_stopped_, pdMS_TO_TICKS(wait_ms)) != pdTRUE) {
+            state_ = TransportState::kFailed;
+            return status.ok() ? Status::Error(ErrorCode::kUnavailable, "等待 ESP Linx TX 任务退出超时") : status;
+        }
+        tx_task_ = nullptr;
+    }
     if (client_ != nullptr) {
         const esp_err_t destroy_status = esp_websocket_client_destroy(client_);
         client_ = nullptr;
@@ -270,9 +305,53 @@ Status EspWebSocketTransport::Impl::Close() {
 
 void EspWebSocketTransport::Impl::SetGeneration(uint64_t generation) {
     std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mutex_);
+    // An item may already have been dequeued by TxLoop. Advance generation
+    // only after its check-and-write critical section has completed; otherwise
+    // that old item could cross an interrupt or reconnect boundary.
+    tx_generation_gate_.SetGeneration(generation);
     generation_.store(generation);
     std::lock_guard<std::mutex> lock(assembler_mutex_);
     assembler_.Reset();
+    // A new VoiceSession epoch invalidates every queued audio item. Drop the
+    // backlog immediately so the next turn cannot wait behind old PCM.
+    if (tx_queue_ != nullptr) {
+        detail::LinxTxItem* stale = nullptr;
+        while (xQueueReceive(tx_queue_, &stale, 0) == pdTRUE) {
+            ReleaseTxItem(stale);
+            stale = nullptr;
+        }
+    }
+    if (tx_control_queue_ != nullptr) {
+        detail::LinxTxItem* stale = nullptr;
+        while (xQueueReceive(tx_control_queue_, &stale, 0) == pdTRUE) {
+            ReleaseTxItem(stale);
+            stale = nullptr;
+        }
+    }
+}
+
+detail::LinxTxItem* EspWebSocketTransport::Impl::TryAcquireTxItem() {
+    std::unique_lock<std::mutex> lock(tx_item_mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) return nullptr;
+    for (std::size_t index = 0; index < tx_items_.size(); ++index) {
+        if (tx_item_in_use_[index]) continue;
+        tx_item_in_use_[index] = true;
+        auto* item = &tx_items_[index];
+        item->kind = detail::LinxTxItem::Kind::kText;
+        item->generation = 0;
+        item->payload = voice::AudioPayload{};
+        return item;
+    }
+    return nullptr;
+}
+
+void EspWebSocketTransport::Impl::ReleaseTxItem(detail::LinxTxItem* item) {
+    if (item == nullptr) return;
+    std::lock_guard<std::mutex> lock(tx_item_mutex_);
+    const auto index = static_cast<std::size_t>(item - tx_items_.data());
+    if (index >= tx_items_.size() || !tx_item_in_use_[index]) return;
+    item->payload = voice::AudioPayload{};
+    tx_item_in_use_[index] = false;
 }
 
 bool EspWebSocketTransport::Impl::ValidHeaderValue(std::string_view value) {
@@ -317,7 +396,8 @@ bool EspWebSocketTransport::Impl::PrepareWorker() {
     }
     state_events_ = xEventGroupCreate();
     worker_stopped_ = xSemaphoreCreateBinary();
-    if (event_queue_ == nullptr || state_events_ == nullptr || worker_stopped_ == nullptr) {
+    tx_stopped_ = xSemaphoreCreateBinary();
+    if (event_queue_ == nullptr || state_events_ == nullptr || worker_stopped_ == nullptr || tx_stopped_ == nullptr) {
         ESP_LOGW(detail::kTag, "LINX_WS_QUEUE_ALLOC_FAILED bytes=%u internal_free=%u",
                  static_cast<unsigned>(event_queue_bytes),
                  static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
@@ -332,8 +412,8 @@ bool EspWebSocketTransport::Impl::PrepareWorker() {
         return false;
     }
     // 统一 TX 队列：文本/音频/barrier 由唯一 TxTask 顺序发送。
-    // 容量 50 帧（20ms 帧 → 1 秒，对齐播放队列），放 PSRAM 优先。
-    constexpr int kTxQueueDepth = 64;
+    // 低延迟音频队列：8 x 20 ms 约 160 ms；满载时 SendAudio 丢旧保新。
+    constexpr int kTxQueueDepth = 8;
 #if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
     tx_queue_ = xQueueCreateWithCaps(kTxQueueDepth, sizeof(detail::LinxTxItem*), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     tx_queue_uses_caps_ = tx_queue_ != nullptr;
@@ -344,8 +424,8 @@ bool EspWebSocketTransport::Impl::PrepareWorker() {
     if (tx_queue_ == nullptr) {
         tx_queue_ = xQueueCreate(kTxQueueDepth, sizeof(detail::LinxTxItem*));
     }
-    // 高优先级控制队列（listen.stop/abort），深度 8；音频占满时控制帧仍可入队。
-    constexpr int kTxControlQueueDepth = 8;
+    // 文本/控制队列深度 16；音频队列满载不能阻塞这些语义消息。
+    constexpr int kTxControlQueueDepth = 16;
 #if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
     tx_control_queue_ =
         xQueueCreateWithCaps(kTxControlQueueDepth, sizeof(detail::LinxTxItem*), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -375,8 +455,15 @@ bool EspWebSocketTransport::Impl::PrepareWorker() {
             return false;
         }
     }
-    if (tx_queue_ == nullptr ||
-        xTaskCreateStatic(&TxEntry, "linx_ws_tx", kTxStackWords, this, 5, tx_stack_, tx_tcb_) == nullptr) {
+    tx_task_ = xTaskCreateStatic(&TxEntry, "linx_ws_tx", kTxStackWords, this, 5, tx_stack_, tx_tcb_);
+    if (tx_queue_ == nullptr || tx_task_ == nullptr) {
+        running_.store(false);
+        detail::EventEnvelope shutdown;
+        shutdown.kind = detail::EventKind::kShutdown;
+        (void)xQueueSend(event_queue_, &shutdown, 0);
+        if (worker_ != nullptr && xSemaphoreTake(worker_stopped_, pdMS_TO_TICKS(1000)) == pdTRUE) {
+            worker_ = nullptr;
+        }
         CleanupWorker();
         return false;
     }
@@ -395,7 +482,7 @@ void EspWebSocketTransport::Impl::CleanupWorker() {
         // 丢弃仍排队的 TX 项，释放各自 payload。
         detail::LinxTxItem* pending = nullptr;
         while (xQueueReceive(tx_queue_, &pending, 0) == pdTRUE) {
-            delete pending;
+            ReleaseTxItem(pending);
         }
 #if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
         if (tx_queue_uses_caps_) {
@@ -412,7 +499,7 @@ void EspWebSocketTransport::Impl::CleanupWorker() {
     if (tx_control_queue_ != nullptr) {
         detail::LinxTxItem* pending_ctl = nullptr;
         while (xQueueReceive(tx_control_queue_, &pending_ctl, 0) == pdTRUE) {
-            delete pending_ctl;
+            ReleaseTxItem(pending_ctl);
         }
 #if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
         vQueueDeleteWithCaps(tx_control_queue_);
@@ -441,6 +528,10 @@ void EspWebSocketTransport::Impl::CleanupWorker() {
     if (worker_stopped_ != nullptr) {
         vSemaphoreDelete(worker_stopped_);
         worker_stopped_ = nullptr;
+    }
+    if (tx_stopped_ != nullptr) {
+        vSemaphoreDelete(tx_stopped_);
+        tx_stopped_ = nullptr;
     }
 }
 

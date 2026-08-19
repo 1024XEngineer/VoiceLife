@@ -20,6 +20,11 @@ namespace voicelife::runtime {
 
 namespace {
 
+// Linx can deliver several 20 ms PCM frames in one network burst. Keep enough
+// room for a 240 ms burst without turning playback into an unbounded buffer.
+constexpr std::size_t kSparkBotPlaybackQueueDepth = 12;
+constexpr uint32_t kSparkBotPlaybackLatencyBudgetMs = 240;
+
 /** @brief 从官方 SparkBot 板级 Profile 填充 LVGL 显示配置。 */
 voicelife::display_sparkbot::SparkBotLcdConfig MakeSparkBotLcdConfig() {
     const auto profile = voicelife::board_esp::SparkBotProfile();
@@ -173,23 +178,38 @@ void VoiceLifePcbAssembly::LogAudioStats() {
         "voicelife_pcb_audio",
         "AUDIO_STATS in_frames=%llu in_bytes=%llu in_samples=%llu in_peak=%u in_energy=%llu in_zero=%llu "
         "out_frames=%llu out_bytes=%llu out_samples=%llu out_peak=%u out_energy=%llu out_zero=%llu "
-        "volume=%u clipped=%llu short_read=%llu short_write=%llu in_i2s_err=%llu out_i2s_err=%llu",
+        "in_drop=%llu in_q_hi=%llu in_pool_hi=%llu in_pool_fail=%llu out_reject=%llu out_q_hi=%llu resampled=%llu "
+        "min_heap=%llu "
+        "volume=%u clipped=%llu short_read=%llu short_write=%llu in_i2s_err=%llu out_i2s_err=%llu "
+        "test_in_frames=%llu test_in_bytes=%llu",
         static_cast<unsigned long long>(stats.captured_frames), static_cast<unsigned long long>(stats.input_pcm_bytes),
         static_cast<unsigned long long>(stats.input_samples), static_cast<unsigned>(stats.input_peak),
         static_cast<unsigned long long>(stats.input_sum_squares),
         static_cast<unsigned long long>(stats.input_zero_periods), static_cast<unsigned long long>(stats.played_frames),
         static_cast<unsigned long long>(stats.output_pcm_bytes), static_cast<unsigned long long>(stats.output_samples),
         static_cast<unsigned>(stats.output_peak), static_cast<unsigned long long>(stats.output_sum_squares),
-        static_cast<unsigned long long>(stats.output_zero_periods), static_cast<unsigned>(stats.output_volume),
+        static_cast<unsigned long long>(stats.output_zero_periods),
+        static_cast<unsigned long long>(stats.dropped_input_frames),
+        static_cast<unsigned long long>(stats.input_high_watermark),
+        static_cast<unsigned long long>(stats.input_payload_pool_high_watermark),
+        static_cast<unsigned long long>(stats.input_payload_pool_acquisition_failures),
+        static_cast<unsigned long long>(stats.rejected_output_frames),
+        static_cast<unsigned long long>(stats.output_high_watermark),
+        static_cast<unsigned long long>(stats.resampled_frames),
+        static_cast<unsigned long long>(stats.minimum_free_heap_bytes), static_cast<unsigned>(stats.output_volume),
         static_cast<unsigned long long>(stats.output_clipped_samples),
         static_cast<unsigned long long>(stats.short_reads), static_cast<unsigned long long>(stats.short_writes),
         static_cast<unsigned long long>(stats.input_i2s_errors),
-        static_cast<unsigned long long>(stats.output_i2s_errors));
+        static_cast<unsigned long long>(stats.output_i2s_errors),
+        static_cast<unsigned long long>(stats.test_injected_input_frames),
+        static_cast<unsigned long long>(stats.test_injected_input_bytes));
 #endif
 }
 
 SparkBotAssembly::SparkBotAssembly()
-    : audio_ports_(audio_esp::SparkBotEsp32s3AudioProfile(), {},
+    : audio_ports_(audio_esp::SparkBotEsp32s3AudioProfile(),
+                   {.output_queue_depth = kSparkBotPlaybackQueueDepth,
+                    .maximum_playback_latency_ms = kSparkBotPlaybackLatencyBudgetMs},
                    [this](bool enabled) { (void)SetAudioOutputEnabled(enabled); }),
       arbiter_(voicelife::board_esp::SparkBotProfile().shared_power),
       adapter_(MakeSparkBotLcdConfig(), [this](bool enabled) { ApplyBacklight(enabled); }) {}
@@ -254,18 +274,33 @@ void SparkBotAssembly::LogAudioStats() {
         kPowerTag,
         "AUDIO_STATS in_frames=%llu in_bytes=%llu in_samples=%llu in_peak=%u in_energy=%llu in_zero=%llu "
         "out_frames=%llu out_bytes=%llu out_samples=%llu out_peak=%u out_energy=%llu out_zero=%llu "
-        "volume=%u clipped=%llu short_read=%llu short_write=%llu in_i2s_err=%llu out_i2s_err=%llu",
+        "in_drop=%llu in_q_hi=%llu in_pool_hi=%llu in_pool_fail=%llu out_reject=%llu out_q_hi=%llu out_q_cap=%u "
+        "out_latency_budget_ms=%u "
+        "resampled=%llu min_heap=%llu "
+        "volume=%u clipped=%llu short_read=%llu short_write=%llu in_i2s_err=%llu out_i2s_err=%llu "
+        "test_in_frames=%llu test_in_bytes=%llu",
         static_cast<unsigned long long>(stats.captured_frames), static_cast<unsigned long long>(stats.input_pcm_bytes),
         static_cast<unsigned long long>(stats.input_samples), static_cast<unsigned>(stats.input_peak),
         static_cast<unsigned long long>(stats.input_sum_squares),
         static_cast<unsigned long long>(stats.input_zero_periods), static_cast<unsigned long long>(stats.played_frames),
         static_cast<unsigned long long>(stats.output_pcm_bytes), static_cast<unsigned long long>(stats.output_samples),
         static_cast<unsigned>(stats.output_peak), static_cast<unsigned long long>(stats.output_sum_squares),
-        static_cast<unsigned long long>(stats.output_zero_periods), static_cast<unsigned>(stats.output_volume),
+        static_cast<unsigned long long>(stats.output_zero_periods),
+        static_cast<unsigned long long>(stats.dropped_input_frames),
+        static_cast<unsigned long long>(stats.input_high_watermark),
+        static_cast<unsigned long long>(stats.input_payload_pool_high_watermark),
+        static_cast<unsigned long long>(stats.input_payload_pool_acquisition_failures),
+        static_cast<unsigned long long>(stats.rejected_output_frames),
+        static_cast<unsigned long long>(stats.output_high_watermark),
+        static_cast<unsigned>(kSparkBotPlaybackQueueDepth), static_cast<unsigned>(kSparkBotPlaybackLatencyBudgetMs),
+        static_cast<unsigned long long>(stats.resampled_frames),
+        static_cast<unsigned long long>(stats.minimum_free_heap_bytes), static_cast<unsigned>(stats.output_volume),
         static_cast<unsigned long long>(stats.output_clipped_samples),
         static_cast<unsigned long long>(stats.short_reads), static_cast<unsigned long long>(stats.short_writes),
         static_cast<unsigned long long>(stats.input_i2s_errors),
-        static_cast<unsigned long long>(stats.output_i2s_errors));
+        static_cast<unsigned long long>(stats.output_i2s_errors),
+        static_cast<unsigned long long>(stats.test_injected_input_frames),
+        static_cast<unsigned long long>(stats.test_injected_input_bytes));
 #endif
 }
 

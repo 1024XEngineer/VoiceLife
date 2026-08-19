@@ -75,6 +75,12 @@ Status WakeGateAudioInput::StartStandby() {
     return Status::Ok();
 }
 
+void WakeGateAudioInput::SuppressLocalWakeFor(uint32_t duration_ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(duration_ms);
+    if (until > wake_suppressed_until_) wake_suppressed_until_ = until;
+}
+
 Status WakeGateAudioInput::StartCapture(VoiceMode mode) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!opened_) return Unavailable("云端采集前必须先打开输入端口");
@@ -139,7 +145,7 @@ void WakeGateAudioInput::HandlePhysicalFrame(AudioFrame frame) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (forwarding_) {
             audio_sink = audio_sink_;
-        } else if (detector_running_) {
+        } else if (detector_running_ && std::chrono::steady_clock::now() >= wake_suppressed_until_) {
             detector = &detector_;
         }
     }
@@ -154,7 +160,10 @@ void WakeGateAudioInput::HandleWakeWord(std::string_view wake_word) {
     WakeSink sink;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (forwarding_ || !detector_running_) return;
+        // A detector can finish a command match after its last submitted PCM
+        // frame. Honor the guard here too, otherwise that late callback can
+        // still turn terminal TTS into an unsolicited new voice turn.
+        if (forwarding_ || !detector_running_ || std::chrono::steady_clock::now() < wake_suppressed_until_) return;
         // MultiNet 命中后其内部一次性停止（running_=false），同步本 Gate 标志，
         // 否则 StartStandby 会误以为检测器仍在运行而跳过重启。
         detector_running_ = false;

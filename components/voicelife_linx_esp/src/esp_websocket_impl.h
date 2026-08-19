@@ -17,6 +17,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
+#include "voicelife/linx_esp/linx_tx_generation_gate.h"
 #include "voicelife/linx_esp/websocket_fragment_assembler.h"
 
 namespace voicelife::linx_esp {
@@ -24,6 +25,8 @@ namespace detail {
 
 constexpr char kTag[] = "voicelife_linx_esp";
 constexpr size_t kMaxEventChunkBytes = 4096;
+// 8 media + 16 control + one in-flight writer + one replacement/stop item.
+constexpr size_t kTxItemPoolCapacity = 26;
 constexpr EventBits_t kConnectedBit = BIT0;
 constexpr EventBits_t kFailedBit = BIT1;
 
@@ -33,7 +36,7 @@ enum class EventKind : uint8_t { kConnected, kData, kDisconnected, kError, kShut
 struct LinxTxItem {
     enum class Kind : uint8_t { kText, kAudio, kBarrier };
     Kind kind = Kind::kText;
-    std::vector<uint8_t> payload;
+    voice::AudioPayload payload;
     uint64_t generation = 0;
 };
 
@@ -64,7 +67,7 @@ class EspWebSocketTransport::Impl final {
 
     Status Connect(const linx::LinxConnectionConfig& config, linx::LinxTransportSink sink);
     Status SendText(std::string_view message);
-    Status SendAudio(const voice::AudioFrame& frame);
+    Status SendAudio(voice::AudioFrame frame);
     Status Close();
     void SetGeneration(uint64_t generation);
     TransportState state() const { return state_.load(); }
@@ -80,6 +83,8 @@ class EspWebSocketTransport::Impl final {
     void WorkerLoop();
     static void TxEntry(void* argument);
     void TxLoop();
+    detail::LinxTxItem* TryAcquireTxItem();
+    void ReleaseTxItem(detail::LinxTxItem* item);
     void HandleQueueOverflow();
     void HandleEnvelope(const detail::EventEnvelope& envelope);
     void HandleData(const detail::EventEnvelope& envelope);
@@ -95,6 +100,9 @@ class EspWebSocketTransport::Impl final {
     QueueHandle_t tx_queue_ = nullptr;
     // 高优先级控制队列：listen.stop/abort 等控制帧，音频占满时仍可入队。
     QueueHandle_t tx_control_queue_ = nullptr;
+    std::array<detail::LinxTxItem, detail::kTxItemPoolCapacity> tx_items_{};
+    std::array<bool, detail::kTxItemPoolCapacity> tx_item_in_use_{};
+    std::mutex tx_item_mutex_;
     bool tx_queue_uses_caps_ = false;
     TaskHandle_t tx_task_ = nullptr;
     // linx_ws_tx 任务栈常驻 PSRAM、TCB 在内部 RAM（一次性分配、跨连接复用，随
@@ -106,6 +114,10 @@ class EspWebSocketTransport::Impl final {
     StaticTask_t* tx_tcb_ = nullptr;
     EventGroupHandle_t state_events_ = nullptr;
     SemaphoreHandle_t worker_stopped_ = nullptr;
+    // Close must not destroy `client_` while TxLoop is inside a synchronous
+    // WebSocket write. The task signals this semaphore after it has observed
+    // `running_ == false` and released every client access.
+    SemaphoreHandle_t tx_stopped_ = nullptr;
     TaskHandle_t worker_ = nullptr;
     std::atomic<bool> running_{false};
     std::atomic<bool> closing_{false};
@@ -119,6 +131,7 @@ class EspWebSocketTransport::Impl final {
     std::mutex assembler_mutex_;
     std::mutex callback_mutex_;
     std::mutex status_mutex_;
+    LinxTxGenerationGate tx_generation_gate_;
     WebSocketFragmentAssembler assembler_;
     linx::LinxTransportSink sink_;
     std::string headers_;

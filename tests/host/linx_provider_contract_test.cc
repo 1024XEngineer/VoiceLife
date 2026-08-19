@@ -30,14 +30,18 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
         }
         return send_text_result;
     }
-    Status SendAudio(const voicelife::voice::AudioFrame& frame) override {
-        audio_frames.push_back(frame);
+    Status SendAudio(voicelife::voice::AudioFrame frame) override {
+        if (frame.generation != tx_generation) {
+            return Status::Error(ErrorCode::kConflict, "测试 TX gate 拒绝非当前 generation 音频");
+        }
+        audio_frames.push_back(std::move(frame));
         return send_audio_result;
     }
     Status Close() override {
         ++closes;
         return close_result;
     }
+    void SetGeneration(uint64_t generation) override { tx_generation = generation; }
 
     void EmitText(std::string message) {
         if (sink_.on_text) {
@@ -46,7 +50,8 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
     }
     void EmitBinary(std::vector<uint8_t> payload) {
         if (sink_.on_binary) {
-            sink_.on_binary(payload);
+            emitted_binary_data = payload.data();
+            sink_.on_binary(std::move(payload));
         }
     }
     void EmitConnected() {
@@ -73,6 +78,8 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
     bool emit_hello = true;
     int connects = 0;
     int closes = 0;
+    uint64_t tx_generation = 0;
+    const uint8_t* emitted_binary_data = nullptr;
 };
 
 voicelife::voice::VoiceSessionConfig Config() {
@@ -103,6 +110,14 @@ int main() {
     Check(hello.value->find("\"transport\":\"websocket\"") != std::string::npos, "hello 必须声明 websocket transport");
     Check(hello.value->find("\"mcp\":true") != std::string::npos, "hello 必须声明 MCP 能力");
     Check(hello.value->find("\"sample_rate\":16000") != std::string::npos, "hello 必须声明采样率");
+    Check(hello.value->find("\"play_buffer_duration\":200") != std::string::npos,
+          "默认播放缓冲必须保持在 200ms 实时预算内");
+    auto larger_buffer_connection = connection;
+    larger_buffer_connection.playback_buffer_duration_ms = 320;
+    auto larger_buffer_hello = codec.EncodeHello(config, larger_buffer_connection);
+    Check(larger_buffer_hello.ok() &&
+              larger_buffer_hello.value->find("\"play_buffer_duration\":320") != std::string::npos,
+          "连接配置必须能显式控制 Linx 下行缓冲预算");
     auto detect = codec.EncodeListenDetect(config, "请播报\\测试", "收到！");
     Check(detect.ok() && detect.value->find("\\\\测试") != std::string::npos &&
               detect.value->find("\"text_response\":\"收到！\"") != std::string::npos,
@@ -153,6 +168,8 @@ int main() {
     Check(transport.connects == 1 && transport.texts.size() == 1 &&
               transport.texts.front().find("\"type\":\"hello\"") != std::string::npos,
           "连接必须只发送一次 hello");
+    Check(transport.tx_generation == session_config.generation,
+          "首次连接必须在首帧 PCM 进入 Transport 前初始化 TX generation");
     Check(!events.empty() && events.back().kind == voicelife::voice::VoiceEventKind::kConnected &&
               events.back().generation == 7,
           "hello 事件必须携带当前 generation");
@@ -225,11 +242,17 @@ int main() {
     uplink.sequence = 0;
     uplink.format = config.audio;
     uplink.payload = {1, 2, 3};
-    Check(provider.SendAudio(uplink).ok() && transport.audio_frames.size() == 1, "当前 generation 音频应上行");
+    const auto* uplink_data = uplink.payload.data();
+    Check(provider.SendAudio(std::move(uplink)).ok() && transport.audio_frames.size() == 1 &&
+              transport.audio_frames.back().payload.data() == uplink_data,
+          "当前 generation 音频应上行");
+    Check(transport.audio_frames.back().payload.data() == uplink_data,
+          "Provider 到 WebSocket Transport 的上行 PCM 负载必须移动，不能复制每个音频帧");
     transport.EmitBinary({4, 5, 6});
     Check(received_audio.size() == 1 && received_audio.front().generation == 7 &&
               received_audio.front().sequence == 0 && received_audio.front().payload.size() == 3 &&
-              received_audio.front().format.sample_rate_hz == 24000,
+              received_audio.front().format.sample_rate_hz == 24000 &&
+              received_audio.front().payload.data() == transport.emitted_binary_data,
           "二进制下行音频应使用协商格式并携带 generation");
     const auto events_before_output_backpressure = events.size();
     reject_output = true;
@@ -239,7 +262,7 @@ int main() {
           "有界播放队列拒绝单帧应只计入端口指标，不能伪装成 Provider 失败");
     transport.EmitDisconnected();
     Check(events.back().kind == voicelife::voice::VoiceEventKind::kDisconnected, "物理断线必须向会话上报生命周期事件");
-    Check(provider.SendAudio(uplink).code == ErrorCode::kUnavailable, "断线后必须立即阻断音频上行");
+    Check(provider.SendAudio({}).code == ErrorCode::kUnavailable, "断线后必须立即阻断音频上行");
     provider.SetGeneration(8);
     transport.EmitConnected();
     Check(transport.texts.size() == 7 && transport.texts.back().find("\"type\":\"hello\"") != std::string::npos,
@@ -249,8 +272,9 @@ int main() {
     transport.EmitBinary({7, 8, 9});
     Check(received_audio.size() == 2 && received_audio.back().generation == 8 && received_audio.back().sequence == 0,
           "同一连接打断后 Provider 应切换到新的 generation");
-    uplink.generation = 6;
-    Check(provider.SendAudio(uplink).code == ErrorCode::kConflict, "旧 generation 上行必须拒绝");
+    voicelife::voice::AudioFrame stale_uplink;
+    stale_uplink.generation = 6;
+    Check(provider.SendAudio(std::move(stale_uplink)).code == ErrorCode::kConflict, "旧 generation 上行必须拒绝");
 
     transport.EmitDisconnected();
     provider.SetGeneration(9);
@@ -285,6 +309,11 @@ int main() {
     invalid_audio.audio.sample_rate_hz = 0;
     Check(codec.EncodeHello(invalid_audio, connection).status.code == ErrorCode::kInvalidArgument,
           "hello 必须拒绝无效音频参数");
+    auto invalid_connection = connection;
+    invalid_connection.playback_buffer_duration_ms = 0;
+    Check(!invalid_connection.valid() &&
+              codec.EncodeHello(config, invalid_connection).status.code == ErrorCode::kInvalidArgument,
+          "零播放缓冲预算不能生成 Linx hello");
     Check(codec.EncodeAbort(config, "").status.code == ErrorCode::kInvalidArgument, "空 abort 原因必须拒绝");
     Check(codec.DecodeText("not-json").status.code == ErrorCode::kInvalidArgument, "非 JSON 输入必须拒绝");
     Check(codec.DecodeText(R"({"type":123})").status.code == ErrorCode::kInvalidArgument, "type 非字符串必须拒绝");

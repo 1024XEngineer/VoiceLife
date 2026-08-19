@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -57,6 +59,13 @@ class WakeGateAudioInput final : public AudioInputPort {
      * @return 检测器和物理采集均就绪时返回成功。
      */
     Status StartStandby();
+    /**
+     * @brief 暂时丢弃本地唤醒检测帧，但保持物理采集可用。
+     *
+     * 终结型 TTS 可能包含本地命令词；无 AEC 板型必须在其后留出余响窗口。
+     * @param duration_ms 丢弃本地唤醒检测帧的持续时间（毫秒）。
+     */
+    void SuppressLocalWakeFor(uint32_t duration_ms);
     /** @brief 查询当前是否只运行本地待机检测。
      * @return 处于待机且没有向云端转发 PCM 时返回 true。
      */
@@ -103,6 +112,7 @@ class WakeGateAudioInput final : public AudioInputPort {
     bool physical_running_ = false;
     bool detector_running_ = false;
     bool forwarding_ = false;
+    std::chrono::steady_clock::time_point wake_suppressed_until_{};
 };
 
 }  // namespace voicelife::voice

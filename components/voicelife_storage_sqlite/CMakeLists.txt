@@ -1,5 +1,4 @@
 set(voicelife_storage_sqlite_sources)
-
 if(CONFIG_VOICELIFE_STORAGE_SQLITE)
     list(APPEND voicelife_storage_sqlite_sources
         "src/mapping/schedule_row_mapper.cc"
@@ -23,8 +22,10 @@ if(CONFIG_VOICELIFE_STORAGE_SQLITE)
     )
 endif()
 
-# 私有依赖必须无条件声明：ESP-IDF 的早期组件扫描阶段不加载 sdkconfig，
-# 若把 PRIV_REQUIRES 放入 CONFIG 分支，启用配置后不会将 sqlite3 纳入构建图。
+# ESP-IDF 在 Kconfig 值可用前解析组件依赖图；不能用
+# CONFIG_VOICELIFE_STORAGE_SQLITE 条件化 sqlite3 依赖，否则启用 SQLite 的第二次
+# 配置会加入源码，却不会把 sqlite3 的 include path 和链接依赖带进来。
+# 固件构建入口会先运行 scripts/prepare_sqlite.py，提供这个固定本地组件。
 idf_component_register(
     SRCS ${voicelife_storage_sqlite_sources}
     INCLUDE_DIRS "include"

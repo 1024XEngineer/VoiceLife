@@ -40,7 +40,14 @@ struct EspWebSocketTransportOptions {
     size_t event_queue_capacity = 32;
     size_t event_chunk_bytes = 4096;
     uint32_t connect_timeout_ms = 10000;
+    // ESP-IDF applies this to receive operations as well as network I/O.
+    // Keep fragmented downstream audio and control frames on the normal
+    // network budget; TX uses tx_timeout_ms below.
     uint32_t network_timeout_ms = 10000;
+    // A generation switch serializes with an in-flight write. Keep that wait
+    // bounded so a stalled socket cannot defer a local barge-in for the old
+    // connection budget.
+    uint32_t tx_timeout_ms = 1000;
     uint32_t reconnect_timeout_ms = 1000;
     uint32_t websocket_task_stack_size = 12288;
     // MCP 日程工具（schedule.create/query）在此 worker 任务上执行 SQLite/FATFS 操作，
@@ -92,7 +99,7 @@ class EspWebSocketTransport final : public linx::LinxTransportPort {
      * @param frame 待发送音频帧。
      * @return 发送结果。
      */
-    Status SendAudio(const voice::AudioFrame& frame) override;
+    Status SendAudio(voice::AudioFrame frame) override;
     /**
      * @brief 关闭 WebSocket 连接。
      * @return 关闭结果。
