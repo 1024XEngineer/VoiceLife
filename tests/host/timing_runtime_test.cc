@@ -198,9 +198,7 @@ void ClearsTimerCallbackBeforeRuntimeDependenciesCanOutliveIt() {
     FixedClock clock(TriggerAt{1h});
     RecordingOneShotTimer timer;
     RecordingRunnerWake wake;
-    {
-        TimingTaskRuntime runtime(runner, clock, timer, wake);
-    }
+    { TimingTaskRuntime runtime(runner, clock, timer, wake); }
 
     timer.FireIfBound();
 
