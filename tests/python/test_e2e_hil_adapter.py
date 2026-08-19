@@ -220,9 +220,11 @@ class HilPairingAdapterTest(unittest.TestCase):
         hardware = HIL.RealHilHardware(
             "runner@example.test", "/srv/voicelife", "https://gateway.example.test", "user-test"
         )
-        with mock.patch.object(HIL.subprocess, "run", side_effect=FileNotFoundError):
-            with self.assertRaises(RUNNER.RunnerFailure) as raised:
-                hardware._run(["missing-command"], 1.0)
+        with (
+            mock.patch.object(HIL.subprocess, "run", side_effect=FileNotFoundError),
+            self.assertRaises(RUNNER.RunnerFailure) as raised,
+        ):
+            hardware._run(["missing-command"], 1.0)
         self.assertEqual(raised.exception.category, RUNNER.FailureCategory.INFRASTRUCTURE)
         self.assertEqual(raised.exception.message_code, "hil_command_unavailable")
 
