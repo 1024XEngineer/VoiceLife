@@ -14,18 +14,14 @@ function adapter(overrides = {}) {
 
 function textFrame(overrides = {}) {
     return {
-        cmd: 'aibot_msg_callback',
-        headers: { req_id: 'request-fixture' },
-        body: {
-            msgid: 'message-fixture',
-            aibotid: 'bot-fixture',
-            from: { userid: 'userid-fixture' },
-            chattype: 'single',
-            msgtype: 'text',
-            text: { content: '绑定 123456' },
-            create_time: 1_786_665_600,
-            ...overrides,
-        },
+        msgid: 'message-fixture',
+        aibotid: 'bot-fixture',
+        from: { userid: 'userid-fixture' },
+        chattype: 'single',
+        msgtype: 'text',
+        text: { content: '绑定 123456' },
+        create_time: 1_786_665_600,
+        ...overrides,
     };
 }
 
@@ -61,7 +57,7 @@ test('WeCom AI Bot preserves ordinary single-chat text as a message event', asyn
 
 test('WeCom AI Bot uses its receive time when a valid single-chat message omits create_time', async () => {
     const frame = textFrame({ msgid: 'message-without-time' });
-    delete frame.body.create_time;
+    delete frame.create_time;
 
     const event = await adapter().normalizeInbound(frame);
 

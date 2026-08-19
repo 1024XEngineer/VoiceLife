@@ -19,9 +19,9 @@ export interface WecomAibotInboundAdapterOptions {
 }
 
 /**
- * 将企业微信 AI Bot WSS 单聊文本帧归一化为 Gateway 入站事件。
+ * 将企业微信 AI Bot URL 回调解密后的单聊文本消息归一化为 Gateway 入站事件。
  *
- * 此适配器只实现入站绑定链路；主动投递和 WebSocket 生命周期由后续渠道切片提供。
+ * 此适配器只实现入站绑定链路；主动投递由后续渠道切片提供。
  */
 export class WecomAibotInboundAdapter implements PlatformCapabilityPort {
     public readonly platform = 'wecom_aibot' as const;
@@ -67,11 +67,7 @@ export class WecomAibotInboundAdapter implements PlatformCapabilityPort {
 
     /** {@inheritDoc PlatformCapabilityPort.normalizeInbound} */
     public async normalizeInbound(rawEvent: unknown): Promise<NormalizedImEvent> {
-        const frame = requiredRecord(rawEvent, 'WeCom AI Bot frame');
-        if (requiredString(frame, 'cmd', 'WeCom AI Bot command') !== 'aibot_msg_callback') {
-            throw new ImGatewayError('invalid_contract', 'WeCom AI Bot frame is not a message callback');
-        }
-        const body = requiredRecord(frame.body, 'WeCom AI Bot message body');
+        const body = requiredRecord(rawEvent, 'WeCom AI Bot callback');
         if (requiredString(body, 'aibotid', 'WeCom AI Bot ID') !== this.botId) {
             throw new ImGatewayError('invalid_contract', 'WeCom AI Bot callback targets another bot');
         }
