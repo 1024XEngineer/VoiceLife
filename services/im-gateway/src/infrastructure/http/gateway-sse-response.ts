@@ -5,6 +5,8 @@ import { unsafeId, type ActionId, type DeviceId, type ReminderTriggerId } from '
 import { SSE_HEARTBEAT_INTERVAL_SECONDS, SSE_RESPONSE_HEADERS } from './device-api.js';
 import type { GatewayLogger } from './gateway-http-server.js';
 
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 /** 将一条动作流连接序列化到 HTTP 响应所需的依赖。 */
 export interface ReminderActionStreamHttpOptions {
     readonly request: IncomingMessage;
@@ -30,6 +32,7 @@ export async function streamReminderActions(options: ReminderActionStreamHttpOpt
     if (reminderType !== 'strong' || reminderTriggerId === null || reminderTriggerId.trim() === '') {
         throw new TypeError('Invalid action stream scope');
     }
+    const heartbeatIntervalMs = positiveInterval(options.heartbeatIntervalMs ?? SSE_HEARTBEAT_INTERVAL_SECONDS * 1000);
     const controller = new AbortController();
     options.request.once('aborted', () => controller.abort());
     options.response.once('close', () => controller.abort());
@@ -44,7 +47,6 @@ export async function streamReminderActions(options: ReminderActionStreamHttpOpt
     });
     options.response.writeHead(200, { ...SSE_RESPONSE_HEADERS, Connection: 'keep-alive' });
     options.response.flushHeaders();
-    const heartbeatIntervalMs = positiveInterval(options.heartbeatIntervalMs ?? SSE_HEARTBEAT_INTERVAL_SECONDS * 1000);
     const heartbeat = setInterval(() => {
         if (!options.response.destroyed && !options.response.writableNeedDrain) {
             options.response.write(': heartbeat\n\n');
@@ -74,7 +76,9 @@ export async function streamReminderActions(options: ReminderActionStreamHttpOpt
 }
 
 function positiveInterval(value: number): number {
-    if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError('Invalid SSE heartbeat interval');
+    if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_TIMER_DELAY_MS) {
+        throw new TypeError('Invalid SSE heartbeat interval');
+    }
     return value;
 }
 
