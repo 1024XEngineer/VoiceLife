@@ -324,6 +324,28 @@ test('production server mounts health, device, Action UI and webhook routes', as
     });
 });
 
+test('production server keeps JSON valid while escaping HTML metacharacters', async () => {
+    const server = await startGatewayHttpServer({
+        host: '127.0.0.1',
+        port: 0,
+        runtime: fakeRuntime([]),
+        healthCheck: async () => ({ message: '</script><img src=x onerror=alert(1)>&' }),
+        logger: { log: () => {} },
+    });
+    try {
+        const response = await globalThis.fetch(`${server.origin}/healthz`);
+        const body = await response.text();
+        assert.equal(body.includes('</script>'), false);
+        assert.equal(body.includes('<img'), false);
+        assert.deepEqual(JSON.parse(body), { message: '</script><img src=x onerror=alert(1)>&' });
+        assert.deepEqual(await new globalThis.Response(body).json(), {
+            message: '</script><img src=x onerror=alert(1)>&',
+        });
+    } finally {
+        await server.close();
+    }
+});
+
 test('production server bounds bodies and maps unsupported requests without leaking details', async () => {
     await withServer(async ({ origin }) => {
         const unsupported = await globalThis.fetch(`${origin}/v1/im/notifications`, {

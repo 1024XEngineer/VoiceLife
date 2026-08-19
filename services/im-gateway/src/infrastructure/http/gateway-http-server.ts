@@ -366,7 +366,18 @@ function writePage(response: ServerResponse, page: ActionUiPageResponse): void {
 
 function writeJson(response: ServerResponse, status: number, value: unknown): void {
     response.writeHead(status, responseHeaders('application/json; charset=utf-8'));
-    response.end(JSON.stringify(value));
+    response.end(serializeJson(value));
+}
+
+function serializeJson(value: unknown): string {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) return 'null';
+    return serialized
+        .replaceAll('<', '\\u003c')
+        .replaceAll('>', '\\u003e')
+        .replaceAll('&', '\\u0026')
+        .replaceAll('\u2028', '\\u2028')
+        .replaceAll('\u2029', '\\u2029');
 }
 
 function writeText(response: ServerResponse, status: number, body: string): void {
