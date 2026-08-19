@@ -178,7 +178,8 @@ void VoiceLifePcbAssembly::LogAudioStats() {
         "voicelife_pcb_audio",
         "AUDIO_STATS in_frames=%llu in_bytes=%llu in_samples=%llu in_peak=%u in_energy=%llu in_zero=%llu "
         "out_frames=%llu out_bytes=%llu out_samples=%llu out_peak=%u out_energy=%llu out_zero=%llu "
-        "in_drop=%llu in_q_hi=%llu out_reject=%llu out_q_hi=%llu resampled=%llu min_heap=%llu "
+        "in_drop=%llu in_q_hi=%llu in_pool_hi=%llu in_pool_fail=%llu out_reject=%llu out_q_hi=%llu resampled=%llu "
+        "min_heap=%llu "
         "volume=%u clipped=%llu short_read=%llu short_write=%llu in_i2s_err=%llu out_i2s_err=%llu "
         "test_in_frames=%llu test_in_bytes=%llu",
         static_cast<unsigned long long>(stats.captured_frames), static_cast<unsigned long long>(stats.input_pcm_bytes),
@@ -190,6 +191,8 @@ void VoiceLifePcbAssembly::LogAudioStats() {
         static_cast<unsigned long long>(stats.output_zero_periods),
         static_cast<unsigned long long>(stats.dropped_input_frames),
         static_cast<unsigned long long>(stats.input_high_watermark),
+        static_cast<unsigned long long>(stats.input_payload_pool_high_watermark),
+        static_cast<unsigned long long>(stats.input_payload_pool_acquisition_failures),
         static_cast<unsigned long long>(stats.rejected_output_frames),
         static_cast<unsigned long long>(stats.output_high_watermark),
         static_cast<unsigned long long>(stats.resampled_frames),
@@ -271,7 +274,8 @@ void SparkBotAssembly::LogAudioStats() {
         kPowerTag,
         "AUDIO_STATS in_frames=%llu in_bytes=%llu in_samples=%llu in_peak=%u in_energy=%llu in_zero=%llu "
         "out_frames=%llu out_bytes=%llu out_samples=%llu out_peak=%u out_energy=%llu out_zero=%llu "
-        "in_drop=%llu in_q_hi=%llu out_reject=%llu out_q_hi=%llu out_q_cap=%u out_latency_budget_ms=%u "
+        "in_drop=%llu in_q_hi=%llu in_pool_hi=%llu in_pool_fail=%llu out_reject=%llu out_q_hi=%llu out_q_cap=%u "
+        "out_latency_budget_ms=%u "
         "resampled=%llu min_heap=%llu "
         "volume=%u clipped=%llu short_read=%llu short_write=%llu in_i2s_err=%llu out_i2s_err=%llu "
         "test_in_frames=%llu test_in_bytes=%llu",
@@ -284,10 +288,11 @@ void SparkBotAssembly::LogAudioStats() {
         static_cast<unsigned long long>(stats.output_zero_periods),
         static_cast<unsigned long long>(stats.dropped_input_frames),
         static_cast<unsigned long long>(stats.input_high_watermark),
+        static_cast<unsigned long long>(stats.input_payload_pool_high_watermark),
+        static_cast<unsigned long long>(stats.input_payload_pool_acquisition_failures),
         static_cast<unsigned long long>(stats.rejected_output_frames),
         static_cast<unsigned long long>(stats.output_high_watermark),
-        static_cast<unsigned>(kSparkBotPlaybackQueueDepth),
-        static_cast<unsigned>(kSparkBotPlaybackLatencyBudgetMs),
+        static_cast<unsigned>(kSparkBotPlaybackQueueDepth), static_cast<unsigned>(kSparkBotPlaybackLatencyBudgetMs),
         static_cast<unsigned long long>(stats.resampled_frames),
         static_cast<unsigned long long>(stats.minimum_free_heap_bytes), static_cast<unsigned>(stats.output_volume),
         static_cast<unsigned long long>(stats.output_clipped_samples),

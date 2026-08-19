@@ -102,6 +102,7 @@ target_link_libraries(mcp PUBLIC contracts schedule)
 target_link_libraries(mcp PRIVATE yyjson)
 add_voicelife_library(voice voicelife_voice
     "${ROOT_DIR}/components/voicelife_voice/src/audio_frame_queue.cc"
+    "${ROOT_DIR}/components/voicelife_voice/src/audio_payload.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/audio_aec.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/wake_gate_audio_input.cc"
     "${ROOT_DIR}/components/voicelife_voice/src/voice_interaction_controller.cc"

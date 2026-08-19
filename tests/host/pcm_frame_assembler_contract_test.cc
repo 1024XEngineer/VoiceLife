@@ -73,6 +73,27 @@ int main() {
     Check(first_sample == 0 && last_first_frame_sample == 959 && first_second_frame_sample == 960,
           "分段组帧不能改变 PCM 样本顺序");
 
+    PcmFrameAssembler pooled(Pcm(20), 10);
+    Check(pooled.Prepare().ok(), "实时 PCM 组帧器必须在采集前建立固定 payload pool");
+    std::vector<voicelife::voice::AudioFrame> retained_frames;
+    const PcmFrameAssembler::Sink retain_sink = [&retained_frames](voicelife::voice::AudioFrame frame) {
+        retained_frames.push_back(std::move(frame));
+        return Status::Ok();
+    };
+    for (int index = 0; index < 16; ++index) {
+        Check(pooled.Push(period.data(), period.size(), retain_sink).ok(), "固定 pool 容量内首个 period 必须被暂存");
+        Check(pooled.Push(period.data(), period.size(), retain_sink).ok(), "固定 pool 容量内必须交付完整 PCM 帧");
+    }
+    Check(pooled.payload_pool_high_watermark() == 16, "pool 高水位必须反映全部在途 PCM lease");
+    Check(pooled.Push(period.data(), period.size(), retain_sink).ok(), "耗尽前的首个 period 必须仍可被组装");
+    Check(pooled.Push(period.data(), period.size(), retain_sink).code == ErrorCode::kUnavailable,
+          "pool 耗尽时采集路径必须立即失败，不能退回堆分配或等待消费者");
+    Check(pooled.payload_pool_acquisition_failures() == 1, "pool 耗尽必须留下可观测计数");
+    retained_frames.erase(retained_frames.begin());
+    Check(pooled.Push(period.data(), period.size(), retain_sink).ok(), "释放后的首个 period 必须被组装");
+    Check(pooled.Push(period.data(), period.size(), retain_sink).ok(),
+          "异步消费者释放 lease 后必须能再次取得固定 pool slot");
+
     Check(assembler.Push(nullptr, 1, sink).code == ErrorCode::kInvalidArgument, "非零样本数不能搭配空指针");
     Check(assembler.Push(period.data(), period.size(), {}).code == ErrorCode::kInvalidArgument, "组帧必须拒绝空 sink");
 

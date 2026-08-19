@@ -299,21 +299,21 @@ int main() {
     Check(input.EmitCapture(std::move(captured)).ok() && provider.audio_frames == 2 &&
               provider.last_audio_frame.payload.data() == captured_data,
           "输入端口采集回调应转发为上行音频");
-    Check(std::count_if(evidence.begin(), evidence.end(), [](const voicelife::voice::VoiceEvidence& item) {
-              return item.event == "speech_started";
-          }) == 1,
-          "每轮首个有效语音帧必须只上报一次 speech_started");
+    Check(
+        std::count_if(evidence.begin(), evidence.end(),
+                      [](const voicelife::voice::VoiceEvidence& item) { return item.event == "speech_started"; }) == 1,
+        "每轮首个有效语音帧必须只上报一次 speech_started");
     Check(provider.last_audio_frame.payload.data() == captured_data,
           "采集到 Provider 的上行 PCM 负载必须移动，不能复制每个音频帧");
     Check(provider.last_audio_frame.generation == generation && provider.last_audio_frame.sequence == 1,
           "会话应为输入回调补齐当前 generation 和连续序号");
     auto mismatched_format = Frame(generation, 1);
     mismatched_format.format.sample_rate_hz = 8000;
-    Check(session.SubmitAudio(mismatched_format).code == ErrorCode::kInvalidArgument,
+    Check(session.SubmitAudio(std::move(mismatched_format)).code == ErrorCode::kInvalidArgument,
           "采样率与会话不一致的音频帧必须拒绝");
     auto mismatched_codec = Frame(generation, 1);
     mismatched_codec.format.codec = voicelife::voice::AudioCodec::kOpus;
-    Check(session.SubmitAudio(mismatched_codec).code == ErrorCode::kInvalidArgument,
+    Check(session.SubmitAudio(std::move(mismatched_codec)).code == ErrorCode::kInvalidArgument,
           "编码与会话不一致的音频帧必须拒绝");
     Check(session.SubmitAudio(Frame(generation, 3)).code == ErrorCode::kConflict, "跳号音频帧必须拒绝");
     Check(session.SubmitAudio(Frame(generation - 1, 1)).code == ErrorCode::kInvalidArgument,

@@ -4,6 +4,8 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
+#include <memory>
 #include <utility>
 
 #include "serial_voice_protocol.h"
@@ -35,6 +37,8 @@ class SerialVoiceTest::Impl final {
         if (!callbacks_.begin_turn || !callbacks_.submit_pcm || !callbacks_.end_turn) {
             return Status::Error(ErrorCode::kInvalidArgument, "串口语音测试回调不完整");
         }
+        payload_pool_ = voice::AudioPayloadPool::Create(16, detail::kSerialVoicePcmBytes);
+        if (payload_pool_ == nullptr) return Unavailable("创建串口语音 payload pool 失败");
         if (!usb_serial_jtag_is_driver_installed()) {
             usb_serial_jtag_driver_config_t config = {
                 .tx_buffer_size = 1024,
@@ -138,7 +142,12 @@ class SerialVoiceTest::Impl final {
                             .channels = 1,
                             .bits_per_sample = 16,
                             .frame_duration_ms = 20};
-            frame.payload.assign(payload.begin(), payload.end());
+            frame.payload = payload_pool_->TryAcquire();
+            if (!frame.payload.pooled()) {
+                ESP_LOGW(kTag, "SERIAL_VOICE_PCM=reject code=%d", static_cast<int>(ErrorCode::kUnavailable));
+                continue;
+            }
+            std::memcpy(frame.payload.data(), payload.data(), payload.size());
             const Status status = callbacks_.submit_pcm(std::move(frame));
             if (!status.ok()) LogResult("PCM", status);
         }
@@ -148,6 +157,7 @@ class SerialVoiceTest::Impl final {
 
     SerialVoiceTestCallbacks callbacks_;
     std::atomic_bool stopping_{false};
+    std::shared_ptr<voice::AudioPayloadPool> payload_pool_;
 #ifdef ESP_PLATFORM
     TaskHandle_t task_ = nullptr;
 #endif

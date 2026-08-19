@@ -138,7 +138,7 @@ void EspWebSocketTransport::Impl::TxLoop() {
         }
         if (item->kind == detail::LinxTxItem::Kind::kBarrier) {
             // barrier：文本/音频序列的分界（如 listen.stop 排在本轮音频之后）。
-            delete item;
+            ReleaseTxItem(item);
             continue;
         }
         int sent = -1;
@@ -152,7 +152,7 @@ void EspWebSocketTransport::Impl::TxLoop() {
                                                        pdMS_TO_TICKS(options_.tx_timeout_ms));
         });
         const size_t want = item->payload.size();
-        delete item;
+        ReleaseTxItem(item);
         item = nullptr;
         if (!sent_current) {
             continue;
@@ -174,11 +174,11 @@ void EspWebSocketTransport::Impl::TxLoop() {
             // 会让失效的 listen.start/abort 在新连接上被错误发送。
             detail::LinxTxItem* remaining = nullptr;
             while (tx_queue_ != nullptr && xQueueReceive(tx_queue_, &remaining, 0) == pdTRUE) {
-                delete remaining;
+                ReleaseTxItem(remaining);
                 remaining = nullptr;
             }
             while (tx_control_queue_ != nullptr && xQueueReceive(tx_control_queue_, &remaining, 0) == pdTRUE) {
-                delete remaining;
+                ReleaseTxItem(remaining);
                 remaining = nullptr;
             }
             continue;

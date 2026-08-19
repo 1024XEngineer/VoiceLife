@@ -102,6 +102,11 @@ AudioPortStats Esp32s3PcmAudioPorts::Impl::stats() const {
     result.short_reads = short_reads_.load();
     result.short_writes = short_writes_.load();
     result.input_high_watermark = input_high_watermark_.load();
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (assembler_ != nullptr) {
+        result.input_payload_pool_high_watermark = assembler_->payload_pool_high_watermark();
+        result.input_payload_pool_acquisition_failures = assembler_->payload_pool_acquisition_failures();
+    }
     result.output_high_watermark = output_high_watermark_.load();
     result.input_pcm_bytes = input_pcm_bytes_.load();
     result.output_pcm_bytes = output_pcm_bytes_.load();

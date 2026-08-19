@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "src/audio_frame_queue.cc"
+        "src/audio_payload.cc"
         "src/audio_aec.cc"
         "src/wake_gate_audio_input.cc"
         "src/voice_interaction_controller.cc"

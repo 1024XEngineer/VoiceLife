@@ -4,7 +4,8 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include <vector>
+
+#include "voicelife/voice/audio_payload.h"
 
 namespace voicelife::voice {
 
@@ -72,7 +73,7 @@ struct AudioFrame {
     /** @brief 帧格式。 */
     AudioFormat format;
     /** @brief 帧载荷。 */
-    std::vector<uint8_t> payload;
+    AudioPayload payload;
 };
 
 /**

@@ -25,6 +25,8 @@ namespace detail {
 
 constexpr char kTag[] = "voicelife_linx_esp";
 constexpr size_t kMaxEventChunkBytes = 4096;
+// 8 media + 16 control + one in-flight writer + one replacement/stop item.
+constexpr size_t kTxItemPoolCapacity = 26;
 constexpr EventBits_t kConnectedBit = BIT0;
 constexpr EventBits_t kFailedBit = BIT1;
 
@@ -34,7 +36,7 @@ enum class EventKind : uint8_t { kConnected, kData, kDisconnected, kError, kShut
 struct LinxTxItem {
     enum class Kind : uint8_t { kText, kAudio, kBarrier };
     Kind kind = Kind::kText;
-    std::vector<uint8_t> payload;
+    voice::AudioPayload payload;
     uint64_t generation = 0;
 };
 
@@ -81,6 +83,8 @@ class EspWebSocketTransport::Impl final {
     void WorkerLoop();
     static void TxEntry(void* argument);
     void TxLoop();
+    detail::LinxTxItem* TryAcquireTxItem();
+    void ReleaseTxItem(detail::LinxTxItem* item);
     void HandleQueueOverflow();
     void HandleEnvelope(const detail::EventEnvelope& envelope);
     void HandleData(const detail::EventEnvelope& envelope);
@@ -96,6 +100,9 @@ class EspWebSocketTransport::Impl final {
     QueueHandle_t tx_queue_ = nullptr;
     // 高优先级控制队列：listen.stop/abort 等控制帧，音频占满时仍可入队。
     QueueHandle_t tx_control_queue_ = nullptr;
+    std::array<detail::LinxTxItem, detail::kTxItemPoolCapacity> tx_items_{};
+    std::array<bool, detail::kTxItemPoolCapacity> tx_item_in_use_{};
+    std::mutex tx_item_mutex_;
     bool tx_queue_uses_caps_ = false;
     TaskHandle_t tx_task_ = nullptr;
     // linx_ws_tx 任务栈常驻 PSRAM、TCB 在内部 RAM（一次性分配、跨连接复用，随

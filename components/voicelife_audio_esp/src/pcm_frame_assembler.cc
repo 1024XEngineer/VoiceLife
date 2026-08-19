@@ -13,6 +13,8 @@
 namespace voicelife::audio_esp {
 namespace {
 
+constexpr std::size_t kPcmPayloadPoolSlots = 16;
+
 Status Invalid(std::string message) { return Status::Error(ErrorCode::kInvalidArgument, std::move(message)); }
 
 }  // namespace
@@ -70,6 +72,16 @@ Status PcmFrameAssembler::Prepare() {
     pending_samples_ = new (std::nothrow) int16_t[frame_samples_];
 #endif
     if (pending_samples_ == nullptr) return Status::Error(ErrorCode::kUnavailable, "PCM 组帧缓存分配失败");
+    payload_pool_ = voice::AudioPayloadPool::Create(kPcmPayloadPoolSlots, frame_samples_ * sizeof(int16_t));
+    if (payload_pool_ == nullptr) {
+#ifdef ESP_PLATFORM
+        heap_caps_free(pending_samples_);
+#else
+        delete[] pending_samples_;
+#endif
+        pending_samples_ = nullptr;
+        return Status::Error(ErrorCode::kUnavailable, "PCM payload pool 分配失败");
+    }
     prepared_ = true;
     return Status::Ok();
 }
@@ -101,6 +113,11 @@ Status PcmFrameAssembler::Push(const int16_t* samples, std::size_t sample_count,
         if (frame_samples_ > std::numeric_limits<std::size_t>::max() / sizeof(int16_t)) {
             return Invalid("PCM 组帧负载长度溢出");
         }
+        frame.payload = payload_pool_->TryAcquire();
+        if (!frame.payload.pooled()) {
+            pending_size_ = 0;
+            return Status::Error(ErrorCode::kUnavailable, "PCM payload pool 已耗尽");
+        }
         frame.payload.resize(frame_samples_ * sizeof(int16_t));
         std::memcpy(frame.payload.data(), pending_samples_, frame.payload.size());
         pending_size_ = 0;
@@ -113,5 +130,13 @@ Status PcmFrameAssembler::Push(const int16_t* samples, std::size_t sample_count,
 }
 
 void PcmFrameAssembler::Reset() { pending_size_ = 0; }
+
+std::size_t PcmFrameAssembler::payload_pool_high_watermark() const {
+    return payload_pool_ != nullptr ? payload_pool_->high_watermark() : 0;
+}
+
+std::size_t PcmFrameAssembler::payload_pool_acquisition_failures() const {
+    return payload_pool_ != nullptr ? payload_pool_->acquisition_failures() : 0;
+}
 
 }  // namespace voicelife::audio_esp

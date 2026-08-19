@@ -40,6 +40,9 @@ struct AudioPortStats {
     std::size_t short_writes = 0;
     /** @brief 输入队列高水位。 */
     std::size_t input_high_watermark = 0;
+    /** @brief 实时上行 payload pool 高水位与即时获取失败次数。 */
+    std::size_t input_payload_pool_high_watermark = 0;
+    std::size_t input_payload_pool_acquisition_failures = 0;
     /** @brief 输出队列高水位。 */
     std::size_t output_high_watermark = 0;
     /** @brief 最小空闲堆字节数。 */

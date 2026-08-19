@@ -49,6 +49,8 @@ class TurnResult:
     reply_text: str = ""
     terminal_guard_armed: bool = False
     terminal_guard_clean: bool = True
+    log_start: int = 0
+    log_end: int = 0
     completed: bool = False
     error: str | None = None
 
@@ -246,6 +248,7 @@ def run_turn(
     )
     try:
         cursor = log.mark()
+        result.log_start = cursor
         if first_turn:
             device.write(packet(BEGIN))
             device.flush()
@@ -295,6 +298,7 @@ def run_turn(
             if hits:
                 raise RuntimeError(f"terminal_wake_guard_failed:{','.join(hits)}")
             result.completed = True
+            result.log_end = log.mark()
             return result
         # VoiceSession reopens listening for the next conversational turn.
         # Wait for that existing capture instead of sending a second PressDown.
@@ -302,6 +306,7 @@ def run_turn(
         result.completed = True
     except (RuntimeError, TimeoutError, serial.SerialException) as error:
         result.error = str(error)
+    result.log_end = log.mark()
     return result
 
 
@@ -449,6 +454,13 @@ def main() -> int:
         "viewport_height=50" in line and "content_height=0" not in line for line in content_render_lines
     )
     display_scroll_observed = any(re.search(r"overflow_height=[1-9][0-9]*", line) for line in content_render_lines)
+    def turn_phases_complete(marker: str) -> bool:
+        return len(results) == len(texts) and all(
+            all(any(f"{marker}={phase} " in line for line in raw_lines[result.log_start : result.log_end])
+                for phase in required_active_phases)
+            for result in results
+        )
+
     acceptance = {
         "audio_stats_present": all(key in audio_stats for key in required_present),
         "audio_flow_observed": audio_stats.get("test_in_frames", 0) > 0 and audio_stats.get("out_frames", 0) > 0,
@@ -461,12 +473,9 @@ def main() -> int:
         and all(all(stats.get(key, -1) == 0 for key in interaction_keys) for stats in interaction_stats),
         "no_interaction_rejection": not any("INTERACTION_REJECTED" in line for line in raw_lines),
         "no_provider_error": not any("SERIAL_VOICE_EVIDENCE event=provider_error" in line for line in raw_lines),
-        "state_flow_complete": all(
-            any(f"state={phase} " in line for line in state_lines) for phase in required_active_phases
-        ),
-        "display_flow_complete": all(
-            any(f"phase={phase} " in line for line in rendered_lines) for phase in required_active_phases
-        ) and not any("SPARKBOT_DISPLAY_RENDER_FAILED" in line for line in raw_lines),
+        "state_flow_complete": turn_phases_complete("state"),
+        "display_flow_complete": turn_phases_complete("phase")
+        and not any("SPARKBOT_DISPLAY_RENDER_FAILED" in line for line in raw_lines),
         "display_text_trace_complete": display_text_trace_complete,
         "display_scroll_observed": not args.require_display_scroll or display_scroll_observed,
         "terminal_guard_clean": not args.expect_terminal

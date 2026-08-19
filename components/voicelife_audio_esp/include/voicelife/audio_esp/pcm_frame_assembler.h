@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 
 #include "voicelife/contracts/status.h"
 #include "voicelife/voice/voice_types.h"
@@ -53,6 +54,10 @@ class PcmFrameAssembler final {
 
     /** @brief 当前待组装的样本数。 @return 挂起样本数。 */
     [[nodiscard]] std::size_t pending_samples() const { return pending_size_; }
+    /** @brief 当前上行 pool 的峰值已占用槽位。 */
+    [[nodiscard]] std::size_t payload_pool_high_watermark() const;
+    /** @brief 当前上行 pool 未能即时获取 slot 的次数。 */
+    [[nodiscard]] std::size_t payload_pool_acquisition_failures() const;
 
     /**
      * @brief 推送逻辑 S16 样本。
@@ -74,6 +79,7 @@ class PcmFrameAssembler final {
     uint16_t hardware_period_ms_ = 0;
     std::size_t frame_samples_ = 0;
     int16_t* pending_samples_ = nullptr;
+    std::shared_ptr<voice::AudioPayloadPool> payload_pool_;
     std::size_t pending_size_ = 0;
     bool prepared_ = false;
 };
