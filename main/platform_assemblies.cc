@@ -20,10 +20,13 @@ namespace voicelife::runtime {
 
 namespace {
 
-// Linx can deliver several 20 ms PCM frames in one network burst. Keep enough
-// room for a 240 ms burst without turning playback into an unbounded buffer.
-constexpr std::size_t kSparkBotPlaybackQueueDepth = 12;
-constexpr uint32_t kSparkBotPlaybackLatencyBudgetMs = 240;
+// Linx can deliver several 20 ms PCM frames in one network burst. A 12-frame
+// / 240 ms budget rejected frames during the real eight-turn context stress
+// run, while 16 / 320 ms kept the same workload lossless with more than 4 MiB
+// of free heap remaining. Keep this finite: it absorbs a short transport burst
+// without turning downlink playback into an unbounded backlog.
+constexpr std::size_t kSparkBotPlaybackQueueDepth = 16;
+constexpr uint32_t kSparkBotPlaybackLatencyBudgetMs = 320;
 
 /** @brief 从官方 SparkBot 板级 Profile 填充 LVGL 显示配置。 */
 voicelife::display_sparkbot::SparkBotLcdConfig MakeSparkBotLcdConfig() {

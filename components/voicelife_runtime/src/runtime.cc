@@ -2241,7 +2241,13 @@ class Runtime final {
         vTaskDelete(nullptr);
 #endif
     }
+#if CONFIG_VOICELIFE_SERIAL_VOICE_TEST
+    // Test-only firmware must not disturb the surrounding environment. The
+    // production profile keeps its existing default at 70.
+    int volume_ = 35;
+#else
     int volume_ = 70;
+#endif
     std::atomic<int64_t> capture_started_us_{0};
     std::string stt_display_text_;
     // 下行内容滚动窗口起始字符（0=从头）；滚动迁移至 Ssd1306PresentationAdapter。
