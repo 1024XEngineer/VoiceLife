@@ -4,18 +4,21 @@
 
 ## 开发流程
 
-> **核心规则：所有人都通过 Fork 工作流提交 PR，禁止直接在主仓库（upstream）上建分支或推送。**
+> **核心规则：所有人都通过 Fork 工作流提交 PR，禁止直接在主仓库上建分支或推送。**
 > 主仓库仅维护 `main` 分支；所有个人工作分支都应在自己的 Fork 上创建、推送和发起 PR。
+> 远端命名采用 GitHub 标准：`origin` 指向你的个人 Fork，`upstream` 指向主仓库。
 
-1. **Fork 主仓库**：首次参与开发前，在 GitHub 上 Fork `1024XEngineer/VoiceLife` 到你的个人账号。将你的 Fork 添加为 `origin`，主仓库添加为 `upstream`：
+1. **Fork 主仓库**：首次参与开发前，在 GitHub 上 Fork `1024XEngineer/VoiceLife` 到你的个人账号。克隆主仓库到本地，并将你的 Fork 添加为 `origin`：
    ```bash
-   git remote add upstream git@github.com:1024XEngineer/VoiceLife.git
+   git clone git@github.com:1024XEngineer/VoiceLife.git
+   cd VoiceLife
    git remote set-url origin git@github.com:<你的用户名>/VoiceLife.git
+   git remote add upstream git@github.com:1024XEngineer/VoiceLife.git
    git remote -v  # 确认 origin → 你的 Fork，upstream → 主仓库
    ```
 2. 在当前 Milestone 下创建或领取 Issue，写清场景、范围和验收标准。
 3. 涉及边界、接口、数据模型或依赖方向时，先提交 Design Issue；重大取舍补 ADR。
-4. **从上游最新 `main` 创建个人分支**（始终基于 upstream 保持同步）：
+4. **从主仓库最新 `main` 创建个人分支**（始终基于 upstream 保持同步）：
    ```bash
    git fetch upstream
    git switch -c dev/<issue>-<short-name> upstream/main
