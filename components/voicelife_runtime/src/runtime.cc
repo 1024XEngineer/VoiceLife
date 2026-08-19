@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <ctime>
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -37,8 +38,10 @@
 #include "voicelife/linx_esp/esp_websocket_transport.h"
 #include "voicelife/mcp/mcp_server.h"
 #include "voicelife/schedule/schedule_operation_service.h"
+#include "voicelife/schedule/schedule_reminder_service.h"
 #include "voicelife/schedule/schedule_rule_service.h"
 #include "voicelife/schedule/schedule_service.h"
+#include "voicelife/timing_esp/esp_timing_runtime.h"
 #endif
 
 #include "bootstrap/storage_bootstrap.h"
@@ -165,6 +168,18 @@ class ScaffoldSpeechProvider final : public voice::SpeechProviderAdapter {
     voice::CapabilityProfile profile_{"scaffold", {"streaming-asr", "tts"}};
 };
 
+#ifdef ESP_PLATFORM
+class ReminderSpeech final : public schedule::ScheduleReminderSpeechPort {
+   public:
+    explicit ReminderSpeech(std::function<Status(std::string_view)> speak) : speak_(std::move(speak)) {}
+
+    Status SpeakScheduleReminder(std::string_view text) override { return speak_(text); }
+
+   private:
+    std::function<Status(std::string_view)> speak_;
+};
+#endif
+
 class Runtime final {
    public:
     /** @brief 构造运行时并将日程服务绑定到持久化仓储。 */
@@ -178,21 +193,11 @@ class Runtime final {
     {
         auto& registry = voice::SpeechProviderRegistry::Instance();
 #ifdef ESP_PLATFORM
-        init_status_ = mcp::RegisterScheduleMcpTools(mcp_server_, schedule_service_, schedule_rule_service_,
-                                                     schedule_operation_service_);
-        if (init_status_.ok()) {
-            // MCP worker 只产生绑定结果；轮询与 OLED/TTS 均由各自受控任务处理。
-            init_status_ =
-                RegisterImBindingMcpTools(mcp_server_, binding_use_case_, [this](const im::BindingResult& result) {
-                    EnqueueBindingResult(result);
-                    if (result.state == im::BindingState::kPending) StartBindingPolling(result.generation);
-                });
-        }
-        if (init_status_.ok()) {
-            ESP_LOGI(kTag,
-                     "MCP_TOOLS_READY count=6 names=schedule.create,schedule.query,schedule.update,schedule.delete,"
-                     "schedule.operation_query,im.binding.start");
-        }
+        init_status_ =
+            RegisterImBindingMcpTools(mcp_server_, binding_use_case_, [this](const im::BindingResult& result) {
+                EnqueueBindingResult(result);
+                if (result.state == im::BindingState::kPending) StartBindingPolling(result.generation);
+            });
         registry.Register("xrobot-websocket", linx::LinxSpeechProviderAdapter::DefaultCapabilities(), [this]() {
             return std::make_unique<linx::LinxSpeechProviderAdapter>(
                 *linx_transport_, linx_codec_, linx_config_, linx::LinxSpeechProviderAdapter::DefaultCapabilities(),
@@ -211,6 +216,7 @@ class Runtime final {
 #ifdef ESP_PLATFORM
             StopMcpWorker();
             StopEventLoop();
+            StopScheduleReminderRuntime();
 #endif
             return status;
         };
@@ -222,6 +228,42 @@ class Runtime final {
             return storage_status;
         }
 #ifdef ESP_PLATFORM
+        auto timing_runtime = timing_esp::EspTimingTaskRuntime::Create();
+        if (!timing_runtime.ok() || !timing_runtime.value.has_value()) {
+            const Status failure = timing_runtime.ok()
+                                       ? Status::Error(ErrorCode::kInternal, "ESP Timing 运行时创建结果为空")
+                                       : timing_runtime.status;
+            ESP_LOGE(kTag, "STARTUP_ERROR stage=timing_runtime code=%d msg=%s", static_cast<int>(failure.code),
+                     failure.message.c_str());
+            return failure;
+        }
+        timing_runtime_ = std::move(*timing_runtime.value);
+        reminder_speech_ = std::make_unique<ReminderSpeech>([this](std::string_view text) {
+            if (!session_) {
+                return Status::Error(ErrorCode::kUnavailable, "语音会话尚未启动");
+            }
+            return session_->Speak(text);
+        });
+        schedule_reminder_service_ = std::make_unique<schedule::ScheduleReminderService>(
+            storage_.GetScheduleRepository(), schedule_service_, schedule_rule_service_, *timing_runtime_,
+            *reminder_speech_);
+        const Status reminder_status = schedule_reminder_service_->Start();
+        if (!reminder_status.ok()) {
+            ESP_LOGE(kTag, "STARTUP_ERROR stage=schedule_reminder code=%d msg=%s",
+                     static_cast<int>(reminder_status.code), reminder_status.message.c_str());
+            return fail_startup(reminder_status);
+        }
+        ESP_LOGI(kTag, "SCHEDULE_REMINDER_READY=1");
+        if (!schedule_mcp_registered_) {
+            init_status_ = mcp::RegisterScheduleMcpTools(mcp_server_, schedule_service_, schedule_rule_service_,
+                                                         schedule_operation_service_, schedule_reminder_service_.get());
+            if (!init_status_.ok()) return fail_startup(init_status_);
+            schedule_mcp_registered_ = true;
+            // MCP worker 只产生绑定结果；轮询与 OLED/TTS 均由各自受控任务处理。
+            ESP_LOGI(kTag,
+                     "MCP_TOOLS_READY count=6 names=schedule.create,schedule.query,schedule.update,schedule.delete,"
+                     "schedule.operation_query,im.binding.start");
+        }
         // 立创实战派 ESP32-S3 板载 WS2812 灯珠接 GPIO48（小智 BUILTIN_LED_GPIO）。
         // 主 NVS 分区初始化（Wi-Fi 驱动/凭据等依赖；linx_secrets 为加密分区另行初始化）。
         {
@@ -362,6 +404,15 @@ class Runtime final {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
         event_task_ = nullptr;
+    }
+
+    void StopScheduleReminderRuntime() {
+        if (schedule_reminder_service_) {
+            schedule_reminder_service_->Stop();
+            schedule_reminder_service_.reset();
+        }
+        reminder_speech_.reset();
+        timing_runtime_.reset();
     }
 
     struct McpRequest {
@@ -1478,6 +1529,10 @@ class Runtime final {
     schedule::ScheduleOperationService schedule_operation_service_;
     schedule::ScheduleService schedule_service_;
     schedule::ScheduleRuleService schedule_rule_service_;
+    bool schedule_mcp_registered_ = false;
+    std::unique_ptr<timing_esp::EspTimingTaskRuntime> timing_runtime_;
+    std::unique_ptr<ReminderSpeech> reminder_speech_;
+    std::unique_ptr<schedule::ScheduleReminderService> schedule_reminder_service_;
     Status init_status_ = Status::Ok();
     linx::LinxJsonCodec linx_codec_;
     linx::LinxConnectionConfig linx_config_;
@@ -1981,6 +2036,12 @@ class Runtime final {
     std::unique_ptr<voice::VoiceSession> session_;
 
    public:
+    ~Runtime() {
+#ifdef ESP_PLATFORM
+        StopScheduleReminderRuntime();
+#endif
+    }
+
     Status RequestInterrupt() {
         if (!session_) return Status::Error(ErrorCode::kUnavailable, "设备运行时尚未启动");
 #ifdef ESP_PLATFORM

@@ -252,6 +252,28 @@ UpdateScheduleResult ScheduleService::update_schedule(const UpdateScheduleComman
     };
 }
 
+Status ScheduleService::complete_schedule(ScheduleId schedule_id, std::optional<int64_t> expected_reminder_task_id) {
+    if (schedule_id <= 0) {
+        return Status::Error(ErrorCode::kInvalidArgument, "日程 ID 必须大于零");
+    }
+
+    const Result<Schedule> loaded = repository_.FindById(schedule_id);
+    if (!loaded.ok()) return loaded.status;
+
+    Schedule completed = *loaded.value;
+    if (completed.status != ScheduleStatus::kActive) {
+        return Status::Error(ErrorCode::kConflict, "只有进行中的日程可以标记为已完成");
+    }
+    if (expected_reminder_task_id.has_value() && completed.reminder_task_id != expected_reminder_task_id) {
+        return Status::Error(ErrorCode::kConflict, "提醒任务已被替换，忽略过期回调");
+    }
+
+    completed.status = ScheduleStatus::kCompleted;
+    completed.reminder_task_id = std::nullopt;
+    completed.updated_at = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
+    return repository_.Update(completed);
+}
+
 QueryScheduleResult ScheduleService::query_schedule(const QueryScheduleCommand& command) const {
     // 先校验查询条件，避免非法筛选和分页参数进入 SQL。
     const Status validation = ValidateQueryScheduleCommand(command);

@@ -103,6 +103,8 @@ Status BindSchedule(SqliteStatement& statement, const schedule::Schedule& schedu
     if (!status.ok()) return status;
     status = BindOptionalInt64(statement, index++, schedule.rule_id, "rule_id");
     if (!status.ok()) return status;
+    status = BindOptionalInt64(statement, index++, schedule.reminder_task_id, "reminder_task_id");
+    if (!status.ok()) return status;
     status = WithField(statement.BindInt(index++, static_cast<int>(schedule.status)), "status");
     if (!status.ok()) return status;
     status = WithField(statement.BindInt64(index++, schedule.created_at.time_since_epoch().count()), "created_at");
@@ -111,7 +113,7 @@ Status BindSchedule(SqliteStatement& statement, const schedule::Schedule& schedu
 }
 
 Result<schedule::Schedule> ReadSchedule(const SqliteStatement& statement) {
-    const int status_value = statement.ColumnInt(7);
+    const int status_value = statement.ColumnInt(8);
     if (!IsValidStatus(status_value)) {
         return Result<schedule::Schedule>::Failure(ErrorCode::kInternal, "数据库中的日程状态无效");
     }
@@ -127,12 +129,16 @@ Result<schedule::Schedule> ReadSchedule(const SqliteStatement& statement) {
         .location = ReadOptionalText(statement, 4),
         .notes = ReadOptionalText(statement, 5),
         .rule_id = std::nullopt,
+        .reminder_task_id = std::nullopt,
         .status = static_cast<schedule::ScheduleStatus>(status_value),
-        .created_at = schedule::DateTime{std::chrono::seconds{statement.ColumnInt64(8)}},
-        .updated_at = schedule::DateTime{std::chrono::seconds{statement.ColumnInt64(9)}},
+        .created_at = schedule::DateTime{std::chrono::seconds{statement.ColumnInt64(9)}},
+        .updated_at = schedule::DateTime{std::chrono::seconds{statement.ColumnInt64(10)}},
     };
     if (!statement.IsNull(6)) {
         schedule.rule_id = statement.ColumnInt64(6);
+    }
+    if (!statement.IsNull(7)) {
+        schedule.reminder_task_id = statement.ColumnInt64(7);
     }
     return Result<schedule::Schedule>::Success(std::move(schedule));
 }
