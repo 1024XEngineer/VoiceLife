@@ -66,6 +66,12 @@ export interface GatewayWechatConfiguration {
         readonly body: string;
         readonly time: string;
     };
+    readonly queryTemplateId: string;
+    readonly queryTemplateFields: {
+        readonly title: string;
+        readonly body: string;
+        readonly time: string;
+    };
     readonly displayTimeZone: string;
     readonly actionUiBaseUrl: string;
 }
@@ -142,6 +148,12 @@ export function readGatewayConfiguration(environment: GatewayEnvironment): Gatew
                 body: templateField(environment, 'WECHAT_TEMPLATE_BODY_FIELD'),
                 time: templateField(environment, 'WECHAT_TEMPLATE_TIME_FIELD'),
             },
+            queryTemplateId: requiredEnvironment(environment, 'WECHAT_QUERY_TEMPLATE_ID'),
+            queryTemplateFields: {
+                title: templateField(environment, 'WECHAT_QUERY_TEMPLATE_TITLE_FIELD'),
+                body: templateField(environment, 'WECHAT_QUERY_TEMPLATE_BODY_FIELD'),
+                time: templateField(environment, 'WECHAT_QUERY_TEMPLATE_TIME_FIELD'),
+            },
             displayTimeZone: displayTimeZone(environment),
             actionUiBaseUrl,
         },
@@ -180,6 +192,8 @@ export async function startConfiguredGatewayProcess(
                 appSecret: config.wechat.appSecret,
                 templateId: config.wechat.templateId,
                 templateFields: config.wechat.templateFields,
+                queryTemplateId: config.wechat.queryTemplateId,
+                queryTemplateFields: config.wechat.queryTemplateFields,
                 displayTimeZone: config.wechat.displayTimeZone,
                 actionUiBaseUrl: config.wechat.actionUiBaseUrl,
                 revealExternalUserId: (ciphertext) => identities.reveal(ciphertext),

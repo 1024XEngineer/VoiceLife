@@ -36,6 +36,12 @@ function outboundAdapter(fetchImpl, overrides = {}) {
                 body: 'thing2',
                 time: 'time3',
             },
+            queryTemplateId: 'fixture-query-template',
+            queryTemplateFields: {
+                title: 'first',
+                body: 'keyword1',
+                time: 'keyword2',
+            },
             revealExternalUserId: async (ciphertext) => ciphertext.replace(/^(?:ciphertext|encrypted):/u, ''),
             fetch: fetchImpl,
             ...overrides,
@@ -116,8 +122,10 @@ test('WeChat outbound rejects invalid deployment configuration before making a r
         { appId: 'invalid-app' },
         { appSecret: '' },
         { templateId: 'bad template' },
+        { queryTemplateId: 'fixture-template' },
         { actionUiBaseUrl: 'http://gateway.example/actions' },
         { templateFields: { title: 'same', body: 'same', time: 'time3' } },
+        { queryTemplateFields: { title: 'same', body: 'same', time: 'time3' } },
         { requestTimeoutMs: 0 },
         { requestTimeoutMs: 10_001 },
         { displayTimeZone: 'not/a-time-zone' },
@@ -127,6 +135,38 @@ test('WeChat outbound rejects invalid deployment configuration before making a r
             (error) => error.code === 'invalid_contract',
         );
     }
+});
+
+test('query template payload passes send validation with its own field mapping', async () => {
+    const requests = [];
+    const responses = [
+        new globalThis.Response(JSON.stringify({ access_token: 'fixture-query-access-token', expires_in: 7200 })),
+        new globalThis.Response(JSON.stringify({ errcode: 0, msgid: '123' })),
+    ];
+    const adapter = outboundAdapter(async (url, init) => {
+        requests.push({ url: String(url), init });
+        return responses.shift();
+    });
+    const account = { id: 'channel-1', platform: 'wechat_official', status: 'active' };
+    const content = await adapter.render(
+        {
+            channelAccountId: 'channel-1',
+            presentationType: 'template',
+            kind: 'schedule_query_result',
+            semanticPayload: scheduleQueryResultIntent(),
+        },
+        account,
+        await adapter.capabilities(account),
+        {},
+    );
+
+    assert.deepEqual(await adapter.sendToUser('fixture-open-id', content), {
+        accepted: true,
+        platformMessageId: '123',
+    });
+    const body = JSON.parse(requests[1].init.body);
+    assert.equal(body.template_id, 'fixture-query-template');
+    assert.deepEqual(Object.keys(body.data).sort(), ['first', 'keyword1', 'keyword2']);
 });
 
 test('renders template times in the configured IANA time zone', async () => {
@@ -208,8 +248,9 @@ test('WeChat outbound validates delivery scope and payload shape before network 
         capabilities,
         {},
     );
-    assert.equal(renderedQueryResult.data.thing1.value, '日程查询结果（2 条）');
-    assert.deepEqual(JSON.parse(renderedQueryResult.data.thing2.value), {
+    assert.equal(renderedQueryResult.templateId, 'fixture-query-template');
+    assert.equal(renderedQueryResult.data.first.value, '日程查询结果（2 条）');
+    assert.deepEqual(JSON.parse(renderedQueryResult.data.keyword1.value), {
         query: queryResult.query,
         resultCount: queryResult.resultCount,
         schedules: queryResult.schedules,
@@ -217,7 +258,7 @@ test('WeChat outbound validates delivery scope and payload shape before network 
         exceptions: queryResult.exceptions,
         queriedAt: queryResult.queriedAt,
     });
-    assert.equal(renderedQueryResult.data.time3.value, '2026年8月3日 08:00');
+    assert.equal(renderedQueryResult.data.keyword2.value, '2026年8月3日 08:00');
     for (const delivery of [
         { ...validDelivery, channelAccountId: 'channel-other' },
         { ...validDelivery, presentationType: 'text' },

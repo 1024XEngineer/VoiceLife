@@ -31,6 +31,10 @@ function fixtureEnvironment(overrides = {}) {
         WECHAT_TEMPLATE_TITLE_FIELD: 'first',
         WECHAT_TEMPLATE_BODY_FIELD: 'keyword1',
         WECHAT_TEMPLATE_TIME_FIELD: 'keyword2',
+        WECHAT_QUERY_TEMPLATE_ID: 'fixture-query-template',
+        WECHAT_QUERY_TEMPLATE_TITLE_FIELD: 'first',
+        WECHAT_QUERY_TEMPLATE_BODY_FIELD: 'keyword1',
+        WECHAT_QUERY_TEMPLATE_TIME_FIELD: 'keyword2',
         WECHAT_ACTION_UI_BASE_URL: 'https://gateway.example/voicelife/reminder-actions',
         ...overrides,
     };

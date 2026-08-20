@@ -210,6 +210,10 @@ Infrastructure 内完成归一化后直接调用 `PlatformEventApplication`，�
 提示其以 `绑定 123456` 的格式发送六码绑定码；有效绑定会同步返回成功提示，无效或过期的绑定码会返回重新获取提示。
 这些被动回复均不依赖模板消息权限。
 
+提醒和日程变更回执使用 `WECHAT_TEMPLATE_*` 配置的模板；日程查询结果使用独立的
+`WECHAT_QUERY_TEMPLATE_ID`、`WECHAT_QUERY_TEMPLATE_TITLE_FIELD`、`WECHAT_QUERY_TEMPLATE_BODY_FIELD` 与
+`WECHAT_QUERY_TEMPLATE_TIME_FIELD`。两套模板 ID 必须不同，每套模板的三个字段也必须互不相同。
+
 新的 pending 会话再次确认完全相同组合时复用已有有效绑定。设备改绑新身份或身份改绑新设备时，旧关系会保留为
 `unbound` 历史；任一设备和任一外部身份最多各有一条 active 绑定。设备吊销不会删除绑定或投递历史。
 

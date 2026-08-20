@@ -28,12 +28,20 @@ export interface WechatTemplateFields {
     readonly time: string;
 }
 
+interface WechatTemplateConfig {
+    readonly templateId: string;
+    readonly templateFields: WechatTemplateFields;
+}
+
 /** 由部署层从 Secret 引用解析后注入的微信公众号出站配置。 */
 export interface WechatOfficialOutboundOptions {
     readonly appId: string;
     readonly appSecret: string;
     readonly templateId: string;
     readonly templateFields: WechatTemplateFields;
+    /** 查询结果使用的独立模板，提醒和日程回执仍使用上面的默认模板。 */
+    readonly queryTemplateId: string;
+    readonly queryTemplateFields: WechatTemplateFields;
     /** 模板中展示时间使用的 IANA 时区；默认 Asia/Shanghai。 */
     readonly displayTimeZone?: string;
     readonly actionUiBaseUrl: string;
@@ -90,11 +98,14 @@ export class WechatOfficialOutbound {
      * @returns 微信模板消息载荷。
      */
     public renderScheduleReceipt(intent: ScheduleReceiptIntent): JsonValue {
-        return this.templatePayload({
-            title: '日程已更新',
-            body: intent.summary,
-            time: formatTemplateTime(intent.occurredAt, this.options.displayTimeZone),
-        });
+        return this.templatePayload(
+            {
+                title: '日程已更新',
+                body: intent.summary,
+                time: formatTemplateTime(intent.occurredAt, this.options.displayTimeZone),
+            },
+            this.options,
+        );
     }
 
     /**
@@ -111,11 +122,17 @@ export class WechatOfficialOutbound {
             exceptions: intent.exceptions,
             queriedAt: intent.queriedAt,
         });
-        return this.templatePayload({
-            title: `日程查询结果（${intent.resultCount} 条）`,
-            body,
-            time: formatTemplateTime(intent.queriedAt, this.options.displayTimeZone),
-        });
+        return this.templatePayload(
+            {
+                title: `日程查询结果（${intent.resultCount} 条）`,
+                body,
+                time: formatTemplateTime(intent.queriedAt, this.options.displayTimeZone),
+            },
+            {
+                templateId: this.options.queryTemplateId,
+                templateFields: this.options.queryTemplateFields,
+            },
+        );
     }
 
     /**
@@ -134,6 +151,7 @@ export class WechatOfficialOutbound {
                 body: intent.content.body ?? '',
                 time: formatTemplateTime(intent.triggerAt, this.options.displayTimeZone),
             },
+            this.options,
             actionToken,
         );
     }
@@ -195,10 +213,11 @@ export class WechatOfficialOutbound {
      * @returns 平台即时受理结果。
      */
     public async sendToUser(revealedExternalUserId: string, content: JsonValue): Promise<ImSendAcceptance> {
+        const template = templateConfigForContent(content, this.options);
         const payload = parseTemplatePayload(
             content,
-            this.options.templateId,
-            this.options.templateFields,
+            template.templateId,
+            template.templateFields,
             this.options.actionUiBaseUrl,
         );
         const externalUserId = revealedExternalUserId.trim();
@@ -242,12 +261,13 @@ export class WechatOfficialOutbound {
 
     private templatePayload(
         content: { readonly title: string; readonly body: string; readonly time: string },
+        template: WechatTemplateConfig,
         actionToken?: string,
     ): WechatTemplatePayload {
-        const fields = this.options.templateFields;
+        const fields = template.templateFields;
         return {
             type: 'wechat_template',
-            templateId: this.options.templateId,
+            templateId: template.templateId,
             data: {
                 [fields.title]: { value: content.title },
                 [fields.body]: { value: content.body },
@@ -338,15 +358,39 @@ class WechatAccessTokenError extends Error {
     }
 }
 
+function templateConfigForContent(content: JsonValue, options: NormalizedWechatOutboundOptions): WechatTemplateConfig {
+    if (
+        typeof content === 'object' &&
+        content !== null &&
+        !Array.isArray(content) &&
+        'templateId' in content &&
+        typeof content.templateId === 'string' &&
+        content.templateId === options.queryTemplateId
+    ) {
+        return {
+            templateId: options.queryTemplateId,
+            templateFields: options.queryTemplateFields,
+        };
+    }
+    return options;
+}
+
 function normalizeOptions(options: WechatOfficialOutboundOptions): NormalizedWechatOutboundOptions {
     const appId = options.appId.trim();
     const appSecret = options.appSecret.trim();
     const templateId = options.templateId.trim();
+    const queryTemplateId = options.queryTemplateId.trim();
     if (!/^wx[A-Za-z0-9_-]{1,126}$/u.test(appId) || appSecret === '' || appSecret.length > 256) {
         throw new ImGatewayError('invalid_contract', 'WeChat outbound credentials are invalid');
     }
     if (templateId === '' || templateId.length > 128 || !/^[A-Za-z0-9_-]+$/u.test(templateId)) {
         throw new ImGatewayError('invalid_contract', 'WeChat template id is invalid');
+    }
+    if (queryTemplateId === '' || queryTemplateId.length > 128 || !/^[A-Za-z0-9_-]+$/u.test(queryTemplateId)) {
+        throw new ImGatewayError('invalid_contract', 'WeChat query template id is invalid');
+    }
+    if (templateId === queryTemplateId) {
+        throw new ImGatewayError('invalid_contract', 'WeChat template ids must be distinct');
     }
     const fields = {
         title: templateField(options.templateFields.title),
@@ -355,6 +399,14 @@ function normalizeOptions(options: WechatOfficialOutboundOptions): NormalizedWec
     };
     if (new Set(Object.values(fields)).size !== 3) {
         throw new ImGatewayError('invalid_contract', 'WeChat template fields must be distinct');
+    }
+    const queryFields = {
+        title: templateField(options.queryTemplateFields.title),
+        body: templateField(options.queryTemplateFields.body),
+        time: templateField(options.queryTemplateFields.time),
+    };
+    if (new Set(Object.values(queryFields)).size !== 3) {
+        throw new ImGatewayError('invalid_contract', 'WeChat query template fields must be distinct');
     }
     const displayTimeZone = normalizeDisplayTimeZone(options.displayTimeZone);
     let actionUiUrl: URL;
@@ -385,6 +437,8 @@ function normalizeOptions(options: WechatOfficialOutboundOptions): NormalizedWec
         appSecret,
         templateId,
         templateFields: fields,
+        queryTemplateId,
+        queryTemplateFields: queryFields,
         displayTimeZone,
         actionUiBaseUrl: actionUiUrl.toString().replace(/\/$/u, ''),
         revealExternalUserId: options.revealExternalUserId,
