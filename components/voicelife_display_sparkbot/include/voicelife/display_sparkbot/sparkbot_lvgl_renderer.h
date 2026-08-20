@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -7,6 +8,42 @@
 #include "voicelife/voice/display_snapshot.h"
 
 namespace voicelife::display_sparkbot {
+
+/**
+ * @brief 当前 SparkBot 外壳观察用的产品布局参数。
+ *
+ * 这些参数只约束产品 UI 的安全视口，不改变 ST7789/LVGL 的 240x240
+ * 控制器坐标。当前 viewport_y=0 用于先观察上半区；实物边界确认后，
+ * 后续只需调整 viewport_y 或尺寸，不必重写面板初始化。
+ */
+struct SparkBotDisplayLayout {
+    /** @brief 正文栏的滚动策略。 */
+    enum class ContentScrollMode : uint8_t {
+        kHorizontalCircular,
+    };
+
+    uint16_t viewport_y = 0;
+    uint16_t viewport_height = 120;
+    uint16_t horizontal_inset = 12;
+    uint16_t top_bar_height = 18;
+    uint16_t status_top = 18;
+    uint16_t status_height = 25;
+    uint16_t emoji_top = 43;
+    uint16_t emoji_size = 50;
+    uint16_t content_top = 95;
+    uint16_t content_height = 25;
+    uint16_t content_inset = 10;
+    uint16_t icon_font_size = 14;
+    uint16_t emoji_scale = 133;
+    uint32_t content_scroll_duration_ms = 6000;
+    ContentScrollMode content_scroll_mode = ContentScrollMode::kHorizontalCircular;
+};
+
+/**
+ * @brief 返回当前上半区观察布局；不代表已完成实板可视区测量。
+ * @return 当前半高观察布局参数。
+ */
+[[nodiscard]] constexpr SparkBotDisplayLayout DefaultSparkBotDisplayLayout() { return {}; }
 
 /**
  * @brief 显示模型表情到官方 SparkBot emotion key 的映射。
@@ -22,12 +59,12 @@ namespace voicelife::display_sparkbot {
 [[nodiscard]] std::string_view EmotionKeyForMood(voicelife::voice::VoiceMood mood);
 
 /**
- * @brief SparkBot 官方简单模式 LVGL 渲染器（官方移植骨架）。
+ * @brief SparkBot 官方简单模式 LVGL 渲染器（半高视口适配）。
  *
  * 移植来源：xiaozhi-esp32@37d1aee main/display/lcd_display.cc 的
- * SetupUI 简单模式（中央 96x96 emoji 舞台、顶部状态栏、底部 224x56
- * 消息栏）与官方 dark 主题颜色。布局、主题、字体、字号、颜色、标点、
- * 文本换行与刷新节奏以官方为准，不得自行重新设计 UI。
+ * SetupUI 简单模式（顶部状态栏、中央 emoji 舞台、底部消息栏）与官方
+ * dark 主题颜色。控制器仍是 240x240；产品对象统一挂在可裁剪的半高
+ * 视口下，消息栏使用单行横向循环滚动以节省垂直空间。
  *
  * 本阶段 emoji 使用官方字形 fallback（xiaozhi-fonts 的 noto_emoji /
  * material_symbols）；assets 分区的 GIF 资源加载在后续阶段接入。
