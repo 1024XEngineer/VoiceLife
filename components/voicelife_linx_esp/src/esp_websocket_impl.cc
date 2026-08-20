@@ -414,7 +414,9 @@ bool EspWebSocketTransport::Impl::PrepareWorker() {
     if (xTaskCreateWithCaps(&WorkerEntry, "linx_ws_events", options_.worker_task_stack_size, this, 6, &worker_,
                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
 #else
-    if (xTaskCreate(&WorkerEntry, "linx_ws_events", options_.worker_task_stack_size, this, 6, &worker_) != pdPASS) {
+    const uint32_t worker_stack_words = options_.worker_task_stack_size / sizeof(StackType_t);
+    if (worker_stack_words == 0 ||
+        xTaskCreate(&WorkerEntry, "linx_ws_events", worker_stack_words, this, 6, &worker_) != pdPASS) {
 #endif
         CleanupWorker();
         return false;
