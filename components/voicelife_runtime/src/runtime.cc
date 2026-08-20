@@ -725,6 +725,9 @@ class Runtime final {
             if (injection == nullptr) return Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
             const Status enabled = injection->SetTestInputEnabled(true);
             if (!enabled.ok()) return enabled;
+            // TTS 结束后 Runtime 会自动打开下一轮采集；串口夹具仍需显式
+            // 重新声明注入窗口，但不能再次投递 PressDown 破坏 Listening 状态。
+            if (interaction_.state() == voice::VoiceInteractionState::kListening) return Status::Ok();
             if (EnqueueBoardInput(BoardInputAction::kPressDown)) return Status::Ok();
             (void)injection->SetTestInputEnabled(false);
             return Status::Error(ErrorCode::kUnavailable, "语音测试开始事件未进入状态机队列");
