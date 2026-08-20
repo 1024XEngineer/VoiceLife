@@ -76,6 +76,60 @@ test('WeCom AI Bot resolves registered active accounts as unavailable for outbou
     });
 });
 
+test('WeCom AI Bot renders Markdown and sends it through the injected WSS transport', async () => {
+    const sent = [];
+    const wecom = adapter({
+        outbound: {
+            revealExternalUserId: async (ciphertext) => ciphertext.replace('encrypted:', ''),
+            transport: {
+                sendMarkdown: async (chatId, content) => {
+                    sent.push({ chatId, content });
+                    return { accepted: true, platformMessageId: 'platform-message-1' };
+                },
+            },
+        },
+    });
+    assert.deepEqual(await wecom.resolve({ id: 'channel-wecom', platform: 'wecom_aibot', status: 'active' }), {
+        proactiveMessage: true,
+        nativeAction: false,
+        actionUi: false,
+        deliveryReceipt: false,
+        presentationTypes: ['rich_text'],
+    });
+    assert.deepEqual(await wecom.renderNotification({ content: { title: '提醒', body: '该处理了' } }), {
+        type: 'wecom_aibot_markdown',
+        content: '**提醒**\n该处理了',
+    });
+    assert.deepEqual(
+        await wecom.send({
+            delivery: { channelAccountId: 'channel-wecom' },
+            conversation: { externalConversationIdCiphertext: 'encrypted:userid-fixture' },
+            content: { type: 'wecom_aibot_markdown', content: '**提醒**\n该处理了' },
+        }),
+        { accepted: true, platformMessageId: 'platform-message-1' },
+    );
+    assert.deepEqual(sent, [{ chatId: 'userid-fixture', content: '**提醒**\n该处理了' }]);
+});
+
+test('WeCom AI Bot refuses a mismatched delivery before revealing the recipient', async () => {
+    const wecom = adapter({
+        outbound: {
+            revealExternalUserId: async () => {
+                throw new Error('recipient must not be revealed');
+            },
+            transport: { sendMarkdown: async () => ({ accepted: true }) },
+        },
+    });
+    assert.deepEqual(
+        await wecom.send({
+            delivery: { channelAccountId: 'another-channel' },
+            conversation: { externalConversationIdCiphertext: 'encrypted:userid-fixture' },
+            content: { type: 'wecom_aibot_markdown', content: 'message' },
+        }),
+        { accepted: false, retryable: false, errorCode: 'wecom_aibot_account_mismatch' },
+    );
+});
+
 test('WeCom AI Bot rejects a message for another bot, an empty userid, and group context', async () => {
     for (const frame of [
         textFrame({ aibotid: 'bot-other' }),

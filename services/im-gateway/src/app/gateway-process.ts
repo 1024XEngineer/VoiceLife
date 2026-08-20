@@ -25,8 +25,11 @@ import {
 } from '../infrastructure/security/production-ports.js';
 import { WechatOfficialAdapter } from '../infrastructure/wechat/wechat-official-adapter.js';
 import { WechatOfficialKoishiBot } from '../infrastructure/koishi/wechat-official-koishi-bot.js';
-import { WecomAibotUrlCallbackController } from '../infrastructure/http/wecom-aibot-url-callback.js';
 import { WecomAibotInboundAdapter } from '../infrastructure/wecom/wecom-aibot-inbound-adapter.js';
+import {
+    WecomAibotWssRuntime,
+    type WecomAibotWebSocketFactory,
+} from '../infrastructure/wecom/wecom-aibot-wss-runtime.js';
 
 export {
     startGatewayHttpServer,
@@ -74,8 +77,7 @@ export interface GatewayWechatConfiguration {
 export interface GatewayWecomAibotConfiguration {
     readonly channelAccountId: string;
     readonly botId: string;
-    readonly webhookToken: string;
-    readonly encodingAesKey: string;
+    readonly secret: string;
 }
 
 /** 生产进程经过校验且仅驻留内存的配置。 */
@@ -88,6 +90,12 @@ export interface GatewayConfiguration {
     readonly wechat: GatewayWechatConfiguration;
     /** 未配置时不影响已有微信公众号部署。 */
     readonly wecom?: GatewayWecomAibotConfiguration;
+}
+
+/** 生产进程的可替换基础设施依赖，仅供集成测试或受控部署使用。 */
+export interface GatewayProcessOptions {
+    /** 覆盖企业微信 WSS 客户端创建方式；缺省使用生产客户端。 */
+    readonly createWecomWebSocket?: WecomAibotWebSocketFactory;
 }
 
 /** 已启动且托管全部依赖生命周期的生产 Gateway 进程。 */
@@ -159,6 +167,7 @@ export function readGatewayConfiguration(environment: GatewayEnvironment): Gatew
 export async function startConfiguredGatewayProcess(
     environment: GatewayEnvironment,
     logger: GatewayLogger = new JsonLineGatewayLogger(),
+    options: GatewayProcessOptions = {},
 ): Promise<StartedGatewayProcess> {
     const config = readGatewayConfiguration(environment);
     const processLogger = nonThrowingLogger(logger);
@@ -166,6 +175,7 @@ export async function startConfiguredGatewayProcess(
     let koishi: KoishiGatewayRuntime | undefined;
     let deliveryWorker: DeliveryOutboxWorker | undefined;
     let http: StartedGatewayHttpServer | undefined;
+    let wecomRuntime: WecomAibotWssRuntime | undefined;
     try {
         await unitOfWork.migrate();
         const clock = new SystemClock();
@@ -193,12 +203,25 @@ export async function startConfiguredGatewayProcess(
                       adapter: new WecomAibotInboundAdapter({
                           channelAccountId: unsafeId<ChannelAccountId>(config.wecom.channelAccountId),
                           botId: config.wecom.botId,
+                          outbound: {
+                              revealExternalUserId: (ciphertext) => identities.reveal(ciphertext),
+                              transport: {
+                                  sendMarkdown: (chatId, content) =>
+                                      wecomRuntime?.sendMarkdown(chatId, content) ??
+                                      Promise.resolve({
+                                          accepted: false,
+                                          retryable: true,
+                                          errorCode: 'wecom_aibot_unavailable',
+                                      }),
+                              },
+                          },
                       }),
                   };
         const channelAdapters = new ChannelAdapterRegistry([
             { accountId: channelAccountId, adapter },
             ...(wecomRegistration === undefined ? [] : [wecomRegistration]),
         ]);
+        const wecomAdapter = wecomRegistration?.adapter;
         const context = new Context();
         const koishiBotId = `wechat:${channelAccountId}`;
         const wechatBot = new WechatOfficialKoishiBot(context, {
@@ -237,24 +260,26 @@ export async function startConfiguredGatewayProcess(
                     },
                 },
             },
-            capabilities: wecomRegistration === undefined ? [adapter] : [adapter, wecomRegistration.adapter],
+            capabilities: wecomAdapter === undefined ? [adapter] : [adapter, wecomAdapter],
             revealExternalUserId: (ciphertext) => identities.reveal(ciphertext),
         });
         await ensureConfiguredChannel(koishi.runtime, channelAccountId, config.wechat);
-        const wecomWebhook =
-            config.wecom === undefined || wecomRegistration === undefined
-                ? undefined
-                : new WecomAibotUrlCallbackController(wecomRegistration.adapter, {
-                      token: config.wecom.webhookToken,
-                      encodingAesKey: config.wecom.encodingAesKey,
-                      postEvent: async (event) => {
-                          await koishi!.runtime.application.platformEvents.postEvent(event);
-                      },
-                  });
         if (config.wecom !== undefined) {
             await ensureConfiguredWecomChannel(unitOfWork, clock, config.wecom);
+            wecomRuntime = new WecomAibotWssRuntime({
+                adapter: wecomAdapter!,
+                botId: config.wecom.botId,
+                secret: config.wecom.secret,
+                ...(options.createWecomWebSocket === undefined
+                    ? {}
+                    : { createWebSocket: options.createWecomWebSocket }),
+                postEvent: async (event) => {
+                    await koishi!.runtime.application.platformEvents.postEvent(event);
+                },
+            });
         }
         await koishi.start();
+        wecomRuntime?.start();
         deliveryWorker = new DeliveryOutboxWorker({
             unitOfWork,
             dispatch: koishi.runtime.application.deliveryDispatch,
@@ -268,12 +293,12 @@ export async function startConfiguredGatewayProcess(
             runtime: koishi.runtime,
             logger: processLogger,
             deliveryAvailable: () => deliveryWorker!.wake(),
-            ...(wecomWebhook === undefined ? {} : { wecomAibotApi: wecomWebhook }),
             healthCheck: async () => {
                 const account = await koishi!.runtime.application.channels.find(channelAccountId);
                 if (account === undefined || account.status !== 'active') throw new Error('channel unavailable');
                 const health = await koishi!.runtime.application.channels.health(channelAccountId);
                 if (health.status !== 'healthy') throw new Error('channel unavailable');
+                if (config.wecom !== undefined && !wecomRuntime?.healthy) throw new Error('channel unavailable');
                 return { status: 'ok' };
             },
         });
@@ -282,13 +307,14 @@ export async function startConfiguredGatewayProcess(
         return {
             origin: http.origin,
             close(): Promise<void> {
-                closePromise ??= closeGateway(http!, deliveryWorker!, koishi!, unitOfWork, processLogger);
+                closePromise ??= closeGateway(http!, deliveryWorker!, koishi!, unitOfWork, processLogger, wecomRuntime);
                 return closePromise;
             },
         };
     } catch (error) {
         if (http !== undefined) await http.close().catch(() => undefined);
         if (deliveryWorker !== undefined) await deliveryWorker.close().catch(() => undefined);
+        if (wecomRuntime !== undefined) await wecomRuntime.close().catch(() => undefined);
         if (koishi !== undefined) await koishi.close().catch(() => undefined);
         await unitOfWork.close().catch(() => undefined);
         throw error;
@@ -310,8 +336,8 @@ async function ensureConfiguredWecomChannel(
                 platform: 'wecom_aibot',
                 tenantExternalId: wecom.botId,
                 koishiBotId: `wecom:${channelAccountId}`,
-                credentialRef: 'secret://env/WECOM_AIBOT_WEBHOOK_TOKEN',
-                connectionMode: 'webhook',
+                credentialRef: 'secret://env/WECOM_AIBOT_SECRET',
+                connectionMode: 'websocket',
                 status: 'active',
                 createdAt: now,
                 updatedAt: now,
@@ -326,9 +352,9 @@ function assertConfiguredWecomChannel(account: ChannelAccount, wecom: GatewayWec
     if (
         account.platform !== 'wecom_aibot' ||
         account.tenantExternalId !== wecom.botId ||
-        account.credentialRef !== 'secret://env/WECOM_AIBOT_WEBHOOK_TOKEN' ||
+        account.credentialRef !== 'secret://env/WECOM_AIBOT_SECRET' ||
         account.koishiBotId !== `wecom:${account.id}` ||
-        account.connectionMode !== 'webhook' ||
+        account.connectionMode !== 'websocket' ||
         account.status !== 'active'
     ) {
         throw new GatewayConfigurationError(
@@ -389,9 +415,11 @@ async function closeGateway(
     koishi: KoishiGatewayRuntime,
     unitOfWork: PostgresImUnitOfWork,
     logger: GatewayLogger,
+    wecomRuntime: WecomAibotWssRuntime | undefined,
 ): Promise<void> {
     const errors: unknown[] = [];
     for (const close of [
+        () => wecomRuntime?.close(),
         () => http.close(),
         () => deliveryWorker.close(),
         () => koishi.close(),
@@ -414,20 +442,14 @@ function requiredEnvironment(environment: GatewayEnvironment, name: string): str
 }
 
 function optionalWecomAibotConfiguration(environment: GatewayEnvironment): GatewayWecomAibotConfiguration | undefined {
-    const names = [
-        'WECOM_AIBOT_CHANNEL_ACCOUNT_ID',
-        'WECOM_AIBOT_BOT_ID',
-        'WECOM_AIBOT_WEBHOOK_TOKEN',
-        'WECOM_AIBOT_ENCODING_AES_KEY',
-    ] as const;
+    const names = ['WECOM_AIBOT_CHANNEL_ACCOUNT_ID', 'WECOM_AIBOT_BOT_ID', 'WECOM_AIBOT_SECRET'] as const;
     if (names.every((name) => environment[name] === undefined)) {
         return undefined;
     }
     return {
         channelAccountId: requiredEnvironment(environment, 'WECOM_AIBOT_CHANNEL_ACCOUNT_ID'),
         botId: requiredEnvironment(environment, 'WECOM_AIBOT_BOT_ID'),
-        webhookToken: requiredEnvironment(environment, 'WECOM_AIBOT_WEBHOOK_TOKEN'),
-        encodingAesKey: requiredEnvironment(environment, 'WECOM_AIBOT_ENCODING_AES_KEY'),
+        secret: requiredEnvironment(environment, 'WECOM_AIBOT_SECRET'),
     };
 }
 

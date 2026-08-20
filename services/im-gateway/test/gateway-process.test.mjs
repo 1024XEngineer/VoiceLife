@@ -3,7 +3,6 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { TextDecoder } from 'node:util';
 
 import {
     readGatewayConfiguration,
@@ -14,6 +13,29 @@ import { PostgresImUnitOfWork } from '../dist/infrastructure/persistence/postgre
 import { ImGatewayError } from '../dist/shared/errors.js';
 
 const deviceToken = 'fixture-device-token-with-enough-entropy';
+
+class FakeWecomWebSocket {
+    sent = [];
+    listeners = new Map();
+
+    addEventListener(type, listener) {
+        const listeners = this.listeners.get(type) ?? [];
+        listeners.push(listener);
+        this.listeners.set(type, listeners);
+    }
+
+    send(data) {
+        this.sent.push(JSON.parse(data));
+    }
+
+    close() {
+        this.emit('close', {});
+    }
+
+    emit(type, event) {
+        for (const listener of this.listeners.get(type) ?? []) listener(event);
+    }
+}
 
 function fixtureEnvironment(overrides = {}) {
     return {
@@ -113,65 +135,6 @@ async function withServer(work, options = {}) {
     }
 }
 
-test('production server mounts the optional WeCom AI Bot URL callback', async () => {
-    const received = [];
-    await withServer(
-        async ({ origin }) => {
-            const verification = await globalThis.fetch(
-                `${origin}/wecom/aibot?timestamp=1786665600&nonce=nonce-fixture&msg_signature=signature-fixture&echostr=encrypted-fixture`,
-            );
-            assert.equal(verification.status, 200);
-            assert.equal(await verification.text(), 'url-verification');
-
-            const callback = await globalThis.fetch(
-                `${origin}/wecom/aibot?timestamp=1786665600&nonce=nonce-fixture&msg_signature=signature-fixture`,
-                {
-                    method: 'POST',
-                    headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({ encrypt: 'encrypted-fixture' }),
-                },
-            );
-            assert.equal(callback.status, 200);
-            assert.equal(await callback.text(), 'success');
-        },
-        {
-            wecomAibotApi: {
-                verify: (request) => {
-                    received.push({ kind: 'verify', request });
-                    return 'url-verification';
-                },
-                post: async (request) => {
-                    received.push({
-                        kind: 'post',
-                        request: { ...request, body: new TextDecoder().decode(request.body) },
-                    });
-                    return { status: 200, body: 'success' };
-                },
-            },
-        },
-    );
-    assert.deepEqual(received, [
-        {
-            kind: 'verify',
-            request: {
-                timestamp: '1786665600',
-                nonce: 'nonce-fixture',
-                msg_signature: 'signature-fixture',
-                echostr: 'encrypted-fixture',
-            },
-        },
-        {
-            kind: 'post',
-            request: {
-                timestamp: '1786665600',
-                nonce: 'nonce-fixture',
-                msg_signature: 'signature-fixture',
-                body: '{"encrypt":"encrypted-fixture"}',
-            },
-        },
-    ]);
-});
-
 test('production configuration requires every secret without exposing its value', () => {
     const config = readGatewayConfiguration(fixtureEnvironment());
     assert.equal(config.host, '127.0.0.1');
@@ -201,23 +164,17 @@ test('production configuration requires every secret without exposing its value'
             fixtureEnvironment({
                 WECOM_AIBOT_CHANNEL_ACCOUNT_ID: 'wecom-production',
                 WECOM_AIBOT_BOT_ID: 'bot-fixture',
-                WECOM_AIBOT_WEBHOOK_TOKEN: 'wecom-webhook-token',
-                WECOM_AIBOT_ENCODING_AES_KEY: 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
+                WECOM_AIBOT_SECRET: 'secret-fixture',
             }),
         ).wecom,
-        {
-            channelAccountId: 'wecom-production',
-            botId: 'bot-fixture',
-            webhookToken: 'wecom-webhook-token',
-            encodingAesKey: 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
-        },
+        { channelAccountId: 'wecom-production', botId: 'bot-fixture', secret: 'secret-fixture' },
     );
     assert.throws(
         () => readGatewayConfiguration(fixtureEnvironment({ WECOM_AIBOT_BOT_ID: 'bot-fixture' })),
         /WECOM_AIBOT_CHANNEL_ACCOUNT_ID is required/u,
     );
     assert.throws(
-        () => readGatewayConfiguration(fixtureEnvironment({ WECOM_AIBOT_ENCODING_AES_KEY: 'fixture-key' })),
+        () => readGatewayConfiguration(fixtureEnvironment({ WECOM_AIBOT_SECRET: 'secret-fixture' })),
         /WECOM_AIBOT_CHANNEL_ACCOUNT_ID is required/u,
     );
 });
@@ -593,7 +550,7 @@ test('configured production process migrates Postgres, starts Koishi and closes 
     await restarted.close();
 });
 
-test('configured production process registers an optional WeCom AI Bot URL callback channel', async (context) => {
+test('configured production process registers and starts an optional WeCom AI Bot channel', async (context) => {
     const databaseUrl = process.env.DATABASE_URL ?? 'postgres://voicelife:voicelife@127.0.0.1:5432/voicelife';
     const probe = new PostgresImUnitOfWork(databaseUrl);
     try {
@@ -605,6 +562,7 @@ test('configured production process registers an optional WeCom AI Bot URL callb
     }
     await probe.close();
 
+    const socket = new FakeWecomWebSocket();
     const wecomChannelId = `wecom-process-${Date.now()}`;
     const gateway = await startConfiguredGatewayProcess(
         fixtureEnvironment({
@@ -613,12 +571,19 @@ test('configured production process registers an optional WeCom AI Bot URL callb
             WECHAT_CHANNEL_ACCOUNT_ID: `wechat-process-${Date.now()}`,
             WECOM_AIBOT_CHANNEL_ACCOUNT_ID: wecomChannelId,
             WECOM_AIBOT_BOT_ID: 'bot-fixture',
-            WECOM_AIBOT_WEBHOOK_TOKEN: 'wecom-webhook-token',
-            WECOM_AIBOT_ENCODING_AES_KEY: 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
+            WECOM_AIBOT_SECRET: 'secret-fixture',
         }),
         { log: () => {} },
+        { createWecomWebSocket: () => socket },
     );
     try {
+        socket.emit('open', {});
+        const subscription = socket.sent[0];
+        assert.equal(subscription.cmd, 'aibot_subscribe');
+        socket.emit('message', {
+            data: JSON.stringify({ headers: { req_id: subscription.headers.req_id }, errcode: 0 }),
+        });
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
         assert.equal((await globalThis.fetch(`${gateway.origin}/healthz`)).status, 200);
 
         const check = new PostgresImUnitOfWork(databaseUrl);
@@ -635,7 +600,7 @@ test('configured production process registers an optional WeCom AI Bot URL callb
                     id: wecomChannelId,
                     platform: 'wecom_aibot',
                     tenantExternalId: 'bot-fixture',
-                    connectionMode: 'webhook',
+                    connectionMode: 'websocket',
                 },
             );
         } finally {
