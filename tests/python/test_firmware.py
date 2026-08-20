@@ -72,7 +72,41 @@ class ProfileValidationTest(unittest.TestCase):
         self.assertIn("CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y", profile["sdkconfig"])
         self.assertIn("CONFIG_VOICELIFE_BOARD_ESP_SPARKBOT=y", profile["sdkconfig"])
         self.assertIn("CONFIG_VOICELIFE_IM_GATEWAY=y", profile["sdkconfig"])
+        self.assertEqual(profile["adapters"]["storage"]["driver"], "sqlite")
+        self.assertIn("durable-calendar", profile["adapters"]["storage"]["capabilities"])
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_SQLITE=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_ADDRESS=0x700000", profile["sdkconfig"])
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_SIZE=0x900000", profile["sdkconfig"])
         self.assertNotIn("CONFIG_VOICELIFE_BOARD_VOICELIFE_PCB=y", profile["sdkconfig"])
+
+    def test_sparkbot_serial_voice_profile_uses_persistent_storage_without_im_overhead(self) -> None:
+        profile_path = ROOT / "config" / "profiles" / "esp32s3-esp-sparkbot-serial-voice.json"
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(profile["adapters"]["im"]["driver"], "disabled")
+        self.assertEqual(profile["adapters"]["im"]["capabilities"], [])
+        self.assertNotIn("CONFIG_VOICELIFE_IM_GATEWAY=y", profile["sdkconfig"])
+        self.assertEqual(profile["adapters"]["storage"]["driver"], "sqlite")
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_SQLITE=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_ADDRESS=0x700000", profile["sdkconfig"])
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_SIZE=0x900000", profile["sdkconfig"])
+
+    def test_sparkbot_partition_reserves_persistent_data_after_model(self) -> None:
+        lines = (ROOT / "config" / "partitions" / "sparkbot.csv").read_text(encoding="utf-8").splitlines()
+        data_line = next(line for line in lines if line.strip().startswith("voicelife,"))
+        self.assertIn("0x700000", data_line)
+        self.assertIn("0x900000", data_line)
+        self.assertLessEqual(0x400000 + 0x300000, 0x700000)
+        self.assertLessEqual(0x700000 + 0x900000, 0x1000000)
+
+    def test_production_fatfs_never_formats_on_mount_failure(self) -> None:
+        source = (ROOT / "components" / "voicelife_storage_fatfs" / "src" / "fatfs_volume.cc").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("mount_config.format_if_mount_failed = false;", source)
+        self.assertNotIn("mount_config.format_if_mount_failed = true;", source)
 
     def test_im_pcb_profile_accepts_input_from_its_usb_provisioning_port(self) -> None:
         profile_path = ROOT / "config" / "profiles" / "esp32s3-voicelife-pcb-pcm.json"

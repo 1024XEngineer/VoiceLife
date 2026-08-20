@@ -21,9 +21,10 @@
       "configRef": "nvs://linx/websocket_url"
     },
     "storage": {
-      "driver": "memory",
+      "driver": "sqlite",
       "capabilities": [
-        "atomic-calendar-write"
+        "atomic-calendar-write",
+        "durable-calendar"
       ]
     },
     "im": {
@@ -39,8 +40,10 @@
     "CONFIG_LOG_DEFAULT_LEVEL_INFO=y",
     "CONFIG_COMPILER_OPTIMIZATION_SIZE=y",
     "CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y",
-    "CONFIG_VOICELIFE_STORAGE_FATFS=n",
-    "CONFIG_VOICELIFE_STORAGE_SQLITE=n",
+    "CONFIG_VOICELIFE_STORAGE_FATFS=y",
+    "CONFIG_VOICELIFE_STORAGE_SQLITE=y",
+    "CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_ADDRESS=0x700000",
+    "CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_SIZE=0x900000",
     "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
     "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"config/partitions/sparkbot.csv\"",
     "CONFIG_SPIRAM=y",

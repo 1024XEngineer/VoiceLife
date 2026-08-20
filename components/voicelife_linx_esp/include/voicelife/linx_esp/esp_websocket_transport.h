@@ -49,10 +49,15 @@ struct EspWebSocketTransportOptions {
     // connection budget.
     uint32_t tx_timeout_ms = 1000;
     uint32_t reconnect_timeout_ms = 1000;
-    uint32_t websocket_task_stack_size = 12288;
+    // ESP-IDF passes this value to xTaskCreatePinnedToCore in StackType_t
+    // words, not bytes. 4096 words (16 KiB on ESP32-S3) leaves room for the
+    // TLS task and I2S DMA after SQLite/FATFS startup.
+    uint32_t websocket_task_stack_size = 6144;
     // MCP 日程工具（schedule.create/query）在此 worker 任务上执行 SQLite/FATFS 操作，
     // SQLite 的 sqlite3_step 需要较大栈，12KB 会导致栈溢出崩溃。
-    uint32_t worker_task_stack_size = 32768;
+    // 8192 words (32 KiB) is enough for sqlite3_step; the stack is allocated
+    // in PSRAM so it does not consume the audio driver's internal heap.
+    uint32_t worker_task_stack_size = 8192;
     bool enable_close_reconnect = true;
     bool allow_insecure_ws = false;
 };

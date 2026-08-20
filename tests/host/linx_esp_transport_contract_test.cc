@@ -42,6 +42,10 @@ int main() {
     Check(voicelife::linx_esp::EspWebSocketTransportOptions{}.max_message_bytes == 64 * 1024,
           "Linx WebSocket 默认消息上限必须为 64 KiB");
     const voicelife::linx_esp::EspWebSocketTransportOptions defaults{};
+    Check(defaults.websocket_task_stack_size == 6144,
+          "WebSocket task stack must fit the ESP32-S3 internal heap after SQLite startup");
+    Check(defaults.worker_task_stack_size == 8192,
+          "Linx worker task stack must fit the ESP32-S3 internal heap after SQLite startup");
     Check(defaults.network_timeout_ms == 10000, "Linx 网络超时必须保留 10 秒，避免慢速下行分片被错误重连");
     Check(defaults.tx_timeout_ms == 1000, "Linx 默认同步写超时必须限制在 1 秒，避免 generation 切换拖慢本地打断");
     Check(SelectLinxTextTxLane("{\"type\":\"listen\",\"state\":\"stop\"}") == LinxTextTxLane::kMediaOrdered,
