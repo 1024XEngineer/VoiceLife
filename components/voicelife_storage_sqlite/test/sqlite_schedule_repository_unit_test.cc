@@ -423,7 +423,8 @@ void CheckOperationRepository(const std::filesystem::path& path) {
     window.operated_from = saved_create.value->operated_at;
     window.operated_to = saved_delete.value->operated_at;
     const auto ranged = repository.FindOperations(window);
-    Check(ranged.ok() && ranged.value->size() == 3, "时间窗口应命中全部操作");
+    Check(ranged.ok(), "时间窗口查询应成功");
+    Check(ranged.value->size() == 3, "时间窗口应命中全部操作");
 
     QueryOperationCommand empty_window;
     empty_window.operated_from = saved_delete.value->operated_at + std::chrono::seconds{1};
