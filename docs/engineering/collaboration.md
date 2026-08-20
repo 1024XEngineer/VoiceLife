@@ -41,12 +41,12 @@ dev/<issue>-<short-name>
 任务分支必须以主仓库最新 `main` 为基线，并推送到个人 fork：
 
 ```bash
-git fetch origin
-git switch -c dev/123-xrobot-adapter origin/main
-git push -u fork HEAD
+git fetch upstream
+git switch -c dev/123-xrobot-adapter upstream/main
+git push -u origin HEAD
 ```
 
-这里的 `origin` 和 `fork` 是本仓库当前远端角色，判断依据始终是 URL，不是远端名字。禁止直接推送主仓库 `main`，也不要从个人 fork 中滞后的 `main` 开始任务。
+这里 `origin` 指向你的个人 Fork，`upstream` 指向主仓库。判断依据始终是 URL，不是远端名字：`origin` 是你的账号下的仓库，`upstream` 是组织的主仓库。禁止直接推送主仓库 `main`，也不要从个人 fork 中滞后的 `main` 开始任务。
 
 默认不建立 `develop` 或裸 `dev` 长期分支。它们会让未完成工作积压在一起，也会把一次发布变成大批量合并。只有两个以上任务确实需要联合验证时，才建立 `integration/<milestone>-<topic>`：各任务仍通过 PR 进入集成分支，联调完成后再由一个 PR 合回 `main`，随后删除集成分支。
 

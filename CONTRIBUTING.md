@@ -4,24 +4,43 @@
 
 ## 开发流程
 
-1. 在当前 Milestone 下创建或领取 Issue，写清场景、范围和验收标准。
-2. 涉及边界、接口、数据模型或依赖方向时，先提交 Design Issue；重大取舍补 ADR。
-3. 从最新 `main` 创建短分支，命名为 `dev/<issue>-<short-name>`，例如 `dev/91-tdd-architecture`。仓库不维护长期共享的裸 `dev` 分支。
-4. 先写失败测试并记录 RED 原因，再补最小实现使其 GREEN；重构期间保持测试通过。
-5. 小步提交。每个提交只表达一个可回退的意图，并保持可编译。
-6. 本地运行 `./scripts/run_pre_submit_checks.sh`；设备相关改动还要运行对应 Profile 构建和真机检查。
-7. PR 使用中文写结论、TDD 记录、验证和风险，关联 Issue，等待 CI 与 Review 通过后合并。
+> **核心规则：所有人都通过 Fork 工作流提交 PR，禁止直接在主仓库上建分支或推送。**
+> 主仓库仅维护 `main` 分支；所有个人工作分支都应在自己的 Fork 上创建、推送和发起 PR。
+> 远端命名采用 GitHub 标准：`origin` 指向你的个人 Fork，`upstream` 指向主仓库。
+
+1. **Fork 主仓库**：首次参与开发前，在 GitHub 上 Fork `1024XEngineer/VoiceLife` 到你的个人账号。克隆主仓库到本地，并将你的 Fork 添加为 `origin`：
+   ```bash
+   git clone git@github.com:1024XEngineer/VoiceLife.git
+   cd VoiceLife
+   git remote set-url origin git@github.com:<你的用户名>/VoiceLife.git
+   git remote add upstream git@github.com:1024XEngineer/VoiceLife.git
+   git remote -v  # 确认 origin → 你的 Fork，upstream → 主仓库
+   ```
+2. 在当前 Milestone 下创建或领取 Issue，写清场景、范围和验收标准。
+3. 涉及边界、接口、数据模型或依赖方向时，先提交 Design Issue；重大取舍补 ADR。
+4. **从主仓库最新 `main` 创建个人分支**（始终基于 upstream 保持同步）：
+   ```bash
+   git fetch upstream
+   git switch -c dev/<issue>-<short-name> upstream/main
+   ```
+   命名规范：`dev/<issue>-<short-name>`，例如 `dev/91-tdd-architecture`。仓库不维护长期共享的裸 `dev` 分支。
+5. 先写失败测试并记录 RED 原因，再补最小实现使其 GREEN；重构期间保持测试通过。
+6. 小步提交。每个提交只表达一个可回退的意图，并保持可编译。
+7. 本地运行 `./scripts/run_pre_submit_checks.sh`；设备相关改动还要运行对应 Profile 构建和真机检查。
+8. 将分支推送到**你自己的 Fork（origin）**，然后发起 PR：
+   ```bash
+   git push -u origin HEAD
+   # 在 GitHub 上打开 PR，目标分支选 upstream/main
+   gh pr create --title "📝 docs(readme): 补充贡献者指南" --body "..."
+   ```
+9. PR 使用中文写结论、TDD 记录、验证和风险，关联 Issue，等待 CI 与 Review 通过后合并。
+
+**禁止行为**：
+- ❌ 在主仓库（upstream）上直接创建或推送分支。
+- ❌ 将分支推送到 `origin` 后不发起 PR，直接要求合入。
+- ❌ 以 `main` 以外的长期共享分支作为工作基线。
 
 `main` 始终保持可构建、可回退。只有多个任务确实需要联合验证时，才临时建立 `integration/<milestone>-<topic>`；联调结束后通过一个 PR 合回 `main` 并删除该分支，不能把它变成第二条长期主线。
-
-```bash
-# 从上游最新 main 开始一个任务
-git fetch origin
-git switch -c dev/123-short-name origin/main
-
-# 首次推送到个人 fork
-git push -u fork HEAD
-```
 
 阶段性交付在 PR 中写 `Refs #123`；只有一个 PR 已完成 Issue 的全部验收时才写 `Closes #123`。普通单一交付默认使用 Squash Merge，保持 `main` 简洁；初始化架构等包含多笔可独立审查提交的 PR 可以使用 Merge commit。合并后删除个人 fork 上的任务分支。
 
