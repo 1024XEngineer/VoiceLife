@@ -114,6 +114,36 @@ async function runContractFixtureTests() {
         parseScheduleQueryResultIntent(scheduleQueryResult).resultCount === 2,
         'ScheduleQueryResultIntent fixture did not preserve the complete result count',
     );
+    const minimalScheduleQueryResult = JSON.parse(JSON.stringify(scheduleQueryResult));
+    delete minimalScheduleQueryResult.userId;
+    minimalScheduleQueryResult.query = { status: 'all' };
+    minimalScheduleQueryResult.resultCount = 0;
+    minimalScheduleQueryResult.schedules = [];
+    minimalScheduleQueryResult.futureOccurrences = [];
+    minimalScheduleQueryResult.exceptions = [];
+    assert(
+        parseScheduleQueryResultIntent(minimalScheduleQueryResult).query.status === 'all',
+        'ScheduleQueryResultIntent must accept an empty result without optional query filters',
+    );
+    for (const invalidScheduleQueryResult of [
+        { ...scheduleQueryResult, query: { ...scheduleQueryResult.query, status: 'unknown' } },
+        { ...scheduleQueryResult, query: { ...scheduleQueryResult.query, startDate: '2026/08/03' } },
+        { ...scheduleQueryResult, query: { ...scheduleQueryResult.query, endDate: '2026-08' } },
+        { ...scheduleQueryResult, resultCount: 1.5 },
+        { ...scheduleQueryResult, resultCount: 1001 },
+        { ...scheduleQueryResult, schedules: {} },
+        { ...scheduleQueryResult, futureOccurrences: {} },
+        { ...scheduleQueryResult, exceptions: {} },
+        { ...scheduleQueryResult, schedules: Array.from({ length: 101 }, () => ({ id: 1 })) },
+        { ...scheduleQueryResult, schedules: [undefined] },
+        { ...scheduleQueryResult, resultCount: 0 },
+    ]) {
+        await expectGatewayError(
+            () => Promise.resolve(parseScheduleQueryResultIntent(invalidScheduleQueryResult)),
+            'invalid_contract',
+            'Invalid ScheduleQueryResultIntent was accepted by the runtime parser',
+        );
+    }
     assert(parseNotificationIntent(strong).reminderType === 'strong', 'Strong notification fixture did not parse');
     assert(
         parseNotificationIntent(weak).actions.length === 0,

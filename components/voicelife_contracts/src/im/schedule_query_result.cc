@@ -15,6 +15,21 @@ using detail::RequireEnum;
 using detail::RequireIsoDateTime;
 using detail::RequireString;
 
+Status OptionalIsoDate(const JsonValue& root, const char* key, std::optional<std::string>& out) {
+    const JsonValue* value = root.Get(key);
+    if (value == nullptr) return Status::Ok();
+    if (!value->IsString() || value->string.size() != 10 || value->string[4] != '-' || value->string[7] != '-') {
+        return Reject("可选日期字段必须使用 YYYY-MM-DD");
+    }
+    for (size_t index = 0; index < value->string.size(); ++index) {
+        if (index != 4 && index != 7 && (value->string[index] < '0' || value->string[index] > '9')) {
+            return Reject("可选日期字段必须使用 YYYY-MM-DD");
+        }
+    }
+    out = value->string;
+    return Status::Ok();
+}
+
 Status ParseValue(const JsonValue& root, ScheduleQueryResultIntent& out) {
     if (!root.IsObject()) return Reject("ScheduleQueryResultIntent 必须是对象");
     const JsonValue* schema = root.Get("schemaVersion");
@@ -32,8 +47,8 @@ Status ParseValue(const JsonValue& root, ScheduleQueryResultIntent& out) {
     if (const Status status = RequireEnum(*query, "status", {"all", "active", "cancelled", "completed"}, out.status);
         !status.ok())
         return status;
-    if (const Status status = OptionalString(*query, "startDate", out.startDate); !status.ok()) return status;
-    if (const Status status = OptionalString(*query, "endDate", out.endDate); !status.ok()) return status;
+    if (const Status status = OptionalIsoDate(*query, "startDate", out.startDate); !status.ok()) return status;
+    if (const Status status = OptionalIsoDate(*query, "endDate", out.endDate); !status.ok()) return status;
     const JsonValue* count = root.Get("resultCount");
     if (count == nullptr || count->kind != JsonValue::Kind::kNumber || count->number < 0 || count->number > 1000 ||
         std::floor(count->number) != count->number) {

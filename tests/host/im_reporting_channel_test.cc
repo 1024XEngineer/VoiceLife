@@ -228,6 +228,41 @@ void TestScheduleQueryResultNetworkFailureIsRetryable() {
     Check(transport.requests.size() == 1, "查询结果网络失败仍应记录一次发送尝试");
 }
 
+void TestScheduleQueryResultOptionalFieldsRoundTrip() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    ImReportingChannel channel(transport, credentials);
+    ScheduleQueryResultIntent intent = MakeScheduleQueryResult();
+    intent.userId.reset();
+    intent.keyword = "会议";
+    intent.startDate.reset();
+    intent.endDate.reset();
+
+    const ReportResult result = channel.SubmitScheduleQueryResult(intent);
+
+    Check(result.status == ReportStatus::kSubmitted, "可选查询字段的组合必须可提交");
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(transport.requests[0].body, root).ok(), "可选查询字段请求体必须是合法 JSON");
+    ScheduleQueryResultIntent parsed;
+    Check(ParseScheduleQueryResultIntent(root, parsed).ok(), "可选查询字段请求体必须通过契约校验");
+    Check(!parsed.userId.has_value() && parsed.keyword == "会议" && !parsed.startDate.has_value() &&
+              !parsed.endDate.has_value(),
+          "序列化必须精确保留查询结果可选字段是否存在");
+}
+
+void TestScheduleQueryResultInvalidIntentRejectedLocally() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    ImReportingChannel channel(transport, credentials);
+    ScheduleQueryResultIntent intent = MakeScheduleQueryResult();
+    intent.queriedAt = "invalid";
+
+    const ReportResult result = channel.SubmitScheduleQueryResult(intent);
+
+    Check(result.status == ReportStatus::kRejected, "非法查询结果必须在发送前本地拒绝");
+    Check(transport.requests.empty(), "发送前契约校验失败不得发起网络请求");
+}
+
 void TestSubmitNotificationSurfacesResponseBody() {
     FakeTransport transport;
     FakeCredentials credentials;
@@ -398,6 +433,8 @@ int main() {
     TestNotificationSuccess();
     TestScheduleQueryResultSuccess();
     TestScheduleQueryResultNetworkFailureIsRetryable();
+    TestScheduleQueryResultOptionalFieldsRoundTrip();
+    TestScheduleQueryResultInvalidIntentRejectedLocally();
     TestSubmitNotificationSurfacesResponseBody();
     TestMissingCredentialIsLocal();
     TestDeviceIdMismatchIsLocal();

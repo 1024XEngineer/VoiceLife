@@ -42,6 +42,11 @@ function fakeRuntime(events) {
             postPairingSession: async (input) => ({ session: { id: 'pairing-1' }, displayCode: input.body.deviceId }),
             getPairingSession: async (input) => ({ id: input.pairingSessionId }),
             postScheduleReceipt: async (input) => ({ accepted: true, deliveries: [], eventId: input.body.eventId }),
+            postScheduleQueryResult: async (input) => ({
+                accepted: true,
+                deliveries: [{ deliveryId: 'query-delivery-1', status: 'pending' }],
+                businessEventId: input.body.businessEventId,
+            }),
             postNotification: async (input) => ({
                 accepted: true,
                 deliveries: [{ deliveryId: 'delivery-1', status: 'pending' }],
@@ -93,6 +98,50 @@ function fakeRuntime(events) {
         },
     };
 }
+
+test('production server accepts a complete schedule query result through the device route', async () => {
+    const received = [];
+    const runtime = fakeRuntime([]);
+    runtime.deviceApi.postScheduleQueryResult = async (input) => {
+        received.push(input);
+        return {
+            accepted: true,
+            deliveries: [{ deliveryId: 'query-delivery-1', status: 'pending' }],
+            businessEventId: input.body.businessEventId,
+        };
+    };
+    await withServer(
+        async ({ origin, events, logs }) => {
+            const body = { businessEventId: 'query-event-1', correlationId: 'query-correlation-1' };
+            const response = await globalThis.fetch(`${origin}/v1/im/schedule-query-results`, {
+                method: 'POST',
+                headers: {
+                    authorization: 'Bearer fixture-device-token',
+                    'content-type': 'application/json',
+                    'idempotency-key': 'query-event-1',
+                },
+                body: JSON.stringify(body),
+            });
+            assert.equal(response.status, 202);
+            assert.deepEqual(await response.json(), {
+                accepted: true,
+                deliveries: [{ deliveryId: 'query-delivery-1', status: 'pending' }],
+                businessEventId: 'query-event-1',
+            });
+            assert.deepEqual(received, [
+                {
+                    authorization: 'Bearer fixture-device-token',
+                    idempotencyKey: 'query-event-1',
+                    body,
+                },
+            ]);
+            assert.deepEqual(events, [{ kind: 'worker-wake' }]);
+            assert.equal(logs.at(-1).route, 'device.schedule-query-result.create');
+            assert.equal(logs.at(-1).correlationId, 'query-correlation-1');
+        },
+        { runtime },
+    );
+});
 
 async function withServer(work, options = {}) {
     const events = [];

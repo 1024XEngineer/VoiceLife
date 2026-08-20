@@ -4,7 +4,13 @@ import assert from 'node:assert/strict';
 
 import { WechatOfficialAdapter, createMockImGateway } from '../dist/index.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
-import { bindFixtureUser, scheduleReceiptIntent, strongIntent, weakIntent } from './helpers.mjs';
+import {
+    bindFixtureUser,
+    scheduleQueryResultIntent,
+    scheduleReceiptIntent,
+    strongIntent,
+    weakIntent,
+} from './helpers.mjs';
 
 const webhookToken = 'fixture-webhook-token';
 const expectedToUserName = 'gh_fixture';
@@ -195,6 +201,23 @@ test('WeChat outbound validates delivery scope and payload shape before network 
             time3: { value: '2026年8月3日 08:00' },
         },
     });
+    const queryResult = scheduleQueryResultIntent();
+    const renderedQueryResult = await adapter.render(
+        { ...validDelivery, kind: 'schedule_query_result', semanticPayload: queryResult },
+        account,
+        capabilities,
+        {},
+    );
+    assert.equal(renderedQueryResult.data.thing1.value, '日程查询结果（2 条）');
+    assert.deepEqual(JSON.parse(renderedQueryResult.data.thing2.value), {
+        query: queryResult.query,
+        resultCount: queryResult.resultCount,
+        schedules: queryResult.schedules,
+        futureOccurrences: queryResult.futureOccurrences,
+        exceptions: queryResult.exceptions,
+        queriedAt: queryResult.queriedAt,
+    });
+    assert.equal(renderedQueryResult.data.time3.value, '2026年8月3日 08:00');
     for (const delivery of [
         { ...validDelivery, channelAccountId: 'channel-other' },
         { ...validDelivery, presentationType: 'text' },
