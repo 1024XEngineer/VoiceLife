@@ -170,10 +170,13 @@ export class WecomAibotInboundAdapter
             return { accepted: false, retryable: false, errorCode: 'wecom_aibot_account_mismatch' };
         }
         const content = markdownContent(message.content);
+        const templateCard = templateCardContent(message.content);
+        if (content === undefined && templateCard === undefined) {
+            return { accepted: false, retryable: false, errorCode: 'wecom_aibot_invalid_message' };
+        }
         const externalUserId = await this.outbound.revealExternalUserId(
             message.conversation.externalConversationIdCiphertext,
         );
-        const templateCard = templateCardContent(message.content);
         if (templateCard !== undefined) {
             if (this.outbound.transport.sendTemplateCard === undefined) {
                 return { accepted: false, retryable: false, errorCode: 'wecom_aibot_invalid_message' };

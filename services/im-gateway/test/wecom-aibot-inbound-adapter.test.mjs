@@ -241,6 +241,28 @@ test('WeCom AI Bot refuses a mismatched delivery before revealing the recipient'
     );
 });
 
+test('WeCom AI Bot rejects malformed outbound content before revealing the recipient', async () => {
+    let revealed = false;
+    const wecom = adapter({
+        outbound: {
+            revealExternalUserId: async () => {
+                revealed = true;
+                return 'userid-fixture';
+            },
+            transport: { sendMarkdown: async () => ({ accepted: true }) },
+        },
+    });
+    assert.deepEqual(
+        await wecom.send({
+            delivery: { channelAccountId: 'channel-wecom' },
+            conversation: { externalConversationIdCiphertext: 'encrypted:userid-fixture' },
+            content: { type: 'unknown' },
+        }),
+        { accepted: false, retryable: false, errorCode: 'wecom_aibot_invalid_message' },
+    );
+    assert.equal(revealed, false);
+});
+
 test('WeCom AI Bot rejects a message for another bot, an empty userid, and group context', async () => {
     for (const frame of [
         textFrame({ aibotid: 'bot-other' }),
