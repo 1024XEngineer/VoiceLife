@@ -122,6 +122,9 @@ class VoiceSession {
     // 同一 generation 的最终识别结果在 kReady 中被接收一次，避免 VAD 端点
     // 把“再见”等最终语义丢失。
     bool awaiting_final_asr_ = false;
+    // 待机本地唤醒后立即开麦时，服务端可能先回传刚被本地识别器消费的
+    // 唤醒词。仅忽略这一条精确回传，保持采集，不能用 Abort 中断整轮语音。
+    std::string pending_local_wake_echo_;
     // 打断播报后，必须等待旧 TTS 的终止标记才能发送下一条确认播报。否则
     // 旧回合已经在传输中的 PCM 会被错误归入新 generation 而继续出声。
     bool interrupt_fence_pending_ = false;

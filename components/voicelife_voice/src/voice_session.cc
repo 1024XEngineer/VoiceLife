@@ -79,6 +79,7 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
         response_armed_ = false;
         first_tts_audio_pending_ = false;
         awaiting_final_asr_ = false;
+        pending_local_wake_echo_.clear();
         interrupt_fence_pending_ = false;
         generation_++;
         config_.generation = generation_;
@@ -156,6 +157,7 @@ Status VoiceSession::Start(const VoiceSessionConfig& config) {
 
 void VoiceSession::HandleEvent(const VoiceEvent& event) {
     bool stale = false;
+    bool wake_echo_suppressed = false;
     bool generation_changed = false;
     bool disconnected = false;
     bool playback_aborted = false;
@@ -182,6 +184,7 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
             disconnected = true;
             response_armed_ = false;
             awaiting_final_asr_ = false;
+            pending_local_wake_echo_.clear();
             interrupt_fence_pending_ = false;
             pending_interrupt_wake_word_.clear();
             pending_interrupt_text_response_.clear();
@@ -193,7 +196,14 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
             if (state_ != VoiceSessionState::kCapturing &&
                 !(state_ == VoiceSessionState::kReady && awaiting_final_asr_)) {
                 stale = true;
+            } else if (!pending_local_wake_echo_.empty() && event.text == pending_local_wake_echo_) {
+                // 本地唤醒已被设备消费，服务端回传的同一短语不是用户意图。
+                // 这里必须保持采集：Abort 会把紧随唤醒词的真实指令一并丢弃，
+                // 并可能让 Runtime 的交互状态停留在 Listening。
+                pending_local_wake_echo_.clear();
+                wake_echo_suppressed = true;
             } else {
+                pending_local_wake_echo_.clear();
                 response_armed_ = true;
                 awaiting_final_asr_ = false;
             }
@@ -227,7 +237,8 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
                 interrupt_fence_reached = true;
                 pending_wake_word = std::move(pending_interrupt_wake_word_);
                 pending_text_response = std::move(pending_interrupt_text_response_);
-            } else if (event.aborted && audio_ready_) {
+            } else if (event.aborted && audio_ready_ && state_ == VoiceSessionState::kSpeaking) {
+                // 服务端主动中止当前实际播报：失效旧代次并清空已排队的 PCM。
                 ++generation_;
                 config_.generation = generation_;
                 next_sequence_ = 0;
@@ -241,6 +252,11 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
                 // it would allow a delayed, unrelated tts.start to restart
                 // playback while the session is otherwise idle.
                 response_armed_ = false;
+            } else {
+                // Linx 没有为每个 TTS 流携带独立 generation。一次本地唤醒后，
+                // 服务端可能送达旧流的 tts.stop/abort；若当前正在采集或等最终
+                // STT，接受该事件会错误终止本轮并让 Runtime 永久停在“聆听中”。
+                stale = true;
             }
         }
     }
@@ -262,6 +278,8 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
         }
     } else if (event.kind == VoiceEventKind::kConnected) {
         Emit("transport_connected", "provider hello completed");
+    } else if (wake_echo_suppressed) {
+        Emit("wake_echo_suppressed", "");
     } else if (event.kind == VoiceEventKind::kAsrText) {
         Emit("stt_text_received", event.text);
     } else if (event.kind == VoiceEventKind::kToolCall) {
@@ -562,11 +580,13 @@ Status VoiceSession::NotifyLocalWakeWord(std::string_view wake_word, std::string
         // A text_response is a provider-requested system utterance. Arm only
         // that response; unrelated idle TTS remains rejected by HandleEvent.
         response_armed_ = !text_response.empty();
+        pending_local_wake_echo_ = text_response.empty() ? std::string(wake_word) : std::string{};
     }
     Status status = provider_.NotifyLocalWakeWord(wake_word, text_response);
-    if (!status.ok() && !text_response.empty()) {
+    if (!status.ok()) {
         std::lock_guard<std::mutex> lock(mutex_);
         response_armed_ = false;
+        pending_local_wake_echo_.clear();
     } else if (status.ok()) {
         Emit("local_wake_ack_requested", "");
     }
@@ -594,6 +614,7 @@ Status VoiceSession::InterruptAndNotifyLocalWakeWord(std::string_view wake_word,
         state_ = VoiceSessionState::kReady;
         response_armed_ = false;
         awaiting_final_asr_ = false;
+        pending_local_wake_echo_.clear();
         interrupt_fence_pending_ = wait_for_old_tts_stop;
         pending_interrupt_wake_word_.assign(wake_word);
         pending_interrupt_text_response_.assign(text_response);
@@ -659,6 +680,7 @@ Status VoiceSession::Interrupt() {
         // cancelled turn under the new generation.
         response_armed_ = false;
         awaiting_final_asr_ = false;
+        pending_local_wake_echo_.clear();
         interrupt_fence_pending_ = needs_interrupt_fence;
         pending_interrupt_wake_word_.clear();
         pending_interrupt_text_response_.clear();
@@ -697,6 +719,7 @@ Status VoiceSession::Stop() {
         state_ = VoiceSessionState::kStopped;
         response_armed_ = false;
         awaiting_final_asr_ = false;
+        pending_local_wake_echo_.clear();
         interrupt_fence_pending_ = false;
         pending_interrupt_wake_word_.clear();
         pending_interrupt_text_response_.clear();

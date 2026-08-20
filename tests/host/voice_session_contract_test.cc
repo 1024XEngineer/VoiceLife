@@ -395,6 +395,88 @@ int main() {
           "停止会话应清理输入回调，避免资源关闭后的迟到帧");
     Check(evidence_count >= 4, "会话生命周期应产出可关联的证据事件");
 
+    FakeInput acknowledged_wake_input;
+    FakeOutput acknowledged_wake_output;
+    FakeProvider acknowledged_wake_provider;
+    std::vector<voicelife::voice::VoiceEvidence> acknowledged_wake_evidence;
+    voicelife::voice::VoiceSession acknowledged_wake_session(
+        acknowledged_wake_input, acknowledged_wake_output, acknowledged_wake_provider,
+        [&acknowledged_wake_evidence](const auto& item) { acknowledged_wake_evidence.push_back(item); });
+    Check(acknowledged_wake_session.Start(Config()).ok(), "确认唤醒回归会话应启动");
+    Check(acknowledged_wake_session.NotifyLocalWakeWord("你好牛牛", "收到！").ok() &&
+              acknowledged_wake_provider.wake_notifications == 1 &&
+              acknowledged_wake_provider.last_wake_word == "你好牛牛" &&
+              acknowledged_wake_provider.last_wake_response == "收到！" && acknowledged_wake_provider.starts == 0,
+          "确认播报必须先请求服务端 TTS，未完成前不得打开采集");
+    const uint64_t acknowledgement_generation = acknowledged_wake_session.generation();
+    acknowledged_wake_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
+                                                                  .generation = acknowledgement_generation,
+                                                                  .text = {},
+                                                                  .aborted = false});
+    Check(acknowledged_wake_session.state() == voicelife::voice::VoiceSessionState::kSpeaking,
+          "确认 TTS 开始后会话必须进入 speaking");
+    acknowledged_wake_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStopped,
+                                                                  .generation = acknowledgement_generation,
+                                                                  .text = {},
+                                                                  .aborted = false});
+    Check(acknowledged_wake_session.state() == voicelife::voice::VoiceSessionState::kReady,
+          "确认 TTS 结束后会话必须回 ready，等待状态机显式打开采集");
+    Check(acknowledged_wake_session.BeginCapture().ok() && acknowledged_wake_provider.starts == 1 &&
+              acknowledged_wake_input.starts == 1,
+          "确认播报完成后必须能够事务式开始真实采集");
+    const uint64_t wake_capture_generation = acknowledged_wake_session.generation();
+    const int wake_capture_flushes = acknowledged_wake_output.flushes;
+    acknowledged_wake_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStopped,
+                                                                  .generation = wake_capture_generation,
+                                                                  .text = {},
+                                                                  .aborted = true});
+    Check(acknowledged_wake_session.state() == voicelife::voice::VoiceSessionState::kCapturing &&
+              acknowledged_wake_session.generation() == wake_capture_generation &&
+              acknowledged_wake_output.flushes == wake_capture_flushes &&
+              acknowledged_wake_evidence.back().event == "stale_event_dropped",
+          "采集中的迟到 tts.stop/abort 不能推进代次、清空输出或中止真实指令");
+    acknowledged_wake_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kAsrText,
+                                                                  .generation = wake_capture_generation,
+                                                                  .text = "现在几点",
+                                                                  .aborted = false});
+    Check(std::any_of(acknowledged_wake_evidence.begin(), acknowledged_wake_evidence.end(),
+                      [](const auto& item) { return item.event == "stt_text_received" && item.detail == "现在几点"; }),
+          "确认完成后的真实指令必须照常上报");
+    Check(acknowledged_wake_session.EndCapture().ok(), "确认后的采集回合必须可以正常结束");
+
+    FakeInput timed_out_ack_input;
+    FakeOutput timed_out_ack_output;
+    FakeProvider timed_out_ack_provider;
+    std::vector<voicelife::voice::VoiceEvidence> timed_out_ack_evidence;
+    voicelife::voice::VoiceSession timed_out_ack_session(
+        timed_out_ack_input, timed_out_ack_output, timed_out_ack_provider,
+        [&timed_out_ack_evidence](const auto& item) { timed_out_ack_evidence.push_back(item); });
+    Check(timed_out_ack_session.Start(Config()).ok() &&
+              timed_out_ack_session.NotifyLocalWakeWord("你好牛牛", "收到！").ok(),
+          "确认首音频超时用例应能提交远端确认");
+    const uint64_t timed_out_ack_generation = timed_out_ack_session.generation();
+    timed_out_ack_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
+                                                              .generation = timed_out_ack_generation,
+                                                              .text = {},
+                                                              .aborted = false});
+    Check(timed_out_ack_session.state() == voicelife::voice::VoiceSessionState::kSpeaking &&
+              timed_out_ack_session.Interrupt().ok() &&
+              timed_out_ack_session.generation() == timed_out_ack_generation + 1 &&
+              timed_out_ack_provider.aborts == 1,
+          "确认流没有首段音频时必须可中止，并使旧代次失效");
+    Check(timed_out_ack_session.BeginCapture().ok() &&
+              timed_out_ack_session.state() == voicelife::voice::VoiceSessionState::kCapturing,
+          "跳过迟到确认后必须立即可开始真实采集");
+    const uint64_t timed_out_capture_generation = timed_out_ack_session.generation();
+    timed_out_ack_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStopped,
+                                                              .generation = timed_out_ack_generation,
+                                                              .text = {},
+                                                              .aborted = true});
+    Check(timed_out_ack_session.state() == voicelife::voice::VoiceSessionState::kCapturing &&
+              timed_out_ack_session.generation() == timed_out_capture_generation &&
+              timed_out_ack_evidence.back().event == "stale_event_dropped",
+          "超时确认的迟到结束事件不得中止后续真实采集");
+
     FakeInput finalizing_input;
     FakeOutput finalizing_output;
     FakeProvider finalizing_provider;

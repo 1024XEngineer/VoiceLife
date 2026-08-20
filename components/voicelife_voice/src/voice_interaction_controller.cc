@@ -65,7 +65,9 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             break;
         case VoiceInteractionEvent::kWakeDetected:
             if (state_ == VoiceInteractionState::kStandby) {
-                state_ = VoiceInteractionState::kListening;
+                // SparkBot 当前没有 AEC。确认播报与真实采集必须是两个明确
+                // 阶段，不能在“聆听中”状态里并行，否则扬声器声音会污染首句。
+                state_ = VoiceInteractionState::kAcknowledging;
                 transition.action = VoiceInteractionAction::kStartVoiceTurn;
             } else if (state_ == VoiceInteractionState::kListening) {
                 state_ = VoiceInteractionState::kStandby;
@@ -85,6 +87,15 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             } else if (state_ != VoiceInteractionState::kListening) {
                 return InvalidTransition(state_, event);
             }
+            break;
+        case VoiceInteractionEvent::kAcknowledgementTimedOut:
+            if (state_ != VoiceInteractionState::kAcknowledging && state_ != VoiceInteractionState::kSpeaking) {
+                return InvalidTransition(state_, event);
+            }
+            // 云端确认音色只有在首段 PCM 及时到达时才有价值。超时后必须
+            // 放弃旧流、回到事务式开麦，而不是继续占用“收到/说话中”。
+            state_ = VoiceInteractionState::kOpeningCapture;
+            transition.action = VoiceInteractionAction::kStartCapture;
             break;
         case VoiceInteractionEvent::kInterruptAcknowledged:
             // “别说了”的确认请求已被 Provider 接受。确认 TTS 随后会把
@@ -119,7 +130,8 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             state_ = VoiceInteractionState::kThinking;
             break;
         case VoiceInteractionEvent::kTtsStarted:
-            if (state_ != VoiceInteractionState::kListening && state_ != VoiceInteractionState::kThinking &&
+            if (state_ != VoiceInteractionState::kAcknowledging && state_ != VoiceInteractionState::kListening &&
+                state_ != VoiceInteractionState::kThinking &&
                 state_ != VoiceInteractionState::kFinalizing) {
                 return InvalidTransition(state_, event);
             }
@@ -127,9 +139,9 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             break;
         case VoiceInteractionEvent::kTtsStopped:
             if (state_ != VoiceInteractionState::kSpeaking) return InvalidTransition(state_, event);
-            // 播报结束后进入 follow-up 聆听：保持开麦让用户可直接续说，
-            // 无需重新唤醒。长时间无输入由聆听超时结束本回合。
-            state_ = VoiceInteractionState::kListening;
+            // 播报结束后的输入也必须等待 BeginCapture 实际成功；不能先把
+            // UI 标成“聆听中”，否则硬件启动失败会形成假状态。
+            state_ = VoiceInteractionState::kOpeningCapture;
             transition.action = VoiceInteractionAction::kStartCapture;
             break;
         case VoiceInteractionEvent::kInterruptAndAcknowledge:
@@ -158,7 +170,8 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             break;
         case VoiceInteractionEvent::kStandbyReady:
             if (state_ != VoiceInteractionState::kStandby && state_ != VoiceInteractionState::kError &&
-                state_ != VoiceInteractionState::kInterrupting && state_ != VoiceInteractionState::kOpeningCapture) {
+                state_ != VoiceInteractionState::kInterrupting && state_ != VoiceInteractionState::kAcknowledging &&
+                state_ != VoiceInteractionState::kOpeningCapture) {
                 return InvalidTransition(state_, event);
             }
             state_ = VoiceInteractionState::kStandby;

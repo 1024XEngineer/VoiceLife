@@ -75,6 +75,9 @@ constexpr uint32_t kTerminalWakeGuardMs = 8000;
 // 又不会让无输入回合长时间占住 UI。说话后的端点与最终 STT 分别处理。
 constexpr uint32_t kListenStartTimeoutMs = 6000;
 constexpr uint32_t kFinalSttTimeoutMs = 5000;
+// 确认语音不能拖慢首轮交互。Linx 若未在此窗口内送达首段 PCM，保留
+// 原音色的最佳策略是跳过迟到确认并立即开麦，而不是播放一段过时的“收到”。
+constexpr uint32_t kWakeAckFirstAudioTimeoutMs = 1800;
 #if CONFIG_VOICELIFE_IM_GATEWAY
 constexpr bool kImGatewayEnabled = true;
 #else
@@ -1138,12 +1141,12 @@ class Runtime final {
                 RestoreStandbyFromWakeTask();
                 continue;
             }
-            // Linx 官方协议支持 listen.detect.text_response：服务端真实合成
-            // “收到！”并下发协商 PCM，tts.stop 后 Controller 才开始聆听。
+            // SparkBot 目前没有 AEC。确认播报完成后才会由 kTtsStopped 进入
+            // kOpeningCapture，避免把“收到！”录回云端，也避免假“聆听中”。
             const Status acknowledge = session_->NotifyLocalWakeWord(request.wake_word, "收到！");
             if (!acknowledge.ok()) {
                 ESP_LOGW(kTag, "唤醒确认请求失败: %s", acknowledge.message.c_str());
-                // 唤醒启动失败：回待机，不显示"出错了/牛牛走了"。
+                // 确认请求失败：回待机，不显示"出错了/牛牛走了"。
                 (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
             }
         }
@@ -1157,6 +1160,8 @@ class Runtime final {
                 return "开机";
             case voice::VoiceInteractionState::kStandby:
                 return "空闲";
+            case voice::VoiceInteractionState::kAcknowledging:
+                return "收到";
             case voice::VoiceInteractionState::kOpeningCapture:
                 return "准备中";
             case voice::VoiceInteractionState::kListening:
@@ -1183,6 +1188,8 @@ class Runtime final {
                 return voice::VoiceMood::kBooting;
             case voice::VoiceInteractionState::kStandby:
                 return voice::VoiceMood::kIdle;
+            case voice::VoiceInteractionState::kAcknowledging:
+                return voice::VoiceMood::kNeutral;
             case voice::VoiceInteractionState::kOpeningCapture:
             case voice::VoiceInteractionState::kListening:
                 return voice::VoiceMood::kListening;
@@ -1260,7 +1267,7 @@ class Runtime final {
     void ClearExpiredWakeAck() {
         if (wake_ack_until_us_ == 0 || esp_timer_get_time() < wake_ack_until_us_) return;
         wake_ack_until_us_ = 0;
-        if (snapshot_.phase != voice::VoiceInteractionState::kListening ||
+        if (snapshot_.phase != voice::VoiceInteractionState::kAcknowledging ||
             snapshot_.role != voice::VoiceContentRole::kSystem || snapshot_.content_text != "收到！") {
             return;
         }
@@ -1320,13 +1327,20 @@ class Runtime final {
         // - kIntentReceived（STT）：内容栏显示用户语音，角色 user
         // - kTtsStarted：内容栏保持/显示助手文本，角色 assistant
         // - 会话结束/回待机：清空内容栏
-        // WakeAck 租约：唤醒后短窗（400ms）内显示“收到！”，不阻塞开麦。
+        // WakeAck 租约：确认阶段显示“收到！”。麦克风只会在确认播报完整
+        // 结束并经 kCaptureStarted 确认后打开。
         if ((event == voice::VoiceInteractionEvent::kWakeDetected ||
              event == voice::VoiceInteractionEvent::kInterruptAndAcknowledge) &&
-            snapshot_.phase == voice::VoiceInteractionState::kListening && wake_ack_until_us_ > 0 &&
+            snapshot_.phase == voice::VoiceInteractionState::kAcknowledging && wake_ack_until_us_ > 0 &&
             esp_timer_get_time() < wake_ack_until_us_) {
             snapshot_.content_text = "收到！";
             snapshot_.role = voice::VoiceContentRole::kSystem;
+        } else if (event == voice::VoiceInteractionEvent::kAcknowledgementTimedOut) {
+            // 已放弃迟到的确认流，显示不能继续保留“收到！”。否则开麦后会
+            // 出现状态栏为“准备中/聆听中”但内容仍是确认字幕的假反馈。
+            wake_ack_until_us_ = 0;
+            snapshot_.content_text.clear();
+            snapshot_.role = voice::VoiceContentRole::kNone;
         } else if (event == voice::VoiceInteractionEvent::kEndpointDetected) {
             // VAD 端点：进入 kFinalizing 等待最终 STT，清掉“收到！”残留，
             // 显示“聆听中”状态词。
@@ -1442,11 +1456,8 @@ class Runtime final {
         ESP_LOGI(kTag, "SERIAL_VOICE_EVIDENCE event=%s generation=%llu detail=%s", evidence.event.c_str(),
                  static_cast<unsigned long long>(evidence.generation), evidence.detail.c_str());
         if (evidence.event == "capture_started") {
-            // 连续对话在 TTS 后会直接重新打开采集；测试输入必须随新的
-            // capture 生命周期重新获得排他权，不能依赖下一次 PressDown。
-            if (assembly_ != nullptr && assembly_->test_audio_injection() != nullptr) {
-                (void)assembly_->test_audio_injection()->SetTestInputEnabled(true);
-            }
+            // 仅记录可注入窗口。排他模式只能由串口协议的 TURN_BEGIN 显式
+            // 开启，普通实板唤醒不能因测试 Profile 而屏蔽物理麦克风。
             ESP_LOGI(kTag, "SERIAL_VOICE_CAPTURE_READY generation=%llu",
                      static_cast<unsigned long long>(evidence.generation));
         } else if (evidence.event == "capture_stopped") {
@@ -1468,6 +1479,7 @@ class Runtime final {
                 ESP_LOGI(kTag, "WAKE_ACK_LATENCY stage=tts_started ms=%lld", static_cast<long long>(wake_latency_ms));
             }
         } else if (evidence.event == "tts_first_audio" && wake_ack_tts_started_at_us_ > 0) {
+            CancelListenTimer();
             const int64_t audio_latency_ms = (esp_timer_get_time() - wake_ack_requested_at_us_) / 1000;
             ESP_LOGI(kTag, "WAKE_ACK_LATENCY stage=first_audio ms=%lld", static_cast<long long>(audio_latency_ms));
         } else if (evidence.event == "tts_stopped" && wake_ack_tts_started_at_us_ > 0) {
@@ -1485,18 +1497,6 @@ class Runtime final {
         } else if (evidence.event == "stt_text_received") {
             // 收到用户语音转写（STT）：取消聆听超时，等待服务端回复。
             CancelListenTimer();
-            // 抑制唤醒词被回传为 STT：唤醒后 1.5s 内收到等于唤醒词的文本，
-            // 视为服务端把唤醒词误转写，不显示、不武装回复、不发 kIntentReceived。
-            const bool wake_echo = !last_wake_word_.empty() && evidence.detail == last_wake_word_ &&
-                                   (last_wake_at_ > 0 && esp_timer_get_time() - last_wake_at_ < 1500 * 1000LL);
-            if (wake_echo) {
-                ESP_LOGI(kTag, "WAKE_ECHO_SUPPRESSED");
-                // 中止该合成回合，避免服务端据此生成问候 TTS；随后由聆听超时/新输入重启。
-                if (session_) {
-                    (void)session_->Interrupt();
-                }
-                return;
-            }
             // 回写用户说的话到屏幕（detail 是 ASR 文本，属于用户自己的输入）。
             if (!evidence.detail.empty()) {
                 stt_display_text_ = evidence.detail;
@@ -1555,16 +1555,17 @@ class Runtime final {
             ShowOverlay(success ? voice::VoiceMood::kHappy : voice::VoiceMood::kSad, status, summary);
             StartOverlayTimer(2500);
         } else if (evidence.event == "tts_started") {
-            CancelListenTimer();
+            // 确认 TTS 的 started 只说明服务端接收了请求，不能证明用户已经
+            // 听到声音。首段 PCM 到达前保留 deadline，防止下行缓冲把首轮卡住。
+            if (wake_ack_requested_at_us_ == 0) CancelListenTimer();
             (void)EnqueueEvent(voice::VoiceInteractionEvent::kTtsStarted);
         } else if (evidence.event == "local_wake_ack_requested" || evidence.event == "interrupt_ack_requested") {
-            // 本地唤醒/打断确认已经成功提交给 Provider，但真正的 tts.start
-            // 可能永远不到达（断线或服务端无响应）。此时 UI 已处于
-            // kListening，必须有边界地回到待机，不能无限显示“聆听中”。
+            // 本地唤醒/打断确认已提交给 Provider。直到首段 PCM 到达前保留
+            // deadline；超时后直接开始采集，不能无限等待远端音频。
             if (evidence.event == "interrupt_ack_requested") {
                 (void)EnqueueEvent(voice::VoiceInteractionEvent::kInterruptAcknowledged);
             }
-            StartListenTimer(kListenStartTimeoutMs);
+            StartListenTimer(kWakeAckFirstAudioTimeoutMs);
         } else if (evidence.event == "tts_sentence_started") {
             // 回写服务端回复句子到屏幕（detail 为 TTS 文本），并立即提交快照
             // 让“说话中 + 助手文本”可见（不再停留显示用户 STT）。
@@ -1575,7 +1576,9 @@ class Runtime final {
                 ESP_LOGI(kTag, "TTS_SENTENCE_STALE state=%d 丢弃迟到句子", static_cast<int>(interaction_.state()));
                 return;
             }
-            CancelListenTimer();
+            // 服务端可能先送文本字幕，数秒后才送 PCM。确认阶段只有实际
+            // tts_first_audio 才能解除 deadline，不能把字幕当成已播放。
+            if (wake_ack_tts_started_at_us_ == 0) CancelListenTimer();
             if (!evidence.detail.empty()) {
                 // 事件化：文本经事件循环应用（唯一写者），门控仍在事件循环校验。
                 stt_display_text_ = evidence.detail;
@@ -2180,7 +2183,19 @@ class Runtime final {
                 continue;
             }
             if (item.listen_timeout) {
-                if (interaction_.state() == voice::VoiceInteractionState::kListening) {
+                if (interaction_.state() == voice::VoiceInteractionState::kAcknowledging ||
+                    (interaction_.state() == voice::VoiceInteractionState::kSpeaking &&
+                     wake_ack_requested_at_us_ > 0 && wake_ack_tts_started_at_us_ > 0)) {
+                    ESP_LOGW(kTag, "ACK_FIRST_AUDIO_TIMEOUT transition=acknowledging_or_speaking->opening_capture");
+                    if (session_) (void)session_->Interrupt();
+                    // Interrupt 使旧确认流失效，迟到的 tts.stop 会由会话层
+                    // 丢弃；这里必须立即清除归因，避免下一轮正常回复被误算
+                    // 为唤醒确认，或把再次开始的监听计时器取消掉。
+                    wake_ack_requested_at_us_ = 0;
+                    wake_ack_tts_started_at_us_ = 0;
+                    wake_ack_until_us_ = 0;
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kAcknowledgementTimedOut);
+                } else if (interaction_.state() == voice::VoiceInteractionState::kListening) {
                     // 实机麦克风底噪可能让本地 VAD 未能识别静音端点，但此前
                     // 已采集的语音仍必须以 listen.stop 交给服务端完成最终 STT。
                     // 直接 abort 会无条件丢弃该回合，表现为“收到后不再回应”。
@@ -2215,13 +2230,12 @@ class Runtime final {
             }
             if (item.event == voice::VoiceInteractionEvent::kWakeDetected ||
                 item.event == voice::VoiceInteractionEvent::kInterruptAndAcknowledge) {
-                // 唤醒前置（唯一状态写者内）：显示租约；声音由 Linx TTS 的
-                // text_response 产生，绝不在 Runtime 直接推裸 PCM。
-                last_wake_word_ = item.wake_word;
-                last_wake_at_ = esp_timer_get_time();
-                wake_ack_requested_at_us_ = last_wake_at_;
+                // 唤醒前置（唯一状态写者内）：普通唤醒和“别说了”都记录
+                // 确认播报时延；是否开麦由对应的 TTS 完成事件决定。
+                const int64_t now = esp_timer_get_time();
+                wake_ack_requested_at_us_ = now;
                 wake_ack_tts_started_at_us_ = 0;
-                wake_ack_until_us_ = esp_timer_get_time() + kWakeAckDisplayUs;
+                wake_ack_until_us_ = now + kWakeAckDisplayUs;
             }
             const Status wake_status = HandleInteractionEvent(item.event, item.wake_word);
             if (item.event != voice::VoiceInteractionEvent::kWakeDetected && !wake_status.ok()) {
@@ -2264,9 +2278,6 @@ class Runtime final {
     std::string binding_terminal_status_text_;
     std::string binding_terminal_content_text_;
     int64_t binding_terminal_until_us_ = 0;
-    // 最近唤醒词与其发生时刻（抑制唤醒词被服务端回传为 STT）。
-    std::string last_wake_word_;
-    int64_t last_wake_at_ = 0;
     int64_t wake_ack_requested_at_us_ = 0;
     int64_t wake_ack_tts_started_at_us_ = 0;
     // WakeAck 显示租约截止时刻（esp_timer_us）：到期前下行栏显示“收到！”。
