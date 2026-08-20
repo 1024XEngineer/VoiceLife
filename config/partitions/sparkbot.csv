@@ -12,4 +12,4 @@ linx_secrets, data, nvs, 0x2E0000, 0x10000,
 assets,   data, spiffs,  0x300000, 0x100000,
 model,    data, spiffs,  0x400000, 0x300000,
 # SQLite/FATFS 日程数据卷。保留 ESP-SparkBot 现有 9 MiB FATFS 卷，不能与资源或模型分区重叠。
-voicelife,data, spiffs,  0x700000, 0x900000,
+voicelife,data, fat,     0x700000, 0x900000,

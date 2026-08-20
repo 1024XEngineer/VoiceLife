@@ -96,6 +96,7 @@ class ProfileValidationTest(unittest.TestCase):
     def test_sparkbot_partition_reserves_persistent_data_after_model(self) -> None:
         lines = (ROOT / "config" / "partitions" / "sparkbot.csv").read_text(encoding="utf-8").splitlines()
         data_line = next(line for line in lines if line.strip().startswith("voicelife,"))
+        self.assertIn(", fat,", data_line)
         self.assertIn("0x700000", data_line)
         self.assertIn("0x900000", data_line)
         self.assertLessEqual(0x400000 + 0x300000, 0x700000)
