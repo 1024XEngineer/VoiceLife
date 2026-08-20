@@ -131,8 +131,7 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             break;
         case VoiceInteractionEvent::kTtsStarted:
             if (state_ != VoiceInteractionState::kAcknowledging && state_ != VoiceInteractionState::kListening &&
-                state_ != VoiceInteractionState::kThinking &&
-                state_ != VoiceInteractionState::kFinalizing) {
+                state_ != VoiceInteractionState::kThinking && state_ != VoiceInteractionState::kFinalizing) {
                 return InvalidTransition(state_, event);
             }
             state_ = VoiceInteractionState::kSpeaking;

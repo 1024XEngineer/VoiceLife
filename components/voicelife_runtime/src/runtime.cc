@@ -2184,8 +2184,8 @@ class Runtime final {
             }
             if (item.listen_timeout) {
                 if (interaction_.state() == voice::VoiceInteractionState::kAcknowledging ||
-                    (interaction_.state() == voice::VoiceInteractionState::kSpeaking &&
-                     wake_ack_requested_at_us_ > 0 && wake_ack_tts_started_at_us_ > 0)) {
+                    (interaction_.state() == voice::VoiceInteractionState::kSpeaking && wake_ack_requested_at_us_ > 0 &&
+                     wake_ack_tts_started_at_us_ > 0)) {
                     ESP_LOGW(kTag, "ACK_FIRST_AUDIO_TIMEOUT transition=acknowledging_or_speaking->opening_capture");
                     if (session_) (void)session_->Interrupt();
                     // Interrupt 使旧确认流失效，迟到的 tts.stop 会由会话层
