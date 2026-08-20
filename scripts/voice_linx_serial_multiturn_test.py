@@ -245,10 +245,14 @@ def run_turn(
     try:
         cursor = log.mark()
         result.log_start = cursor
+        # The firmware closes the test-input gate at every capture endpoint,
+        # including automatic follow-up capture after TTS. Re-open it once per
+        # turn; Runtime treats BEGIN as an injection-window refresh while it
+        # is already Listening, so no duplicate PressDown is generated.
+        device.write(packet(BEGIN))
+        device.flush()
+        cursor, _ = log.wait_for("SERIAL_VOICE_TURN_BEGIN=ok", cursor, 5)
         if first_turn:
-            device.write(packet(BEGIN))
-            device.flush()
-            cursor, _ = log.wait_for("SERIAL_VOICE_TURN_BEGIN=ok", cursor, 5)
             cursor, _ = log.wait_for("SERIAL_VOICE_CAPTURE_READY", cursor, 12)
         turn_cursor = cursor
         for frame in prepared.frames:
