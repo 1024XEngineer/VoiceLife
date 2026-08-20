@@ -757,11 +757,12 @@ int main() {
         capped_rules.rules.push_back(rule);
     }
     for (int64_t index = 0; index < 101; ++index) {
-        capped_exceptions.exceptions.push_back(
-            {.id = 2'000 + index,
-             .rule_id = 1'000,
-             .original_start_time = DateTime{std::chrono::seconds{1'893'456'000 + index}},
-             .type = ExceptionType::kSkip});
+        ScheduleException exception;
+        exception.id = 2'000 + index;
+        exception.rule_id = 1'000;
+        exception.original_start_time = DateTime{std::chrono::seconds{1'893'456'000 + index}};
+        exception.type = ExceptionType::kSkip;
+        capped_exceptions.exceptions.push_back(std::move(exception));
     }
     ScheduleRuleService capped_rule_service(capped_rules, capped_exceptions, capped_schedules);
     ScheduleService capped_service(capped_schedules);
