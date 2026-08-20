@@ -311,6 +311,9 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
             if (!result.result.ok()) return FailureOutput(result.result.status.message);
 
             ToolOutputArray schedules = schedule_tool_output::ScheduleArrayOutput(result.result.value);
+            if (schedules.size() > contracts::im::kMaxScheduleQueryItems) {
+                schedules.resize(contracts::im::kMaxScheduleQueryItems);
+            }
             ToolOutputArray future_occurrences;
             ToolOutputArray exceptions;
             // 周期部分不物化，只把规则、未来 occurrence、exception 转成模型可读的结果。
@@ -326,15 +329,15 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
 
                 for (const auto& view : rules.rules) {
                     rule_by_id.emplace(view.rule.id, view.rule);
-                    exceptions.reserve(exceptions.size() + view.exceptions.size());
                     for (const auto& exception : view.exceptions) {
-                        if (WithinRange(start, end, exception.original_start_time)) {
+                        if (exceptions.size() < contracts::im::kMaxScheduleQueryItems &&
+                            WithinRange(start, end, exception.original_start_time)) {
                             exceptions.emplace_back(MakeToolOutput(schedule_tool_output::ExceptionOutput(exception)));
                         }
                     }
-                    future_occurrences.reserve(future_occurrences.size() + view.upcoming_occurrences.size());
                     for (const auto& occurrence : view.upcoming_occurrences) {
-                        if (WithinRange(start, end, occurrence)) {
+                        if (future_occurrences.size() < contracts::im::kMaxScheduleQueryItems &&
+                            WithinRange(start, end, occurrence)) {
                             future_occurrences.emplace_back(
                                 MakeToolOutput(schedule_tool_output::FutureOccurrenceOutput(view.rule, occurrence)));
                         }

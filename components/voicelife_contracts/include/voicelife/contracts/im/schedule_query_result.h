@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -8,6 +9,9 @@
 #include "voicelife/contracts/json.h"
 
 namespace voicelife::contracts::im {
+
+/// Gateway 单个日程查询结果数组允许的最大条目数。
+inline constexpr std::size_t kMaxScheduleQueryItems = 100;
 
 /// 设备侧日程查询的完整 IM 结果载荷。
 struct ScheduleQueryResultIntent {

@@ -61,6 +61,10 @@ Status ParseValue(const JsonValue& root, ScheduleQueryResultIntent& out) {
     if (schedules == nullptr || !schedules->IsArray()) return Reject("schedules 必须是数组");
     if (future == nullptr || !future->IsArray()) return Reject("futureOccurrences 必须是数组");
     if (exceptions == nullptr || !exceptions->IsArray()) return Reject("exceptions 必须是数组");
+    if (schedules->array.size() > kMaxScheduleQueryItems || future->array.size() > kMaxScheduleQueryItems ||
+        exceptions->array.size() > kMaxScheduleQueryItems) {
+        return Reject("查询结果数组最多包含 100 个条目");
+    }
     if (out.resultCount != static_cast<int64_t>(schedules->array.size() + future->array.size())) {
         return Reject("resultCount 必须等于 schedules 与 futureOccurrences 数量之和");
     }

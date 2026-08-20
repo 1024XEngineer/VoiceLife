@@ -337,6 +337,16 @@ int main() {
     JsonValue mismatch_count = query_root;
     mismatch_count.object["resultCount"] = JsonValue::Number(0);
     RequireScheduleQueryResultRejected(mismatch_count, "条目数量不匹配必须被 C++ 拒绝");
+    for (const char* field : {"schedules", "futureOccurrences", "exceptions"}) {
+        JsonValue oversized = query_root;
+        oversized.object[field] = JsonValue::Array(std::vector<JsonValue>(101, JsonValue::Object({})));
+        if (std::string(field) == "schedules") {
+            oversized.object["resultCount"] = JsonValue::Number(101);
+        } else if (std::string(field) == "futureOccurrences") {
+            oversized.object["resultCount"] = JsonValue::Number(102);
+        }
+        RequireScheduleQueryResultRejected(oversized, "超过 Gateway 上限的查询结果数组必须被 C++ 拒绝");
+    }
 
     // 非法日程回执 fixture：与 TS 一致的拒绝语义
     RequireScheduleReceiptRejected("schedule-receipt-invalid-version.json", "非法版本日程回执必须被 C++ 拒绝");
