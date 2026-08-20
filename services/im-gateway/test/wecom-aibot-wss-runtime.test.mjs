@@ -33,7 +33,7 @@ class FakeWebSocket {
     }
 }
 
-test('WeCom AI Bot WSS runtime subscribes and posts a normalized single-chat binding event', async () => {
+test('WeCom AI Bot WSS runtime subscribes and posts a normalized single-chat binding event', async (context) => {
     const socket = new FakeWebSocket();
     const events = [];
     const runtime = new WecomAibotWssRuntime({
@@ -44,6 +44,7 @@ test('WeCom AI Bot WSS runtime subscribes and posts a normalized single-chat bin
         createWebSocket: () => socket,
         nextRequestId: () => 'request-fixture',
     });
+    context.after(() => runtime.close());
 
     runtime.start();
     socket.emit('open', {});
@@ -204,4 +205,64 @@ test('WeCom AI Bot WSS runtime terminates an unresponsive socket after the shutd
 
     await runtime.close();
     assert.equal(socket.terminateCalls, 1);
+});
+
+test('WeCom AI Bot WSS runtime sends Markdown over the subscribed connection and maps its acknowledgement', async () => {
+    const socket = new FakeWebSocket();
+    let requestNo = 0;
+    const runtime = new WecomAibotWssRuntime({
+        adapter: new WecomAibotInboundAdapter({ channelAccountId: 'channel-wecom', botId: 'bot-fixture' }),
+        botId: 'bot-fixture',
+        secret: 'secret-fixture',
+        postEvent: async () => {},
+        createWebSocket: () => socket,
+        nextRequestId: () => `request-${String(++requestNo)}`,
+    });
+    runtime.start();
+    socket.emit('open', {});
+    socket.emit('message', { data: JSON.stringify({ headers: { req_id: 'request-1' }, errcode: 0 }) });
+
+    const sending = runtime.sendMarkdown('userid-fixture', '**提醒**\n请及时处理');
+    assert.deepEqual(socket.sent[1], {
+        cmd: 'aibot_send_msg',
+        headers: { req_id: 'request-2' },
+        body: {
+            chatid: 'userid-fixture',
+            msgtype: 'markdown',
+            markdown: { content: '**提醒**\n请及时处理' },
+        },
+    });
+    socket.emit('message', {
+        data: JSON.stringify({ headers: { req_id: 'request-2' }, errcode: 0, body: { msgid: 'platform-message-1' } }),
+    });
+    assert.deepEqual(await sending, { accepted: true, platformMessageId: 'platform-message-1' });
+
+    const rejected = runtime.sendMarkdown('userid-fixture', '再次提醒');
+    socket.emit('message', {
+        data: JSON.stringify({ headers: { req_id: 'request-3' }, errcode: 45009 }),
+    });
+    assert.deepEqual(await rejected, { accepted: false, retryable: true, errorCode: 'wecom_aibot_45009' });
+    await runtime.close();
+});
+
+test('WeCom AI Bot WSS runtime rejects invalid or unavailable outbound messages without writing frames', async () => {
+    const socket = new FakeWebSocket();
+    const runtime = new WecomAibotWssRuntime({
+        adapter: new WecomAibotInboundAdapter({ channelAccountId: 'channel-wecom', botId: 'bot-fixture' }),
+        botId: 'bot-fixture',
+        secret: 'secret-fixture',
+        postEvent: async () => {},
+        createWebSocket: () => socket,
+    });
+    assert.deepEqual(await runtime.sendMarkdown('userid-fixture', 'message'), {
+        accepted: false,
+        retryable: true,
+        errorCode: 'wecom_aibot_unavailable',
+    });
+    assert.deepEqual(await runtime.sendMarkdown('userid-fixture', '   '), {
+        accepted: false,
+        retryable: false,
+        errorCode: 'wecom_aibot_invalid_message',
+    });
+    assert.equal(socket.sent.length, 0);
 });

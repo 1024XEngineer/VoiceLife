@@ -28,9 +28,6 @@ importers:
       ws:
         specifier: 8.21.2
         version: 8.21.2
-      wxcrypt:
-        specifier: 1.4.3
-        version: 1.4.3
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -826,9 +823,6 @@ packages:
         optional: true
       utf-8-validate:
         optional: true
-
-  wxcrypt@1.4.3:
-    resolution: {integrity: sha512-gFAMpD9PbWGETXmSQC37KrYSIPNA4Wax/yMx7lU1nwbrn45DwqR5pCZhKEPn2eR7mAI9i8fme++Fj+bOmaf3BQ==}
 
   xml-naming@0.3.0:
     resolution: {integrity: sha512-ghig2TBE/H11aOVgmahA3MhimvkBr6JIYknH/Dhdk10nXwdbIqBJsbfMxpvFPG8bAw77gN29aQWvKpmVoPlvPQ==}
@@ -1644,10 +1638,6 @@ snapshots:
       strip-ansi: 7.2.0
 
   ws@8.21.2: {}
-
-  wxcrypt@1.4.3:
-    dependencies:
-      '@types/node': 24.13.3
 
   xml-naming@0.3.0: {}
 

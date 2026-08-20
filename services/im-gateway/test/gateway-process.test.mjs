@@ -3,7 +3,6 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { TextDecoder } from 'node:util';
 
 import {
     readGatewayConfiguration,
@@ -135,65 +134,6 @@ async function withServer(work, options = {}) {
         await server.close();
     }
 }
-
-test('production server mounts the optional WeCom AI Bot URL callback', async () => {
-    const received = [];
-    await withServer(
-        async ({ origin }) => {
-            const verification = await globalThis.fetch(
-                `${origin}/wecom/aibot?timestamp=1786665600&nonce=nonce-fixture&msg_signature=signature-fixture&echostr=encrypted-fixture`,
-            );
-            assert.equal(verification.status, 200);
-            assert.equal(await verification.text(), 'url-verification');
-
-            const callback = await globalThis.fetch(
-                `${origin}/wecom/aibot?timestamp=1786665600&nonce=nonce-fixture&msg_signature=signature-fixture`,
-                {
-                    method: 'POST',
-                    headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({ encrypt: 'encrypted-fixture' }),
-                },
-            );
-            assert.equal(callback.status, 200);
-            assert.equal(await callback.text(), 'success');
-        },
-        {
-            wecomAibotApi: {
-                verify: (request) => {
-                    received.push({ kind: 'verify', request });
-                    return 'url-verification';
-                },
-                post: async (request) => {
-                    received.push({
-                        kind: 'post',
-                        request: { ...request, body: new TextDecoder().decode(request.body) },
-                    });
-                    return { status: 200, body: 'success' };
-                },
-            },
-        },
-    );
-    assert.deepEqual(received, [
-        {
-            kind: 'verify',
-            request: {
-                timestamp: '1786665600',
-                nonce: 'nonce-fixture',
-                msg_signature: 'signature-fixture',
-                echostr: 'encrypted-fixture',
-            },
-        },
-        {
-            kind: 'post',
-            request: {
-                timestamp: '1786665600',
-                nonce: 'nonce-fixture',
-                msg_signature: 'signature-fixture',
-                body: '{"encrypt":"encrypted-fixture"}',
-            },
-        },
-    ]);
-});
 
 test('production configuration requires every secret without exposing its value', () => {
     const config = readGatewayConfiguration(fixtureEnvironment());

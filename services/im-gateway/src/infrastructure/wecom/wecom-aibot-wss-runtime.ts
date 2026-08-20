@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 
 import type { NormalizedImEvent } from '../../contracts/platform-events.js';
+import type { ImSendAcceptance } from '../../ports/external.js';
 import { ImGatewayError } from '../../shared/errors.js';
 import type { WecomAibotInboundAdapter } from './wecom-aibot-inbound-adapter.js';
 
@@ -10,6 +11,10 @@ const INITIAL_RECONNECT_MILLISECONDS = 1_000;
 const MAX_RECONNECT_MILLISECONDS = 30_000;
 const CLOSE_GRACE_MILLISECONDS = 5_000;
 const SUBSCRIPTION_ACK_TIMEOUT_MILLISECONDS = 10_000;
+const OUTBOUND_ACK_TIMEOUT_MILLISECONDS = 10_000;
+const MAX_CHAT_ID_BYTES = 512;
+const MAX_MARKDOWN_BYTES = 20_480;
+const RETRYABLE_SEND_ERROR_CODES = new Set([-1, 408, 429, 45009, 45011, 502, 503, 504]);
 
 /** 企业微信 AI Bot WSS 连接所需的最小 WebSocket 接口。 */
 export interface WecomAibotWebSocket {
@@ -53,6 +58,8 @@ export interface WecomAibotWssRuntimeOptions {
     readonly closeGraceMilliseconds?: number;
     /** 仅用于受控测试的订阅 ACK 等待时间；生产默认 10 秒。 */
     readonly subscriptionAckTimeoutMilliseconds?: number;
+    /** 仅用于受控测试的出站 ACK 等待时间；生产默认 10 秒。 */
+    readonly outboundAckTimeoutMilliseconds?: number;
 }
 
 /**
@@ -75,6 +82,8 @@ export class WecomAibotWssRuntime {
 
     private readonly subscriptionAckTimeoutMilliseconds: number;
 
+    private readonly outboundAckTimeoutMilliseconds: number;
+
     private socket: WecomAibotWebSocket | undefined;
 
     private subscriptionRequestId: string | undefined;
@@ -88,6 +97,14 @@ export class WecomAibotWssRuntime {
     private closed = false;
 
     private nextReconnectMilliseconds: number;
+
+    private readonly outboundRequests = new Map<
+        string,
+        {
+            readonly resolve: (acceptance: ImSendAcceptance) => void;
+            readonly timeout: ReturnType<typeof setTimeout>;
+        }
+    >();
 
     /** 连接已订阅并可接收平台回调时为 true。 */
     public healthy = false;
@@ -109,6 +126,10 @@ export class WecomAibotWssRuntime {
         this.subscriptionAckTimeoutMilliseconds = positiveMilliseconds(
             options.subscriptionAckTimeoutMilliseconds,
             SUBSCRIPTION_ACK_TIMEOUT_MILLISECONDS,
+        );
+        this.outboundAckTimeoutMilliseconds = positiveMilliseconds(
+            options.outboundAckTimeoutMilliseconds,
+            OUTBOUND_ACK_TIMEOUT_MILLISECONDS,
         );
         this.nextReconnectMilliseconds = this.initialReconnectMilliseconds;
     }
@@ -135,6 +156,58 @@ export class WecomAibotWssRuntime {
         const socket = this.socket;
         this.unavailable(socket);
         if (socket !== undefined) await this.closeSocket(socket);
+    }
+
+    /**
+     * 通过当前已订阅的连接向单聊会话主动发送 Markdown。
+     *
+     * 平台确认的是受理结果，不代表用户已阅读或设备已执行后续动作。
+     * @param chatId 企业微信单聊标识。
+     * @param content UTF-8 Markdown 正文。
+     * @returns 企业微信的即时受理或可重试/不可重试失败分类。
+     */
+    public sendMarkdown(chatId: string, content: string): Promise<ImSendAcceptance> {
+        const normalizedChatId = chatId.trim();
+        const normalizedContent = content.trim();
+        if (
+            normalizedChatId === '' ||
+            Buffer.byteLength(normalizedChatId, 'utf8') > MAX_CHAT_ID_BYTES ||
+            normalizedContent === '' ||
+            Buffer.byteLength(normalizedContent, 'utf8') > MAX_MARKDOWN_BYTES
+        ) {
+            return Promise.resolve({ accepted: false, retryable: false, errorCode: 'wecom_aibot_invalid_message' });
+        }
+        const socket = this.socket;
+        if (!this.healthy || socket === undefined || this.closed) {
+            return Promise.resolve({ accepted: false, retryable: true, errorCode: 'wecom_aibot_unavailable' });
+        }
+        const requestId = this.nextRequestId();
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                if (!this.outboundRequests.delete(requestId)) return;
+                resolve({ accepted: false, retryable: true, errorCode: 'wecom_aibot_timeout' });
+            }, this.outboundAckTimeoutMilliseconds);
+            this.outboundRequests.set(requestId, { resolve, timeout });
+            try {
+                socket.send(
+                    JSON.stringify({
+                        cmd: 'aibot_send_msg',
+                        headers: { req_id: requestId },
+                        body: {
+                            chatid: normalizedChatId,
+                            msgtype: 'markdown',
+                            markdown: { content: normalizedContent },
+                        },
+                    }),
+                );
+            } catch {
+                this.settleOutbound(requestId, {
+                    accepted: false,
+                    retryable: true,
+                    errorCode: 'wecom_aibot_transport_error',
+                });
+            }
+        });
     }
 
     private subscribe(socket: WecomAibotWebSocket): void {
@@ -166,6 +239,7 @@ export class WecomAibotWssRuntime {
         }
         if (this.isSubscriptionResponse(frame)) {
             this.clearSubscriptionAckTimeout();
+            this.subscriptionRequestId = undefined;
             if (frame.errcode === 0) {
                 this.healthy = true;
                 this.nextReconnectMilliseconds = this.initialReconnectMilliseconds;
@@ -175,9 +249,10 @@ export class WecomAibotWssRuntime {
             }
             return;
         }
+        if (this.settleOutboundResponse(frame)) return;
         if (!this.healthy || frame.cmd !== 'aibot_msg_callback') return;
         try {
-            await this.options.postEvent(await this.options.adapter.normalizeInbound(frame));
+            await this.options.postEvent(await this.options.adapter.normalizeInbound(frame.body));
         } catch {
             // Untrusted platform input must not terminate the connection loop.
         }
@@ -221,6 +296,46 @@ export class WecomAibotWssRuntime {
         if (this.heartbeat !== undefined) clearInterval(this.heartbeat);
         this.heartbeat = undefined;
         this.socket = undefined;
+        for (const requestId of this.outboundRequests.keys()) {
+            this.settleOutbound(requestId, {
+                accepted: false,
+                retryable: true,
+                errorCode: 'wecom_aibot_unavailable',
+            });
+        }
+    }
+
+    private settleOutboundResponse(frame: Record<string, unknown>): boolean {
+        const headers = frame.headers;
+        if (headers === null || typeof headers !== 'object') return false;
+        const requestId = (headers as Record<string, unknown>).req_id;
+        if (
+            typeof requestId !== 'string' ||
+            !this.outboundRequests.has(requestId) ||
+            typeof frame.errcode !== 'number'
+        ) {
+            return false;
+        }
+        const messageId = platformMessageId(frame.body);
+        this.settleOutbound(
+            requestId,
+            frame.errcode === 0
+                ? { accepted: true, ...(messageId === undefined ? {} : { platformMessageId: messageId }) }
+                : {
+                      accepted: false,
+                      retryable: RETRYABLE_SEND_ERROR_CODES.has(frame.errcode),
+                      errorCode: `wecom_aibot_${String(frame.errcode)}`,
+                  },
+        );
+        return true;
+    }
+
+    private settleOutbound(requestId: string, acceptance: ImSendAcceptance): void {
+        const pending = this.outboundRequests.get(requestId);
+        if (pending === undefined) return;
+        this.outboundRequests.delete(requestId);
+        clearTimeout(pending.timeout);
+        pending.resolve(acceptance);
     }
 
     private clearSubscriptionAckTimeout(): void {
@@ -249,6 +364,12 @@ export class WecomAibotWssRuntime {
 
 function positiveMilliseconds(value: number | undefined, fallback: number): number {
     return value === undefined || !Number.isSafeInteger(value) || value <= 0 ? fallback : value;
+}
+
+function platformMessageId(body: unknown): string | undefined {
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) return undefined;
+    const value = (body as Record<string, unknown>).msgid;
+    return typeof value === 'string' && value.trim() !== '' ? value : undefined;
 }
 
 function defaultWebSocket(endpoint: string): WecomAibotWebSocket {

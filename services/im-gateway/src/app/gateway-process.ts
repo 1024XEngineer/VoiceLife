@@ -203,14 +203,25 @@ export async function startConfiguredGatewayProcess(
                       adapter: new WecomAibotInboundAdapter({
                           channelAccountId: unsafeId<ChannelAccountId>(config.wecom.channelAccountId),
                           botId: config.wecom.botId,
+                          outbound: {
+                              revealExternalUserId: (ciphertext) => identities.reveal(ciphertext),
+                              transport: {
+                                  sendMarkdown: (chatId, content) =>
+                                      wecomRuntime?.sendMarkdown(chatId, content) ??
+                                      Promise.resolve({
+                                          accepted: false,
+                                          retryable: true,
+                                          errorCode: 'wecom_aibot_unavailable',
+                                      }),
+                              },
+                          },
                       }),
                   };
         const channelAdapters = new ChannelAdapterRegistry([
             { accountId: channelAccountId, adapter },
             ...(wecomRegistration === undefined ? [] : [wecomRegistration]),
         ]);
-        const wecomAdapter =
-            wecomRegistration?.adapter;
+        const wecomAdapter = wecomRegistration?.adapter;
         const context = new Context();
         const koishiBotId = `wechat:${channelAccountId}`;
         const wechatBot = new WechatOfficialKoishiBot(context, {
