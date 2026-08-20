@@ -246,8 +246,8 @@ class Runtime final {
             return session_->Speak(text);
         });
         schedule_reminder_service_ = std::make_unique<schedule::ScheduleReminderService>(
-            storage_.GetScheduleRepository(), schedule_service_, schedule_rule_service_, *timing_runtime_,
-            *reminder_speech_);
+            storage_.GetScheduleRepository(), storage_.GetScheduleReminderTaskRepository(), schedule_service_,
+            schedule_rule_service_, *timing_runtime_, *reminder_speech_);
         const Status reminder_status = schedule_reminder_service_->Start();
         if (!reminder_status.ok()) {
             ESP_LOGE(kTag, "STARTUP_ERROR stage=schedule_reminder code=%d msg=%s",
@@ -262,8 +262,8 @@ class Runtime final {
             schedule_mcp_registered_ = true;
             // MCP worker 只产生绑定结果；轮询与 OLED/TTS 均由各自受控任务处理。
             ESP_LOGI(kTag,
-                     "MCP_TOOLS_READY count=6 names=schedule.create,schedule.query,schedule.update,schedule.delete,"
-                     "schedule.operation_query,im.binding.start");
+                     "MCP_TOOLS_READY count=8 names=schedule.create,schedule.query,schedule.update,schedule.delete,"
+                     "schedule.operation_query,schedule.reminder_acknowledge,schedule.reminder_snooze,im.binding.start");
         }
         // 立创实战派 ESP32-S3 板载 WS2812 灯珠接 GPIO48（小智 BUILTIN_LED_GPIO）。
         // 主 NVS 分区初始化（Wi-Fi 驱动/凭据等依赖；linx_secrets 为加密分区另行初始化）。

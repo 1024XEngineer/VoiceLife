@@ -124,19 +124,23 @@ add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_exception_row_mapper.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_rule_row_mapper.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_row_mapper.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/mapping/schedule_reminder_task_row_mapper.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v001_create_schedule.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v002_create_schedule_operation.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v003_create_schedule_rule.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v004_create_operation_record.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v005_add_schedule_reminder_task_id.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v006_create_schedule_reminder_task.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/sqlite_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/voicelife_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/operation_sql.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_exception_sql.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_rule_sql.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_sql.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/schedule_reminder_task_sql.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_database.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_repository.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_reminder_task_repository.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sqlite_schedule_rule_repository.cc")
 target_include_directories(storage_sqlite PRIVATE "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
 target_link_libraries(storage_sqlite PUBLIC contracts schedule)
@@ -149,7 +153,8 @@ add_voicelife_library(storage_fatfs voicelife_storage_fatfs
     "${ROOT_DIR}/components/voicelife_storage_fatfs/src/fatfs_volume.cc")
 target_link_libraries(storage_fatfs PUBLIC contracts)
 add_voicelife_library(storage_memory voicelife_storage_memory
-    "${ROOT_DIR}/components/voicelife_storage_memory/src/memory_schedule_repository.cc")
+    "${ROOT_DIR}/components/voicelife_storage_memory/src/memory_schedule_repository.cc"
+    "${ROOT_DIR}/components/voicelife_storage_memory/src/memory_schedule_reminder_task_repository.cc")
 target_link_libraries(storage_memory PUBLIC contracts schedule Threads::Threads)
 add_voicelife_library(audio_esp voicelife_audio_esp
     "${ROOT_DIR}/components/voicelife_audio_esp/src/audio_board_profile.cc"
@@ -278,7 +283,7 @@ target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule)
 add_voicelife_test(schedule_mcp_tools_reminder_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_reminder_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
-target_link_libraries(schedule_mcp_tools_reminder_test PRIVATE mcp schedule timing)
+target_link_libraries(schedule_mcp_tools_reminder_test PRIVATE mcp schedule timing storage_memory)
 
 add_voicelife_test(schedule_mcp_tools_branch_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_branch_test.cc
@@ -297,7 +302,7 @@ target_link_libraries(schedule_rule_mcp_tools_test PRIVATE mcp schedule)
 
 add_voicelife_test(schedule_reminder_service_test "unit;schedule;timing;reminder"
     schedule_reminder_service_test.cc)
-target_link_libraries(schedule_reminder_service_test PRIVATE schedule timing)
+target_link_libraries(schedule_reminder_service_test PRIVATE schedule timing storage_memory)
 
 add_voicelife_test(schedule_reminder_uncovered_branch_test "unit;schedule;timing;reminder"
     schedule_reminder_uncovered_branch_test.cc)

@@ -12,6 +12,8 @@
 #include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_exception_repository.h"
+#include "voicelife/storage_memory/memory_schedule_reminder_task_repository.h"
+#include "voicelife/schedule/schedule_reminder_task_repository.h"
 #include "voicelife/schedule/schedule_rule_repository.h"
 #include "voicelife/timing/timing_task.h"
 
@@ -26,6 +28,9 @@ using voicelife::schedule::Schedule;
 using voicelife::schedule::ScheduleException;
 using voicelife::schedule::ScheduleReminderService;
 using voicelife::schedule::ScheduleReminderSpeechPort;
+using voicelife::schedule::ScheduleReminderTask;
+using voicelife::schedule::ScheduleReminderTimerStatus;
+using voicelife::schedule::ScheduleReminderBusinessStatus;
 using voicelife::schedule::ScheduleRule;
 using voicelife::schedule::ScheduleRuleId;
 using voicelife::schedule::ScheduleRuleService;
@@ -193,7 +198,6 @@ class FakeRuleRepository final : public voicelife::schedule::ScheduleRuleReposit
 
 Schedule MakeSchedule(int64_t id, std::string event, std::optional<DateTime> start,
                       std::optional<ScheduleRuleId> rule_id = std::nullopt,
-                      std::optional<int64_t> reminder_task_id = std::nullopt,
                       ScheduleStatus status = ScheduleStatus::kActive) {
     return {
         .id = id,
@@ -203,7 +207,6 @@ Schedule MakeSchedule(int64_t id, std::string event, std::optional<DateTime> sta
         .location = std::nullopt,
         .notes = std::nullopt,
         .rule_id = rule_id,
-        .reminder_task_id = reminder_task_id,
         .status = status,
         .created_at = At(900),
         .updated_at = At(900),
@@ -240,9 +243,11 @@ struct Fixture {
           rule_service(rules, exceptions, repository),
           schedule_service(repository),
           now(current),
-          reminder(repository, schedule_service, rule_service, timing, speech, [this]() { return now; }) {}
+          reminder(repository, reminder_repository, schedule_service, rule_service, timing, speech, nullptr,
+                   [this]() { return now; }) {}
 
     InMemoryScheduleRepository repository;
+    voicelife::storage_memory::MemoryScheduleReminderTaskRepository reminder_repository;
     FakeExceptionRepository exceptions;
     FakeRuleRepository rules;
     ScheduleRuleService rule_service;
@@ -260,9 +265,11 @@ struct ScriptedFixture {
           rule_service(rules, exceptions, repository),
           schedule_service(repository),
           now(current),
-          reminder(repository, schedule_service, rule_service, timing, speech, [this]() { return now; }) {}
+          reminder(repository, reminder_repository, schedule_service, rule_service, timing, speech, nullptr,
+                   [this]() { return now; }) {}
 
     InMemoryScheduleRepository repository;
+    voicelife::storage_memory::MemoryScheduleReminderTaskRepository reminder_repository;
     FakeExceptionRepository exceptions;
     FakeRuleRepository rules;
     ScheduleRuleService rule_service;
@@ -285,10 +292,15 @@ void CheckFutureMemoAndExpiredRestoration() {
     const auto future = fixture.repository.FindById(1);
     const auto memo = fixture.repository.FindById(2);
     const auto expired = fixture.repository.FindById(3);
-    Check(future.ok() && future.value->reminder_task_id.has_value(), "未来日程应持久化提醒任务标识");
-    Check(memo.ok() && !memo.value->reminder_task_id.has_value(), "备忘录不应注册提醒");
-    Check(expired.ok() && expired.value->status == ScheduleStatus::kActive &&
-              !expired.value->reminder_task_id.has_value(),
+    const auto future_tasks = fixture.reminder_repository.FindBySchedule(1);
+    const auto memo_tasks = fixture.reminder_repository.FindBySchedule(2);
+    const auto expired_tasks = fixture.reminder_repository.FindBySchedule(3);
+    Check(future.ok() && future_tasks.ok() && future_tasks.value->size() == 1 &&
+              future_tasks.value->front().attempt == 1,
+          "未来日程应持久化独立提醒任务");
+    Check(memo.ok() && memo_tasks.ok() && memo_tasks.value->empty(), "备忘录不应注册提醒");
+    Check(expired.ok() && expired.value->status == ScheduleStatus::kActive && expired_tasks.ok() &&
+              expired_tasks.value->empty(),
           "过期日程应保持 Active 且无提醒");
 
     const auto ran = fixture.timing.RunDueTasks(Trigger(1'100));
@@ -296,9 +308,11 @@ void CheckFutureMemoAndExpiredRestoration() {
               fixture.speech.texts.front() == "提醒：现在是「未来会议」时间了",
           "到点应使用约定模板提交 TTS");
     const auto completed = fixture.repository.FindById(1);
-    Check(completed.ok() && completed.value->status == ScheduleStatus::kCompleted &&
-              !completed.value->reminder_task_id.has_value(),
-          "TTS 成功后应标记完成并清除任务标识");
+    const auto triggered_tasks = fixture.reminder_repository.FindBySchedule(1);
+    Check(completed.ok() && completed.value->status == ScheduleStatus::kActive && triggered_tasks.ok() &&
+              triggered_tasks.value->size() == 2 &&
+              triggered_tasks.value->front().timer_status == ScheduleReminderTimerStatus::kTriggered,
+          "提醒触发后日程仍保持 Active，并注册下一次独立提醒");
 }
 
 void CheckSpeechFailureLeavesActive() {
@@ -307,15 +321,18 @@ void CheckSpeechFailureLeavesActive() {
     Check(fixture.reminder.Start().ok(), "失败测试应启动提醒服务");
     fixture.timing.RunDueTasks(Trigger(1'100));
     const auto stored = fixture.repository.FindById(1);
-    Check(stored.ok() && stored.value->status == ScheduleStatus::kActive && !stored.value->reminder_task_id.has_value(),
-          "TTS 失败后应保持 Active 并清除已终止任务标识");
+    const auto tasks = fixture.reminder_repository.FindBySchedule(1);
+    Check(stored.ok() && stored.value->status == ScheduleStatus::kActive && tasks.ok() && tasks.value->size() == 2,
+          "TTS 失败后应保持 Active 且保留提醒链状态");
 }
 
 void CheckCancellationAndRescheduleUseFreshIds() {
     Fixture fixture({MakeSchedule(1, "原提醒", At(1'100))});
     Check(fixture.reminder.Start().ok(), "重排测试应启动服务");
     fixture.timing.ProcessPendingCommands(Trigger(1'000));
-    const int64_t first_id = *fixture.repository.FindById(1).value->reminder_task_id;
+    const auto first_tasks = fixture.reminder_repository.FindBySchedule(1);
+    Check(first_tasks.ok() && !first_tasks.value->empty(), "启动后应持久化首个提醒任务");
+    const std::string first_id = *first_tasks.value->front().timing_task_id;
 
     Schedule updated = *fixture.repository.FindById(1).value;
     updated.event = "新提醒";
@@ -323,8 +340,10 @@ void CheckCancellationAndRescheduleUseFreshIds() {
     Check(fixture.repository.Update(updated).ok(), "应保存修改后的日程");
     Check(fixture.reminder.SynchronizeSchedule(1).ok(), "修改时间或文本后应重新同步提醒");
     fixture.timing.ProcessPendingCommands(Trigger(1'001));
-    const int64_t second_id = *fixture.repository.FindById(1).value->reminder_task_id;
-    Check(second_id != first_id, "重新注册必须使用从未使用过的新 TaskId");
+    const auto second_tasks = fixture.reminder_repository.FindBySchedule(1);
+    Check(second_tasks.ok() && second_tasks.value->size() == 2, "重新同步应保留旧链并创建新链");
+    const auto second_id = second_tasks.value->back().timing_task_id;
+    Check(second_id.has_value() && *second_id != first_id, "重新注册必须使用从未使用过的新 TaskId");
     Check(fixture.timing.RunDueTasks(Trigger(1'100)).processed_count == 0, "旧任务取消后不应在原时间触发");
     Check(fixture.timing.RunDueTasks(Trigger(1'200)).processed_count == 1 &&
               fixture.speech.texts.front() == "提醒：现在是「新提醒」时间了",
@@ -367,7 +386,7 @@ void CheckGenerationRetryBackoff() {
 void CheckInvalidAndNotRunningPaths() {
     Fixture fixture({
         MakeSchedule(1, "未来提醒", At(1'100)),
-        MakeSchedule(2, "已取消提醒", At(1'150), std::nullopt, std::nullopt, ScheduleStatus::kCancelled),
+        MakeSchedule(2, "已取消提醒", At(1'150), std::nullopt, ScheduleStatus::kCancelled),
     });
     fixture.reminder.Stop();
     Check(!fixture.reminder.SynchronizeSchedule(1).ok(), "未启动时不应同步提醒");

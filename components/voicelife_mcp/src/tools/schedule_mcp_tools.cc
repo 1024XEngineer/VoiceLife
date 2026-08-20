@@ -579,7 +579,7 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
     if (!status.ok()) return status;
 
     // 操作记录查询：记录写入不经过 tool，由变更 service 显式推送；本工具只读查询。
-    return server.add_tool(
+    status = server.add_tool(
         "schedule.operation_query", "查询最近的操作记录，支持按对象类型、操作类型和名称筛选。",
         OperationQueryProperties(), [operation_service](const PropertyList& properties) {
             if (operation_service == nullptr) return FailureOutput("当前运行时未启用操作记录能力");
@@ -613,6 +613,38 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                 MakeToolOutput("total", ToolOutputValue::Integer(result.total)),
                 MakeToolOutput("operations",
                                ToolOutputValue::Array(schedule_tool_output::OperationArrayOutput(result.result.value))),
+            });
+        });
+    if (!status.ok()) return status;
+
+    status = server.add_tool(
+        "schedule.reminder_acknowledge",
+        "确认提醒。查找最近 10 分钟内已触发的所有提醒，取消各提醒后续尚未触发的定时任务，"
+        "并将对应日程标记为已完成。多个提醒会一次性全部确认。本工具不需要参数。",
+        PropertyList{}, [reminder_service](const PropertyList&) {
+            if (reminder_service == nullptr) return FailureOutput("当前运行时未启用提醒能力");
+            const auto result = reminder_service->AcknowledgeRecentReminders();
+            if (!result.ok()) return FailureOutput(result.status.message);
+            return Output({
+                MakeToolOutput("status", ToolOutputValue::String("success")),
+                MakeToolOutput("message", ToolOutputValue::String("已确认提醒")),
+                MakeToolOutput("affected_count", ToolOutputValue::Integer(result.value->affected_count)),
+            });
+        });
+    if (!status.ok()) return status;
+
+    return server.add_tool(
+        "schedule.reminder_snooze",
+        "稍后提醒用户。首次提醒后系统已自动注册 10 分钟后的下一次提醒，因此本工具不会重复注册定时器。"
+        "调用成功后直接返回‘已延迟提醒’。本工具不需要参数。",
+        PropertyList{}, [reminder_service](const PropertyList&) {
+            if (reminder_service == nullptr) return FailureOutput("当前运行时未启用提醒能力");
+            const auto result = reminder_service->SnoozeRecentReminders();
+            if (!result.ok()) return FailureOutput(result.status.message);
+            return Output({
+                MakeToolOutput("status", ToolOutputValue::String("success")),
+                MakeToolOutput("message", ToolOutputValue::String("已延迟提醒")),
+                MakeToolOutput("affected_count", ToolOutputValue::Integer(result.value->affected_count)),
             });
         });
 }
