@@ -41,6 +41,8 @@ ignore:
   - "components/voicelife_linx/**"
   - "components/voicelife_linx_esp/**"
   - "components/voicelife_audio_esp/**"
+  # ESP_PLATFORM-only FreeRTOS runtime; host gcov cannot execute this target-specific code.
+  - "components/voicelife_timing_esp/**"
   - "components/voicelife_runtime/**"
   - "components/voicelife_schedule/**"
   - "components/voicelife_mcp/**"
