@@ -114,14 +114,7 @@ export class WechatOfficialOutbound {
      * @returns 微信模板消息载荷。
      */
     public renderScheduleQueryResult(intent: ScheduleQueryResultIntent): JsonValue {
-        const body = JSON.stringify({
-            query: intent.query,
-            resultCount: intent.resultCount,
-            schedules: intent.schedules,
-            futureOccurrences: intent.futureOccurrences,
-            exceptions: intent.exceptions,
-            queriedAt: intent.queriedAt,
-        });
+        const body = formatScheduleQueryBody(intent, this.options.displayTimeZone);
         return this.templatePayload(
             {
                 title: `日程查询结果（${intent.resultCount} 条）`,
@@ -470,6 +463,80 @@ function formatTemplateTime(value: string, timeZone: string): string {
     const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find((item) => item.type === type)?.value ?? '';
     const datePart = (type: 'year' | 'month' | 'day'): string => String(Number(part(type)));
     return `${datePart('year')}年${datePart('month')}月${datePart('day')}日 ${part('hour')}:${part('minute')}`;
+}
+
+const QUERY_STATUS_LABELS: Readonly<Record<ScheduleQueryResultIntent['query']['status'], string>> = {
+    all: '全部',
+    active: '进行中',
+    cancelled: '已取消',
+    completed: '已完成',
+};
+
+const MAX_SCHEDULE_QUERY_BODY_LENGTH = 1000;
+
+/** 将完整的日程查询结果压缩为模板字段可直接阅读的文本。 */
+function formatScheduleQueryBody(intent: ScheduleQueryResultIntent, timeZone: string): string {
+    const lines = [
+        `查询范围：${formatQueryRange(intent.query.startDate, intent.query.endDate)}`,
+        `状态：${QUERY_STATUS_LABELS[intent.query.status]}`,
+        ...(intent.query.keyword === undefined ? [] : [`关键词：${intent.query.keyword}`]),
+        `共 ${intent.resultCount} 条日程`,
+    ];
+    const entries = [...intent.schedules, ...intent.futureOccurrences];
+    if (entries.length === 0) {
+        lines.push('暂无符合条件的日程');
+    } else {
+        entries.forEach((entry, index) => {
+            const title = scheduleField(entry, 'event') ?? '未命名日程';
+            const start = formatScheduleDateTime(
+                scheduleField(entry, 'start_time') ?? scheduleField(entry, 'original_start_time'),
+                timeZone,
+            );
+            const end = formatScheduleDateTime(scheduleField(entry, 'end_time'), timeZone);
+            const location = scheduleField(entry, 'location');
+            const notes = scheduleField(entry, 'notes');
+            const time = start === undefined ? undefined : end === undefined ? start : `${start} - ${end}`;
+            const details = [
+                time === undefined ? undefined : `时间：${time}`,
+                location === undefined ? undefined : `地点：${location}`,
+                notes === undefined ? undefined : `备注：${notes}`,
+            ].filter((value): value is string => value !== undefined);
+            lines.push(`${index + 1}. ${title}`);
+            lines.push(...details.map((detail) => `   ${detail}`));
+        });
+    }
+    if (intent.exceptions.length > 0) {
+        lines.push(`例外调整：${intent.exceptions.length} 条`);
+    }
+    return limitTemplateText(lines.join('\n'), MAX_SCHEDULE_QUERY_BODY_LENGTH);
+}
+
+function formatQueryRange(startDate: string | undefined, endDate: string | undefined): string {
+    if (startDate !== undefined && endDate !== undefined) return `${startDate} 至 ${endDate}`;
+    if (startDate !== undefined) return `${startDate} 起`;
+    if (endDate !== undefined) return `截至 ${endDate}`;
+    return '未限定日期';
+}
+
+function scheduleField(value: JsonValue, key: string): string | undefined {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    const field = value[key];
+    return typeof field === 'string' && field.trim() !== '' ? field.trim().replace(/\s+/gu, ' ') : undefined;
+}
+
+function formatScheduleDateTime(value: string | undefined, timeZone: string): string | undefined {
+    if (value === undefined) return undefined;
+    const localMatch = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/u.exec(value);
+    if (localMatch !== null) {
+        return `${Number(localMatch[1])}年${Number(localMatch[2])}月${Number(localMatch[3])}日 ${localMatch[4]}:${localMatch[5]}`;
+    }
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : formatTemplateTime(value, timeZone);
+}
+
+function limitTemplateText(value: string, maxLength: number): string {
+    const characters = [...value];
+    return characters.length <= maxLength ? value : `${characters.slice(0, maxLength - 1).join('')}…`;
 }
 
 function templateField(value: string): string {

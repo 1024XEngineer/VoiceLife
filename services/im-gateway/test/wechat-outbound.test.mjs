@@ -250,14 +250,19 @@ test('WeChat outbound validates delivery scope and payload shape before network 
     );
     assert.equal(renderedQueryResult.templateId, 'fixture-query-template');
     assert.equal(renderedQueryResult.data.first.value, '日程查询结果（2 条）');
-    assert.deepEqual(JSON.parse(renderedQueryResult.data.keyword1.value), {
-        query: queryResult.query,
-        resultCount: queryResult.resultCount,
-        schedules: queryResult.schedules,
-        futureOccurrences: queryResult.futureOccurrences,
-        exceptions: queryResult.exceptions,
-        queriedAt: queryResult.queriedAt,
-    });
+    assert.equal(
+        renderedQueryResult.data.keyword1.value,
+        [
+            '查询范围：2026-08-03 至 2026-08-10',
+            '状态：进行中',
+            '共 2 条日程',
+            '1. 一次性日程',
+            '   时间：2026年8月3日 09:00',
+            '2. 周期日程',
+            '   时间：2026年8月4日 09:00',
+            '例外调整：1 条',
+        ].join('\n'),
+    );
     assert.equal(renderedQueryResult.data.keyword2.value, '2026年8月3日 08:00');
     for (const delivery of [
         { ...validDelivery, channelAccountId: 'channel-other' },
