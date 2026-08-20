@@ -266,3 +266,43 @@ test('WeCom AI Bot WSS runtime rejects invalid or unavailable outbound messages 
     });
     assert.equal(socket.sent.length, 0);
 });
+
+test('WeCom AI Bot WSS runtime classifies transport errors and pending sends on disconnect as retryable', async (context) => {
+    const socket = new FakeWebSocket();
+    const originalSend = socket.send.bind(socket);
+    let shouldThrow = false;
+    socket.send = (data) => {
+        if (shouldThrow) throw new Error('socket is closed');
+        originalSend(data);
+    };
+    let requestNo = 0;
+    const runtime = new WecomAibotWssRuntime({
+        adapter: new WecomAibotInboundAdapter({ channelAccountId: 'channel-wecom', botId: 'bot-fixture' }),
+        botId: 'bot-fixture',
+        secret: 'secret-fixture',
+        postEvent: async () => {},
+        createWebSocket: () => socket,
+        nextRequestId: () => `request-${String(++requestNo)}`,
+    });
+    context.after(() => runtime.close());
+
+    runtime.start();
+    socket.emit('open', {});
+    socket.emit('message', { data: JSON.stringify({ headers: { req_id: 'request-1' }, errcode: 0 }) });
+
+    shouldThrow = true;
+    assert.deepEqual(await runtime.sendMarkdown('userid-fixture', 'transport failure'), {
+        accepted: false,
+        retryable: true,
+        errorCode: 'wecom_aibot_transport_error',
+    });
+
+    shouldThrow = false;
+    const pending = runtime.sendMarkdown('userid-fixture', 'pending request');
+    socket.emit('close', {});
+    assert.deepEqual(await pending, {
+        accepted: false,
+        retryable: true,
+        errorCode: 'wecom_aibot_unavailable',
+    });
+});
