@@ -70,6 +70,15 @@ function fixtureEnvironment(overrides = {}) {
     };
 }
 
+function isPostgresUnavailable(error) {
+    return (
+        error !== null &&
+        typeof error === 'object' &&
+        'code' in error &&
+        ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(error.code)
+    );
+}
+
 function fakeRuntime(events) {
     return {
         deviceApi: {
@@ -646,8 +655,11 @@ test('configured WeCom AI Bot sends one weak reminder and persists the accepted 
         );
     } catch (error) {
         await setup.close().catch(() => undefined);
-        context.skip(`PostgreSQL unavailable: ${error instanceof Error ? error.name : 'unknown'}`);
-        return;
+        if (isPostgresUnavailable(error)) {
+            context.skip(`PostgreSQL unavailable: ${error instanceof Error ? error.name : 'unknown'}`);
+            return;
+        }
+        throw error;
     }
     await setup.close();
 
