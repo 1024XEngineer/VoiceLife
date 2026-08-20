@@ -90,7 +90,30 @@ Esp32s3PcmAudioPorts::Impl::~Impl() {
     (void)CloseInput();
     (void)CloseOutput();
     DestroyChannels();
+#ifdef ESP_PLATFORM
+    ReleaseTaskStorage();
+#endif
 }
+
+#ifdef ESP_PLATFORM
+void Esp32s3PcmAudioPorts::Impl::ReleaseTaskStorage() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Static task storage must remain valid until the corresponding task has
+    // exited. A timeout intentionally leaves it allocated rather than risking
+    // a use-after-free from a late task callback during teardown.
+    if (capture_task_ != nullptr || delivery_task_ != nullptr) {
+        return;
+    }
+    heap_caps_free(capture_stack_);
+    heap_caps_free(capture_tcb_);
+    heap_caps_free(delivery_stack_);
+    heap_caps_free(delivery_tcb_);
+    capture_stack_ = nullptr;
+    capture_tcb_ = nullptr;
+    delivery_stack_ = nullptr;
+    delivery_tcb_ = nullptr;
+}
+#endif
 
 AudioPortStats Esp32s3PcmAudioPorts::Impl::stats() const {
     AudioPortStats result;

@@ -37,8 +37,16 @@ const lv_color_t kTextColor = lv_color_hex(0xFFFFFF);
 std::string FlattenSubtitleLine(std::string_view text) {
     std::string result;
     result.reserve(text.size());
-    for (const char character : text) {
-        result.push_back(character == '\n' || character == '\r' ? ' ' : character);
+    for (std::size_t index = 0; index < text.size(); ++index) {
+        const char character = text[index];
+        if (character == '\r') {
+            result.push_back(' ');
+            if (index + 1 < text.size() && text[index + 1] == '\n') {
+                ++index;
+            }
+        } else {
+            result.push_back(character == '\n' ? ' ' : character);
+        }
     }
     return result;
 }
