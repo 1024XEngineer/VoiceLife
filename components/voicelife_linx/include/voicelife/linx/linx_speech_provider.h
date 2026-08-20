@@ -3,10 +3,12 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "voicelife/linx/linx_types.h"
@@ -30,6 +32,7 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
                               LinxConnectionConfig connection,
                               voice::CapabilityProfile capabilities = DefaultCapabilities(),
                               LinxMcpMessageHandler mcp_handler = {});
+    ~LinxSpeechProviderAdapter() override;
 
     /**
      * @brief 设置下行音频接收回调。
@@ -86,6 +89,9 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     void OnBinary(std::vector<uint8_t> payload);
     void OnTransportConnected();
     void OnTransportDisconnected();
+    void StartMcpWorker();
+    void StopMcpWorker();
+    void McpWorkerLoop();
     [[nodiscard]] voice::VoiceSessionConfig ActiveSessionConfig() const;
     Status Send(Result<std::string> encoded);
     void Emit(voice::VoiceEvent event);
@@ -113,6 +119,17 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     voice::VoiceAudioFormats audio_formats_;
     voice::VoiceAudioFormats last_audio_formats_;
     Status hello_status_ = Status::Ok();
+    struct McpRequest {
+        std::string payload;
+        std::string session_id;
+        uint64_t generation = 0;
+    };
+    static constexpr std::size_t kMcpQueueCapacity = 4;
+    std::mutex mcp_mutex_;
+    std::condition_variable mcp_cv_;
+    std::deque<McpRequest> mcp_queue_;
+    bool mcp_stop_ = false;
+    std::thread mcp_worker_;
 };
 
 }  // namespace voicelife::linx

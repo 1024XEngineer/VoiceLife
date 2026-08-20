@@ -1,3 +1,7 @@
+#include <chrono>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,6 +32,7 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
         if (emit_hello && message.find("\"type\":\"hello\"") != std::string_view::npos && sink_.on_text) {
             sink_.on_text(hello_message);
         }
+        if (text_sent_callback) text_sent_callback();
         return send_text_result;
     }
     Status SendAudio(voicelife::voice::AudioFrame frame) override {
@@ -80,6 +85,7 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
     int closes = 0;
     uint64_t tx_generation = 0;
     const uint8_t* emitted_binary_data = nullptr;
+    std::function<void()> text_sent_callback;
 };
 
 voicelife::voice::VoiceSessionConfig Config() {
@@ -213,10 +219,23 @@ int main() {
 
     FakeTransport mcp_transport;
     int mcp_calls = 0;
+    std::mutex mcp_test_mutex;
+    std::condition_variable mcp_test_cv;
+    bool mcp_started = false;
+    bool mcp_release = false;
+    bool mcp_response_sent = false;
+    std::vector<voicelife::voice::AudioFrame> mcp_audio;
     voicelife::linx::LinxSpeechProviderAdapter mcp_provider(
         mcp_transport, codec, connection, voicelife::linx::LinxSpeechProviderAdapter::DefaultCapabilities(),
-        [&mcp_calls](std::string_view, std::string_view session_id) {
-            ++mcp_calls;
+        [&mcp_calls, &mcp_test_mutex, &mcp_test_cv, &mcp_started, &mcp_release](std::string_view,
+                                                                                std::string_view session_id) {
+            {
+                std::unique_lock<std::mutex> lock(mcp_test_mutex);
+                ++mcp_calls;
+                mcp_started = true;
+                mcp_test_cv.notify_all();
+                mcp_test_cv.wait(lock, [&mcp_release]() { return mcp_release; });
+            }
             return voicelife::Result<std::string>::Success(
                 "{\"type\":\"mcp\",\"session_id\":\"" + std::string(session_id) +
                 "\",\"payload\":{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}");
@@ -229,8 +248,36 @@ int main() {
                        [&mcp_events](const voicelife::voice::VoiceEvent& event) { mcp_events.push_back(event); })
               .ok(),
           "配置 MCP handler 的 Provider 应能重新绑定事件接收器");
+    mcp_provider.SetAudioSink([&mcp_audio](voicelife::voice::AudioFrame frame) {
+        mcp_audio.push_back(std::move(frame));
+        return Status::Ok();
+    });
+    mcp_transport.text_sent_callback = [&mcp_test_mutex, &mcp_test_cv, &mcp_response_sent]() {
+        {
+            std::lock_guard<std::mutex> lock(mcp_test_mutex);
+            mcp_response_sent = true;
+        }
+        mcp_test_cv.notify_all();
+    };
     const auto mcp_events_before_request = mcp_events.size();
     mcp_transport.EmitText(R"({"type":"mcp","payload":{"jsonrpc":"2.0","method":"tools/list","id":1}})");
+    {
+        std::unique_lock<std::mutex> lock(mcp_test_mutex);
+        Check(mcp_test_cv.wait_for(lock, std::chrono::seconds(1), [&mcp_started]() { return mcp_started; }),
+              "MCP 请求应在专用 worker 中完成，不能阻塞 Linx RX 回调");
+    }
+    mcp_transport.EmitBinary({9, 8, 7});
+    Check(mcp_audio.size() == 1, "MCP handler 等待期间 Linx RX 仍必须继续投递下行音频");
+    {
+        std::lock_guard<std::mutex> lock(mcp_test_mutex);
+        mcp_release = true;
+    }
+    mcp_test_cv.notify_all();
+    {
+        std::unique_lock<std::mutex> lock(mcp_test_mutex);
+        Check(mcp_test_cv.wait_for(lock, std::chrono::seconds(1), [&mcp_response_sent]() { return mcp_response_sent; }),
+              "MCP worker 完成后应回发响应");
+    }
     Check(mcp_calls == 1 && mcp_transport.texts.back().find("\"type\":\"mcp\"") != std::string::npos &&
               mcp_transport.texts.back().find("\"session_id\":\"remote-linx-session\"") != std::string::npos,
           "MCP payload 应调用 handler 并回发响应");

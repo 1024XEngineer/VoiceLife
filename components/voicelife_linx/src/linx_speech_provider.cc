@@ -36,6 +36,11 @@ LinxSpeechProviderAdapter::LinxSpeechProviderAdapter(LinxTransportPort& transpor
       capabilities_(std::move(capabilities)),
       mcp_handler_(std::move(mcp_handler)) {}
 
+LinxSpeechProviderAdapter::~LinxSpeechProviderAdapter() {
+    (void)Disconnect();
+    StopMcpWorker();
+}
+
 voice::CapabilityProfile LinxSpeechProviderAdapter::DefaultCapabilities() {
     return {.provider_id = "xrobot-websocket", .capabilities = {"streaming-asr", "tts", "cancel-generation", "pcm"}};
 }
@@ -82,6 +87,7 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
         std::lock_guard<std::mutex> lock(callback_mutex_);
         event_sink_ = std::move(sink);
     }
+    StartMcpWorker();
     LinxTransportSink transport_sink;
     transport_sink.on_connected = [this]() { OnTransportConnected(); };
     transport_sink.on_disconnected = [this]() { OnTransportDisconnected(); };
@@ -101,6 +107,7 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
     };
     Status status = transport_.Connect(connection_, std::move(transport_sink));
     if (!status.ok()) {
+        StopMcpWorker();
         std::lock_guard<std::mutex> lock(callback_mutex_);
         event_sink_ = {};
         return status;
@@ -111,6 +118,7 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
     if (!received) {
         hello_lock.unlock();
         transport_.Close();
+        StopMcpWorker();
         std::lock_guard<std::mutex> lock(callback_mutex_);
         event_sink_ = {};
         return Status::Error(ErrorCode::kUnavailable, "Linx hello 等待超时");
@@ -119,6 +127,7 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
     hello_lock.unlock();
     if (!status.ok()) {
         transport_.Close();
+        StopMcpWorker();
         std::lock_guard<std::mutex> lock(callback_mutex_);
         event_sink_ = {};
         return status;
@@ -188,6 +197,7 @@ Status LinxSpeechProviderAdapter::NotifyLocalWakeWord(std::string_view wake_word
 Status LinxSpeechProviderAdapter::Disconnect() {
     explicit_disconnect_.store(true);
     const Status status = transport_.Close();
+    StopMcpWorker();
     hello_cv_.notify_all();
     connected_.store(false);
     transport_connected_.store(false);
@@ -398,14 +408,21 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
                 return;
             }
             const std::string session_id = inbound.session_id.value_or(ActiveSessionConfig().session_id);
-            if (const auto response = mcp_handler_(inbound.text, session_id);
-                response.ok() && response.value.has_value()) {
-                if (response.value->empty()) return;
-                const Status status = transport_.SendText(*response.value);
-                if (!status.ok()) Emit(Event(voice::VoiceEventKind::kError, status.message));
-            } else {
-                Emit(Event(voice::VoiceEventKind::kError, response.status.message));
+            bool rejected = false;
+            {
+                std::lock_guard<std::mutex> lock(mcp_mutex_);
+                if (mcp_stop_ || mcp_queue_.size() >= kMcpQueueCapacity) {
+                    rejected = true;
+                } else {
+                    mcp_queue_.push_back(
+                        McpRequest{.payload = inbound.text, .session_id = session_id, .generation = generation_.load()});
+                }
             }
+            if (rejected) {
+                Emit(Event(voice::VoiceEventKind::kError, "Linx MCP 请求队列已满"));
+                return;
+            }
+            mcp_cv_.notify_one();
             return;
         }
         case LinxMessageKind::kGoodbye:
@@ -417,6 +434,47 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
         case LinxMessageKind::kError:
             Emit(Event(voice::VoiceEventKind::kError, inbound.text));
             return;
+    }
+}
+
+void LinxSpeechProviderAdapter::StartMcpWorker() {
+    if (!mcp_handler_) return;
+    std::lock_guard<std::mutex> lock(mcp_mutex_);
+    if (mcp_worker_.joinable()) return;
+    mcp_stop_ = false;
+    mcp_worker_ = std::thread([this]() { McpWorkerLoop(); });
+}
+
+void LinxSpeechProviderAdapter::StopMcpWorker() {
+    {
+        std::lock_guard<std::mutex> lock(mcp_mutex_);
+        mcp_stop_ = true;
+        mcp_queue_.clear();
+    }
+    mcp_cv_.notify_all();
+    if (mcp_worker_.joinable()) mcp_worker_.join();
+}
+
+void LinxSpeechProviderAdapter::McpWorkerLoop() {
+    while (true) {
+        McpRequest request;
+        {
+            std::unique_lock<std::mutex> lock(mcp_mutex_);
+            mcp_cv_.wait(lock, [this]() { return mcp_stop_ || !mcp_queue_.empty(); });
+            if (mcp_stop_ && mcp_queue_.empty()) return;
+            request = std::move(mcp_queue_.front());
+            mcp_queue_.pop_front();
+        }
+        if (request.generation != generation_.load() || !connected_.load()) continue;
+        const auto response = mcp_handler_(request.payload, request.session_id);
+        if (request.generation != generation_.load() || !connected_.load()) continue;
+        if (!response.ok() || !response.value.has_value()) {
+            Emit(Event(voice::VoiceEventKind::kError, response.status.message));
+            continue;
+        }
+        if (response.value->empty()) continue;
+        const Status status = transport_.SendText(*response.value);
+        if (!status.ok()) Emit(Event(voice::VoiceEventKind::kError, status.message));
     }
 }
 

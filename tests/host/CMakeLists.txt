@@ -116,7 +116,7 @@ add_voicelife_library(linx voicelife_linx
     "${ROOT_DIR}/components/voicelife_linx/src/linx_json_codec.cc"
     "${ROOT_DIR}/components/voicelife_linx/src/linx_ota.cc"
     "${ROOT_DIR}/components/voicelife_linx/src/linx_speech_provider.cc")
-target_link_libraries(linx PUBLIC voice cjson)
+target_link_libraries(linx PUBLIC voice cjson Threads::Threads)
 add_voicelife_library(linx_esp voicelife_linx_esp
     "${ROOT_DIR}/components/voicelife_linx_esp/src/websocket_fragment_assembler.cc")
 target_link_libraries(linx_esp PUBLIC contracts linx)
