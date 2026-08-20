@@ -2,6 +2,7 @@ import WebSocket from 'ws';
 
 import type { NormalizedImEvent } from '../../contracts/platform-events.js';
 import type { ImSendAcceptance } from '../../ports/external.js';
+import type { JsonValue } from '../../shared/types.js';
 import { ImGatewayError } from '../../shared/errors.js';
 import type { WecomAibotInboundAdapter } from './wecom-aibot-inbound-adapter.js';
 
@@ -14,6 +15,7 @@ const SUBSCRIPTION_ACK_TIMEOUT_MILLISECONDS = 10_000;
 const OUTBOUND_ACK_TIMEOUT_MILLISECONDS = 10_000;
 const MAX_CHAT_ID_BYTES = 512;
 const MAX_MARKDOWN_BYTES = 20_480;
+const MAX_TEMPLATE_CARD_BYTES = 20_480;
 const RETRYABLE_SEND_ERROR_CODES = new Set([-1, 408, 429, 45009, 45011, 502, 503, 504]);
 
 /** 企业微信 AI Bot WSS 连接所需的最小 WebSocket 接口。 */
@@ -177,6 +179,38 @@ export class WecomAibotWssRuntime {
         ) {
             return Promise.resolve({ accepted: false, retryable: false, errorCode: 'wecom_aibot_invalid_message' });
         }
+        return this.sendMessage(normalizedChatId, {
+            msgtype: 'markdown',
+            markdown: { content: normalizedContent },
+        });
+    }
+
+    /**
+     * 通过当前已订阅的连接向单聊会话主动发送模板卡片。
+     *
+     * @param chatId 企业微信单聊标识。
+     * @param templateCard 企业微信模板卡片结构。
+     * @returns 企业微信的即时受理或可重试/不可重试失败分类。
+     */
+    public sendTemplateCard(chatId: string, templateCard: JsonValue): Promise<ImSendAcceptance> {
+        const normalizedChatId = chatId.trim();
+        if (
+            normalizedChatId === '' ||
+            Buffer.byteLength(normalizedChatId, 'utf8') > MAX_CHAT_ID_BYTES ||
+            templateCard === null ||
+            typeof templateCard !== 'object' ||
+            Array.isArray(templateCard) ||
+            Buffer.byteLength(JSON.stringify(templateCard), 'utf8') > MAX_TEMPLATE_CARD_BYTES
+        ) {
+            return Promise.resolve({ accepted: false, retryable: false, errorCode: 'wecom_aibot_invalid_message' });
+        }
+        return this.sendMessage(normalizedChatId, {
+            msgtype: 'template_card',
+            template_card: templateCard,
+        });
+    }
+
+    private sendMessage(chatId: string, body: Readonly<Record<string, JsonValue>>): Promise<ImSendAcceptance> {
         const socket = this.socket;
         if (!this.healthy || socket === undefined || this.closed) {
             return Promise.resolve({ accepted: false, retryable: true, errorCode: 'wecom_aibot_unavailable' });
@@ -194,9 +228,8 @@ export class WecomAibotWssRuntime {
                         cmd: 'aibot_send_msg',
                         headers: { req_id: requestId },
                         body: {
-                            chatid: normalizedChatId,
-                            msgtype: 'markdown',
-                            markdown: { content: normalizedContent },
+                            chatid: chatId,
+                            ...body,
                         },
                     }),
                 );
@@ -250,7 +283,7 @@ export class WecomAibotWssRuntime {
             return;
         }
         if (this.settleOutboundResponse(frame)) return;
-        if (!this.healthy || frame.cmd !== 'aibot_msg_callback') return;
+        if (!this.healthy || (frame.cmd !== 'aibot_msg_callback' && frame.cmd !== 'aibot_event_callback')) return;
         try {
             await this.options.postEvent(await this.options.adapter.normalizeInbound(frame.body));
         } catch {

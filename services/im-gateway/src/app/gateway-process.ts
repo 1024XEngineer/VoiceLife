@@ -217,11 +217,30 @@ export async function startConfiguredGatewayProcess(
                       adapter: new WecomAibotInboundAdapter({
                           channelAccountId: unsafeId<ChannelAccountId>(config.wecom.channelAccountId),
                           botId: config.wecom.botId,
+                          resolveExternalIdentityId: async (externalUserId) => {
+                              const protectedIdentity = await identities.protect(externalUserId);
+                              return unitOfWork.transaction(
+                                  async (tx) =>
+                                      (
+                                          await tx.identities.findByChannelAndHash(
+                                              unsafeId<ChannelAccountId>(config.wecom!.channelAccountId),
+                                              protectedIdentity.hash,
+                                          )
+                                      )?.id,
+                              );
+                          },
                           outbound: {
                               revealExternalUserId: (ciphertext) => identities.reveal(ciphertext),
                               transport: {
                                   sendMarkdown: (chatId, content) =>
                                       wecomRuntime?.sendMarkdown(chatId, content) ??
+                                      Promise.resolve({
+                                          accepted: false,
+                                          retryable: true,
+                                          errorCode: 'wecom_aibot_unavailable',
+                                      }),
+                                  sendTemplateCard: (chatId, card) =>
+                                      wecomRuntime?.sendTemplateCard(chatId, card) ??
                                       Promise.resolve({
                                           accepted: false,
                                           retryable: true,
