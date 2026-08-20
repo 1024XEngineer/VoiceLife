@@ -64,7 +64,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready --health-interval 10s --health-timeout 5s
+          --health-cmd "pg_isready -U voicelife -d voicelife" --health-interval 10s --health-timeout 5s
           --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -128,7 +128,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready --health-interval 10s --health-timeout 5s
+          --health-cmd "pg_isready -U voicelife -d voicelife" --health-interval 10s --health-timeout 5s
           --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
