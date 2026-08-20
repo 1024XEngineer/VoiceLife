@@ -87,8 +87,23 @@ bool Esp32s3PcmAudioPorts::Impl::OutputPort::IsIdle() const { return owner_.Outp
 void Esp32s3PcmAudioPorts::Impl::OutputPort::Close() { (void)owner_.CloseOutput(); }
 
 Esp32s3PcmAudioPorts::Impl::~Impl() {
-    (void)CloseInput();
-    (void)CloseOutput();
+    const Status input_status = CloseInput();
+#ifdef ESP_PLATFORM
+    if (!input_status.ok()) {
+        // Destruction cannot leave a task holding an Impl pointer alive. The
+        // public close path remains bounded, while owner teardown waits for a
+        // late task to observe the stop flag before releasing its state.
+        WaitForInputTasks();
+        (void)CloseInput();
+    }
+#endif
+    const Status output_status = CloseOutput();
+#ifdef ESP_PLATFORM
+    if (!output_status.ok()) {
+        WaitForOutputTask();
+        (void)FinalizeOutputClose();
+    }
+#endif
     DestroyChannels();
 #ifdef ESP_PLATFORM
     ReleaseTaskStorage();
@@ -112,6 +127,16 @@ void Esp32s3PcmAudioPorts::Impl::ReleaseTaskStorage() {
     capture_tcb_ = nullptr;
     delivery_stack_ = nullptr;
     delivery_tcb_ = nullptr;
+}
+
+void Esp32s3PcmAudioPorts::Impl::WaitForInputTasks() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    done_cv_.wait(lock, [this]() { return capture_task_ == nullptr && delivery_task_ == nullptr; });
+}
+
+void Esp32s3PcmAudioPorts::Impl::WaitForOutputTask() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    done_cv_.wait(lock, [this]() { return output_task_ == nullptr; });
 }
 #endif
 
@@ -401,6 +426,9 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
     if (input_running_) {
         return Status::Ok();
     }
+    if (capture_task_ != nullptr || delivery_task_ != nullptr) {
+        return Status::Error(ErrorCode::kConflict, "上一次 I2S 采集任务尚未退出");
+    }
     // voice_audio_in 的 4096-word 栈需要 16KB 连续内存。网络、Codec 和
     // MultiNet 就绪后内部 RAM 最大连续块可能不足该大小，因此和投递任务
     // 一样把可复用栈放入 PSRAM，只把 FreeRTOS TCB 留在内部 RAM。
@@ -485,7 +513,7 @@ Status Esp32s3PcmAudioPorts::Impl::StopCapture() {
 #else
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!input_running_) {
+        if (!input_running_ && capture_task_ == nullptr && delivery_task_ == nullptr) {
             input_queue_.clear();
             return Status::Ok();
         }
@@ -512,6 +540,11 @@ Status Esp32s3PcmAudioPorts::Impl::StopCapture() {
 Status Esp32s3PcmAudioPorts::Impl::CloseInput() {
     const Status stop_status = StopCapture();
 #ifdef ESP_PLATFORM
+    if (!stop_status.ok()) {
+        // Keep the assembler, sink and channels alive until late tasks have
+        // exited; they still hold this Impl as their callback owner.
+        return stop_status;
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     input_sink_ = {};
     input_open_ = false;

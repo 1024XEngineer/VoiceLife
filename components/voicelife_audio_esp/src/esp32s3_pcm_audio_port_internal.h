@@ -120,6 +120,8 @@ class Esp32s3PcmAudioPorts::Impl final {
     void DestroyChannels();
     void DestroyChannelsLocked();
     void ReleaseTaskStorage();
+    void WaitForInputTasks();
+    void WaitForOutputTask();
     static void CaptureTaskEntry(void* arg);
     static void DeliveryTaskEntry(void* arg);
     static void OutputTaskEntry(void* arg);
