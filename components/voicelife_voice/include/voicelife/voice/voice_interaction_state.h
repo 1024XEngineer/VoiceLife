@@ -6,6 +6,8 @@ namespace voicelife::voice {
 enum class VoiceInteractionState {
     kBooting,
     kStandby,
+    /** 本地唤醒已提交确认播报，尚未打开麦克风。 */
+    kAcknowledging,
     /** 采集请求已提交，等待 capture_started 确认（事务式启动，避免假"聆听中"）。 */
     kOpeningCapture,
     kListening,

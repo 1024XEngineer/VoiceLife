@@ -10,9 +10,10 @@ int main() {
     using voicelife::display_sparkbot::IsControlledAssetId;
     using voicelife::display_sparkbot::SparkBotEmojiAssets;
 
-    // 受控标识：10 个官方 key 全部接受。
+    // 受控标识：官方 key 和待机屏保 key 全部接受。
     const std::string_view kAllIds[] = {
-        "boot", "connecting", "error", "happy", "idle", "listening", "provisioning", "sleepy", "speaking", "thinking",
+        "boot",      "connecting",   "error",  "happy",    "idle",     "idle_eyes",
+        "listening", "provisioning", "sleepy", "speaking", "thinking",
     };
     for (const std::string_view id : kAllIds) {
         Check(IsControlledAssetId(id), "官方 asset_id 必须被接受");

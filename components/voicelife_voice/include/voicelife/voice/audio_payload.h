@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
-#include <mutex>
 #include <vector>
 
 namespace voicelife::voice {
@@ -148,10 +147,13 @@ class AudioPayloadPool final : public std::enable_shared_from_this<AudioPayloadP
     std::size_t slot_count_ = 0;
     std::size_t slot_bytes_ = 0;
     uint8_t* bytes_ = nullptr;
-    std::unique_ptr<bool[]> used_;
-    mutable std::mutex mutex_;
-    std::size_t in_use_ = 0;
-    std::size_t high_watermark_ = 0;
+    // A PCM producer runs on the I2S capture task while consumers release
+    // leases from other tasks. It must not treat brief lock contention as an
+    // exhausted pool, so slot ownership is represented by a non-blocking bit
+    // map. The public factory limits this to 32 slots.
+    std::atomic<uint32_t> available_slots_{0};
+    std::atomic_size_t in_use_{0};
+    std::atomic_size_t high_watermark_{0};
     std::atomic_size_t acquisition_failures_{0};
 };
 

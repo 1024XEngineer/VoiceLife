@@ -322,6 +322,8 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                 schedule::QueryScheduleRulesCommand rule_command;
                 rule_command.keyword = properties.value<std::string>("keyword");
                 rule_command.status = command.status;
+                rule_command.occurrence_start = start;
+                rule_command.occurrence_end = end;
                 rule_command.limit = 50;
                 rule_command.offset = 0;
                 const auto rules = rule_service->query_schedule_rules(rule_command);

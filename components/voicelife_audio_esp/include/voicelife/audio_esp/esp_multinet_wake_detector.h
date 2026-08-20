@@ -32,7 +32,7 @@ class EspMultiNetWakeDetector final : public voice::LocalWakeDetectorPort {
      * @param frame 待机状态下的音频帧。
      * @return 帧格式和模型均可接受时返回成功。
      */
-    Status Submit(const voice::AudioFrame& frame) override;
+    Status Submit(voice::AudioFrame frame) override;
 
    private:
     /** @brief 隐藏 ESP-SR 平台对象，避免平台类型进入公共接口。 */

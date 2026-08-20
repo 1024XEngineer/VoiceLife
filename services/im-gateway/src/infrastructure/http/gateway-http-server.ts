@@ -6,7 +6,6 @@ import type { ActionId, DeviceId, PairingSessionId } from '../../contracts/ids.j
 import { unsafeId } from '../../contracts/ids.js';
 import type { ActionUiPageResponse } from './action-ui-api.js';
 import { streamReminderActions } from './gateway-sse-response.js';
-import type { WecomAibotUrlCallbackController } from './wecom-aibot-url-callback.js';
 import { ImGatewayError } from '../../shared/errors.js';
 
 const JSON_BODY_LIMIT = 64 * 1024;
@@ -51,8 +50,6 @@ export interface GatewayHttpServerOptions {
     readonly deliveryAvailable?: () => void;
     /** 可选的 SSE 心跳间隔，供基础设施层确定性验证使用。 */
     readonly sseHeartbeatIntervalMs?: number;
-    /** 可选的企业微信 AI Bot URL 回调控制器。 */
-    readonly wecomAibotApi?: WecomAibotUrlCallbackController;
     /**
      * 探测数据库等关键依赖是否仍可用。
      * @returns 健康响应；抛错时监听器返回 503。
@@ -262,25 +259,6 @@ async function routeRequest(
         writeMethodNotAllowed(response, 'GET, POST');
         return;
     }
-    if (url.pathname === '/wecom/aibot') {
-        context.route = 'wecom.aibot.webhook';
-        const webhookApi = options.wecomAibotApi;
-        if (webhookApi === undefined) throw new Error('WeCom AI Bot webhook is not configured');
-        if (method === 'GET') {
-            writeText(response, 200, webhookApi.verify(wecomAibotWebhookRequest(url)));
-            return;
-        }
-        if (method === 'POST') {
-            const result = await webhookApi.post({
-                ...wecomAibotWebhookRequest(url),
-                body: await readBody(request, WECHAT_BODY_LIMIT),
-            });
-            writeText(response, result.status, result.body);
-            return;
-        }
-        writeMethodNotAllowed(response, 'GET, POST');
-        return;
-    }
     const actionUiMatch = ACTION_UI_PATH.exec(url.pathname);
     if (actionUiMatch !== null) {
         context.route = 'action-ui';
@@ -377,21 +355,6 @@ function webhookRequest(url: URL): {
     readonly encrypt_type?: string;
 } {
     const values = ['signature', 'timestamp', 'nonce', 'echostr', 'encrypt_type'] as const;
-    return Object.fromEntries(
-        values.flatMap((name) => {
-            const value = url.searchParams.get(name);
-            return value === null ? [] : [[name, value]];
-        }),
-    );
-}
-
-function wecomAibotWebhookRequest(url: URL): {
-    readonly msg_signature?: string;
-    readonly timestamp?: string;
-    readonly nonce?: string;
-    readonly echostr?: string;
-} {
-    const values = ['msg_signature', 'timestamp', 'nonce', 'echostr'] as const;
     return Object.fromEntries(
         values.flatMap((name) => {
             const value = url.searchParams.get(name);

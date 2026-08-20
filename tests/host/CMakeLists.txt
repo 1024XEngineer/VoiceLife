@@ -419,7 +419,7 @@ target_link_libraries(sparkbot_emoji_assets_test PRIVATE display_sparkbot)
 
 add_voicelife_test(pcm_frame_assembler_contract_test "unit;voice;audio;esp;contract"
     pcm_frame_assembler_contract_test.cc)
-target_link_libraries(pcm_frame_assembler_contract_test PRIVATE audio_esp)
+target_link_libraries(pcm_frame_assembler_contract_test PRIVATE audio_esp Threads::Threads)
 
 add_voicelife_test(im_gateway_contract_test "unit;im" im_gateway_contract_test.cc)
 target_compile_definitions(im_gateway_contract_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")

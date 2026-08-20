@@ -20,6 +20,17 @@ void CheckTransition(VoiceInteractionController& controller, VoiceInteractionEve
     Check(transition.value->action == expected_action, "交互动作迁移错误");
 }
 
+void CompleteWakeAcknowledgement(VoiceInteractionController& controller, const char* message) {
+    CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kAcknowledging,
+                    VoiceInteractionAction::kStartVoiceTurn, message);
+    CheckTransition(controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
+                    VoiceInteractionAction::kNone, "确认播报开始后应进入播报态");
+    CheckTransition(controller, VoiceInteractionEvent::kTtsStopped, VoiceInteractionState::kOpeningCapture,
+                    VoiceInteractionAction::kStartCapture, "确认播报结束后应事务式请求采集");
+    CheckTransition(controller, VoiceInteractionEvent::kCaptureStarted, VoiceInteractionState::kListening,
+                    VoiceInteractionAction::kNone, "只有采集成功确认后才能显示聆听中");
+}
+
 }  // namespace
 
 int main() {
@@ -29,10 +40,35 @@ int main() {
                     VoiceInteractionAction::kNone, "启动前 Provider 已连接只能确认网络，不能跳过 boot 转场");
     CheckTransition(controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "启动后应进入待机并启动本地唤醒");
-    CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kStartVoiceTurn, "本地唤醒应开始一轮云端语音");
-    CheckTransition(controller, VoiceInteractionEvent::kCaptureStarted, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kNone, "采集开始不应改变聆听状态");
+
+    VoiceInteractionController acknowledgement_timeout_controller;
+    CheckTransition(acknowledgement_timeout_controller, VoiceInteractionEvent::kBootCompleted,
+                    VoiceInteractionState::kStandby, VoiceInteractionAction::kRestoreStandby,
+                    "确认超时用例应先进入待机");
+    CheckTransition(acknowledgement_timeout_controller, VoiceInteractionEvent::kWakeDetected,
+                    VoiceInteractionState::kAcknowledging, VoiceInteractionAction::kStartVoiceTurn,
+                    "确认播报请求期间不得伪装为聆听中");
+    CheckTransition(acknowledgement_timeout_controller, VoiceInteractionEvent::kAcknowledgementTimedOut,
+                    VoiceInteractionState::kOpeningCapture, VoiceInteractionAction::kStartCapture,
+                    "确认播报未产生首段音频必须立即开麦，不能永久卡住");
+    CheckTransition(acknowledgement_timeout_controller, VoiceInteractionEvent::kCaptureStarted,
+                    VoiceInteractionState::kListening, VoiceInteractionAction::kNone,
+                    "确认超时后的采集成功确认才进入聆听");
+
+    VoiceInteractionController acknowledgement_audio_timeout_controller;
+    CheckTransition(acknowledgement_audio_timeout_controller, VoiceInteractionEvent::kBootCompleted,
+                    VoiceInteractionState::kStandby, VoiceInteractionAction::kRestoreStandby,
+                    "确认首音频超时用例应先进入待机");
+    CheckTransition(acknowledgement_audio_timeout_controller, VoiceInteractionEvent::kWakeDetected,
+                    VoiceInteractionState::kAcknowledging, VoiceInteractionAction::kStartVoiceTurn,
+                    "确认首音频超时用例必须先请求远端确认");
+    CheckTransition(acknowledgement_audio_timeout_controller, VoiceInteractionEvent::kTtsStarted,
+                    VoiceInteractionState::kSpeaking, VoiceInteractionAction::kNone,
+                    "远端仅确认开始时应进入 speaking 等待首段 PCM");
+    CheckTransition(acknowledgement_audio_timeout_controller, VoiceInteractionEvent::kAcknowledgementTimedOut,
+                    VoiceInteractionState::kOpeningCapture, VoiceInteractionAction::kStartCapture,
+                    "远端 TTS 无首段 PCM 时必须中止等待并开始采集");
+    CompleteWakeAcknowledgement(controller, "本地唤醒必须先进入确认播报阶段");
     CheckTransition(controller, VoiceInteractionEvent::kIntentReceived, VoiceInteractionState::kThinking,
                     VoiceInteractionAction::kNone, "识别文本或工具调用后应显示思考");
     CheckTransition(controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
@@ -45,20 +81,20 @@ int main() {
     VoiceInteractionController terminal_controller;
     CheckTransition(terminal_controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "终结型回复测试应先进入待机");
-    CheckTransition(terminal_controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kStartVoiceTurn, "终结型回复应从有效语音回合开始");
+    CompleteWakeAcknowledgement(terminal_controller, "终结型回复应从完整唤醒确认开始");
     CheckTransition(terminal_controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
                     VoiceInteractionAction::kNone, "终结型回复应允许进入播报状态");
     CheckTransition(terminal_controller, VoiceInteractionEvent::kTerminalResponseCompleted,
                     VoiceInteractionState::kStandby, VoiceInteractionAction::kRestoreStandby,
                     "绑定码等终结型回复播报后应直接回待机，不进入 follow-up 聆听");
 
-    CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kStartVoiceTurn, "新一轮唤醒应可开始");
+    CompleteWakeAcknowledgement(controller, "新一轮唤醒应可完整开始");
     CheckTransition(controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
                     VoiceInteractionAction::kNone, "无需先收到文本也允许服务器直接开始 TTS");
-    CheckTransition(controller, VoiceInteractionEvent::kTtsStopped, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kStartCapture, "TTS 结束后应进入 follow-up 聆听供用户续说");
+    CheckTransition(controller, VoiceInteractionEvent::kTtsStopped, VoiceInteractionState::kOpeningCapture,
+                    VoiceInteractionAction::kStartCapture, "TTS 结束后必须等待 follow-up 采集确认");
+    CheckTransition(controller, VoiceInteractionEvent::kCaptureStarted, VoiceInteractionState::kListening,
+                    VoiceInteractionAction::kNone, "follow-up 采集成功后才进入聆听");
     CheckTransition(controller, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kFinalizing,
                     VoiceInteractionAction::kStopVoiceTurn, "follow-up 聆听可通过松开触摸进入等待最终 STT");
     CheckTransition(controller, VoiceInteractionEvent::kFinalizationTimedOut, VoiceInteractionState::kStandby,
@@ -67,9 +103,7 @@ int main() {
     VoiceInteractionController restart_during_finalization;
     CheckTransition(restart_during_finalization, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "重开语音用例应先完成启动");
-    CheckTransition(restart_during_finalization, VoiceInteractionEvent::kWakeDetected,
-                    VoiceInteractionState::kListening, VoiceInteractionAction::kStartVoiceTurn,
-                    "重开语音用例应先进入聆听");
+    CompleteWakeAcknowledgement(restart_during_finalization, "重开语音用例应先完成确认再聆听");
     CheckTransition(restart_during_finalization, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kFinalizing,
                     VoiceInteractionAction::kStopVoiceTurn, "松开后应进入最终识别等待");
     CheckTransition(restart_during_finalization, VoiceInteractionEvent::kPressDown,
@@ -79,8 +113,7 @@ int main() {
                     VoiceInteractionState::kListening, VoiceInteractionAction::kNone,
                     "旧回合取消后只有成功采集确认才能进入新聆听");
 
-    CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kStartVoiceTurn, "按住说打断路径前应可进入一轮语音");
+    CompleteWakeAcknowledgement(controller, "按住说打断路径前应可进入一轮语音");
     CheckTransition(controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
                     VoiceInteractionAction::kNone, "按住说打断路径应可进入播报状态");
     CheckTransition(controller, VoiceInteractionEvent::kPressDown, VoiceInteractionState::kInterrupting,
@@ -109,8 +142,7 @@ int main() {
     CheckTransition(controller, VoiceInteractionEvent::kTransportConnected, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kNone, "后台重连完成不得扰动空闲显示");
 
-    CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kStartVoiceTurn, "待机唤醒仍应开始云端语音");
+    CompleteWakeAcknowledgement(controller, "待机唤醒仍应完成确认并开始云端语音");
     CheckTransition(controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
                     VoiceInteractionAction::kNone, "打断回归路径应允许直接播报");
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kInterrupting,
@@ -118,16 +150,14 @@ int main() {
     CheckTransition(controller, VoiceInteractionEvent::kInterruptCompleted, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "播报打断后应回到待机再等待下一次唤醒");
 
-    CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kStartVoiceTurn, "待机中唤醒应开始新一轮云端语音");
+    CompleteWakeAcknowledgement(controller, "待机中唤醒应完成确认并开始新一轮云端语音");
     CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kStopVoiceTurn, "聆听中再次唤醒应关闭当前音频通道");
 
     VoiceInteractionController interrupt_ack_controller;
     CheckTransition(interrupt_ack_controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "打断确认用例应先进入待机");
-    CheckTransition(interrupt_ack_controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kStartVoiceTurn, "打断确认用例应先开始一轮语音");
+    CompleteWakeAcknowledgement(interrupt_ack_controller, "打断确认用例应先开始一轮语音");
     CheckTransition(interrupt_ack_controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
                     VoiceInteractionAction::kNone, "打断确认用例应进入播报");
     CheckTransition(interrupt_ack_controller, VoiceInteractionEvent::kInterruptAndAcknowledge,
@@ -146,8 +176,7 @@ int main() {
           "失败必须中止远端轮次后恢复本地待机");
     CheckTransition(controller, VoiceInteractionEvent::kStandbyReady, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kNone, "本地待机恢复后应清除错误状态");
-    CheckTransition(controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kStartVoiceTurn, "错误恢复后仍应可重新唤醒");
+    CompleteWakeAcknowledgement(controller, "错误恢复后仍应可重新唤醒");
     CheckTransition(controller, VoiceInteractionEvent::kInterruptRequested, VoiceInteractionState::kInterrupting,
                     VoiceInteractionAction::kInterruptSession, "重新唤醒后仍应支持打断");
     CheckTransition(controller, VoiceInteractionEvent::kStandbyReady, VoiceInteractionState::kStandby,
@@ -164,8 +193,7 @@ int main() {
     CheckTransition(multi_turn_controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "多轮测试应先进入待机");
     for (int turn = 0; turn < 24; ++turn) {
-        CheckTransition(multi_turn_controller, VoiceInteractionEvent::kWakeDetected, VoiceInteractionState::kListening,
-                        VoiceInteractionAction::kStartVoiceTurn, "每轮都必须能从待机开始语音会话");
+        CompleteWakeAcknowledgement(multi_turn_controller, "每轮都必须能从待机开始完整语音会话");
         if (turn % 3 == 0) {
             CheckTransition(multi_turn_controller, VoiceInteractionEvent::kEndpointDetected,
                             VoiceInteractionState::kFinalizing, VoiceInteractionAction::kStopVoiceTurn,
@@ -178,8 +206,11 @@ int main() {
                             VoiceInteractionAction::kNone, "连续多轮中服务端可直接开始播报");
             if (turn % 3 == 1) {
                 CheckTransition(multi_turn_controller, VoiceInteractionEvent::kTtsStopped,
-                                VoiceInteractionState::kListening, VoiceInteractionAction::kStartCapture,
-                                "播报结束后应为追问重新打开采集");
+                                VoiceInteractionState::kOpeningCapture, VoiceInteractionAction::kStartCapture,
+                                "播报结束后应事务式为追问重新打开采集");
+                CheckTransition(multi_turn_controller, VoiceInteractionEvent::kCaptureStarted,
+                                VoiceInteractionState::kListening, VoiceInteractionAction::kNone,
+                                "追问采集确认后才进入聆听");
                 CheckTransition(multi_turn_controller, VoiceInteractionEvent::kEndpointDetected,
                                 VoiceInteractionState::kFinalizing, VoiceInteractionAction::kStopVoiceTurn,
                                 "追问端点应结束本轮采集");

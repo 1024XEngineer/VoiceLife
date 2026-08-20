@@ -119,6 +119,9 @@ class Esp32s3PcmAudioPorts::Impl final {
     Status TryInitializeChannelsLocked();
     void DestroyChannels();
     void DestroyChannelsLocked();
+    void ReleaseTaskStorage();
+    void WaitForInputTasks();
+    void WaitForOutputTask();
     static void CaptureTaskEntry(void* arg);
     static void DeliveryTaskEntry(void* arg);
     static void OutputTaskEntry(void* arg);
@@ -207,10 +210,12 @@ class Esp32s3PcmAudioPorts::Impl final {
     TaskHandle_t capture_task_ = nullptr;
     TaskHandle_t delivery_task_ = nullptr;
     TaskHandle_t output_task_ = nullptr;
-    // voice_audio_sink 投递任务栈常驻 PSRAM、TCB 在内部 RAM（一次性分配、跨采集
-    // 周期复用）：待机恢复时内部 RAM 最大连续块常 <16KB，16384B 动态任务栈会创建
-    // 失败，用 xTaskCreateStatic 把栈放到 PSRAM 解除该瓶颈；TCB 必须内部 RAM
-    // （xPortCheckValidTCBMem 断言）。不释放，随生命周期。
+    // 采集/投递任务栈常驻 PSRAM、TCB 在内部 RAM（一次性分配、跨采集周期
+    // 复用）：待机恢复时内部 RAM 最大连续块常 <16KB，动态任务栈会创建失败。
+    // TCB 必须留在内部 RAM（xPortCheckValidTCBMem 断言）；所有存储在析构时
+    // 确认任务退出后释放。
+    StackType_t* capture_stack_ = nullptr;
+    StaticTask_t* capture_tcb_ = nullptr;
     StackType_t* delivery_stack_ = nullptr;
     StaticTask_t* delivery_tcb_ = nullptr;
 #else

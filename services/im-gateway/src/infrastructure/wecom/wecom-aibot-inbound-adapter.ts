@@ -1,4 +1,5 @@
 import type { NotificationIntent, ScheduleReceiptIntent } from '../../contracts/device-gateway.js';
+import { parseNotificationIntent, parseScheduleReceiptIntent } from '../../contracts/device-gateway-parser.js';
 import { unsafeId, type ChannelAccountId } from '../../contracts/ids.js';
 import type { NormalizedImEvent } from '../../contracts/platform-events.js';
 import type { PlatformCapabilityPort } from '../../ports/external.js';
@@ -17,18 +18,38 @@ const BINDING_CODE = /^(?:绑定|bind)\s*[:：]?\s*([0-9]{6})$/iu;
 const MAX_EXTERNAL_ID_LENGTH = 512;
 const MAX_TEXT_LENGTH = 16 * 1024;
 
+/** WSS 长连接出站 Markdown 所需的最小传输接口。 */
+export interface WecomAibotMarkdownTransport {
+    /**
+     * @param chatId 企业微信单聊标识。
+     * @param content UTF-8 Markdown 正文。
+     * @returns 企业微信对本次发送的即时受理或失败分类。
+     */
+    sendMarkdown(chatId: string, content: string): Promise<ImSendAcceptance>;
+}
+
+/** 部署组合根注入的企业微信 WSS 出站依赖。 */
+export interface WecomAibotOutboundOptions {
+    /** 将持久化的受保护用户标识还原为企业微信单聊标识；实现不得记录明文。 */
+    readonly revealExternalUserId: (ciphertext: string) => Promise<string> | string;
+    /** 已订阅 WSS 连接的发送端口。 */
+    readonly transport: WecomAibotMarkdownTransport;
+}
+
 /** 创建企业微信 AI Bot 入站适配器所需的账号级配置。 */
 export interface WecomAibotInboundAdapterOptions {
     readonly channelAccountId: ChannelAccountId;
     readonly botId: string;
     /** 可替换的接收时间来源，仅在平台帧未提供 create_time 时使用。 */
     readonly now?: () => IsoDateTime;
+    /** 可选 WSS 出站依赖；缺省时 Adapter 只接收入站消息。 */
+    readonly outbound?: WecomAibotOutboundOptions;
 }
 
 /**
- * 将企业微信 AI Bot URL 回调解密后的单聊文本消息归一化为 Gateway 入站事件。
+ * 将企业微信 AI Bot WSS 回调的单聊文本消息归一化为 Gateway 入站事件。
  *
- * 此适配器只实现入站绑定链路；主动投递由后续渠道切片提供。
+ * 没有注入 WSS 出站端口时，此适配器仍可独立处理入站绑定链路。
  */
 export class WecomAibotInboundAdapter
     implements PlatformCapabilityPort, ChannelCapabilityResolver, DeliveryRendererPort, ImChannelPort
@@ -41,6 +62,8 @@ export class WecomAibotInboundAdapter
 
     private readonly now: () => IsoDateTime;
 
+    private readonly outbound: WecomAibotOutboundOptions | undefined;
+
     /**
      * @param options 渠道账号与企业微信机器人标识。
      */
@@ -48,6 +71,7 @@ export class WecomAibotInboundAdapter
         this.channelAccountId = requiredOption(options.channelAccountId, 'channel account ID') as ChannelAccountId;
         this.botId = requiredOption(options.botId, 'bot ID');
         this.now = options.now ?? (() => new Date().toISOString() as IsoDateTime);
+        this.outbound = options.outbound;
     }
 
     /** {@inheritDoc PlatformCapabilityPort.capabilities} */
@@ -55,7 +79,7 @@ export class WecomAibotInboundAdapter
         if (account.id !== this.channelAccountId || account.platform !== this.platform || account.status !== 'active') {
             return Promise.resolve(unavailableCapabilities());
         }
-        return Promise.resolve(unavailableCapabilities());
+        return Promise.resolve(this.outbound === undefined ? unavailableCapabilities() : outboundCapabilities());
     }
 
     /** {@inheritDoc ChannelCapabilityResolver.resolve} */
@@ -65,18 +89,14 @@ export class WecomAibotInboundAdapter
 
     /** {@inheritDoc PlatformCapabilityPort.renderScheduleReceipt} */
     public renderScheduleReceipt(intent: ScheduleReceiptIntent): Promise<JsonValue> {
-        void intent;
-        return Promise.reject(
-            new ImGatewayError('capability_not_supported', 'WeCom AI Bot outbound delivery is not configured'),
-        );
+        if (this.outbound === undefined) return outboundUnavailable();
+        return Promise.resolve(markdownPayload('日程已更新', intent.summary));
     }
 
     /** {@inheritDoc PlatformCapabilityPort.renderNotification} */
     public renderNotification(intent: NotificationIntent): Promise<JsonValue> {
-        void intent;
-        return Promise.reject(
-            new ImGatewayError('capability_not_supported', 'WeCom AI Bot outbound delivery is not configured'),
-        );
+        if (this.outbound === undefined) return outboundUnavailable();
+        return Promise.resolve(markdownPayload(intent.content.title, intent.content.body));
     }
 
     /** {@inheritDoc DeliveryRendererPort.render} */
@@ -86,19 +106,40 @@ export class WecomAibotInboundAdapter
         capabilities: ChannelCapabilities,
         context: { readonly actionToken?: string },
     ): Promise<JsonValue> {
-        void delivery;
-        void account;
-        void capabilities;
         void context;
-        return Promise.reject(
-            new ImGatewayError('capability_not_supported', 'WeCom AI Bot outbound delivery is not configured'),
+        if (
+            this.outbound === undefined ||
+            delivery.channelAccountId !== this.channelAccountId ||
+            account.id !== this.channelAccountId ||
+            account.platform !== this.platform ||
+            delivery.presentationType !== 'rich_text' ||
+            !capabilities.presentationTypes.includes('rich_text')
+        ) {
+            return outboundUnavailable();
+        }
+        return Promise.resolve(
+            delivery.kind === 'schedule_receipt'
+                ? markdownPayloadFromScheduleReceipt(parseScheduleReceiptIntent(delivery.semanticPayload))
+                : markdownPayloadFromNotification(parseNotificationIntent(delivery.semanticPayload)),
         );
     }
 
     /** {@inheritDoc ImChannelPort.send} */
-    public send(message: OutboundImMessage): Promise<ImSendAcceptance> {
-        void message;
-        return Promise.resolve({ accepted: false, retryable: false, errorCode: 'wecom_aibot_not_configured' });
+    public async send(message: OutboundImMessage): Promise<ImSendAcceptance> {
+        if (this.outbound === undefined) {
+            return { accepted: false, retryable: false, errorCode: 'wecom_aibot_not_configured' };
+        }
+        if (message.delivery.channelAccountId !== this.channelAccountId) {
+            return { accepted: false, retryable: false, errorCode: 'wecom_aibot_account_mismatch' };
+        }
+        const content = markdownContent(message.content);
+        if (content === undefined) {
+            return { accepted: false, retryable: false, errorCode: 'wecom_aibot_invalid_message' };
+        }
+        const externalUserId = await this.outbound.revealExternalUserId(
+            message.conversation.externalConversationIdCiphertext,
+        );
+        return this.outbound.transport.sendMarkdown(externalUserId, content);
     }
 
     /** {@inheritDoc PlatformCapabilityPort.normalizeInbound} */
@@ -182,6 +223,43 @@ function unavailableCapabilities(): ChannelCapabilities {
         deliveryReceipt: false,
         presentationTypes: [],
     };
+}
+
+function outboundCapabilities(): ChannelCapabilities {
+    return {
+        proactiveMessage: true,
+        nativeAction: false,
+        actionUi: false,
+        deliveryReceipt: false,
+        presentationTypes: ['rich_text'],
+    };
+}
+
+function outboundUnavailable(): Promise<never> {
+    return Promise.reject(
+        new ImGatewayError('capability_not_supported', 'WeCom AI Bot outbound delivery is not configured'),
+    );
+}
+
+function markdownPayload(title: string, body: string | undefined): JsonValue {
+    const content = [`**${title.trim()}**`, body?.trim() ?? ''].filter((part) => part !== '').join('\n');
+    return { type: 'wecom_aibot_markdown', content };
+}
+
+function markdownPayloadFromScheduleReceipt(intent: ScheduleReceiptIntent): JsonValue {
+    return markdownPayload('日程已更新', intent.summary);
+}
+
+function markdownPayloadFromNotification(intent: NotificationIntent): JsonValue {
+    return markdownPayload(intent.content.title, intent.content.body);
+}
+
+function markdownContent(content: JsonValue): string | undefined {
+    if (content === null || typeof content !== 'object' || Array.isArray(content)) return undefined;
+    const value = content as Record<string, unknown>;
+    return value.type === 'wecom_aibot_markdown' && typeof value.content === 'string' && value.content.trim() !== ''
+        ? value.content
+        : undefined;
 }
 
 function requiredOption(value: string, label: string): string {

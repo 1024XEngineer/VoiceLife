@@ -36,6 +36,8 @@ class TurnResult:
     input_text: str
     tts_ms: int = 0
     pcm_frames: int = 0
+    pcm_frames_sent: int = 0
+    input_endpoint_truncated: bool = False
     asr_text: str = ""
     asr_matches_input: bool = False
     reply_text: str = ""
@@ -88,6 +90,10 @@ class SerialLog:
     def lines_since(self, after: int) -> list[str]:
         with self._condition:
             return [line for _, line in self._items[after:]]
+
+    def contains_since(self, marker: str, after: int) -> bool:
+        with self._condition:
+            return any(marker in line for _, line in self._items[after:])
 
     def all_lines(self) -> list[str]:
         return self.lines_since(0)
@@ -246,12 +252,21 @@ def run_turn(
             cursor, _ = log.wait_for("SERIAL_VOICE_CAPTURE_READY", cursor, 12)
         turn_cursor = cursor
         for frame in prepared.frames:
+            # A device-side endpoint closes capture asynchronously. Stop the
+            # test source immediately so a malformed utterance is reported as
+            # input truncation rather than inflated with late PCM rejections.
+            if log.contains_since("SERIAL_VOICE_CAPTURE_CLOSED", turn_cursor):
+                result.input_endpoint_truncated = True
+                break
             device.write(packet(PCM, frame))
             device.flush()
+            result.pcm_frames_sent += 1
             time.sleep(0.02)
         device.write(packet(END))
         device.flush()
-        cursor, _ = log.wait_for("SERIAL_VOICE_TURN_END=ok", turn_cursor, 5)
+        cursor, end_result = log.wait_for("SERIAL_VOICE_TURN_END", turn_cursor, 5)
+        if "=ok" not in end_result and not result.input_endpoint_truncated:
+            raise RuntimeError(f"turn_end_failed:{end_result}")
         # Local VAD can stop capture before the explicit host end packet. The
         # packet still terminates injection, but the real state transition is
         # valid from any point after this turn began.
@@ -304,6 +319,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", default="/dev/cu.usbmodem14201")
     parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument(
+        "--reset-before-run",
+        action="store_true",
+        help="Hard-reset the test device after opening the serial port, then wait for its full ready sequence.",
+    )
     parser.add_argument("--text", action="append", help="One input utterance; repeat for a multi-turn conversation.")
     parser.add_argument("--tts-model", default="cosyvoice-v3-flash")
     parser.add_argument("--voice", default="longanhuan_v3")
@@ -329,7 +349,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--require-display-scroll",
         action="store_true",
-        help="Require at least one multi-line subtitle to enter the real two-line scrolling path.",
+        help="Require at least one subtitle wider than the safe one-line viewport to enter horizontal scrolling.",
     )
     parser.add_argument(
         "--allow-asr-mismatch",
@@ -364,7 +384,7 @@ def main() -> int:
         # Prepare every utterance before the serial endpoint is opened. This is
         # part of the harness contract, not a production latency measurement.
         prepared_turns = prepare_turns(texts, args.input_tts, args.tts_model, args.voice, args.say_voice)
-    except (RuntimeError, subprocess.SubprocessError) as error:
+    except (RuntimeError, subprocess.SubprocessError, TimeoutError) as error:
         print(f"input_preparation_failed:{error}", file=sys.stderr)
         return 2
     device = serial.Serial()
@@ -383,6 +403,12 @@ def main() -> int:
     log.start()
     results: list[TurnResult] = []
     try:
+        if args.reset_before_run:
+            # USB-Serial/JTAG maps RTS to EN. Keeping DTR deasserted avoids
+            # entering the bootloader; this is an explicit test-only reset.
+            device.rts = True
+            time.sleep(0.12)
+            device.rts = False
         log.wait_for("SERIAL_VOICE_TEST_READY=1", 0, 20)
         # READY means the serial endpoint and I2S port exist, not that the
         # asynchronous local wake-model bootstrap has returned the controller
@@ -435,15 +461,15 @@ def main() -> int:
             and "revision=" in line
             and "content_height=" in line
             and "viewport_height=" in line
-            and "overflow_height=" in line
+            and "overflow_width=" in line
             and "manual_line_breaks=" in line
             and " status=" in line
             and " content=" in line
             for line in rendered_text_lines
         )
-        and all("viewport_height=50" in line and "content_height=0" not in line for line in content_render_lines)
+        and all("viewport_height=120" in line and "content_height=0" not in line for line in content_render_lines)
     )
-    display_scroll_observed = any(re.search(r"overflow_height=[1-9][0-9]*", line) for line in content_render_lines)
+    display_scroll_observed = any(re.search(r"overflow_width=[1-9][0-9]*", line) for line in content_render_lines)
 
     def turn_phases_complete(marker: str) -> bool:
         return len(results) == len(texts) and all(
@@ -462,6 +488,7 @@ def main() -> int:
         "asr_text_matches_input": args.allow_asr_mismatch
         or len(results) == len(texts)
         and all(result.asr_matches_input for result in results),
+        "input_not_endpoint_truncated": not any(result.input_endpoint_truncated for result in results),
         "interaction_queue_clean": bool(interaction_stats)
         and all(all(stats.get(key, -1) == 0 for key in interaction_keys) for stats in interaction_stats),
         "no_interaction_rejection": not any("INTERACTION_REJECTED" in line for line in raw_lines),
