@@ -292,7 +292,9 @@ int main() {
     });
     Check(queried.status.ok() && OutputString(queried, "status") == "success", "查询应返回成功结果");
     Check(queried.text_output.has_value() && queried.text_output->find("条日程") != std::string::npos,
-          "语音查询结果必须提供数量摘要文本");
+          "语音查询结果必须提供日程数量");
+    Check(queried.text_output.has_value() && queried.text_output->find("第 1 条：") != std::string::npos,
+          "语音查询结果必须逐条播报完整日程");
 
     // schedule.query：带日期范围与关键字，触发规则未来 occurrence 与例外展开。
     const auto queried_range = server.call({
