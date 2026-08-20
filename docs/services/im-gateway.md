@@ -100,7 +100,7 @@ Tunnel 或服务器反向代理，以免 Quick Tunnel 重启后域名改变。
 生产监听路由包括：
 
 - `POST /v1/im/pairing-sessions` 与 `GET /v1/im/pairing-sessions/:pairingSessionId`
-- `POST /v1/im/schedule-receipts` 与 `POST /v1/im/notifications`
+- `POST /v1/im/schedule-receipts`、`POST /v1/im/schedule-query-results` 与 `POST /v1/im/notifications`
 - `GET /v1/devices/:deviceId/reminder-actions/stream`（SSE）
 - `POST /v1/devices/:deviceId/reminder-actions/:commandId/result`
 - `GET|POST /voicelife/reminder-actions/:token`

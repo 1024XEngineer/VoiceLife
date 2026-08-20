@@ -4,6 +4,7 @@
 
 #include "voicelife/contracts/im/notification_intent.h"
 #include "voicelife/contracts/im/reminder_action_result.h"
+#include "voicelife/contracts/im/schedule_query_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/im/im_credentials.h"
 #include "voicelife/im/im_transport.h"
@@ -50,6 +51,12 @@ class ImReportingChannel {
      * @return 提交结果分类。
      */
     ReportResult SubmitScheduleReceipt(const contracts::im::ScheduleReceiptIntent& intent);
+    /**
+     * @brief 提交完整日程查询结果到 POST /v1/im/schedule-query-results。
+     * @param intent 要提交的日程查询结果。
+     * @return 提交结果分类。
+     */
+    ReportResult SubmitScheduleQueryResult(const contracts::im::ScheduleQueryResultIntent& intent);
     /**
      * @brief 提交提醒通知意图到 POST /v1/im/notifications。
      * @param intent 要提交的提醒通知。

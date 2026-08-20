@@ -290,6 +290,17 @@ class McpServer {
     Status add_tool(std::string name, std::string description, PropertyList properties, PropertyHandler handler);
 
     /**
+     * @brief 注册可读取 request_id 的工具回调。
+     * @param name 工具名称。
+     * @param description 工具描述。
+     * @param properties 工具参数声明。
+     * @param handler 工具执行回调。
+     * @return 注册结果。
+     */
+    Status add_tool_with_context(std::string name, std::string description, PropertyList properties,
+                                 ToolHandler handler);
+
+    /**
      * @brief 返回当前已注册工具的结构化列表。
      * @return 按注册顺序排列的工具列表。
      */

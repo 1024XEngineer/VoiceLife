@@ -8,6 +8,7 @@ import {
     parseReminderActionIntent,
     parseReminderActionResult,
     parseScheduleReceiptIntent,
+    parseScheduleQueryResultIntent,
     runMockNotificationScenario,
 } from '../dist/index.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
@@ -77,6 +78,7 @@ async function runContractFixtureTests() {
     const expiredPairing = await readFixture('pairing-status-expired.json');
     const cancelledPairing = await readFixture('pairing-status-cancelled.json');
     const scheduleReceipt = await readFixture('schedule-receipt.json');
+    const scheduleQueryResult = await readFixture('schedule-query-result.json');
     const strong = await readFixture('notification-strong.json');
     const replay = await readFixture('notification-strong-replay.json');
     const weak = await readFixture('notification-weak.json');
@@ -107,6 +109,10 @@ async function runContractFixtureTests() {
     assert(
         parseScheduleReceiptIntent(scheduleReceipt).scheduleId === 'schedule-fixture',
         'ScheduleReceiptIntent fixture did not preserve its opaque string ID',
+    );
+    assert(
+        parseScheduleQueryResultIntent(scheduleQueryResult).resultCount === 2,
+        'ScheduleQueryResultIntent fixture did not preserve the complete result count',
     );
     assert(parseNotificationIntent(strong).reminderType === 'strong', 'Strong notification fixture did not parse');
     assert(

@@ -8,6 +8,7 @@
 #include "voicelife/contracts/im/pairing_session.h"
 #include "voicelife/contracts/im/reminder_action_command.h"
 #include "voicelife/contracts/im/reminder_action_result.h"
+#include "voicelife/contracts/im/schedule_query_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/contracts/json.h"
 
@@ -27,9 +28,11 @@ using voicelife::contracts::im::ParseNotificationSubmission;
 using voicelife::contracts::im::ParsePairingSessionStatus;
 using voicelife::contracts::im::ParseReminderActionCommand;
 using voicelife::contracts::im::ParseReminderActionResult;
+using voicelife::contracts::im::ParseScheduleQueryResultIntent;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
 using voicelife::contracts::im::ReminderActionCommand;
 using voicelife::contracts::im::ReminderActionResult;
+using voicelife::contracts::im::ScheduleQueryResultIntent;
 using voicelife::contracts::im::ScheduleReceiptIntent;
 using voicelife::test::Check;
 
@@ -66,6 +69,12 @@ Status ParseScheduleReceiptFixture(const char* name, ScheduleReceiptIntent& out)
         return json_status;
     }
     return ParseScheduleReceiptIntent(root, out);
+}
+
+Status ParseScheduleQueryResultFixture(const char* name, ScheduleQueryResultIntent& out) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) return json_status;
+    return ParseScheduleQueryResultIntent(root, out);
 }
 
 Status ParseActionResultFixture(const char* name, ReminderActionResult& out) {
@@ -276,6 +285,13 @@ int main() {
     Check(receipt.deviceId == "device-fixture", "日程回执 deviceId 必须被保留");
     Check(receipt.operationType == "created" && receipt.result == "succeeded", "日程回执枚举必须与 TS 语义一致");
     Check(receipt.scheduleId == "schedule-fixture" && receipt.summary == "日程已创建", "日程回执载荷必须被保留");
+
+    ScheduleQueryResultIntent query_result;
+    Check(ParseScheduleQueryResultFixture("schedule-query-result.json", query_result).ok(),
+          "完整日程查询结果 fixture 必须被 C++ 解析");
+    Check(query_result.resultCount == 2 && query_result.schedules.array.size() == 1 &&
+              query_result.futureOccurrences.array.size() == 1 && query_result.exceptions.array.size() == 1,
+          "完整日程查询结果必须保留一次性、未来周期和例外条目");
 
     // 非法日程回执 fixture：与 TS 一致的拒绝语义
     RequireScheduleReceiptRejected("schedule-receipt-invalid-version.json", "非法版本日程回执必须被 C++ 拒绝");

@@ -324,6 +324,18 @@ PropertyList PropertyList::with_values(const ToolArguments& arguments) const {
 
 Status McpServer::add_tool(std::string name, std::string description, PropertyList properties,
                            PropertyHandler handler) {
+    if (!handler) return Status::Error(ErrorCode::kInvalidArgument, "工具回调为空");
+    auto property_handler = std::move(handler);
+    const PropertyList property_schema = properties;
+    return add_tool_with_context(
+        std::move(name), std::move(description), std::move(properties),
+        [property_handler = std::move(property_handler), property_schema](const ToolCall& call) {
+            return property_handler(property_schema.with_values(call.arguments));
+        });
+}
+
+Status McpServer::add_tool_with_context(std::string name, std::string description, PropertyList properties,
+                                        ToolHandler handler) {
     // 工具定义完整性校验
     if (name.empty() || description.empty() || !handler) {
         return Status::Error(ErrorCode::kInvalidArgument, "工具定义不完整");
@@ -341,15 +353,12 @@ Status McpServer::add_tool(std::string name, std::string description, PropertyLi
         }
     }
 
-    // 保存工具定义，并在调用时注入已校验的参数
+    // 保存工具定义；带上下文回调自行读取已经校验过的 ToolCall 参数。
     const std::string registered_name = name;
     tools_.emplace(registered_name, RegisteredTool{.definition = {.name = std::move(name),
                                                                   .description = std::move(description),
                                                                   .input_schema = properties.to_schema()},
-                                                   .handler = [properties = std::move(properties),
-                                                               handler = std::move(handler)](const ToolCall& call) {
-                                                       return handler(properties.with_values(call.arguments));
-                                                   }});
+                                                   .handler = std::move(handler)});
     registration_order_.push_back(registered_name);
     return Status::Ok();
 }

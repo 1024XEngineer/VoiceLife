@@ -257,7 +257,8 @@ class Runtime final {
         ESP_LOGI(kTag, "SCHEDULE_REMINDER_READY=1");
         if (!schedule_mcp_registered_) {
             init_status_ = mcp::RegisterScheduleMcpTools(mcp_server_, schedule_service_, schedule_rule_service_,
-                                                         schedule_operation_service_, schedule_reminder_service_.get());
+                                                         schedule_operation_service_, schedule_reminder_service_.get(),
+                                                         {.runtime = &im_runtime_});
             if (!init_status_.ok()) return fail_startup(init_status_);
             schedule_mcp_registered_ = true;
             // MCP worker 只产生绑定结果；轮询与 OLED/TTS 均由各自受控任务处理。

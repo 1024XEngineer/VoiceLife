@@ -136,6 +136,24 @@ export function scheduleReceiptIntent(overrides = {}) {
     };
 }
 
+/** 构造包含一次性、未来周期和例外的完整查询结果意图。 */
+export function scheduleQueryResultIntent(overrides = {}) {
+    return {
+        schemaVersion: '1',
+        businessEventId: 'schedule-query-event-fixture',
+        correlationId: 'correlation-query-fixture',
+        userId: 'user-fixture',
+        deviceId: 'device-fixture',
+        query: { status: 'active', startDate: '2026-08-03', endDate: '2026-08-10' },
+        resultCount: 2,
+        schedules: [{ id: 1, event: '一次性日程', start_time: '2026-08-03 09:00:00' }],
+        futureOccurrences: [{ rule_id: 2, event: '周期日程', original_start_time: '2026-08-04 09:00:00' }],
+        exceptions: [{ id: 3, rule_id: 2, type: 'modify', original_start_time: '2026-08-05 09:00:00' }],
+        queriedAt: '2026-08-03T00:00:00.000Z',
+        ...overrides,
+    };
+}
+
 /** 注册渠道、绑定用户并提交一条强提醒,返回首个投递标识。 */
 export async function pendingStrongDelivery(gateway) {
     await bindFixtureUser(gateway);

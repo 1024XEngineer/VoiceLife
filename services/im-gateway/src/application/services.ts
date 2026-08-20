@@ -7,6 +7,7 @@ import {
     type ReminderActionCommand,
     type ReminderActionResult,
     type ScheduleReceiptIntent,
+    type ScheduleQueryResultIntent,
 } from '../contracts/device-gateway.js';
 import type { NormalizedDeliveryReceipt, NormalizedImEvent } from '../contracts/platform-events.js';
 import type {
@@ -147,6 +148,18 @@ export class DefaultNotificationApplication implements NotificationApplication {
             ...(intent.userId === undefined ? {} : { userId: intent.userId }),
             deviceId: intent.deviceId,
             kind: 'schedule_receipt',
+            payload: intent as unknown as JsonValue,
+        });
+    }
+
+    /** {@inheritDoc NotificationApplication.submitScheduleQueryResult} */
+    public submitScheduleQueryResult(intent: ScheduleQueryResultIntent): Promise<NotificationSubmission> {
+        return this.createDeliveries({
+            businessEventId: intent.businessEventId,
+            correlationId: intent.correlationId,
+            ...(intent.userId === undefined ? {} : { userId: intent.userId }),
+            deviceId: intent.deviceId,
+            kind: 'schedule_query_result',
             payload: intent as unknown as JsonValue,
         });
     }

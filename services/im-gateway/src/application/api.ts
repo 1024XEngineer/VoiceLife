@@ -18,6 +18,7 @@ import type {
     ReminderActionKind,
     ReminderActionResult,
     ScheduleReceiptIntent,
+    ScheduleQueryResultIntent,
 } from '../contracts/device-gateway.js';
 import type { ImPlatform, NormalizedDeliveryReceipt, NormalizedImEvent } from '../contracts/platform-events.js';
 import type {
@@ -157,6 +158,12 @@ export interface NotificationApplication {
      * @returns 投递受理结果。
      */
     submitScheduleReceipt(intent: ScheduleReceiptIntent): Promise<NotificationSubmission>;
+    /**
+     * 幂等受理设备上报的完整日程查询结果。
+     * @param intent 已校验的完整查询结果意图。
+     * @returns 投递受理结果。
+     */
+    submitScheduleQueryResult(intent: ScheduleQueryResultIntent): Promise<NotificationSubmission>;
     /**
      * 幂等受理设备发起的提醒通知。
      * @param intent 已校验的通知意图。

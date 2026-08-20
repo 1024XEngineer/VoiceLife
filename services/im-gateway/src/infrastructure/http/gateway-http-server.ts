@@ -184,6 +184,19 @@ async function routeRequest(
         notifyDeliveryWorker(submission.deliveries, options);
         return;
     }
+    if (url.pathname === '/v1/im/schedule-query-results' && method === 'POST') {
+        context.route = 'device.schedule-query-result.create';
+        const body = await readJson(request);
+        const submission = await options.runtime.deviceApi.postScheduleQueryResult({
+            authorization: authorization(request),
+            idempotencyKey: requiredHeader(request, 'idempotency-key'),
+            body,
+        });
+        context.correlationId = correlationId(body);
+        writeJson(response, 202, submission);
+        notifyDeliveryWorker(submission.deliveries, options);
+        return;
+    }
     if (url.pathname === '/v1/im/notifications' && method === 'POST') {
         context.route = 'device.notification.create';
         const body = await readJson(request);

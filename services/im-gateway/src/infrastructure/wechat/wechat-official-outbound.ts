@@ -1,5 +1,13 @@
-import type { NotificationIntent, ScheduleReceiptIntent } from '../../contracts/device-gateway.js';
-import { parseNotificationIntent, parseScheduleReceiptIntent } from '../../contracts/device-gateway-parser.js';
+import type {
+    NotificationIntent,
+    ScheduleReceiptIntent,
+    ScheduleQueryResultIntent,
+} from '../../contracts/device-gateway.js';
+import {
+    parseNotificationIntent,
+    parseScheduleReceiptIntent,
+    parseScheduleQueryResultIntent,
+} from '../../contracts/device-gateway-parser.js';
 import type { ChannelAccountId } from '../../contracts/ids.js';
 import type { ChannelAccount, ChannelCapabilities, Delivery } from '../../domain/models.js';
 import type { ImSendAcceptance, OutboundImMessage } from '../../ports/external.js';
@@ -90,6 +98,27 @@ export class WechatOfficialOutbound {
     }
 
     /**
+     * 将查询范围、结果条目和例外完整保留在 IM 消息正文中。
+     * @param intent 完整日程查询结果意图。
+     * @returns 微信模板消息载荷。
+     */
+    public renderScheduleQueryResult(intent: ScheduleQueryResultIntent): JsonValue {
+        const body = JSON.stringify({
+            query: intent.query,
+            resultCount: intent.resultCount,
+            schedules: intent.schedules,
+            futureOccurrences: intent.futureOccurrences,
+            exceptions: intent.exceptions,
+            queriedAt: intent.queriedAt,
+        });
+        return this.templatePayload({
+            title: `日程查询结果（${intent.resultCount} 条）`,
+            body,
+            time: formatTemplateTime(intent.queriedAt, this.options.displayTimeZone),
+        });
+    }
+
+    /**
      * 渲染提醒模板与可选 H5 动作地址。
      * @param intent 提醒通知意图。
      * @param actionToken 服务端签发的可选动作令牌。
@@ -134,9 +163,13 @@ export class WechatOfficialOutbound {
         ) {
             throw new ImGatewayError('capability_not_supported', 'WeChat delivery target is invalid');
         }
-        return delivery.kind === 'schedule_receipt'
-            ? this.renderScheduleReceipt(parseScheduleReceiptIntent(delivery.semanticPayload))
-            : this.renderNotification(parseNotificationIntent(delivery.semanticPayload), actionToken);
+        if (delivery.kind === 'schedule_receipt') {
+            return this.renderScheduleReceipt(parseScheduleReceiptIntent(delivery.semanticPayload));
+        }
+        if (delivery.kind === 'schedule_query_result') {
+            return this.renderScheduleQueryResult(parseScheduleQueryResultIntent(delivery.semanticPayload));
+        }
+        return this.renderNotification(parseNotificationIntent(delivery.semanticPayload), actionToken);
     }
 
     /**

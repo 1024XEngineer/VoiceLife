@@ -9,6 +9,7 @@ namespace voicelife::im {
 namespace {
 
 constexpr const char* kScheduleReceiptPath = "/v1/im/schedule-receipts";
+constexpr const char* kScheduleQueryResultPath = "/v1/im/schedule-query-results";
 constexpr const char* kNotificationPath = "/v1/im/notifications";
 constexpr const char* kReminderActionResultPrefix = "/v1/devices/";
 constexpr const char* kReminderActionResultSuffix = "/reminder-actions/";
@@ -19,6 +20,18 @@ bool ValidatesAsScheduleReceipt(const std::string& body) {
     voicelife::JsonValue root;
     contracts::im::ScheduleReceiptIntent validated;
     return voicelife::ParseJson(body, root).ok() && contracts::im::ParseScheduleReceiptIntent(root, validated).ok();
+}
+
+bool ValidatesAsScheduleQueryResult(const std::string& body) {
+    voicelife::JsonValue root;
+    contracts::im::ScheduleQueryResultIntent validated;
+    voicelife::JsonParseOptions options;
+    options.max_bytes = 128 * 1024;
+    options.max_nodes = 4096;
+    options.max_array_items = 128;
+    options.max_allocator_bytes = 512 * 1024;
+    return voicelife::ParseJson(body, root, options).ok() &&
+           contracts::im::ParseScheduleQueryResultIntent(root, validated).ok();
 }
 
 bool ValidatesAsNotification(const std::string& body) {
@@ -44,6 +57,12 @@ ReportResult ImReportingChannel::SubmitScheduleReceipt(const contracts::im::Sche
         return {ReportStatus::kRejected, "发送前契约校验失败", ""};
     }
     return Submit(kScheduleReceiptPath, intent.eventId, intent.deviceId, body);
+}
+
+ReportResult ImReportingChannel::SubmitScheduleQueryResult(const contracts::im::ScheduleQueryResultIntent& intent) {
+    const std::string body = SerializeScheduleQueryResultIntent(intent);
+    if (!ValidatesAsScheduleQueryResult(body)) return {ReportStatus::kRejected, "发送前契约校验失败", ""};
+    return Submit(kScheduleQueryResultPath, intent.businessEventId, intent.deviceId, body);
 }
 
 ReportResult ImReportingChannel::SubmitNotification(const contracts::im::NotificationIntent& intent) {

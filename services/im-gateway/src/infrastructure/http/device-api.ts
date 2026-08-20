@@ -11,6 +11,7 @@ import {
     parseNotificationIntent,
     parseReminderActionResult,
     parseScheduleReceiptIntent,
+    parseScheduleQueryResultIntent,
 } from '../../contracts/device-gateway-parser.js';
 import type { ActionApplication, NotificationApplication, PairingApplication } from '../../application/api.js';
 import type { ImAction, PairingSession } from '../../domain/models.js';
@@ -22,6 +23,7 @@ export const DEVICE_API_ROUTES = {
     pairingSessions: '/v1/im/pairing-sessions',
     pairingSession: '/v1/im/pairing-sessions/:pairingSessionId',
     scheduleReceipts: '/v1/im/schedule-receipts',
+    scheduleQueryResults: '/v1/im/schedule-query-results',
     notifications: '/v1/im/notifications',
     reminderActionResults: '/v1/devices/:deviceId/reminder-actions/:commandId/result',
     reminderActionStream: '/v1/devices/:deviceId/reminder-actions/stream',
@@ -32,6 +34,11 @@ export const DEVICE_API_ENDPOINTS = {
     scheduleReceipt: {
         method: 'POST',
         path: DEVICE_API_ROUTES.scheduleReceipts,
+        transport: 'https',
+    },
+    scheduleQueryResult: {
+        method: 'POST',
+        path: DEVICE_API_ROUTES.scheduleQueryResults,
         transport: 'https',
     },
     notification: {
@@ -135,6 +142,18 @@ export class DeviceIntentController {
         await this.authenticateDevice(input.authorization, body.deviceId, body.userId);
         this.assertIdempotencyKey(input.idempotencyKey, body.eventId);
         return this.notifications.submitScheduleReceipt(body);
+    }
+
+    /**
+     * 认证并受理完整日程查询结果。
+     * @param input 带授权和幂等键的请求。
+     * @returns 投递受理结果。
+     */
+    public async postScheduleQueryResult(input: AuthenticatedIntentRequest): Promise<NotificationSubmission> {
+        const body = parseScheduleQueryResultIntent(input.body);
+        await this.authenticateDevice(input.authorization, body.deviceId, body.userId);
+        this.assertIdempotencyKey(input.idempotencyKey, body.businessEventId);
+        return this.notifications.submitScheduleQueryResult(body);
     }
 
     /**
