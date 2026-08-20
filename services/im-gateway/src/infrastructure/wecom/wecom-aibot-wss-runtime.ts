@@ -272,7 +272,11 @@ export class WecomAibotWssRuntime {
         if (this.heartbeat !== undefined) return;
         this.heartbeat = setInterval(() => {
             if (socket !== this.socket || this.closed) return;
-            socket.send(JSON.stringify({ cmd: 'ping', headers: { req_id: this.nextRequestId() } }));
+            try {
+                socket.send(JSON.stringify({ cmd: 'ping', headers: { req_id: this.nextRequestId() } }));
+            } catch {
+                this.disconnected(socket);
+            }
         }, this.heartbeatMilliseconds);
     }
 

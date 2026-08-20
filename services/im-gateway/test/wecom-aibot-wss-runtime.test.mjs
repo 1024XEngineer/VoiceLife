@@ -118,6 +118,41 @@ test('WeCom AI Bot WSS runtime sends heartbeats, reconnects after a close, and s
     assert.equal(created, 2);
 });
 
+test('WeCom AI Bot WSS runtime reconnects when a heartbeat send fails', async (context) => {
+    const sockets = [new FakeWebSocket(), new FakeWebSocket()];
+    const originalSend = sockets[0].send.bind(sockets[0]);
+    let throwOnHeartbeat = false;
+    sockets[0].send = (data) => {
+        const frame = JSON.parse(data);
+        if (throwOnHeartbeat && frame.cmd === 'ping') throw new Error('socket is closing');
+        originalSend(data);
+    };
+    let created = 0;
+    const runtime = new WecomAibotWssRuntime({
+        adapter: new WecomAibotInboundAdapter({ channelAccountId: 'channel-wecom', botId: 'bot-fixture' }),
+        botId: 'bot-fixture',
+        secret: 'secret-fixture',
+        postEvent: async () => {},
+        createWebSocket: () => sockets[created++],
+        nextRequestId: () => 'request-fixture',
+        heartbeatMilliseconds: 1,
+        reconnectDelayMilliseconds: 1,
+    });
+    context.after(() => runtime.close());
+
+    runtime.start();
+    sockets[0].emit('open', {});
+    sockets[0].emit('message', {
+        data: JSON.stringify({ headers: { req_id: 'request-fixture' }, errcode: 0 }),
+    });
+    throwOnHeartbeat = true;
+
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 5));
+
+    assert.equal(created, 2);
+    assert.equal(runtime.healthy, false);
+});
+
 test('WeCom AI Bot WSS runtime reconnects after the platform rejects its subscription', async (context) => {
     const sockets = [new FakeWebSocket(), new FakeWebSocket()];
     let created = 0;
