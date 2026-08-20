@@ -414,8 +414,8 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
                 if (mcp_stop_ || mcp_queue_.size() >= kMcpQueueCapacity) {
                     rejected = true;
                 } else {
-                    mcp_queue_.push_back(
-                        McpRequest{.payload = inbound.text, .session_id = session_id, .generation = generation_.load()});
+                    mcp_queue_.push_back(McpRequest{
+                        .payload = inbound.text, .session_id = session_id, .generation = generation_.load()});
                 }
             }
             if (rejected) {
