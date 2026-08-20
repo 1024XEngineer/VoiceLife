@@ -157,7 +157,7 @@ test('query template payload passes send validation with its own field mapping',
         },
         account,
         await adapter.capabilities(account),
-        {},
+        { scheduleQueryToken: 'opaque-query-token' },
     );
 
     assert.deepEqual(await adapter.sendToUser('fixture-open-id', content), {
@@ -167,6 +167,7 @@ test('query template payload passes send validation with its own field mapping',
     const body = JSON.parse(requests[1].init.body);
     assert.equal(body.template_id, 'fixture-query-template');
     assert.deepEqual(Object.keys(body.data).sort(), ['first', 'keyword1', 'keyword2']);
+    assert.equal(body.url, 'https://gateway.example/voicelife/reminder-actions/query-result/opaque-query-token');
 });
 
 test('renders template times in the configured IANA time zone', async () => {

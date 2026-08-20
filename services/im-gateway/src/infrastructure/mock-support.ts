@@ -199,14 +199,17 @@ export class MockDeliveryRenderer implements DeliveryRendererPort {
         delivery: Delivery,
         _account: ChannelAccount,
         _capabilities: ChannelCapabilities,
-        context: { readonly actionToken?: string },
+        context: { readonly actionToken?: string; readonly scheduleQueryToken?: string },
     ): Promise<JsonValue> {
-        if (context.actionToken === undefined) {
+        if (context.actionToken === undefined && context.scheduleQueryToken === undefined) {
             return Promise.resolve(delivery.semanticPayload);
         }
         return Promise.resolve({
             semanticPayload: delivery.semanticPayload,
-            actionUi: { token: context.actionToken },
+            ...(context.actionToken === undefined ? {} : { actionUi: { token: context.actionToken } }),
+            ...(context.scheduleQueryToken === undefined
+                ? {}
+                : { scheduleQueryPage: { token: context.scheduleQueryToken } }),
         });
     }
 }

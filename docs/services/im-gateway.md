@@ -104,7 +104,12 @@ Tunnel 或服务器反向代理，以免 Quick Tunnel 重启后域名改变。
 - `GET /v1/devices/:deviceId/reminder-actions/stream`（SSE）
 - `POST /v1/devices/:deviceId/reminder-actions/:commandId/result`
 - `GET|POST /voicelife/reminder-actions/:token`
+- `GET /voicelife/reminder-actions/query-result/:token`
 - `GET|POST /wechat` 与 `GET /healthz`
+
+日程查询模板消息会附带一条 7 天有效的只读 H5 链接，路径为
+`WECHAT_ACTION_UI_BASE_URL/query-result/<token>`。页面仅从已持久化的查询结果读取数据，不包含 JSON 载荷、表单或写入接口，
+并复用 `WECHAT_ACTION_UI_BASE_URL`，无需新增环境变量。
 
 通知受理与 Delivery Outbox 事件在同一 PostgreSQL 事务内提交；常驻 worker 领取事件后派发，并在启动时恢复
 `pending`、`retryable_failed` 与租约已过期的 `sending` Delivery。临时失败按 `availableAt` 延迟重试，HTTP

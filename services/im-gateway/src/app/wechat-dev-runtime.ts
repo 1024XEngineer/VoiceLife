@@ -150,6 +150,7 @@ export async function startConfiguredWechatDevHarness(
             expectedDeviceId: deviceId,
             webhookApi: requiredWechatApi(runtime.wechatApi),
             actionUiPageApi: runtime.actionUiPageApi,
+            scheduleQueryPageApi: runtime.scheduleQueryPageApi,
             sendTestNotification: async () => {
                 const now = clock.now();
                 const unique = randomUUID();

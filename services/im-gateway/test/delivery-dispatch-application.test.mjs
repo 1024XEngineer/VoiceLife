@@ -9,6 +9,7 @@ import {
     buildGateway,
     expectGatewayError,
     pendingStrongDelivery,
+    scheduleQueryResultIntent,
     strongIntent,
     weakIntent,
 } from './helpers.mjs';
@@ -342,6 +343,26 @@ test('dispatch without an action window renders without an action token', async 
 
     assert.equal(rendered.length, 1);
     assert.equal(rendered[0].actionToken, undefined);
+});
+
+test('dispatch of a schedule query result passes a read-only page token to the renderer', async () => {
+    const clock = new FixedClock();
+    const rendered = [];
+    const gateway = createMockImGateway('device-fixture', clock, {
+        deliveryRenderer: {
+            render: async (delivery, _account, _capabilities, context) => {
+                rendered.push({ deliveryId: delivery.id, scheduleQueryToken: context.scheduleQueryToken });
+                return { ok: true };
+            },
+        },
+    });
+    await bindFixtureUser(gateway);
+    const submission = await gateway.application.notifications.submitScheduleQueryResult(scheduleQueryResultIntent());
+
+    await gateway.application.deliveryDispatch.dispatch(submission.deliveries[0].deliveryId);
+
+    assert.equal(rendered.length, 1);
+    assert.equal(typeof rendered[0].scheduleQueryToken, 'string');
 });
 
 test('marking a retryable failure as dead letter transitions the delivery', async () => {

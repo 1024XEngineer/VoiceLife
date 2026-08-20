@@ -14,6 +14,7 @@ export * from './domain/models.js';
 export * from './infrastructure/delivery-outbox-worker.js';
 export * from './infrastructure/channel-adapter-registry.js';
 export * from './infrastructure/http/action-ui-api.js';
+export * from './infrastructure/http/schedule-query-page-api.js';
 export * from './infrastructure/http/device-api.js';
 export * from './infrastructure/http/gateway-http-server.js';
 export * from './infrastructure/http/gateway-sse-response.js';

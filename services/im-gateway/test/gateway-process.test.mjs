@@ -110,6 +110,13 @@ function fakeRuntime(events) {
                 body: '<p>submitted</p>',
             }),
         },
+        scheduleQueryPageApi: {
+            get: async (token) => ({
+                status: 200,
+                headers: { 'content-type': 'text/html; charset=utf-8' },
+                body: `<h1>日程 ${token}</h1>`,
+            }),
+        },
         wechatApi: {
             verify: (input) => input.echostr,
             post: async () => ({ body: 'success', contentType: 'text/plain; charset=utf-8' }),
@@ -167,6 +174,23 @@ test('production server accepts a complete schedule query result through the dev
         },
         { runtime },
     );
+});
+
+test('production server serves schedule query pages as read-only routes', async () => {
+    await withServer(async ({ origin, logs }) => {
+        const page = await globalThis.fetch(`${origin}/voicelife/reminder-actions/query-result/token%2Evalue`);
+        assert.equal(page.status, 200);
+        assert.equal(page.headers.get('content-type'), 'text/html; charset=utf-8');
+        assert.equal(await page.text(), '<h1>日程 token.value</h1>');
+        assert.equal(logs.at(-1).route, 'schedule-query-page');
+
+        const write = await globalThis.fetch(`${origin}/voicelife/reminder-actions/query-result/token%2Evalue`, {
+            method: 'POST',
+        });
+        assert.equal(write.status, 405);
+        assert.equal(write.headers.get('allow'), 'GET');
+        assert.equal(logs.at(-1).route, 'schedule-query-page');
+    });
 });
 
 async function withServer(work, options = {}) {

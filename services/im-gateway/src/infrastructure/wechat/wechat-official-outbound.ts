@@ -109,11 +109,12 @@ export class WechatOfficialOutbound {
     }
 
     /**
-     * 将查询范围、结果条目和例外完整保留在 IM 消息正文中。
+     * 渲染摘要正文，并在可用时附加完整结果的只读 H5 链接。
      * @param intent 完整日程查询结果意图。
+     * @param scheduleQueryToken 服务端签发的可选只读查询令牌。
      * @returns 微信模板消息载荷。
      */
-    public renderScheduleQueryResult(intent: ScheduleQueryResultIntent): JsonValue {
+    public renderScheduleQueryResult(intent: ScheduleQueryResultIntent, scheduleQueryToken?: string): JsonValue {
         const body = formatScheduleQueryBody(intent, this.options.displayTimeZone);
         return this.templatePayload(
             {
@@ -125,6 +126,7 @@ export class WechatOfficialOutbound {
                 templateId: this.options.queryTemplateId,
                 templateFields: this.options.queryTemplateFields,
             },
+            scheduleQueryToken === undefined ? undefined : this.scheduleQueryPageUrl(scheduleQueryToken),
         );
     }
 
@@ -145,7 +147,7 @@ export class WechatOfficialOutbound {
                 time: formatTemplateTime(intent.triggerAt, this.options.displayTimeZone),
             },
             this.options,
-            actionToken,
+            actionToken === undefined ? undefined : this.actionUiUrl(actionToken),
         );
     }
 
@@ -156,6 +158,7 @@ export class WechatOfficialOutbound {
      * @param account 目标渠道账号。
      * @param capabilities 已解析的渠道能力。
      * @param actionToken 服务端签发的可选动作令牌。
+     * @param scheduleQueryToken 服务端签发的可选查询结果令牌。
      * @returns 微信模板消息载荷。
      */
     public render(
@@ -164,6 +167,7 @@ export class WechatOfficialOutbound {
         account: ChannelAccount,
         capabilities: ChannelCapabilities,
         actionToken?: string,
+        scheduleQueryToken?: string,
     ): JsonValue {
         if (
             delivery.channelAccountId !== channelAccountId ||
@@ -178,7 +182,10 @@ export class WechatOfficialOutbound {
             return this.renderScheduleReceipt(parseScheduleReceiptIntent(delivery.semanticPayload));
         }
         if (delivery.kind === 'schedule_query_result') {
-            return this.renderScheduleQueryResult(parseScheduleQueryResultIntent(delivery.semanticPayload));
+            return this.renderScheduleQueryResult(
+                parseScheduleQueryResultIntent(delivery.semanticPayload),
+                scheduleQueryToken,
+            );
         }
         return this.renderNotification(parseNotificationIntent(delivery.semanticPayload), actionToken);
     }
@@ -255,7 +262,7 @@ export class WechatOfficialOutbound {
     private templatePayload(
         content: { readonly title: string; readonly body: string; readonly time: string },
         template: WechatTemplateConfig,
-        actionToken?: string,
+        url?: string,
     ): WechatTemplatePayload {
         const fields = template.templateFields;
         return {
@@ -266,10 +273,16 @@ export class WechatOfficialOutbound {
                 [fields.body]: { value: content.body },
                 [fields.time]: { value: content.time },
             },
-            ...(actionToken === undefined
-                ? {}
-                : { url: `${this.options.actionUiBaseUrl}/${encodeURIComponent(actionToken)}` }),
+            ...(url === undefined ? {} : { url }),
         };
+    }
+
+    private actionUiUrl(token: string): string {
+        return `${this.options.actionUiBaseUrl}/${encodeURIComponent(token)}`;
+    }
+
+    private scheduleQueryPageUrl(token: string): string {
+        return `${this.options.actionUiBaseUrl}/query-result/${encodeURIComponent(token)}`;
     }
 
     private async accessToken(forceRefresh: boolean): Promise<string> {
