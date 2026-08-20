@@ -2,6 +2,7 @@
 
 #include "support/test_support.h"
 #include "voicelife/display_sparkbot/sparkbot_lvgl_display.h"
+#include "voicelife/display_sparkbot/sparkbot_screen_saver.h"
 #include "voicelife/voice/display_snapshot.h"
 
 using voicelife::ErrorCode;
@@ -10,8 +11,12 @@ using voicelife::voice::DisplaySnapshot;
 using voicelife::voice::VoiceMood;
 
 int main() {
+    using voicelife::display_sparkbot::DefaultSparkBotDisplayLayout;
     using voicelife::display_sparkbot::EmotionKeyForMood;
+    using voicelife::display_sparkbot::IsIdleScreenSaverEligible;
     using voicelife::display_sparkbot::IsValidLogicalSpiHost;
+    using voicelife::display_sparkbot::ShouldEnterIdleScreenSaver;
+    using voicelife::display_sparkbot::ShouldExitIdleScreenSaver;
     using voicelife::display_sparkbot::SparkBotLvglRenderer;
 
     // 官方 emotion key 映射：全部落在官方/受控资源 key 集合内。
@@ -49,6 +54,34 @@ int main() {
     // 内完成，禁止跨 SDK 版本硬编码枚举整数值，防裸值回归）。
     Check(IsValidLogicalSpiHost(1) && IsValidLogicalSpiHost(2) && IsValidLogicalSpiHost(3), "逻辑 SPI 1/2/3 必须合法");
     Check(!IsValidLogicalSpiHost(0) && !IsValidLogicalSpiHost(4), "越界 SPI 序号必须拒绝");
+
+    // 半高布局契约：当前从上半区观察，但不贴左右边缘；三个产品槽位
+    // 必须在半高视口内，正文明确采用单行横向循环滚动。
+    const auto layout = DefaultSparkBotDisplayLayout();
+    Check(layout.viewport_y == 0 && layout.viewport_height == 120, "当前观察布局必须占用可调的上半屏视口");
+    Check(layout.horizontal_inset >= 8 && 240 - layout.horizontal_inset * 2 < 240, "产品视口必须保留左右安全边距");
+    Check(layout.status_top + layout.status_height <= layout.emoji_top, "状态栏和表情舞台不能重叠");
+    Check(layout.emoji_top + layout.emoji_size <= layout.content_top, "表情舞台和正文栏不能重叠");
+    Check(layout.content_top + layout.content_height <= layout.viewport_height, "正文栏必须落在半高视口内");
+    Check(layout.icon_font_size < 20 && layout.emoji_size >= 64 && layout.emoji_size < 96,
+          "顶部图标应缩小，中央表情舞台应放大到可辨识尺寸");
+    Check(layout.content_scroll_mode == decltype(layout.content_scroll_mode)::kHorizontalCircular,
+          "正文栏必须使用横向循环滚动");
+    Check(layout.screen_saver_top + layout.screen_saver_size <= layout.viewport_height,
+          "待机屏保眼睛画布必须落在半高视口内");
+    Check(layout.screen_saver_size >= 120 && layout.screen_saver_top + layout.screen_saver_size <= 120 &&
+              layout.screen_saver_idle_timeout_ms == 30000,
+          "待机屏保必须放大到满半高视口并默认 30 秒进入");
+
+    DisplaySnapshot standby;
+    standby.phase = voicelife::voice::VoiceInteractionState::kStandby;
+    standby.role = voicelife::voice::VoiceContentRole::kNone;
+    Check(IsIdleScreenSaverEligible(standby), "纯待机快照必须允许进入屏保");
+    Check(ShouldEnterIdleScreenSaver(standby, 30000, 30000), "达到空闲阈值必须进入屏保");
+    Check(!ShouldEnterIdleScreenSaver(standby, 29999, 30000), "未达到空闲阈值不得进入屏保");
+    standby.content_text = "日程提醒";
+    standby.role = voicelife::voice::VoiceContentRole::kSystem;
+    Check(!IsIdleScreenSaverEligible(standby) && ShouldExitIdleScreenSaver(standby), "系统提醒必须抑制并退出屏保");
 
     // host 构建不触碰 LVGL：SetupUI/Render 必须返回 kUnavailable。
     SparkBotLvglRenderer renderer;

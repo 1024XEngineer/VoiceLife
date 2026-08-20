@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ASSET_DIR = ROOT / "components" / "voicelife_display_esp" / "assets" / "esp-sparkbot"
 MANIFEST = ASSET_DIR / "manifest.json"
 GIF_DIR = ASSET_DIR / "mascot" / "gifs"
-COMMON_FONT = ASSET_DIR / "fonts" / "font_noto_sans_common_16_4.bin"
+COMMON_FONT = ASSET_DIR / "fonts" / "font_noto_sans_common_14_1.bin"
 
 ALLOWED_ASSET_KEYS = {
     "asset_id",
@@ -108,20 +108,20 @@ class SparkBotAssetManifestTest(unittest.TestCase):
         self.assertIn("license", self.manifest["source"])
         self.assertEqual(self.manifest["source"]["license"], "MIT")
         self.assertTrue(self.manifest["source"]["upstream_commit"])
-        self.assertEqual(len(self.assets), 10)
-        self.assertEqual(self.manifest["budget"]["gif_bytes"], 142683)
-        self.assertEqual(self.manifest["budget"]["common_text_font_bytes"], 885948)
+        self.assertEqual(len(self.assets), 11)
+        self.assertEqual(self.manifest["budget"]["gif_bytes"], 144722)
+        self.assertEqual(self.manifest["budget"]["common_text_font_bytes"], 269580)
         self.assertNotIn("wake_model", self.manifest)
         self.assertNotIn("wakenet_packed_bytes", self.manifest["budget"])
-        self.assertEqual(self.manifest["budget"]["total_bytes"], 1028631)
+        self.assertEqual(self.manifest["budget"]["total_bytes"], 414302)
 
-    def test_common_font_matches_official_16px_spec(self) -> None:
+    def test_common_font_matches_official_14px_spec(self) -> None:
         font = self.manifest["text_font"]
         self.assertEqual(font["file"], COMMON_FONT.name)
-        self.assertEqual(font["size_px"], 16)
-        self.assertEqual(font["bpp"], 4)
-        self.assertEqual(font["line_height"], 25)
-        self.assertEqual(font["base_line"], 9)
+        self.assertEqual(font["size_px"], 14)
+        self.assertEqual(font["bpp"], 1)
+        self.assertEqual(font["line_height"], 16)
+        self.assertEqual(font["base_line"], 2)
         data = COMMON_FONT.read_bytes()
         self.assertEqual(len(data), font["size_bytes"])
         self.assertEqual(hashlib.sha256(data).hexdigest(), font["sha256"])

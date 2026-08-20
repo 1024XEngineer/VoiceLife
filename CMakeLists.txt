@@ -19,7 +19,7 @@ project(voicelife)
 # 模型由 managed component 生成到独立的 model 分区，PCB Profile 不生成、也不依赖它。
 if(CONFIG_VOICELIFE_BOARD_ESP_SPARKBOT)
     set(SPARKBOT_GIF_DIR "${CMAKE_SOURCE_DIR}/components/voicelife_display_esp/assets/esp-sparkbot/mascot/gifs")
-    set(SPARKBOT_COMMON_FONT "${CMAKE_SOURCE_DIR}/components/voicelife_display_esp/assets/esp-sparkbot/fonts/font_noto_sans_common_16_4.bin")
+    set(SPARKBOT_COMMON_FONT "${CMAKE_SOURCE_DIR}/components/voicelife_display_esp/assets/esp-sparkbot/fonts/font_noto_sans_common_14_1.bin")
     set(SPARKBOT_ASSETS_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/build_sparkbot_assets.py")
     file(GLOB SPARKBOT_GIF_FILES "${SPARKBOT_GIF_DIR}/*.gif")
     add_custom_command(

@@ -96,7 +96,7 @@ python3 scripts/voice_linx_serial_multiturn_test.py \
 - `AUDIO_STATS` 中输入/输出帧存在，`in_drop`、`out_reject`、`short_write`、`in_i2s_err`、`out_i2s_err` 均为零；
 - 没有 `SERIAL_VOICE_PCM=reject`、`provider_error` 或 `INTERACTION_REJECTED`，交互队列三类丢弃均为零；
 - 状态机和显示都覆盖 phase `3/4/5/6`；
-- 每个 `SPARKBOT_TEXT_RENDER` 都含 generation、revision、可视区和原始文本，内容可视区固定为 50 px 两行；`--require-display-scroll` 还要求至少一次真实纵向滚动。
+- 每个 `SPARKBOT_TEXT_RENDER` 都含 generation、revision、可视区和原始文本；当前半高布局固定记录 `viewport_height=120`、单行 `content_height=18` 和 `manual_line_breaks=0`，`--require-display-scroll` 还要求至少一次 `overflow_width>0` 的真实横向滚动。
 
 测试日志中的普通应用文本、状态和计数可以保留明文以支持诊断；其中出现的凭据、个人数据或原始私密音频必须删除后才能公开。
 

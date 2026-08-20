@@ -10,7 +10,7 @@
 
 - 语义门禁：信息完整时工具参数准确；信息不足或歧义时必须澄清，不得猜测并写入日程；用户补充后只能产生一次正确写入。
 - 状态门禁：普通回合必须按 `capture_started -> speech_started -> capture_stopped -> stt_text_received -> tts_started -> tts_first_audio -> tts_stopped` 运行，且每回合覆盖 phase `3/4/5/6`。
-- 显示门禁：状态文案与 phase 一致；内容区只占一行或两行，长内容按完整断句滚动，不覆盖表情；每次滚动快照包含 generation、revision、viewport 和 overflow。
+- 显示门禁：状态文案与 phase 一致；内容区只占一行，长内容在左右安全边距内横向循环滚动，不覆盖表情；每次滚动快照包含 generation、revision、viewport 和 `overflow_width`。
 - 音频门禁：`in_drop`、`in_pool_fail`、`out_reject`、`short_write`、`in_i2s_err`、`out_i2s_err`、串口 PCM reject 和交互队列丢弃均为零。设备提前端点时，夹具必须停止发送并报告 `input_endpoint_truncated`，不能用拒绝噪声掩盖问题。
 - 定时门禁：注册、到点、播报、完成/生成下一实例和取消均有可关联的 `schedule_id -> task_id` 证据；提醒播报必须真实进入 TTS 播放，屏幕显示“提醒/说话中”，播放完成后恢复可用待机，不得静默丢失或重复触发。
 
@@ -61,7 +61,7 @@
 | T7 | 网络短暂断开后到点 | 提醒失败必须有失败证据和可恢复策略，不能宣称已播报；恢复后不重复触发已完成任务 |
 | T8 | 重启后恢复未来日程 | `Start()` 重新登记 task；到点仍只播报一次；已取消/已完成的不恢复 |
 
-提醒回合还要复用普通语音门禁：状态显示固定两行以内、长标题滚动、音频无 reject/short write，播报结束恢复可唤醒或可接受下一轮的状态。若 `VoiceSession::Speak` 只接受 `kReady`，T5/T6 必须先验证并记录这是架构阻塞，而不是把失败归咎于网络。
+提醒回合还要复用普通语音门禁：状态显示固定一行、长标题横向滚动、音频无 reject/short write，播报结束恢复可唤醒或可接受下一轮的状态。若 `VoiceSession::Speak` 只接受 `kReady`，T5/T6 必须先验证并记录这是架构阻塞，而不是把失败归咎于网络。
 
 ## 4. 执行顺序与证据
 

@@ -5,6 +5,7 @@
 
 #ifdef ESP_PLATFORM
 #include <driver/gpio.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -236,7 +237,10 @@ voicelife::Status SparkBotAssembly::StartBoardInput(BoardInputSink sink) {
         return Status::Error(ErrorCode::kUnavailable, "初始化 SparkBot BOOT GPIO 失败");
     }
     boot_button_ = {.gpio = 0};
-    if (xTaskCreate(&SparkBotAssembly::BoardInputTaskEntry, "sparkbot_button", 3072, this, 5, nullptr) != pdPASS) {
+    // 音频与 MultiNet 启动后内部 RAM 的最大连续块可能不足 12KB；按钮任务
+    // 不执行 DMA/ISR，栈放入 PSRAM，TCB 仍由 IDF 保证位于内部 RAM。
+    if (xTaskCreateWithCaps(&SparkBotAssembly::BoardInputTaskEntry, "sparkbot_button", 3072, this, 5, nullptr,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         return Status::Error(ErrorCode::kInternal, "创建 SparkBot BOOT 按键任务失败");
     }
 #endif
