@@ -7,7 +7,9 @@ import {
     type ReminderActionCommand,
     type ReminderActionResult,
     type ScheduleReceiptIntent,
+    type ScheduleQueryResultIntent,
 } from '../contracts/device-gateway.js';
+import { parseScheduleQueryResultIntent } from '../contracts/device-gateway-parser.js';
 import type { NormalizedDeliveryReceipt, NormalizedImEvent } from '../contracts/platform-events.js';
 import type {
     ActionStatus,
@@ -45,6 +47,7 @@ import type {
     PairingApplication,
     PlatformEventApplication,
     ReceiptApplication,
+    ScheduleQueryPageApplication,
     TriggerPreparedActionCommand,
 } from './api.js';
 
@@ -56,6 +59,8 @@ export { DefaultPairingApplication } from './pairing-application.js';
 const DEFAULT_ACTION_WINDOW_MINUTES = 10;
 const MAX_AUTOMATIC_DELIVERY_ATTEMPTS = 5;
 const MAX_DELIVERY_RETRY_DELAY_MINUTES = 30;
+const SCHEDULE_QUERY_PAGE_TOKEN_MINUTES = 7 * 24 * 60;
+const SCHEDULE_QUERY_PAGE_TOKEN_ACTION_ID = 'schedule-query-read';
 
 /** 派发领取租约时长；sending claim 超过该时长未续期即视为崩溃，允许其他 worker 重领。 */
 const DISPATCH_CLAIM_LEASE_SECONDS = 60;
@@ -147,6 +152,18 @@ export class DefaultNotificationApplication implements NotificationApplication {
             ...(intent.userId === undefined ? {} : { userId: intent.userId }),
             deviceId: intent.deviceId,
             kind: 'schedule_receipt',
+            payload: intent as unknown as JsonValue,
+        });
+    }
+
+    /** {@inheritDoc NotificationApplication.submitScheduleQueryResult} */
+    public submitScheduleQueryResult(intent: ScheduleQueryResultIntent): Promise<NotificationSubmission> {
+        return this.createDeliveries({
+            businessEventId: intent.businessEventId,
+            correlationId: intent.correlationId,
+            ...(intent.userId === undefined ? {} : { userId: intent.userId }),
+            deviceId: intent.deviceId,
+            kind: 'schedule_query_result',
             payload: intent as unknown as JsonValue,
         });
     }
@@ -367,6 +384,7 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
      * @param renderer 消息渲染端口。
      * @param channel IM 发送端口。
      * @param actionUi 动作入口服务。
+     * @param scheduleQueryPage 日程查询只读页面服务。
      */
     public constructor(
         private readonly unitOfWork: ImUnitOfWork,
@@ -377,6 +395,7 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
         private readonly renderer: DeliveryRendererPort,
         private readonly channel: ImChannelPort,
         private readonly actionUi: ActionUiApplication,
+        private readonly scheduleQueryPage: ScheduleQueryPageApplication,
     ) {}
 
     /** {@inheritDoc DeliveryDispatchApplication.dispatch} */
@@ -450,12 +469,14 @@ export class DefaultDeliveryDispatchApplication implements DeliveryDispatchAppli
                 readStrongReminderMetadata(target.delivery.semanticPayload) === undefined
                     ? undefined
                     : await this.actionUi.issue(target.delivery.id);
-            const renderedPayload = await this.renderer.render(
-                target.delivery,
-                target.account,
-                capabilities,
-                actionToken === undefined ? {} : { actionToken },
-            );
+            const scheduleQueryToken =
+                target.delivery.kind === 'schedule_query_result'
+                    ? await this.scheduleQueryPage.issue(target.delivery.id)
+                    : undefined;
+            const renderedPayload = await this.renderer.render(target.delivery, target.account, capabilities, {
+                ...(actionToken === undefined ? {} : { actionToken }),
+                ...(scheduleQueryToken === undefined ? {} : { scheduleQueryToken }),
+            });
             const conversation = await this.conversations.resolveDirect(target.identity);
             preSend = { renderedPayload, conversation };
         } catch {
@@ -1126,6 +1147,56 @@ export class DefaultActionUiApplication implements ActionUiApplication {
             ...(input.params === undefined ? {} : { actionParams: input.params }),
         });
     }
+}
+
+/** 日程查询结果只读链接的默认实现。 */
+export class DefaultScheduleQueryPageApplication implements ScheduleQueryPageApplication {
+    /**
+     * @param tokens 受保护链接令牌端口。
+     * @param unitOfWork 查询已持久化的投递载荷。
+     * @param clock 业务时钟。
+     */
+    public constructor(
+        private readonly tokens: ActionTokenPort,
+        private readonly unitOfWork: ImUnitOfWork,
+        private readonly clock: Clock,
+    ) {}
+
+    /** {@inheritDoc ScheduleQueryPageApplication.issue} */
+    public async issue(deliveryId: DeliveryId): Promise<string> {
+        await this.loadQueryDelivery(deliveryId);
+        return this.tokens.issue({
+            actionId: scheduleQueryTokenActionId(deliveryId),
+            deliveryId,
+            expiresAt: this.clock.addMinutes(this.clock.now(), SCHEDULE_QUERY_PAGE_TOKEN_MINUTES),
+        });
+    }
+
+    /** {@inheritDoc ScheduleQueryPageApplication.show} */
+    public async show(token: string): Promise<ScheduleQueryResultIntent> {
+        const claims = await this.tokens.verify(token);
+        if (claims.expiresAt <= this.clock.now()) {
+            throw new ImGatewayError('action_expired', 'Schedule query page token has expired');
+        }
+        if (claims.actionId !== scheduleQueryTokenActionId(claims.deliveryId)) {
+            throw new ImGatewayError('action_not_found', 'Token is not a schedule query page token');
+        }
+        return this.loadQueryDelivery(claims.deliveryId);
+    }
+
+    private async loadQueryDelivery(deliveryId: DeliveryId): Promise<ScheduleQueryResultIntent> {
+        return this.unitOfWork.transaction(async (tx) => {
+            const delivery = await tx.deliveries.findById(deliveryId);
+            if (delivery === undefined || delivery.kind !== 'schedule_query_result') {
+                throw new ImGatewayError('action_not_found', 'Schedule query delivery was not found');
+            }
+            return parseScheduleQueryResultIntent(delivery.semanticPayload);
+        });
+    }
+}
+
+function scheduleQueryTokenActionId(deliveryId: DeliveryId): ActionId {
+    return `${SCHEDULE_QUERY_PAGE_TOKEN_ACTION_ID}:${deliveryId}` as ActionId;
 }
 
 /**

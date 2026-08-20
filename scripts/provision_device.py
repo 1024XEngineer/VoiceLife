@@ -292,7 +292,7 @@ def main() -> None:
     try:
         if credential_data is not None:
             with tempfile.NamedTemporaryFile(
-                "w", prefix=f"im-{board}-credentials.", suffix=".json", mode=0o600, delete=False
+                prefix=f"im-{board}-credentials.", suffix=".json", mode="w", delete=False
             ) as handle:
                 handle.write(json.dumps(credential_data))
                 token_file = handle.name

@@ -15,6 +15,7 @@
 #include "support/test_support.h"
 #include "voicelife/contracts/im/notification_intent.h"
 #include "voicelife/contracts/im/reminder_action_result.h"
+#include "voicelife/contracts/im/schedule_query_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/im/im_credentials.h"
@@ -23,8 +24,10 @@
 
 using voicelife::contracts::im::NotificationIntent;
 using voicelife::contracts::im::ParseNotificationIntent;
+using voicelife::contracts::im::ParseScheduleQueryResultIntent;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
 using voicelife::contracts::im::ReminderActionResult;
+using voicelife::contracts::im::ScheduleQueryResultIntent;
 using voicelife::contracts::im::ScheduleReceiptIntent;
 using voicelife::im::ImCredentialProvider;
 using voicelife::im::ImHttpHeader;
@@ -94,6 +97,15 @@ NotificationIntent MakeNotification() {
     Check(voicelife::ParseJson(ReadFixture("notification-strong.json"), root).ok(), "共享通知 fixture 必须可解析");
     NotificationIntent intent;
     Check(ParseNotificationIntent(root, intent).ok(), "共享通知 fixture 必须通过契约校验");
+    return intent;
+}
+
+ScheduleQueryResultIntent MakeScheduleQueryResult() {
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(ReadFixture("schedule-query-result.json"), root).ok(),
+          "共享查询结果 fixture 必须可解析");
+    ScheduleQueryResultIntent intent;
+    Check(ParseScheduleQueryResultIntent(root, intent).ok(), "共享查询结果 fixture 必须通过契约校验");
     return intent;
 }
 
@@ -180,6 +192,75 @@ void TestNotificationSuccess() {
     Check(request.path.find("/v1/notification-intents") == std::string::npos,
           "不得再使用旧的 notification-intents 路径");
     CheckBodyRoundTrips(request, intent);
+}
+
+void TestScheduleQueryResultSuccess() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    ImReportingChannel channel(transport, credentials);
+    const ScheduleQueryResultIntent intent = MakeScheduleQueryResult();
+
+    const ReportResult result = channel.SubmitScheduleQueryResult(intent);
+
+    Check(result.status == ReportStatus::kSubmitted, "完整日程查询结果提交成功");
+    Check(transport.requests.size() == 1, "完整日程查询结果应发起一次传输");
+    const ImHttpRequest& request = transport.requests[0];
+    Check(request.path == "/v1/im/schedule-query-results", "查询结果必须提交到专用 Gateway 路径");
+    Check(HeaderValue(request, "Idempotency-Key") == intent.businessEventId, "查询结果幂等键必须使用业务事件 ID");
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(request.body, root).ok(), "查询结果请求体必须是合法 JSON");
+    ScheduleQueryResultIntent parsed;
+    Check(ParseScheduleQueryResultIntent(root, parsed).ok(), "查询结果请求体必须通过契约校验");
+    Check(parsed.resultCount == intent.resultCount && parsed.schedules.array.size() == 1 &&
+              parsed.futureOccurrences.array.size() == 1 && parsed.exceptions.array.size() == 1,
+          "查询结果请求体必须保留完整条目集合");
+}
+
+void TestScheduleQueryResultNetworkFailureIsRetryable() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    transport.next_status = ImTransportStatus::kNetworkFailure;
+    ImReportingChannel channel(transport, credentials);
+
+    const ReportResult result = channel.SubmitScheduleQueryResult(MakeScheduleQueryResult());
+
+    Check(result.status == ReportStatus::kRetryable, "查询结果网络失败必须保留可重试分类");
+    Check(transport.requests.size() == 1, "查询结果网络失败仍应记录一次发送尝试");
+}
+
+void TestScheduleQueryResultOptionalFieldsRoundTrip() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    ImReportingChannel channel(transport, credentials);
+    ScheduleQueryResultIntent intent = MakeScheduleQueryResult();
+    intent.userId.reset();
+    intent.keyword = "会议";
+    intent.startDate.reset();
+    intent.endDate.reset();
+
+    const ReportResult result = channel.SubmitScheduleQueryResult(intent);
+
+    Check(result.status == ReportStatus::kSubmitted, "可选查询字段的组合必须可提交");
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(transport.requests[0].body, root).ok(), "可选查询字段请求体必须是合法 JSON");
+    ScheduleQueryResultIntent parsed;
+    Check(ParseScheduleQueryResultIntent(root, parsed).ok(), "可选查询字段请求体必须通过契约校验");
+    Check(!parsed.userId.has_value() && parsed.keyword == "会议" && !parsed.startDate.has_value() &&
+              !parsed.endDate.has_value(),
+          "序列化必须精确保留查询结果可选字段是否存在");
+}
+
+void TestScheduleQueryResultInvalidIntentRejectedLocally() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    ImReportingChannel channel(transport, credentials);
+    ScheduleQueryResultIntent intent = MakeScheduleQueryResult();
+    intent.queriedAt = "invalid";
+
+    const ReportResult result = channel.SubmitScheduleQueryResult(intent);
+
+    Check(result.status == ReportStatus::kRejected, "非法查询结果必须在发送前本地拒绝");
+    Check(transport.requests.empty(), "发送前契约校验失败不得发起网络请求");
 }
 
 void TestSubmitNotificationSurfacesResponseBody() {
@@ -350,6 +431,10 @@ void TestGatewayUrlScheme() {
 int main() {
     TestScheduleReceiptSuccess();
     TestNotificationSuccess();
+    TestScheduleQueryResultSuccess();
+    TestScheduleQueryResultNetworkFailureIsRetryable();
+    TestScheduleQueryResultOptionalFieldsRoundTrip();
+    TestScheduleQueryResultInvalidIntentRejectedLocally();
     TestSubmitNotificationSurfacesResponseBody();
     TestMissingCredentialIsLocal();
     TestDeviceIdMismatchIsLocal();

@@ -1,5 +1,13 @@
-import type { NotificationIntent, ScheduleReceiptIntent } from '../../contracts/device-gateway.js';
-import { parseNotificationIntent, parseScheduleReceiptIntent } from '../../contracts/device-gateway-parser.js';
+import type {
+    NotificationIntent,
+    ScheduleReceiptIntent,
+    ScheduleQueryResultIntent,
+} from '../../contracts/device-gateway.js';
+import {
+    parseNotificationIntent,
+    parseScheduleReceiptIntent,
+    parseScheduleQueryResultIntent,
+} from '../../contracts/device-gateway-parser.js';
 import type { ChannelAccountId } from '../../contracts/ids.js';
 import type { ChannelAccount, ChannelCapabilities, Delivery } from '../../domain/models.js';
 import type { ImSendAcceptance, OutboundImMessage } from '../../ports/external.js';
@@ -20,12 +28,20 @@ export interface WechatTemplateFields {
     readonly time: string;
 }
 
+interface WechatTemplateConfig {
+    readonly templateId: string;
+    readonly templateFields: WechatTemplateFields;
+}
+
 /** 由部署层从 Secret 引用解析后注入的微信公众号出站配置。 */
 export interface WechatOfficialOutboundOptions {
     readonly appId: string;
     readonly appSecret: string;
     readonly templateId: string;
     readonly templateFields: WechatTemplateFields;
+    /** 查询结果使用的独立模板，提醒和日程回执仍使用上面的默认模板。 */
+    readonly queryTemplateId: string;
+    readonly queryTemplateFields: WechatTemplateFields;
     /** 模板中展示时间使用的 IANA 时区；默认 Asia/Shanghai。 */
     readonly displayTimeZone?: string;
     readonly actionUiBaseUrl: string;
@@ -82,11 +98,36 @@ export class WechatOfficialOutbound {
      * @returns 微信模板消息载荷。
      */
     public renderScheduleReceipt(intent: ScheduleReceiptIntent): JsonValue {
-        return this.templatePayload({
-            title: '日程已更新',
-            body: intent.summary,
-            time: formatTemplateTime(intent.occurredAt, this.options.displayTimeZone),
-        });
+        return this.templatePayload(
+            {
+                title: '日程已更新',
+                body: intent.summary,
+                time: formatTemplateTime(intent.occurredAt, this.options.displayTimeZone),
+            },
+            this.options,
+        );
+    }
+
+    /**
+     * 渲染摘要正文，并在可用时附加完整结果的只读 H5 链接。
+     * @param intent 完整日程查询结果意图。
+     * @param scheduleQueryToken 服务端签发的可选只读查询令牌。
+     * @returns 微信模板消息载荷。
+     */
+    public renderScheduleQueryResult(intent: ScheduleQueryResultIntent, scheduleQueryToken?: string): JsonValue {
+        const body = formatScheduleQueryBody(intent, this.options.displayTimeZone);
+        return this.templatePayload(
+            {
+                title: `日程查询结果（${intent.resultCount} 条）`,
+                body,
+                time: formatTemplateTime(intent.queriedAt, this.options.displayTimeZone),
+            },
+            {
+                templateId: this.options.queryTemplateId,
+                templateFields: this.options.queryTemplateFields,
+            },
+            scheduleQueryToken === undefined ? undefined : this.scheduleQueryPageUrl(scheduleQueryToken),
+        );
     }
 
     /**
@@ -105,7 +146,8 @@ export class WechatOfficialOutbound {
                 body: intent.content.body ?? '',
                 time: formatTemplateTime(intent.triggerAt, this.options.displayTimeZone),
             },
-            actionToken,
+            this.options,
+            actionToken === undefined ? undefined : this.actionUiUrl(actionToken),
         );
     }
 
@@ -116,6 +158,7 @@ export class WechatOfficialOutbound {
      * @param account 目标渠道账号。
      * @param capabilities 已解析的渠道能力。
      * @param actionToken 服务端签发的可选动作令牌。
+     * @param scheduleQueryToken 服务端签发的可选查询结果令牌。
      * @returns 微信模板消息载荷。
      */
     public render(
@@ -124,6 +167,7 @@ export class WechatOfficialOutbound {
         account: ChannelAccount,
         capabilities: ChannelCapabilities,
         actionToken?: string,
+        scheduleQueryToken?: string,
     ): JsonValue {
         if (
             delivery.channelAccountId !== channelAccountId ||
@@ -134,9 +178,16 @@ export class WechatOfficialOutbound {
         ) {
             throw new ImGatewayError('capability_not_supported', 'WeChat delivery target is invalid');
         }
-        return delivery.kind === 'schedule_receipt'
-            ? this.renderScheduleReceipt(parseScheduleReceiptIntent(delivery.semanticPayload))
-            : this.renderNotification(parseNotificationIntent(delivery.semanticPayload), actionToken);
+        if (delivery.kind === 'schedule_receipt') {
+            return this.renderScheduleReceipt(parseScheduleReceiptIntent(delivery.semanticPayload));
+        }
+        if (delivery.kind === 'schedule_query_result') {
+            return this.renderScheduleQueryResult(
+                parseScheduleQueryResultIntent(delivery.semanticPayload),
+                scheduleQueryToken,
+            );
+        }
+        return this.renderNotification(parseNotificationIntent(delivery.semanticPayload), actionToken);
     }
 
     /**
@@ -162,10 +213,11 @@ export class WechatOfficialOutbound {
      * @returns 平台即时受理结果。
      */
     public async sendToUser(revealedExternalUserId: string, content: JsonValue): Promise<ImSendAcceptance> {
+        const template = templateConfigForContent(content, this.options);
         const payload = parseTemplatePayload(
             content,
-            this.options.templateId,
-            this.options.templateFields,
+            template.templateId,
+            template.templateFields,
             this.options.actionUiBaseUrl,
         );
         const externalUserId = revealedExternalUserId.trim();
@@ -209,21 +261,28 @@ export class WechatOfficialOutbound {
 
     private templatePayload(
         content: { readonly title: string; readonly body: string; readonly time: string },
-        actionToken?: string,
+        template: WechatTemplateConfig,
+        url?: string,
     ): WechatTemplatePayload {
-        const fields = this.options.templateFields;
+        const fields = template.templateFields;
         return {
             type: 'wechat_template',
-            templateId: this.options.templateId,
+            templateId: template.templateId,
             data: {
                 [fields.title]: { value: content.title },
                 [fields.body]: { value: content.body },
                 [fields.time]: { value: content.time },
             },
-            ...(actionToken === undefined
-                ? {}
-                : { url: `${this.options.actionUiBaseUrl}/${encodeURIComponent(actionToken)}` }),
+            ...(url === undefined ? {} : { url }),
         };
+    }
+
+    private actionUiUrl(token: string): string {
+        return `${this.options.actionUiBaseUrl}/${encodeURIComponent(token)}`;
+    }
+
+    private scheduleQueryPageUrl(token: string): string {
+        return `${this.options.actionUiBaseUrl}/query-result/${encodeURIComponent(token)}`;
     }
 
     private async accessToken(forceRefresh: boolean): Promise<string> {
@@ -305,15 +364,39 @@ class WechatAccessTokenError extends Error {
     }
 }
 
+function templateConfigForContent(content: JsonValue, options: NormalizedWechatOutboundOptions): WechatTemplateConfig {
+    if (
+        typeof content === 'object' &&
+        content !== null &&
+        !Array.isArray(content) &&
+        'templateId' in content &&
+        typeof content.templateId === 'string' &&
+        content.templateId === options.queryTemplateId
+    ) {
+        return {
+            templateId: options.queryTemplateId,
+            templateFields: options.queryTemplateFields,
+        };
+    }
+    return options;
+}
+
 function normalizeOptions(options: WechatOfficialOutboundOptions): NormalizedWechatOutboundOptions {
     const appId = options.appId.trim();
     const appSecret = options.appSecret.trim();
     const templateId = options.templateId.trim();
+    const queryTemplateId = options.queryTemplateId.trim();
     if (!/^wx[A-Za-z0-9_-]{1,126}$/u.test(appId) || appSecret === '' || appSecret.length > 256) {
         throw new ImGatewayError('invalid_contract', 'WeChat outbound credentials are invalid');
     }
     if (templateId === '' || templateId.length > 128 || !/^[A-Za-z0-9_-]+$/u.test(templateId)) {
         throw new ImGatewayError('invalid_contract', 'WeChat template id is invalid');
+    }
+    if (queryTemplateId === '' || queryTemplateId.length > 128 || !/^[A-Za-z0-9_-]+$/u.test(queryTemplateId)) {
+        throw new ImGatewayError('invalid_contract', 'WeChat query template id is invalid');
+    }
+    if (templateId === queryTemplateId) {
+        throw new ImGatewayError('invalid_contract', 'WeChat template ids must be distinct');
     }
     const fields = {
         title: templateField(options.templateFields.title),
@@ -322,6 +405,14 @@ function normalizeOptions(options: WechatOfficialOutboundOptions): NormalizedWec
     };
     if (new Set(Object.values(fields)).size !== 3) {
         throw new ImGatewayError('invalid_contract', 'WeChat template fields must be distinct');
+    }
+    const queryFields = {
+        title: templateField(options.queryTemplateFields.title),
+        body: templateField(options.queryTemplateFields.body),
+        time: templateField(options.queryTemplateFields.time),
+    };
+    if (new Set(Object.values(queryFields)).size !== 3) {
+        throw new ImGatewayError('invalid_contract', 'WeChat query template fields must be distinct');
     }
     const displayTimeZone = normalizeDisplayTimeZone(options.displayTimeZone);
     let actionUiUrl: URL;
@@ -352,6 +443,8 @@ function normalizeOptions(options: WechatOfficialOutboundOptions): NormalizedWec
         appSecret,
         templateId,
         templateFields: fields,
+        queryTemplateId,
+        queryTemplateFields: queryFields,
         displayTimeZone,
         actionUiBaseUrl: actionUiUrl.toString().replace(/\/$/u, ''),
         revealExternalUserId: options.revealExternalUserId,
@@ -383,6 +476,81 @@ function formatTemplateTime(value: string, timeZone: string): string {
     const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find((item) => item.type === type)?.value ?? '';
     const datePart = (type: 'year' | 'month' | 'day'): string => String(Number(part(type)));
     return `${datePart('year')}年${datePart('month')}月${datePart('day')}日 ${part('hour')}:${part('minute')}`;
+}
+
+const QUERY_STATUS_LABELS: Readonly<Record<ScheduleQueryResultIntent['query']['status'], string>> = {
+    all: '全部',
+    active: '进行中',
+    cancelled: '已取消',
+    completed: '已完成',
+};
+
+const MAX_SCHEDULE_QUERY_BODY_LENGTH = 1000;
+
+/** 将完整的日程查询结果压缩为模板字段可直接阅读的文本。 */
+function formatScheduleQueryBody(intent: ScheduleQueryResultIntent, timeZone: string): string {
+    const lines = [`共 ${intent.resultCount} 条日程`];
+    const entries = [...intent.schedules, ...intent.futureOccurrences];
+    if (entries.length === 0) {
+        lines.push('暂无符合条件的日程');
+    } else {
+        entries.forEach((entry, index) => {
+            const title = scheduleField(entry, 'event') ?? '未命名日程';
+            const start = formatScheduleDateTime(
+                scheduleField(entry, 'start_time') ?? scheduleField(entry, 'original_start_time'),
+                timeZone,
+            );
+            const end = formatScheduleDateTime(scheduleField(entry, 'end_time'), timeZone);
+            const location = scheduleField(entry, 'location');
+            const notes = scheduleField(entry, 'notes');
+            const time = start === undefined ? undefined : end === undefined ? start : `${start} - ${end}`;
+            const details = [
+                time === undefined ? undefined : `时间：${time}`,
+                location === undefined ? undefined : `地点：${location}`,
+                notes === undefined ? undefined : `备注：${notes}`,
+            ].filter((value): value is string => value !== undefined);
+            lines.push(`${index + 1}. ${title}`);
+            lines.push(...details.map((detail) => `   ${detail}`));
+        });
+    }
+    if (intent.exceptions.length > 0) {
+        lines.push(`例外调整：${intent.exceptions.length} 条`);
+    }
+    const queryDetails = [
+        `查询条件：${formatQueryRange(intent.query.startDate, intent.query.endDate)}`,
+        `状态：${QUERY_STATUS_LABELS[intent.query.status]}`,
+        ...(intent.query.keyword === undefined ? [] : [`关键词：${intent.query.keyword}`]),
+    ];
+    lines.push(...queryDetails);
+    return limitTemplateText(lines.join('\n'), MAX_SCHEDULE_QUERY_BODY_LENGTH);
+}
+
+function formatQueryRange(startDate: string | undefined, endDate: string | undefined): string {
+    if (startDate !== undefined && endDate !== undefined) return `${startDate} 至 ${endDate}`;
+    if (startDate !== undefined) return `${startDate} 起`;
+    if (endDate !== undefined) return `截至 ${endDate}`;
+    return '未限定日期';
+}
+
+function scheduleField(value: JsonValue, key: string): string | undefined {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    const field = value[key];
+    return typeof field === 'string' && field.trim() !== '' ? field.trim().replace(/\s+/gu, ' ') : undefined;
+}
+
+function formatScheduleDateTime(value: string | undefined, timeZone: string): string | undefined {
+    if (value === undefined) return undefined;
+    const localMatch = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/u.exec(value);
+    if (localMatch !== null) {
+        return `${Number(localMatch[1])}年${Number(localMatch[2])}月${Number(localMatch[3])}日 ${localMatch[4]}:${localMatch[5]}`;
+    }
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : formatTemplateTime(value, timeZone);
+}
+
+function limitTemplateText(value: string, maxLength: number): string {
+    const characters = [...value];
+    return characters.length <= maxLength ? value : `${characters.slice(0, maxLength - 1).join('')}…`;
 }
 
 function templateField(value: string): string {

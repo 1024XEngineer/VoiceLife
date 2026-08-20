@@ -18,6 +18,7 @@ import type {
     ReminderActionKind,
     ReminderActionResult,
     ScheduleReceiptIntent,
+    ScheduleQueryResultIntent,
 } from '../contracts/device-gateway.js';
 import type { ImPlatform, NormalizedDeliveryReceipt, NormalizedImEvent } from '../contracts/platform-events.js';
 import type {
@@ -157,6 +158,12 @@ export interface NotificationApplication {
      * @returns 投递受理结果。
      */
     submitScheduleReceipt(intent: ScheduleReceiptIntent): Promise<NotificationSubmission>;
+    /**
+     * 幂等受理设备上报的完整日程查询结果。
+     * @param intent 已校验的完整查询结果意图。
+     * @returns 投递受理结果。
+     */
+    submitScheduleQueryResult(intent: ScheduleQueryResultIntent): Promise<NotificationSubmission>;
     /**
      * 幂等受理设备发起的提醒通知。
      * @param intent 已校验的通知意图。
@@ -400,6 +407,22 @@ export interface ActionUiApplication {
     ): Promise<ReminderActionCommand>;
 }
 
+/** 为日程查询结果提供受保护的只读页面入口。 */
+export interface ScheduleQueryPageApplication {
+    /**
+     * 为已经持久化的日程查询投递签发短期只读链接。
+     * @param deliveryId 日程查询结果投递标识。
+     * @returns 可用于 H5 页面路由的不透明令牌。
+     */
+    issue(deliveryId: DeliveryId): Promise<string>;
+    /**
+     * 校验只读令牌并返回可安全呈现的完整查询结果。
+     * @param token 不透明查询结果令牌。
+     * @returns 已校验的查询结果。
+     */
+    show(token: string): Promise<ScheduleQueryResultIntent>;
+}
+
 /** IM Gateway 全部应用服务的统一访问入口。 */
 export interface ImGatewayApplication {
     readonly channels: ChannelAccountApplication;
@@ -413,4 +436,5 @@ export interface ImGatewayApplication {
     readonly receipts: ReceiptApplication;
     readonly actions: ActionApplication;
     readonly actionUi: ActionUiApplication;
+    readonly scheduleQueryPage: ScheduleQueryPageApplication;
 }

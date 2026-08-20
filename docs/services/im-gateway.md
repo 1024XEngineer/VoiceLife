@@ -100,11 +100,16 @@ Tunnel 或服务器反向代理，以免 Quick Tunnel 重启后域名改变。
 生产监听路由包括：
 
 - `POST /v1/im/pairing-sessions` 与 `GET /v1/im/pairing-sessions/:pairingSessionId`
-- `POST /v1/im/schedule-receipts` 与 `POST /v1/im/notifications`
+- `POST /v1/im/schedule-receipts`、`POST /v1/im/schedule-query-results` 与 `POST /v1/im/notifications`
 - `GET /v1/devices/:deviceId/reminder-actions/stream`（SSE）
 - `POST /v1/devices/:deviceId/reminder-actions/:commandId/result`
 - `GET|POST /voicelife/reminder-actions/:token`
+- `GET /voicelife/reminder-actions/query-result/:token`
 - `GET|POST /wechat` 与 `GET /healthz`
+
+日程查询模板消息会附带一条 7 天有效的只读 H5 链接，路径为
+`WECHAT_ACTION_UI_BASE_URL/query-result/<token>`。页面仅从已持久化的查询结果读取数据，不包含 JSON 载荷、表单或写入接口，
+并复用 `WECHAT_ACTION_UI_BASE_URL`，无需新增环境变量。
 
 通知受理与 Delivery Outbox 事件在同一 PostgreSQL 事务内提交；常驻 worker 领取事件后派发，并在启动时恢复
 `pending`、`retryable_failed` 与租约已过期的 `sending` Delivery。临时失败按 `availableAt` 延迟重试，HTTP
@@ -209,6 +214,10 @@ Infrastructure 内完成归一化后直接调用 `PlatformEventApplication`，�
 `2026年8月10日 16:42` 这类用户可读文本。用户发送“帮助”或未识别的文本时，Webhook 会同步返回微信被动文本 XML，
 提示其以 `绑定 123456` 的格式发送六码绑定码；有效绑定会同步返回成功提示，无效或过期的绑定码会返回重新获取提示。
 这些被动回复均不依赖模板消息权限。
+
+提醒和日程变更回执使用 `WECHAT_TEMPLATE_*` 配置的模板；日程查询结果使用独立的
+`WECHAT_QUERY_TEMPLATE_ID`、`WECHAT_QUERY_TEMPLATE_TITLE_FIELD`、`WECHAT_QUERY_TEMPLATE_BODY_FIELD` 与
+`WECHAT_QUERY_TEMPLATE_TIME_FIELD`。两套模板 ID 必须不同，每套模板的三个字段也必须互不相同。
 
 新的 pending 会话再次确认完全相同组合时复用已有有效绑定。设备改绑新身份或身份改绑新设备时，旧关系会保留为
 `unbound` 历史；任一设备和任一外部身份最多各有一条 active 绑定。设备吊销不会删除绑定或投递历史。

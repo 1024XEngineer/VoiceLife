@@ -15,6 +15,7 @@ const PAIRING_SESSION_PATH = /^\/v1\/im\/pairing-sessions\/([^/]+)$/u;
 const ACTION_RESULT_PATH = /^\/v1\/devices\/([^/]+)\/reminder-actions\/([^/]+)\/result$/u;
 const ACTION_STREAM_PATH = /^\/v1\/devices\/([^/]+)\/reminder-actions\/stream$/u;
 const ACTION_UI_PATH = /^\/voicelife\/reminder-actions\/([^/]+)$/u;
+const SCHEDULE_QUERY_PAGE_PATH = /^\/voicelife\/reminder-actions\/query-result\/([^/]+)$/u;
 
 /** 结构化日志条目允许的 JSON 标量和字段集合。 */
 export interface GatewayLogEntry {
@@ -181,6 +182,19 @@ async function routeRequest(
         notifyDeliveryWorker(submission.deliveries, options);
         return;
     }
+    if (url.pathname === '/v1/im/schedule-query-results' && method === 'POST') {
+        context.route = 'device.schedule-query-result.create';
+        const body = await readJson(request);
+        const submission = await options.runtime.deviceApi.postScheduleQueryResult({
+            authorization: authorization(request),
+            idempotencyKey: requiredHeader(request, 'idempotency-key'),
+            body,
+        });
+        context.correlationId = correlationId(body);
+        writeJson(response, 202, submission);
+        notifyDeliveryWorker(submission.deliveries, options);
+        return;
+    }
     if (url.pathname === '/v1/im/notifications' && method === 'POST') {
         context.route = 'device.notification.create';
         const body = await readJson(request);
@@ -244,6 +258,19 @@ async function routeRequest(
             return;
         }
         writeMethodNotAllowed(response, 'GET, POST');
+        return;
+    }
+    const scheduleQueryPageMatch = SCHEDULE_QUERY_PAGE_PATH.exec(url.pathname);
+    if (scheduleQueryPageMatch !== null) {
+        context.route = 'schedule-query-page';
+        if (method !== 'GET') {
+            writeMethodNotAllowed(response, 'GET');
+            return;
+        }
+        writePage(
+            response,
+            await options.runtime.scheduleQueryPageApi.get(decodePathSegment(scheduleQueryPageMatch[1]!)),
+        );
         return;
     }
     const actionUiMatch = ACTION_UI_PATH.exec(url.pathname);

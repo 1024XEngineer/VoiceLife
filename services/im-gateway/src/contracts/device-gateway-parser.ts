@@ -10,6 +10,7 @@ import {
     type ReminderActionResult,
     type ScheduleOperationType,
     type ScheduleReceiptIntent,
+    type ScheduleQueryResultIntent,
 } from './device-gateway.js';
 import type {
     CorrelationId,
@@ -32,6 +33,7 @@ type JsonObject = Record<string, unknown>;
 const MAX_NOTIFICATION_ACTIONS = 16;
 const MAX_SNOOZE_MINUTES = 24 * 60;
 const MAX_ACTION_LABEL_LENGTH = 128;
+const MAX_QUERY_ITEMS = 100;
 
 const ISO_8601 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:Z|[+-](\d{2}):(\d{2}))$/;
 
@@ -76,6 +78,55 @@ export function parseScheduleReceiptIntent(input: unknown): ScheduleReceiptInten
         result: enumAt(value.result, ['succeeded', 'failed'] as const, 'body.result'),
         summary: stringAt(value.summary, 'body.summary'),
         occurredAt: isoDateTimeAt(value.occurredAt, 'body.occurredAt'),
+    };
+}
+
+/**
+ * 解析设备上报的完整日程查询结果。
+ * @param input 未受信任的请求载荷。
+ * @returns 经过校验的完整查询结果意图。
+ */
+export function parseScheduleQueryResultIntent(input: unknown): ScheduleQueryResultIntent {
+    const value = objectAt(input, 'body');
+    const userId = optionalId<UserId>(value, 'userId', 'body.userId');
+    const query = objectAt(value.query, 'body.query');
+    const keyword = optionalString(query, 'keyword', 'body.query.keyword');
+    const startDate = optionalString(query, 'startDate', 'body.query.startDate');
+    const endDate = optionalString(query, 'endDate', 'body.query.endDate');
+    for (const [name, date] of [
+        ['startDate', startDate],
+        ['endDate', endDate],
+    ] as const) {
+        if (date !== undefined && !/^\d{4}-\d{2}-\d{2}$/u.test(date))
+            invalid(`body.query.${name}`, 'must use YYYY-MM-DD');
+    }
+    const resultCount = value.resultCount;
+    if (typeof resultCount !== 'number' || !Number.isInteger(resultCount) || resultCount < 0 || resultCount > 1000) {
+        invalid('body.resultCount', 'must be an integer between 0 and 1000');
+    }
+    const schedules = jsonArrayAt(value.schedules, 'body.schedules');
+    const futureOccurrences = jsonArrayAt(value.futureOccurrences, 'body.futureOccurrences');
+    const exceptions = jsonArrayAt(value.exceptions, 'body.exceptions');
+    if (resultCount !== schedules.length + futureOccurrences.length) {
+        invalid('body.resultCount', 'must equal schedules plus futureOccurrences');
+    }
+    return {
+        schemaVersion: contractVersion(value),
+        businessEventId: requiredId<EventId>(value, 'businessEventId', 'body.businessEventId'),
+        correlationId: requiredId<CorrelationId>(value, 'correlationId', 'body.correlationId'),
+        ...(userId === undefined ? {} : { userId }),
+        deviceId: requiredId<DeviceId>(value, 'deviceId', 'body.deviceId'),
+        query: {
+            ...(keyword === undefined ? {} : { keyword }),
+            status: enumAt(query.status, ['all', 'active', 'cancelled', 'completed'] as const, 'body.query.status'),
+            ...(startDate === undefined ? {} : { startDate }),
+            ...(endDate === undefined ? {} : { endDate }),
+        },
+        resultCount,
+        schedules,
+        futureOccurrences,
+        exceptions,
+        queriedAt: isoDateTimeAt(value.queriedAt, 'body.queriedAt'),
     };
 }
 
@@ -205,6 +256,12 @@ function parseNotificationAction(input: unknown, path: string): NotificationActi
         label: actionLabelAt(value.label, `${path}.label`),
         ...(params === undefined ? {} : { params }),
     };
+}
+
+function jsonArrayAt(input: unknown, path: string): JsonValue[] {
+    if (!Array.isArray(input)) invalid(path, 'must be an array');
+    if (input.length > MAX_QUERY_ITEMS) invalid(path, `must contain at most ${MAX_QUERY_ITEMS} items`);
+    return input.map((item, index) => jsonValueAt(item, `${path}[${index}]`));
 }
 
 function actionLabelAt(input: unknown, path: string): string {

@@ -65,6 +65,10 @@ function fixtureEnvironment(overrides = {}) {
         WECHAT_TEMPLATE_TITLE_FIELD: 'first',
         WECHAT_TEMPLATE_BODY_FIELD: 'keyword1',
         WECHAT_TEMPLATE_TIME_FIELD: 'keyword2',
+        WECHAT_QUERY_TEMPLATE_ID: 'fixture-query-template',
+        WECHAT_QUERY_TEMPLATE_TITLE_FIELD: 'first',
+        WECHAT_QUERY_TEMPLATE_BODY_FIELD: 'keyword1',
+        WECHAT_QUERY_TEMPLATE_TIME_FIELD: 'keyword2',
         WECHAT_ACTION_UI_BASE_URL: 'https://gateway.example/voicelife/reminder-actions',
         ...overrides,
     };
@@ -85,6 +89,11 @@ function fakeRuntime(events) {
             postPairingSession: async (input) => ({ session: { id: 'pairing-1' }, displayCode: input.body.deviceId }),
             getPairingSession: async (input) => ({ id: input.pairingSessionId }),
             postScheduleReceipt: async (input) => ({ accepted: true, deliveries: [], eventId: input.body.eventId }),
+            postScheduleQueryResult: async (input) => ({
+                accepted: true,
+                deliveries: [{ deliveryId: 'query-delivery-1', status: 'pending' }],
+                businessEventId: input.body.businessEventId,
+            }),
             postNotification: async (input) => ({
                 accepted: true,
                 deliveries: [{ deliveryId: 'delivery-1', status: 'pending' }],
@@ -122,6 +131,13 @@ function fakeRuntime(events) {
                 body: '<p>submitted</p>',
             }),
         },
+        scheduleQueryPageApi: {
+            get: async (token) => ({
+                status: 200,
+                headers: { 'content-type': 'text/html; charset=utf-8' },
+                body: `<h1>日程 ${token}</h1>`,
+            }),
+        },
         wechatApi: {
             verify: (input) => input.echostr,
             post: async () => ({ body: 'success', contentType: 'text/plain; charset=utf-8' }),
@@ -136,6 +152,67 @@ function fakeRuntime(events) {
         },
     };
 }
+
+test('production server accepts a complete schedule query result through the device route', async () => {
+    const received = [];
+    const runtime = fakeRuntime([]);
+    runtime.deviceApi.postScheduleQueryResult = async (input) => {
+        received.push(input);
+        return {
+            accepted: true,
+            deliveries: [{ deliveryId: 'query-delivery-1', status: 'pending' }],
+            businessEventId: input.body.businessEventId,
+        };
+    };
+    await withServer(
+        async ({ origin, events, logs }) => {
+            const body = { businessEventId: 'query-event-1', correlationId: 'query-correlation-1' };
+            const response = await globalThis.fetch(`${origin}/v1/im/schedule-query-results`, {
+                method: 'POST',
+                headers: {
+                    authorization: 'Bearer fixture-device-token',
+                    'content-type': 'application/json',
+                    'idempotency-key': 'query-event-1',
+                },
+                body: JSON.stringify(body),
+            });
+            assert.equal(response.status, 202);
+            assert.deepEqual(await response.json(), {
+                accepted: true,
+                deliveries: [{ deliveryId: 'query-delivery-1', status: 'pending' }],
+                businessEventId: 'query-event-1',
+            });
+            assert.deepEqual(received, [
+                {
+                    authorization: 'Bearer fixture-device-token',
+                    idempotencyKey: 'query-event-1',
+                    body,
+                },
+            ]);
+            assert.deepEqual(events, [{ kind: 'worker-wake' }]);
+            assert.equal(logs.at(-1).route, 'device.schedule-query-result.create');
+            assert.equal(logs.at(-1).correlationId, 'query-correlation-1');
+        },
+        { runtime },
+    );
+});
+
+test('production server serves schedule query pages as read-only routes', async () => {
+    await withServer(async ({ origin, logs }) => {
+        const page = await globalThis.fetch(`${origin}/voicelife/reminder-actions/query-result/token%2Evalue`);
+        assert.equal(page.status, 200);
+        assert.equal(page.headers.get('content-type'), 'text/html; charset=utf-8');
+        assert.equal(await page.text(), '<h1>日程 token.value</h1>');
+        assert.equal(logs.at(-1).route, 'schedule-query-page');
+
+        const write = await globalThis.fetch(`${origin}/voicelife/reminder-actions/query-result/token%2Evalue`, {
+            method: 'POST',
+        });
+        assert.equal(write.status, 405);
+        assert.equal(write.headers.get('allow'), 'GET');
+        assert.equal(logs.at(-1).route, 'schedule-query-page');
+    });
+});
 
 async function withServer(work, options = {}) {
     const events = [];

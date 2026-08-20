@@ -44,6 +44,7 @@ add_voicelife_library(contracts voicelife_contracts
     "${ROOT_DIR}/components/voicelife_contracts/src/json.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_intent.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_receipt.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_query_result.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_result.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_command.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_submission.cc"
@@ -273,22 +274,22 @@ target_link_libraries(mcp_server_test PRIVATE mcp)
 
 add_voicelife_test(schedule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_mcp_tools_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
-target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule)
+target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule im)
 
 add_voicelife_test(schedule_mcp_tools_reminder_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_reminder_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
-target_link_libraries(schedule_mcp_tools_reminder_test PRIVATE mcp schedule timing)
+target_link_libraries(schedule_mcp_tools_reminder_test PRIVATE mcp schedule timing im)
 
 add_voicelife_test(schedule_mcp_tools_branch_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_branch_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
-target_link_libraries(schedule_mcp_tools_branch_test PRIVATE mcp schedule timing)
+target_link_libraries(schedule_mcp_tools_branch_test PRIVATE mcp schedule timing im)
 
 add_voicelife_test(schedule_mcp_tools_failure_coverage_test "unit;mcp;schedule;runtime"
     schedule_mcp_tools_failure_coverage_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
-target_link_libraries(schedule_mcp_tools_failure_coverage_test PRIVATE mcp schedule)
+target_link_libraries(schedule_mcp_tools_failure_coverage_test PRIVATE mcp schedule im)
 
 add_voicelife_test(schedule_rule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_rule_mcp_tools_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_rule_mcp_tools.cc")
@@ -338,7 +339,7 @@ add_voicelife_test(linx_mcp_bridge_test "unit;mcp;linx;runtime" linx_mcp_bridge_
     "${ROOT_DIR}/components/voicelife_runtime/src/linx_mcp_bridge.cc"
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 target_include_directories(linx_mcp_bridge_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
-target_link_libraries(linx_mcp_bridge_test PRIVATE contracts mcp schedule)
+target_link_libraries(linx_mcp_bridge_test PRIVATE contracts mcp schedule im)
 
 add_voicelife_test(linx_ota_contract_test "unit;linx;contract" linx_ota_contract_test.cc)
 target_link_libraries(linx_ota_contract_test PRIVATE contracts linx)
