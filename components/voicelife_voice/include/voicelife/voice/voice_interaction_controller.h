@@ -31,6 +31,8 @@ enum class VoiceInteractionEvent {
     kFinalizationTimedOut,
     /** 无需 follow-up 的终结型回复播报完成：kSpeaking → kStandby，恢复待机。 */
     kTerminalResponseCompleted,
+    /** 定时提醒或其它系统文本请求播报；先离开待机再等待 TTS started。 */
+    kSystemSpeechRequested,
     kIntentReceived,
     kTtsStarted,
     kTtsStopped,

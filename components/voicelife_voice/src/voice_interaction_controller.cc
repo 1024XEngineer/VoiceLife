@@ -122,6 +122,17 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             state_ = VoiceInteractionState::kStandby;
             transition.action = VoiceInteractionAction::kRestoreStandby;
             break;
+        case VoiceInteractionEvent::kSystemSpeechRequested:
+            // 系统提醒可能在用户正在聆听或播报时到达。Runtime 会在同一
+            // 请求队列中先取消旧会话，再提交系统 TTS；控制器先进入
+            // thinking，确保随后到达的 tts.started/字幕不会被待机门控丢弃。
+            if (state_ != VoiceInteractionState::kStandby && state_ != VoiceInteractionState::kListening &&
+                state_ != VoiceInteractionState::kFinalizing && state_ != VoiceInteractionState::kThinking &&
+                state_ != VoiceInteractionState::kSpeaking) {
+                return InvalidTransition(state_, event);
+            }
+            state_ = VoiceInteractionState::kThinking;
+            break;
         case VoiceInteractionEvent::kIntentReceived:
             if (state_ != VoiceInteractionState::kListening && state_ != VoiceInteractionState::kThinking &&
                 state_ != VoiceInteractionState::kFinalizing) {
