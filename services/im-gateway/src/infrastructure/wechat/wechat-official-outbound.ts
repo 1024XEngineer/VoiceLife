@@ -476,12 +476,7 @@ const MAX_SCHEDULE_QUERY_BODY_LENGTH = 1000;
 
 /** 将完整的日程查询结果压缩为模板字段可直接阅读的文本。 */
 function formatScheduleQueryBody(intent: ScheduleQueryResultIntent, timeZone: string): string {
-    const lines = [
-        `查询范围：${formatQueryRange(intent.query.startDate, intent.query.endDate)}`,
-        `状态：${QUERY_STATUS_LABELS[intent.query.status]}`,
-        ...(intent.query.keyword === undefined ? [] : [`关键词：${intent.query.keyword}`]),
-        `共 ${intent.resultCount} 条日程`,
-    ];
+    const lines = [`共 ${intent.resultCount} 条日程`];
     const entries = [...intent.schedules, ...intent.futureOccurrences];
     if (entries.length === 0) {
         lines.push('暂无符合条件的日程');
@@ -508,6 +503,12 @@ function formatScheduleQueryBody(intent: ScheduleQueryResultIntent, timeZone: st
     if (intent.exceptions.length > 0) {
         lines.push(`例外调整：${intent.exceptions.length} 条`);
     }
+    const queryDetails = [
+        `查询条件：${formatQueryRange(intent.query.startDate, intent.query.endDate)}`,
+        `状态：${QUERY_STATUS_LABELS[intent.query.status]}`,
+        ...(intent.query.keyword === undefined ? [] : [`关键词：${intent.query.keyword}`]),
+    ];
+    lines.push(...queryDetails);
     return limitTemplateText(lines.join('\n'), MAX_SCHEDULE_QUERY_BODY_LENGTH);
 }
 
