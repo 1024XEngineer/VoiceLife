@@ -32,6 +32,7 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
                               LinxConnectionConfig connection,
                               voice::CapabilityProfile capabilities = DefaultCapabilities(),
                               LinxMcpMessageHandler mcp_handler = {});
+    /** @brief 停止 MCP worker 并断开底层 Linx 传输。 */
     ~LinxSpeechProviderAdapter() override;
 
     /**
@@ -119,6 +120,7 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     voice::VoiceAudioFormats audio_formats_;
     voice::VoiceAudioFormats last_audio_formats_;
     Status hello_status_ = Status::Ok();
+    /** 表示等待异步 MCP worker 处理的请求。 */
     struct McpRequest {
         std::string payload;
         std::string session_id;
