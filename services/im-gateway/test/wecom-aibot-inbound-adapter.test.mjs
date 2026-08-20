@@ -55,6 +55,38 @@ test('WeCom AI Bot preserves ordinary single-chat text as a message event', asyn
     });
 });
 
+test('WeCom AI Bot normalizes a template card click into an action event and resolves its identity', async () => {
+    const wecom = adapter({
+        resolveExternalIdentityId: async (externalUserId) =>
+            externalUserId === 'userid-fixture' ? 'identity-fixture' : undefined,
+    });
+    const event = await wecom.normalizeInbound({
+        ...textFrame({ msgid: 'card-click-fixture', msgtype: 'event' }),
+        event: {
+            eventtype: 'template_card_event',
+            template_card_event: {
+                event_key: 'voicelife-action:v1:v1.token.fixture:snooze:10',
+                task_id: 'voicelife-task',
+            },
+        },
+    });
+
+    assert.deepEqual(event, {
+        id: 'channel-wecom:wecom:card-click-fixture',
+        externalEventId: 'card-click-fixture',
+        platform: 'wecom_aibot',
+        channelAccountId: 'channel-wecom',
+        externalIdentityId: 'identity-fixture',
+        occurredAt: '2026-08-14T00:00:00.000Z',
+        type: 'action.triggered',
+        payload: {
+            token: 'v1.token.fixture',
+            action: 'snooze',
+            params: { minutes: 10 },
+        },
+    });
+});
+
 test('WeCom AI Bot uses its receive time when a valid single-chat message omits create_time', async () => {
     const frame = textFrame({ msgid: 'message-without-time' });
     delete frame.create_time;
@@ -109,6 +141,85 @@ test('WeCom AI Bot renders Markdown and sends it through the injected WSS transp
         { accepted: true, platformMessageId: 'platform-message-1' },
     );
     assert.deepEqual(sent, [{ chatId: 'userid-fixture', content: '**提醒**\n该处理了' }]);
+});
+
+test('WeCom AI Bot renders a strong reminder as a native button card with opaque action keys', async () => {
+    const wecom = adapter({
+        outbound: {
+            revealExternalUserId: async (ciphertext) => ciphertext.replace('encrypted:', ''),
+            transport: {
+                sendMarkdown: async () => ({ accepted: true }),
+                sendTemplateCard: async () => ({ accepted: true }),
+            },
+        },
+    });
+    const capabilities = await wecom.resolve({ id: 'channel-wecom', platform: 'wecom_aibot', status: 'active' });
+    assert.deepEqual(capabilities, {
+        proactiveMessage: true,
+        nativeAction: true,
+        actionUi: false,
+        deliveryReceipt: false,
+        presentationTypes: ['native_card', 'rich_text'],
+    });
+    const rendered = await wecom.render(
+        {
+            channelAccountId: 'channel-wecom',
+            presentationType: 'native_card',
+            kind: 'reminder_due',
+            semanticPayload: {
+                schemaVersion: '1',
+                businessEventId: 'event-fixture',
+                correlationId: 'correlation-fixture',
+                kind: 'reminder_due',
+                reminderType: 'strong',
+                reminderTriggerId: 'trigger-fixture',
+                recipient: { userId: 'user-fixture', deviceId: 'device-fixture' },
+                scheduleId: 'schedule-fixture',
+                taskId: 'task-fixture',
+                instanceId: 'instance-fixture',
+                actions: [
+                    { kind: 'command', type: 'acknowledge', label: '知道了' },
+                    { kind: 'command', type: 'snooze', label: '推迟 10 分钟', params: { minutes: 10 } },
+                ],
+                content: { title: '提醒', body: '该处理了' },
+                plannedAt: '2026-08-03T00:00:00.000Z',
+                triggerAt: '2026-08-03T00:00:00.000Z',
+                occurredAt: '2026-08-03T00:00:00.000Z',
+            },
+        },
+        { id: 'channel-wecom', platform: 'wecom_aibot', status: 'active' },
+        capabilities,
+        { actionToken: 'v1.token.fixture' },
+    );
+    assert.deepEqual(rendered, {
+        type: 'wecom_aibot_template_card',
+        template_card: {
+            card_type: 'button_interaction',
+            main_title: { title: '提醒' },
+            sub_title_text: '该处理了',
+            button_list: [
+                {
+                    text: '知道了',
+                    style: 1,
+                    key: 'voicelife-action:v1:v1.token.fixture:acknowledge:',
+                },
+                {
+                    text: '推迟 10 分钟',
+                    style: 2,
+                    key: 'voicelife-action:v1:v1.token.fixture:snooze:10',
+                },
+            ],
+            task_id: 'voicelife-509c969756ec9a9bba4c963f',
+        },
+    });
+    assert.deepEqual(
+        await wecom.send({
+            delivery: { channelAccountId: 'channel-wecom' },
+            conversation: { externalConversationIdCiphertext: 'encrypted:userid-fixture' },
+            content: rendered,
+        }),
+        { accepted: true },
+    );
 });
 
 test('WeCom AI Bot refuses a mismatched delivery before revealing the recipient', async () => {

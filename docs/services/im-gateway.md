@@ -84,8 +84,9 @@ Gateway 端口绑定到宿主机 loopback，避免设备 API 绕过公网 HTTPS 
 
 企业微信配置存在时，`/healthz` 还要求 WSS 订阅已成功；连接断开后 Runtime 保持单活并从 1 秒开始指数退避重连，
 最高间隔 30 秒。停机时会停止心跳并取消重连。异常回退时移除全部 `WECOM_AIBOT_*` 变量并重启 Gateway；已存在的
-微信公众号账号和 HTTP 路由不受影响。WSS Runtime 可发送 Markdown 并等待企业微信的即时受理结果，但提醒编排、模板卡片、
-卡片动作和送达回执仍由后续切片实现。
+微信公众号账号和 HTTP 路由不受影响。WSS Runtime 可发送 Markdown 和按钮交互模板卡片，并等待企业微信的即时受理结果；
+模板卡片按钮 key 只携带短期加密动作令牌，收到 `aibot_event_callback` 后会先解析已绑定的外部身份，再交给
+`ActionApplication` 做动作、过期和幂等校验。企业微信后台必须具备模板卡片交互回调能力；真实机器人点击和送达回执仍需独立联调。
 
 监听器使用 HTTP，公网 HTTPS 必须由宿主机上的 Cloudflare Tunnel 或反向代理终止 TLS。Quick Tunnel 联调可先运行：
 
