@@ -378,12 +378,31 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
     if (input_running_) {
         return Status::Ok();
     }
+    // voice_audio_in 的 4096-word 栈需要 16KB 连续内存。网络、Codec 和
+    // MultiNet 就绪后内部 RAM 最大连续块可能不足该大小，因此和投递任务
+    // 一样把可复用栈放入 PSRAM，只把 FreeRTOS TCB 留在内部 RAM。
+    constexpr uint32_t kCaptureStackWords = 4096;
+    if (capture_stack_ == nullptr || capture_tcb_ == nullptr) {
+        capture_stack_ = static_cast<StackType_t*>(
+            heap_caps_malloc(sizeof(StackType_t) * kCaptureStackWords, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        capture_tcb_ =
+            static_cast<StaticTask_t*>(heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        if (capture_stack_ == nullptr || capture_tcb_ == nullptr) {
+            heap_caps_free(capture_stack_);
+            heap_caps_free(capture_tcb_);
+            capture_stack_ = nullptr;
+            capture_tcb_ = nullptr;
+            return detail::Unavailable("PSRAM 分配 I2S 采集任务失败");
+        }
+    }
     input_running_ = true;
     if (profile_.topology != AudioBoardTopology::kExternalCodecDuplex && i2s_channel_enable(rx_channel_) != ESP_OK) {
         input_running_ = false;
         return detail::Unavailable("启动 I2S 采集通道失败");
     }
-    if (xTaskCreate(&CaptureTaskEntry, "voice_audio_in", 4096, this, 5, &capture_task_) != pdPASS) {
+    capture_task_ = xTaskCreateStatic(&CaptureTaskEntry, "voice_audio_in", kCaptureStackWords, this, 5, capture_stack_,
+                                      capture_tcb_);
+    if (capture_task_ == nullptr) {
         input_running_ = false;
         if (profile_.topology != AudioBoardTopology::kExternalCodecDuplex) i2s_channel_disable(rx_channel_);
         input_cv_.notify_all();

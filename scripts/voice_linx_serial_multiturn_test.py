@@ -349,7 +349,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--require-display-scroll",
         action="store_true",
-        help="Require at least one multi-line subtitle to enter the real two-line scrolling path.",
+        help="Require at least one subtitle wider than the safe one-line viewport to enter horizontal scrolling.",
     )
     parser.add_argument(
         "--allow-asr-mismatch",
@@ -461,15 +461,15 @@ def main() -> int:
             and "revision=" in line
             and "content_height=" in line
             and "viewport_height=" in line
-            and "overflow_height=" in line
+            and "overflow_width=" in line
             and "manual_line_breaks=" in line
             and " status=" in line
             and " content=" in line
             for line in rendered_text_lines
         )
-        and all("viewport_height=50" in line and "content_height=0" not in line for line in content_render_lines)
+        and all("viewport_height=120" in line and "content_height=0" not in line for line in content_render_lines)
     )
-    display_scroll_observed = any(re.search(r"overflow_height=[1-9][0-9]*", line) for line in content_render_lines)
+    display_scroll_observed = any(re.search(r"overflow_width=[1-9][0-9]*", line) for line in content_render_lines)
 
     def turn_phases_complete(marker: str) -> bool:
         return len(results) == len(texts) and all(
