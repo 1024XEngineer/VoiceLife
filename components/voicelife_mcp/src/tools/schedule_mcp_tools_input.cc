@@ -1,5 +1,6 @@
 #include "schedule_mcp_tools_input.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -41,7 +42,8 @@ std::optional<int64_t> JsonInteger(const JsonValue& object, const std::string& k
 PropertyList RepeatProperties() {
     return PropertyList({
         Property("freq_type", PropertyType::kString)
-            .with_description("周期频率，取值为 daily、weekly、monthly、yearly"),
+            .with_description(
+                "周期频率，只能取 daily、weekly、monthly、yearly。不要把不支持的自然语言规则近似成另一种频率"),
         Property("interval_val", PropertyType::kInteger, int64_t{1})
             .with_description("周期间隔，例如 1 表示每天、每周、每月或每年一次"),
         Property("start_date", PropertyType::kString).with_description("周期规则开始日期，格式 YYYY-MM-DD"),
@@ -50,12 +52,24 @@ PropertyList RepeatProperties() {
         Property::Optional("end_date", PropertyType::kString).with_description("周期规则结束日期，格式 YYYY-MM-DD"),
         Property::Optional("occurrence_count", PropertyType::kInteger).with_description("周期规则最多发生的次数"),
         Property::Optional("weekdays_mask", PropertyType::kInteger)
-            .with_description("每周重复的星期掩码，weekly 模式使用"),
-        Property::Optional("day_of_month", PropertyType::kInteger).with_description("每月重复的日期，monthly 模式使用"),
+            .with_description("每周重复的星期掩码，weekly 模式使用；只表达指定星期，不表达每月第 N 个星期几"),
+        Property::Optional("day_of_month", PropertyType::kInteger)
+            .with_description("每月或每年重复的固定日期；不支持每月第 N 个星期几或最后一个工作日"),
         Property::Optional("month_of_year", PropertyType::kInteger).with_description("每年重复的月份，yearly 模式使用"),
         Property::Optional("monthly_mode", PropertyType::kString)
-            .with_description("月重复模式，取值为 specific_day 或 last_day"),
+            .with_description("月重复模式，只能取 specific_day 或 last_day；不支持 ordinal weekday、工作日等相对规则"),
     });
+}
+
+bool IsKnownRepeatField(const std::string& key) {
+    static constexpr std::array<std::string_view, 11> kFields = {
+        "freq_type",        "interval_val",  "start_date",   "start_time",    "end_time",     "end_date",
+        "occurrence_count", "weekdays_mask", "day_of_month", "month_of_year", "monthly_mode",
+    };
+    for (const auto field : kFields) {
+        if (key == field) return true;
+    }
+    return false;
 }
 
 }  // namespace
@@ -66,6 +80,13 @@ ParsedRepeat ParseRepeat(const std::optional<JsonValue>& repeat, bool require_an
     if (!repeat->IsObject()) {
         parsed.error = "repeat 必须是对象";
         return parsed;
+    }
+    for (const auto& [key, value] : repeat->object) {
+        (void)value;
+        if (!IsKnownRepeatField(key)) {
+            parsed.error = "repeat 包含不支持的字段：" + key + "；不能把未支持的周期语义近似为其他规则";
+            return parsed;
+        }
     }
 
     const auto freq_text = JsonString(*repeat, "freq_type");
@@ -113,16 +134,40 @@ ParsedRepeat ParseRepeat(const std::optional<JsonValue>& repeat, bool require_an
     }
 
     const auto interval = JsonInteger(*repeat, "interval_val");
+    if (repeat->Get("interval_val") != nullptr && !interval.has_value()) {
+        parsed.error = "repeat.interval_val 必须是整数";
+        return parsed;
+    }
+    if (interval.has_value() && (*interval < 1 || *interval > INT32_MAX)) {
+        parsed.error = "repeat.interval_val 必须在 1 到 2147483647 之间";
+        return parsed;
+    }
     parsed.interval_val = interval.has_value() ? std::optional<int32_t>{static_cast<int32_t>(*interval)} : std::nullopt;
 
     const auto weekdays = JsonInteger(*repeat, "weekdays_mask");
+    if (repeat->Get("weekdays_mask") != nullptr && (!weekdays.has_value() || *weekdays < 1 || *weekdays > 127)) {
+        parsed.error = "repeat.weekdays_mask 必须在 1 到 127 之间";
+        return parsed;
+    }
     parsed.weekdays_mask =
         weekdays.has_value() ? std::optional<uint8_t>{static_cast<uint8_t>(*weekdays)} : std::nullopt;
     const auto day = JsonInteger(*repeat, "day_of_month");
+    if (repeat->Get("day_of_month") != nullptr && (!day.has_value() || *day < 1 || *day > 31)) {
+        parsed.error = "repeat.day_of_month 必须在 1 到 31 之间";
+        return parsed;
+    }
     parsed.day_of_month = day.has_value() ? std::optional<uint8_t>{static_cast<uint8_t>(*day)} : std::nullopt;
     const auto month = JsonInteger(*repeat, "month_of_year");
+    if (repeat->Get("month_of_year") != nullptr && (!month.has_value() || *month < 1 || *month > 12)) {
+        parsed.error = "repeat.month_of_year 必须在 1 到 12 之间";
+        return parsed;
+    }
     parsed.month_of_year = month.has_value() ? std::optional<uint8_t>{static_cast<uint8_t>(*month)} : std::nullopt;
     const auto count = JsonInteger(*repeat, "occurrence_count");
+    if (repeat->Get("occurrence_count") != nullptr && (!count.has_value() || *count < 1 || *count > INT32_MAX)) {
+        parsed.error = "repeat.occurrence_count 必须是正整数";
+        return parsed;
+    }
     parsed.occurrence_count = count.has_value() ? std::optional<int32_t>{static_cast<int32_t>(*count)} : std::nullopt;
 
     if (require_anchor &&

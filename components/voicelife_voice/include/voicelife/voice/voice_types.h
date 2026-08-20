@@ -105,7 +105,9 @@ struct VoiceSessionConfig {
     /** @brief hello 握手超时（毫秒）。 */
     uint32_t hello_timeout_ms = 10000;
     /** @brief 本地 VAD 端点静音窗口（毫秒），用于触发 listen.stop。 */
-    uint32_t vad_silence_ms = 700;
+    // 900 ms covers natural intra-sentence pauses observed in real cloud TTS
+    // input while keeping the end-of-turn wait below one second.
+    uint32_t vad_silence_ms = 900;
     /** @brief 重连退避（毫秒）。 */
     uint32_t reconnect_backoff_ms = 250;
     /** @brief 是否启用 MCP。 */

@@ -23,6 +23,8 @@ enum class VoiceInteractionEvent {
     /** 打断确认已成功提交给 Provider：kInterrupting → kListening。 */
     kInterruptAcknowledged,
     kCaptureStarted,
+    /** 本地唤醒确认未在限定时间内产生首段音频：跳过迟到播报并开始采集。 */
+    kAcknowledgementTimedOut,
     /** VAD 检测到语音端点（说话结束）：发 listen.stop，等待最终 STT，不回待机。 */
     kEndpointDetected,
     /** 最终 STT 超时：kFinalizing → kStandby，中止残留服务端回合并恢复待机。 */
@@ -50,7 +52,7 @@ enum class VoiceInteractionAction {
     kStopVoiceTurn,
     /** 打断当前会话后开始手动采集，不发送本地唤醒事件。 */
     kInterruptAndStartCapture,
-    /** 先取消旧回合，再发送本地确认 TTS；确认结束时进入 follow-up 聆听。 */
+    /** 向 Provider 提交本地唤醒确认 TTS；播报结束后再开始采集。 */
     kInterruptAndStartVoiceTurn,
     kRestoreStandby,
     kInterruptSession,

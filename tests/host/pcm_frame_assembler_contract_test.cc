@@ -1,5 +1,7 @@
+#include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 #include "support/test_support.h"
@@ -93,6 +95,32 @@ int main() {
     Check(pooled.Push(period.data(), period.size(), retain_sink).ok(), "释放后的首个 period 必须被组装");
     Check(pooled.Push(period.data(), period.size(), retain_sink).ok(),
           "异步消费者释放 lease 后必须能再次取得固定 pool slot");
+
+    auto concurrent_pool = voicelife::voice::AudioPayloadPool::Create(16, 640);
+    Check(concurrent_pool != nullptr, "实时 PCM pool 必须支持 16 个原子租约");
+    std::atomic_bool start{false};
+    std::atomic_uint64_t acquisition_failures{0};
+    const auto exercise_pool = [&] {
+        while (!start.load(std::memory_order_acquire)) {
+        }
+        for (int index = 0; index < 10000; ++index) {
+            auto lease = concurrent_pool->TryAcquire();
+            if (!lease.pooled()) {
+                ++acquisition_failures;
+                continue;
+            }
+            lease.resize(640);
+        }
+    };
+    std::thread first(exercise_pool);
+    std::thread second(exercise_pool);
+    start.store(true, std::memory_order_release);
+    first.join();
+    second.join();
+    Check(acquisition_failures.load() == 0, "有空闲 slot 时跨线程获取和归还不能因短暂竞争被误判为 pool 耗尽");
+    Check(concurrent_pool->acquisition_failures() == 0, "原子 pool 的失败统计只能表示真实容量耗尽，不能包含锁竞争");
+    Check(concurrent_pool->high_watermark() <= 2, "并发租约高水位不能超过同时在途的两个消费者");
+    Check(voicelife::voice::AudioPayloadPool::Create(33, 640) == nullptr, "原子位图实现必须拒绝超过 32 槽的未支持配置");
 
     Check(assembler.Push(nullptr, 1, sink).code == ErrorCode::kInvalidArgument, "非零样本数不能搭配空指针");
     Check(assembler.Push(period.data(), period.size(), {}).code == ErrorCode::kInvalidArgument, "组帧必须拒绝空 sink");

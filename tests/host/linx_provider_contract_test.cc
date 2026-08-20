@@ -181,7 +181,7 @@ int main() {
     Check(transport.texts.size() == 1, "重复 connected 事件不得重复发送 hello");
     Check(provider.NotifyLocalWakeWord("你好牛牛", "收到！").ok() && provider.StartCapture(config.mode).ok() &&
               provider.StopCapture().ok(),
-          "本地唤醒确认必须先 detect，再发送 listen start/stop");
+          "本地唤醒确认必须先 detect，再由状态机在 TTS 结束后开始采集");
     Check(provider.Speak("测试播报").ok() && provider.Abort("user_interrupt").ok(), "detect/abort 应通过传输发送");
     Check(transport.texts.size() == 6, "hello、本地 detect、listen、listen、detect、abort 应各发送一帧");
     Check(transport.texts[1].find("\"type\":\"listen\"") != std::string::npos &&
@@ -189,7 +189,7 @@ int main() {
               transport.texts[1].find("\"text\":\"你好牛牛\"") != std::string::npos &&
               transport.texts[1].find("\"text_response\":\"收到！\"") != std::string::npos &&
               transport.texts[2].find("\"state\":\"start\"") != std::string::npos,
-          "本地唤醒链路必须保持带收到播报的 listen.detect 在 listen.start 之前");
+          "本地唤醒 detect 必须请求确认播报；listen.start 由后续状态机控制");
     Check(transport.texts[4].find("\"text\":\"system_prompt\"") != std::string::npos &&
               transport.texts[4].find("\"text_response\":\"测试播报\"") != std::string::npos,
           "系统播报必须使用 Linx 定义的 text_response，不能伪装为用户 STT");

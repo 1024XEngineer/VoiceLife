@@ -64,7 +64,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready --health-interval 10s --health-timeout 5s
+          --health-cmd "pg_isready -U voicelife -d voicelife" --health-interval 10s --health-timeout 5s
           --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -128,7 +128,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready --health-interval 10s --health-timeout 5s
+          --health-cmd "pg_isready -U voicelife -d voicelife" --health-interval 10s --health-timeout 5s
           --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -155,7 +155,7 @@ jobs:
           cmake -S tests/host -B build-coverage -DVOICELIFE_ENABLE_COVERAGE=ON -DCMAKE_CXX_COMPILER=g++
           cmake --build build-coverage --parallel
           ctest --test-dir build-coverage --output-on-failure
-          gcovr --root . --filter components --exclude tests --xml-pretty -o coverage/cpp.xml
+          gcovr --root . --filter components --exclude tests --gcov-ignore-parse-errors negative_hits.warn --xml-pretty -o coverage/cpp.xml
       - name: 生成 Gateway 覆盖率报告
         shell: bash
         run: |

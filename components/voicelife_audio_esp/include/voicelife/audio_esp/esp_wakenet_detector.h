@@ -24,7 +24,7 @@ class EspWakeNetDetector final : public voice::LocalWakeDetectorPort {
     /** @brief 停止 WakeNet 检测。 @return 停止结果。 */
     Status Stop() override;
     /** @brief 提交一帧待检测的音频。 @param frame PCM 音频帧。 @return 提交结果。 */
-    Status Submit(const voice::AudioFrame& frame) override;
+    Status Submit(voice::AudioFrame frame) override;
 
    private:
     /** @brief ESP-SR 具体资源的私有实现。 */

@@ -27,7 +27,8 @@ using namespace timing;
 namespace {
 
 constexpr UBaseType_t kCommandQueueDepth = 32;
-constexpr uint32_t kRunnerStackWords = 6144;
+// ESP-IDF defines FreeRTOS task stack depths in bytes, unlike upstream FreeRTOS.
+constexpr configSTACK_DEPTH_TYPE kRunnerStackBytes = 8192;
 constexpr UBaseType_t kRunnerPriority = 4;
 constexpr char kTag[] = "VoiceLifeTiming";
 
@@ -183,7 +184,7 @@ class EspTimingTaskRuntime::Impl {
         if (command_queue_ == nullptr || stopped_ == nullptr || submission_mutex_ == nullptr || !timer_.Initialize()) {
             return false;
         }
-        if (xTaskCreate(&RunnerEntry, "voicelife_timing", kRunnerStackWords, this, kRunnerPriority, &runner_task_) !=
+        if (xTaskCreate(&RunnerEntry, "voicelife_timing", kRunnerStackBytes, this, kRunnerPriority, &runner_task_) !=
             pdPASS) {
             runner_task_ = nullptr;
             return false;

@@ -305,11 +305,14 @@ Status EspWebSocketTransport::Impl::Close() {
 
 void EspWebSocketTransport::Impl::SetGeneration(uint64_t generation) {
     std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mutex_);
+    // RX worker does not hold lifecycle_mutex_. Publish the invalidating
+    // generation before waiting for an in-flight TX write, so an envelope
+    // captured by the previous turn is rejected while this transition waits.
+    generation_.store(generation, std::memory_order_release);
     // An item may already have been dequeued by TxLoop. Advance generation
     // only after its check-and-write critical section has completed; otherwise
     // that old item could cross an interrupt or reconnect boundary.
     tx_generation_gate_.SetGeneration(generation);
-    generation_.store(generation);
     std::lock_guard<std::mutex> lock(assembler_mutex_);
     assembler_.Reset();
     // A new VoiceSession epoch invalidates every queued audio item. Drop the
