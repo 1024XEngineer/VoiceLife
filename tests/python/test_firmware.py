@@ -74,6 +74,41 @@ class ProfileValidationTest(unittest.TestCase):
         self.assertIn("CONFIG_VOICELIFE_IM_GATEWAY=y", profile["sdkconfig"])
         self.assertNotIn("CONFIG_VOICELIFE_BOARD_VOICELIFE_PCB=y", profile["sdkconfig"])
 
+    def test_sparkbot_profile_enables_persistent_sqlite_storage(self) -> None:
+        profile_path = ROOT / "config" / "profiles" / "esp32s3-esp-sparkbot.json"
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(profile["adapters"]["storage"]["driver"], "fatfs-sqlite")
+        self.assertIn("persistent-sqlite", profile["adapters"]["storage"]["capabilities"])
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_VOICELIFE_STORAGE_SQLITE=y", profile["sdkconfig"])
+
+    def test_rejects_volatile_device_storage_profile(self) -> None:
+        profile = copy.deepcopy(self.profile)
+        profile["adapters"]["storage"] = {
+            "driver": "memory",
+            "capabilities": ["atomic-calendar-write"],
+        }
+        profile["sdkconfig"] = [
+            setting
+            for setting in profile["sdkconfig"]
+            if not setting.startswith("CONFIG_VOICELIFE_STORAGE_")
+        ]
+
+        with self.assertRaisesRegex(firmware.ProfileError, "必须使用 persistent-sqlite"):
+            firmware.validate_profile(profile, Path("volatile.json"))
+
+    def test_rejects_persistent_profile_without_storage_flags(self) -> None:
+        profile = copy.deepcopy(self.profile)
+        profile["sdkconfig"] = [
+            setting
+            for setting in profile["sdkconfig"]
+            if not setting.startswith("CONFIG_VOICELIFE_STORAGE_")
+        ]
+
+        with self.assertRaisesRegex(firmware.ProfileError, "持久化存储缺少"):
+            firmware.validate_profile(profile, Path("missing-storage-flags.json"))
+
     def test_im_pcb_profile_accepts_input_from_its_usb_provisioning_port(self) -> None:
         profile_path = ROOT / "config" / "profiles" / "esp32s3-voicelife-pcb-pcm.json"
         profile = json.loads(profile_path.read_text(encoding="utf-8"))

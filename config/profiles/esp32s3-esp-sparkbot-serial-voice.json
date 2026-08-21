@@ -5,15 +5,16 @@
   "adapters": {
     "audio": { "driver": "esp32s3-es8311-duplex", "capabilities": ["es8311-duplex"], "configRef": "env://VOICELIFE_AUDIO_PROFILE" },
     "speech": { "driver": "xrobot-websocket", "capabilities": ["streaming-asr", "tts", "cancel-generation", "pcm"], "configRef": "nvs://linx/websocket_url" },
-    "storage": { "driver": "memory", "capabilities": ["atomic-calendar-write"] },
+    "storage": { "driver": "fatfs-sqlite", "capabilities": ["persistent-sqlite"] },
     "im": { "driver": "disabled", "capabilities": [] }
   },
   "sdkconfig": [
     "CONFIG_LOG_DEFAULT_LEVEL_INFO=y",
     "CONFIG_COMPILER_OPTIMIZATION_SIZE=y",
     "CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y",
-    "CONFIG_VOICELIFE_STORAGE_FATFS=n",
-    "CONFIG_VOICELIFE_STORAGE_SQLITE=n",
+    "CONFIG_VOICELIFE_STORAGE_FATFS=y",
+    "CONFIG_VOICELIFE_STORAGE_SQLITE=y",
+    "CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_ADDRESS=0x700000",
     "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
     "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"config/partitions/sparkbot.csv\"",
     "CONFIG_SPIRAM=y",

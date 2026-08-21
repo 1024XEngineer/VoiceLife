@@ -30,7 +30,9 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "voicelife/contracts/json.h"
+#include "esp_action_stream_transport.h"
 #include "voicelife/im/esp_http_transport_factory.h"
+#include "voicelife/im/im_action_channel.h"
 #include "voicelife/im/im_binding_use_case.h"
 #include "voicelife/im/im_config_store.h"
 #include "voicelife/im/im_retry_policy.h"
@@ -54,6 +56,7 @@
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
 #include "mcp_worker_policy.h"
+#include "schedule_reminder_im_adapter.h"
 #include "serial_voice_test.h"
 #include "voicelife/application/interaction_orchestrator.h"
 #include "voicelife/mcp/schedule_mcp_tools.h"
@@ -245,9 +248,12 @@ class Runtime final {
             }
             return session_->Speak(text);
         });
+        reminder_notification_ = std::make_unique<ImScheduleReminderNotification>(
+            im_runtime_, [this](im::ActionWindow window) { EnqueueReminderActionWindow(std::move(window)); });
         schedule_reminder_service_ = std::make_unique<schedule::ScheduleReminderService>(
             storage_.GetScheduleRepository(), storage_.GetScheduleReminderTaskRepository(), schedule_service_,
-            schedule_rule_service_, *timing_runtime_, *reminder_speech_);
+            schedule_rule_service_, *timing_runtime_, *reminder_speech_, reminder_notification_.get());
+        reminder_action_executor_ = std::make_unique<ImScheduleReminderActionExecutor>(*schedule_reminder_service_);
         const Status reminder_status = schedule_reminder_service_->Start();
         if (!reminder_status.ok()) {
             ESP_LOGE(kTag, "STARTUP_ERROR stage=schedule_reminder code=%d msg=%s",
@@ -415,10 +421,19 @@ class Runtime final {
     }
 
     void StopScheduleReminderRuntime() {
+        if (!StopReminderActionWorker()) {
+            // 动作流仍可能持有 ReminderService；在 worker 真正退出前禁止释放其依赖，
+            // 否则启动失败清理路径也会把未完成的 SSE 回调变成悬空引用。
+            ESP_LOGE(kTag, "IM_ACTION_WORKER_STOP_TIMEOUT=1 dependencies_kept=1");
+            return;
+        }
         if (schedule_reminder_service_) {
             schedule_reminder_service_->Stop();
-            schedule_reminder_service_.reset();
         }
+        im_action_channel_.reset();
+        reminder_action_executor_.reset();
+        schedule_reminder_service_.reset();
+        reminder_notification_.reset();
         reminder_speech_.reset();
         timing_runtime_.reset();
     }
@@ -618,6 +633,153 @@ class Runtime final {
 #endif
     }
 
+    void EnqueueReminderActionWindow(im::ActionWindow window) {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        {
+            std::lock_guard<std::mutex> lock(im_action_mutex_);
+            im_action_windows_.push_back(std::move(window));
+        }
+        if (im_runtime_.state() == im::ImRuntimeState::kReady) DrainReminderActionWindows();
+#else
+        (void)window;
+#endif
+    }
+
+    void DrainReminderActionWindows() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        if (im_action_stop_.load() || !reminder_action_executor_ || !im_runtime_.reporting_channel()) return;
+        bool expected = false;
+        if (!im_action_worker_running_.compare_exchange_strong(expected, true)) return;
+        im_action_worker_stopped_.store(false);
+        if (xTaskCreate(&Runtime::ReminderActionTaskEntry, "voicelife_im_actions", 8192, this, 3, nullptr) != pdPASS) {
+            im_action_worker_running_.store(false);
+            im_action_worker_stopped_.store(true);
+            ESP_LOGW(kTag, "IM_ACTION_TASK_FAILED=1");
+        }
+#endif
+    }
+
+    static void ReminderActionTaskEntry(void* context) { static_cast<Runtime*>(context)->ReminderActionTask(); }
+
+    void ReminderActionTask() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        if (!im_action_channel_) {
+            im_action_channel_ = std::make_unique<im::ImActionChannel>(
+                *im_runtime_.reporting_channel(), im_config_, *reminder_action_executor_, reminder_action_clock_);
+        }
+        while (!im_action_stop_.load()) {
+            im::ActionWindow window;
+            {
+                std::lock_guard<std::mutex> lock(im_action_mutex_);
+                if (im_action_windows_.empty()) break;
+                window = std::move(im_action_windows_.front());
+                im_action_windows_.pop_front();
+            }
+            // Gateway 暂时不可用时保留窗口并退避；不能在 worker 退出路径递归创建任务，
+            // 否则断线会形成无退避的任务创建/连接风暴。
+            if (im_runtime_.state() != im::ImRuntimeState::kReady) {
+                {
+                    std::lock_guard<std::mutex> lock(im_action_mutex_);
+                    im_action_windows_.push_front(std::move(window));
+                }
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+            im::EspActionStreamTransport stream(im_gateway_origin_, im_config_, window.reminderTriggerId);
+            const im::ActionRunResult result = im_action_channel_->Run(stream, window);
+            if (result.status == im::ActionRunStatus::kDisconnected) {
+                {
+                    std::lock_guard<std::mutex> lock(im_action_mutex_);
+                    im_action_windows_.push_front(std::move(window));
+                }
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+        }
+
+        // 关闭前最后一次在队列锁内检查，避免“队列刚入队但旧 worker 仍被认为
+        // running”导致新窗口无人消费。队列非空时继续使用同一个 channel，保留
+        // operationId 缓存和 Last-Event-ID 游标。
+        bool restart_in_place = false;
+        {
+            std::lock_guard<std::mutex> lock(im_action_mutex_);
+            restart_in_place = !im_action_stop_.load() && !im_action_windows_.empty();
+            if (!restart_in_place) {
+                im_action_worker_running_.store(false);
+                im_action_worker_stopped_.store(true);
+            }
+        }
+        if (restart_in_place) {
+            while (!im_action_stop_.load()) {
+                im::ActionWindow window;
+                {
+                    std::lock_guard<std::mutex> lock(im_action_mutex_);
+                    if (im_action_windows_.empty()) break;
+                    window = std::move(im_action_windows_.front());
+                    im_action_windows_.pop_front();
+                }
+                if (im_runtime_.state() != im::ImRuntimeState::kReady) {
+                    {
+                        std::lock_guard<std::mutex> lock(im_action_mutex_);
+                        im_action_windows_.push_front(std::move(window));
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    continue;
+                }
+                im::EspActionStreamTransport stream(im_gateway_origin_, im_config_, window.reminderTriggerId);
+                const im::ActionRunResult result = im_action_channel_->Run(stream, window);
+                if (result.status == im::ActionRunStatus::kDisconnected) {
+                    {
+                        std::lock_guard<std::mutex> lock(im_action_mutex_);
+                        im_action_windows_.push_front(std::move(window));
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                }
+            }
+            {
+                std::lock_guard<std::mutex> lock(im_action_mutex_);
+                im_action_worker_running_.store(false);
+                im_action_worker_stopped_.store(true);
+            }
+        }
+#endif
+        // im_action_worker_stopped_ is set immediately before self-deletion. No
+        // Runtime-owned dependency is accessed after this call, so teardown may
+        // safely release the channel and executor after observing the flag.
+        vTaskDelete(nullptr);
+    }
+
+    bool StopReminderActionWorker() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        im_action_stop_.store(true);
+        if (!im_action_worker_running_.load()) {
+            im_action_worker_stopped_.store(true);
+        }
+        // EspActionStreamTransport may be blocked in one bounded 30s HTTP read;
+        // wait longer than that bound instead of destroying its dependencies while
+        // the worker is still inside ImActionChannel::Run().
+        constexpr int kStopWaitAttempts = 4000;
+        for (int attempt = 0; attempt < kStopWaitAttempts && !im_action_worker_stopped_.load(); ++attempt) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        if (!im_action_worker_stopped_.load()) {
+            return false;
+        }
+        im_action_channel_.reset();
+        return true;
+#else
+        return true;
+#endif
+    }
+
+    void ResumeReminderActionWorker() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        im_action_stop_.store(false);
+        im_action_worker_stopped_.store(false);
+        if (im_runtime_.state() == im::ImRuntimeState::kReady) DrainReminderActionWindows();
+#endif
+    }
+
+
     static void ImLifecycleTaskEntry(void* context) { static_cast<Runtime*>(context)->ImLifecycleTask(); }
 
     void ImLifecycleTask() {
@@ -641,12 +803,15 @@ class Runtime final {
             }
 
             if (im_runtime_.state() == im::ImRuntimeState::kReady) {
+                const auto action_config = im_config_.Load();
+                if (action_config.ok()) im_gateway_origin_ = action_config.value->gateway_origin;
                 // 选择 #235 的“重启后重新开始”策略：不恢复任何旧会话；下一次
                 // 明确语音命令会创建新会话，Gateway 会原子取消同设备旧 pending。
                 binding_use_case_.Bind(*im_runtime_.pairing_client(), im_pairing_clock_, im_runtime_.user_id());
                 EnqueueBindingReset(binding_use_case_.generation());
                 RegisterImPairingAcceptance(im_runtime_.pairing_client(), im_runtime_.device_id(),
                                             im_runtime_.user_id());
+                ResumeReminderActionWorker();
                 ESP_LOGI(kTag, "IM_RUNTIME_READY=1");
                 break;
             }
@@ -1659,7 +1824,17 @@ class Runtime final {
     bool schedule_mcp_registered_ = false;
     std::unique_ptr<timing_esp::EspTimingTaskRuntime> timing_runtime_;
     std::unique_ptr<ReminderSpeech> reminder_speech_;
+    std::unique_ptr<ImScheduleReminderNotification> reminder_notification_;
     std::unique_ptr<schedule::ScheduleReminderService> schedule_reminder_service_;
+    std::unique_ptr<ImScheduleReminderActionExecutor> reminder_action_executor_;
+    EspScheduleReminderClock reminder_action_clock_;
+    std::mutex im_action_mutex_;
+    std::deque<im::ActionWindow> im_action_windows_;
+    std::unique_ptr<im::ImActionChannel> im_action_channel_;
+    std::atomic_bool im_action_worker_running_{false};
+    std::atomic_bool im_action_stop_{false};
+    std::atomic_bool im_action_worker_stopped_{false};
+    std::string im_gateway_origin_;
     Status init_status_ = Status::Ok();
     linx::LinxJsonCodec linx_codec_;
     linx::LinxConnectionConfig linx_config_;

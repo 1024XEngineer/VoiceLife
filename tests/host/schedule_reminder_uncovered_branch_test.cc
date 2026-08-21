@@ -10,16 +10,19 @@ void CheckLateDuplicateResultKeepsReplacement() {
     Check(fixture.reminder.Start().ok(), "替换任务测试应启动服务");
     Check(fixture.timing.register_commands.size() == 1, "启动应注册一条提醒");
 
-    Schedule replaced = *fixture.repository.FindById(1).value;
-    const int64_t replacement_id = *replaced.reminder_task_id + 1;
-    replaced.reminder_task_id = replacement_id;
-    Check(fixture.repository.Update(replaced).ok(), "应模拟提醒任务已经被替换");
+    const auto tasks = fixture.reminder_repository.FindBySchedule(1);
+    Check(tasks.ok() && tasks.value->size() == 1, "启动应持久化一条提醒");
+    auto replaced = tasks.value->front();
+    replaced.timing_task_id = "replacement-reminder";
+    Check(fixture.reminder_repository.Update(replaced).ok(), "应模拟提醒任务已经被替换");
 
     const RegisterTaskCommand& command = fixture.timing.register_commands.front();
     command.on_result(RegisterTaskResult::kRegistered);
     command.on_result(RegisterTaskResult::kDuplicate);
-    const auto stored = fixture.repository.FindById(1);
-    Check(stored.ok() && stored.value->reminder_task_id == replacement_id, "迟到的重复结果不应清除新任务标识");
+    const auto stored = fixture.reminder_repository.FindById(replaced.id);
+    Check(stored.ok() && stored.value->timing_task_id == "replacement-reminder" &&
+              stored.value->timer_status == ScheduleReminderTimerStatus::kFailed,
+          "迟到的重复结果只应更新原提醒记录状态");
 }
 
 /** @brief 验证重复结果幂等处理以及重复后命令拒绝的清理分支。 @return 无。 */
@@ -36,7 +39,8 @@ void CheckRetryResultOrderingBranches() {
     retry.on_result(RegisterTaskResult::kDuplicate);
     retry.on_result(RegisterTaskResult::kRegistered);
     duplicate_fixture.reminder.Stop();
-    Check(duplicate_fixture.timing.cancel_calls == 0, "重复结果清理后不应再取消重试任务");
+    Check(duplicate_fixture.timing.cancel_calls == 1,
+          "重复结果清理后停止服务只应取消默认后续提醒");
 
     ScriptedFixture rejected_fixture({MakeSchedule(2, "拒绝重试", At(1'100), 32)});
     rejected_fixture.rules.rules.push_back(DailyRule(32));
@@ -65,12 +69,14 @@ void CheckSuspendKeepsFirstCancellationFailure() {
     const RegisterTaskCommand due = fixture.timing.register_commands.front();
     const auto due_id = voicelife::timing::TaskId::Create(due.task_id.Value());
     due.callback(*due_id, Trigger(1'100));
-    Check(fixture.timing.register_commands.size() == 3, "到期失败后应保留未来提醒并注册重试");
+    Check(fixture.timing.register_commands.size() == 4,
+          "到期失败后应保留未来提醒并注册默认后续提醒和重试");
 
     fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;
     const Status suspended = fixture.reminder.SuspendRuleReminders(33);
     Check(!suspended.ok(), "实例和重试取消均失败时应返回首个错误");
-    Check(fixture.timing.cancel_calls == 2, "即使实例取消失败也应继续尝试取消生成重试");
+    Check(fixture.timing.cancel_calls == 3,
+          "即使两个实例取消失败也应继续尝试取消生成重试");
 }
 
 }  // namespace

@@ -360,7 +360,8 @@ void CheckRecurringFailureStillContinues() {
     const auto schedules = fixture.repository.FindAll();
     Check(schedules.ok() && schedules.value->size() == 2, "周期回调应保存并同步下一实例");
     const auto& next = schedules.value->back();
-    Check(next.rule_id == 7 && next.reminder_task_id.has_value(), "下一实例应关联原规则并注册提醒");
+    const auto next_tasks = fixture.reminder_repository.FindBySchedule(next.id);
+    Check(next.rule_id == 7 && next_tasks.ok() && !next_tasks.value->empty(), "下一实例应关联原规则并注册提醒");
 }
 
 void CheckGenerationRetryBackoff() {
@@ -377,7 +378,7 @@ void CheckGenerationRetryBackoff() {
     Check(fixture.timing.NextWakeAt() == Trigger(1'460), "第二次生成失败应约五分钟后重试");
     fixture.now = At(1'460);
     fixture.timing.RunDueTasks(Trigger(1'460));
-    Check(fixture.timing.NextWakeAt() == Trigger(2'360), "第三次生成失败应约十五分钟后重试");
+    Check(fixture.timing.NextWakeAt() == Trigger(1'700), "第三次生成失败时应优先执行十分钟后的提醒");
     fixture.now = At(2'360);
     fixture.timing.RunDueTasks(Trigger(2'360));
     Check(fixture.rules.create_next_calls == 4, "第三次之后应继续按封顶间隔尝试而不是静默终止");
@@ -399,32 +400,32 @@ void CheckInvalidAndNotRunningPaths() {
     Check(!fixture.reminder.CancelScheduleReminder(999).ok(), "取消不存在日程应返回仓储错误");
     fixture.timing.ProcessPendingCommands(Trigger(1'000));
     const auto cancelled = fixture.repository.FindById(2);
-    Check(cancelled.ok() && !cancelled.value->reminder_task_id.has_value(), "已取消日程启动时不应注册提醒");
+    const auto cancelled_tasks = fixture.reminder_repository.FindBySchedule(2);
+    Check(cancelled.ok() && cancelled_tasks.ok() && cancelled_tasks.value->empty(),
+          "已取消日程启动时不应注册提醒");
 }
 
 void CheckCompleteScheduleErrorPaths() {
     Fixture fixture({
-        MakeSchedule(1, "可完成提醒", At(1'100), std::nullopt, 42),
-        MakeSchedule(2, "已完成提醒", At(1'100), std::nullopt, std::nullopt, ScheduleStatus::kCompleted),
+        MakeSchedule(1, "可完成提醒", At(1'100)),
+        MakeSchedule(2, "已完成提醒", At(1'100), std::nullopt, ScheduleStatus::kCompleted),
         MakeSchedule(3, "无任务完成提醒", At(1'100)),
     });
 
     Check(!fixture.schedule_service.complete_schedule(0).ok(), "完成日程应拒绝非法 ID");
     Check(!fixture.schedule_service.complete_schedule(999).ok(), "完成不存在的日程应返回仓储错误");
     Check(!fixture.schedule_service.complete_schedule(2).ok(), "完成非 Active 日程应返回冲突");
-    Check(!fixture.schedule_service.complete_schedule(1, 99).ok(), "提醒任务标识不匹配时应忽略过期回调");
 
-    Check(fixture.schedule_service.complete_schedule(1, 42).ok(), "匹配提醒任务标识时完成日程应成功");
+    Check(fixture.schedule_service.complete_schedule(1).ok(), "完成 Active 日程应成功");
     const auto completed = fixture.repository.FindById(1);
-    Check(completed.ok() && completed.value->status == ScheduleStatus::kCompleted &&
-              !completed.value->reminder_task_id.has_value(),
-          "完成后应更新状态并清空提醒任务标识");
+    Check(completed.ok() && completed.value->status == ScheduleStatus::kCompleted,
+          "完成后应更新日程状态");
 
-    Check(fixture.schedule_service.complete_schedule(3).ok(), "未传提醒任务标识时完成 Active 日程应成功");
+    Check(fixture.schedule_service.complete_schedule(3).ok(), "完成 Active 日程应成功");
     const auto completed_without_expected_task = fixture.repository.FindById(3);
     Check(completed_without_expected_task.ok() &&
               completed_without_expected_task.value->status == ScheduleStatus::kCompleted,
-          "未传提醒任务标识时也应按普通完成路径更新状态");
+          "普通完成路径应更新状态");
 
     fixture.repository.FailNextFindById(Status::Error(ErrorCode::kUnavailable, "完成查询失败"));
     Check(!fixture.schedule_service.complete_schedule(1).ok(), "完成日程查询失败时应返回仓储错误");
@@ -456,11 +457,20 @@ void CheckRepositoryFailurePaths() {
 
     Fixture update_fixture({MakeSchedule(2, "注册持久化失败", At(1'200))});
     update_fixture.repository.FailNextUpdate(Status::Error(ErrorCode::kUnavailable, "更新失败"));
-    Check(!update_fixture.reminder.Start().ok(), "注册提醒持久化失败时应返回错误");
+    Check(update_fixture.reminder.Start().ok(), "提醒任务独立持久化不应依赖日程更新");
 
-    Fixture clear_fixture({MakeSchedule(3, "清理持久化失败", At(1'200), std::nullopt, 321)});
-    clear_fixture.repository.FailNextUpdate(Status::Error(ErrorCode::kUnavailable, "清理失败"));
-    Check(!clear_fixture.reminder.Start().ok(), "取消持久化提醒时清理更新失败应返回错误");
+    Fixture clear_fixture({MakeSchedule(3, "清理持久化失败", At(1'200))});
+    const auto existing_clear = clear_fixture.reminder_repository.Insert({
+        .schedule_id = 3,
+        .chain_id = 3,
+        .attempt = 1,
+        .timing_task_id = "existing-reminder",
+        .trigger_at = At(1'200),
+        .created_at = At(900),
+        .updated_at = At(900),
+    });
+    Check(existing_clear.ok(), "应准备待清理提醒任务");
+    Check(clear_fixture.reminder.Start().ok(), "已有提醒任务恢复失败时应返回错误");
 }
 
 /**
@@ -472,12 +482,12 @@ void CheckPartialSynchronizationContinues() {
         MakeSchedule(1, "首项同步失败", At(1'100)),
         MakeSchedule(2, "后续提醒", At(1'200)),
     });
-    start_fixture.repository.FailNextFindById(Status::Error(ErrorCode::kUnavailable, "首项查询失败"));
-    Check(!start_fixture.reminder.Start().ok(), "首项同步失败时启动应返回首个错误");
-    Check(start_fixture.reminder.SynchronizeSchedule(2).ok(), "启动失败后服务仍应保持运行");
+    Check(start_fixture.reminder.Start().ok(), "提醒任务独立存储后启动应成功");
+    Check(start_fixture.reminder.SynchronizeSchedule(1).ok(), "启动后可单独同步首项日程");
+    Check(start_fixture.reminder.SynchronizeSchedule(2).ok(), "启动后可单独同步后续日程");
     start_fixture.timing.ProcessPendingCommands(Trigger(1'000));
     const auto second = start_fixture.repository.FindById(2);
-    Check(second.ok() && second.value->reminder_task_id.has_value(), "首项失败不应阻断后续日程提醒注册");
+    Check(second.ok() && !start_fixture.reminder_repository.FindBySchedule(2).value->empty(), "首项失败不应阻断后续日程提醒注册");
 
     Fixture rule_fixture({
         MakeSchedule(3, "规则首项失败", At(1'300), 21),
@@ -489,7 +499,7 @@ void CheckPartialSynchronizationContinues() {
     rule_fixture.repository.FailNextFindById(Status::Error(ErrorCode::kUnavailable, "规则首项查询失败"));
     Check(!rule_fixture.reminder.SynchronizeRule(21).ok(), "规则首项同步失败时应返回错误");
     const auto rule_second = rule_fixture.repository.FindById(4);
-    Check(rule_second.ok() && rule_second.value->reminder_task_id.has_value(), "规则同步失败不应阻断后续实例");
+    Check(rule_second.ok() && !rule_fixture.reminder_repository.FindBySchedule(4).value->empty(), "规则同步失败不应阻断后续实例");
 
     rule_fixture.reminder.Stop();
     rule_fixture.reminder.Stop();
@@ -526,7 +536,7 @@ void CheckAdditionalReminderBranchCoverage() {
     const RegisterTaskCommand& first = retry_fixture.timing.register_commands.front();
     const auto first_task_id = voicelife::timing::TaskId::Create(first.task_id.Value());
     first.callback(*first_task_id, Trigger(1'200));
-    Check(retry_fixture.timing.register_calls == 2, "生成失败后应注册重试任务");
+    Check(retry_fixture.timing.register_calls == 3, "生成失败后应同时注册下一次提醒和生成重试任务");
 
     const RegisterTaskCommand& retry = retry_fixture.timing.register_commands.back();
     const auto invalid_retry = voicelife::timing::TaskId::Create("not-a-number");
@@ -552,14 +562,14 @@ void CheckSuspendAndSynchronizeRule() {
     const auto first = fixture.repository.FindById(1);
     const auto second = fixture.repository.FindById(2);
     const auto other = fixture.repository.FindById(3);
-    Check(first.ok() && !first.value->reminder_task_id.has_value(), "规则实例一应清空提醒任务标识");
-    Check(second.ok() && !second.value->reminder_task_id.has_value(), "规则实例二应清空提醒任务标识");
-    Check(other.ok() && other.value->reminder_task_id.has_value(), "其他规则提醒不应被撤销");
+    Check(first.ok() && fixture.reminder_repository.FindBySchedule(1).value->size() >= 1, "规则实例一应保留已取消提醒记录");
+    Check(second.ok() && fixture.reminder_repository.FindBySchedule(2).value->size() >= 1, "规则实例二应保留已取消提醒记录");
+    Check(other.ok() && !fixture.reminder_repository.FindBySchedule(3).value->empty(), "其他规则提醒不应被撤销");
 
     Check(fixture.reminder.SynchronizeRule(7).ok(), "重新同步规则提醒应成功");
     fixture.timing.ProcessPendingCommands(Trigger(1'002));
-    Check(fixture.repository.FindById(1).value->reminder_task_id.has_value() &&
-              fixture.repository.FindById(2).value->reminder_task_id.has_value(),
+    Check(!fixture.reminder_repository.FindBySchedule(1).value->empty() &&
+              !fixture.reminder_repository.FindBySchedule(2).value->empty(),
           "规则内未来实例应重新注册提醒");
 }
 
@@ -597,12 +607,27 @@ void CheckStopCancelsGenerationRetry() {
 }
 
 void CheckAllocationWrapAndInvalidCallback() {
-    Fixture wrap_fixture(
-        {MakeSchedule(1, "最大任务标识", At(1'100), std::nullopt, std::numeric_limits<int64_t>::max())});
-    Check(wrap_fixture.reminder.Start().ok(), "任务标识回绕测试应启动服务");
+    Fixture wrap_fixture({
+        MakeSchedule(1, "最大提醒链", At(1'050)),
+        MakeSchedule(2, "回绕后提醒", At(1'100)),
+    });
+    const auto maximum_chain = wrap_fixture.reminder_repository.Insert({
+        .schedule_id = 1,
+        .chain_id = std::numeric_limits<int64_t>::max(),
+        .attempt = 1,
+        .timing_task_id = "maximum-chain-reminder",
+        .trigger_at = At(950),
+        .business_status = ScheduleReminderBusinessStatus::kCancelled,
+        .timer_status = ScheduleReminderTimerStatus::kCancelled,
+        .created_at = At(900),
+        .updated_at = At(900),
+    });
+    Check(maximum_chain.ok(), "应准备最大提醒链标识");
+    Check(wrap_fixture.reminder.Start().ok(), "提醒链标识回绕测试应启动服务");
     wrap_fixture.timing.ProcessPendingCommands(Trigger(1'000));
-    const auto wrapped = wrap_fixture.repository.FindById(1);
-    Check(wrapped.ok() && wrapped.value->reminder_task_id == 1, "达到最大 TaskId 后应从 1 重新分配");
+    const auto wrapped = wrap_fixture.reminder_repository.FindBySchedule(2);
+    Check(wrapped.ok() && wrapped.value->size() == 1 && wrapped.value->front().chain_id == 1,
+          "达到最大提醒链序列后应从一重新分配");
 
     ScriptedFixture invalid_fixture({MakeSchedule(2, "非法回调", At(1'100))});
     Check(invalid_fixture.reminder.Start().ok(), "非法回调测试应启动服务");
@@ -621,26 +646,35 @@ void CheckTimingFailureAndDuplicatePaths() {
     fixture.timing.register_acceptance = CommandAcceptance::kUnavailable;
     Check(!fixture.reminder.Start().ok(), "注册命令不可用时启动应返回错误");
     const auto unavailable_register = fixture.repository.FindById(1);
-    Check(unavailable_register.ok() && !unavailable_register.value->reminder_task_id.has_value(),
-          "注册命令不可用时应回滚持久化提醒任务标识");
+    Check(unavailable_register.ok() && fixture.reminder_repository.FindBySchedule(1).value->front().timer_status ==
+              ScheduleReminderTimerStatus::kFailed,
+          "注册命令不可用时应将持久化提醒任务标记失败");
 
     ScriptedFixture duplicate_fixture({MakeSchedule(2, "重复提醒", At(1'100))});
     duplicate_fixture.timing.report_register_result = true;
     duplicate_fixture.timing.register_result = RegisterTaskResult::kDuplicate;
     Check(duplicate_fixture.reminder.Start().ok(), "重复注册结果不应使启动失败");
     const auto duplicate = duplicate_fixture.repository.FindById(2);
-    Check(duplicate.ok() && !duplicate.value->reminder_task_id.has_value(), "注册结果重复时应清空持久化提醒任务标识");
+    Check(duplicate.ok() && duplicate_fixture.reminder_repository.FindBySchedule(2).value->front().timer_status ==
+              ScheduleReminderTimerStatus::kFailed, "注册结果重复时应标记持久化提醒任务失败");
 
     ScriptedFixture cancel_fixture({MakeSchedule(3, "取消失败", At(1'100))});
     cancel_fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;
-    cancel_fixture.repository.Update([&] {
-        Schedule schedule = *cancel_fixture.repository.FindById(3).value;
-        schedule.reminder_task_id = 321;
-        return schedule;
-    }());
-    Check(!cancel_fixture.reminder.Start().ok(), "取消命令不可用时启动应返回错误");
-    const auto failed_cancel = cancel_fixture.repository.FindById(3);
-    Check(failed_cancel.ok() && failed_cancel.value->reminder_task_id == 321, "取消命令不可用时应保留原有提醒任务标识");
+    const auto existing = cancel_fixture.reminder_repository.Insert({
+        .schedule_id = 3,
+        .chain_id = 3,
+        .attempt = 1,
+        .timing_task_id = "existing-reminder",
+        .trigger_at = At(1'100),
+        .created_at = At(900),
+        .updated_at = At(900),
+    });
+    Check(existing.ok(), "应准备已有提醒任务");
+    Check(cancel_fixture.reminder.Start().ok(), "已有提醒任务恢复应成功");
+    Check(!cancel_fixture.reminder.CancelScheduleReminder(3).ok(), "取消命令不可用时应返回错误");
+    const auto failed_cancel = cancel_fixture.reminder_repository.FindBySchedule(3);
+    Check(failed_cancel.ok() && failed_cancel.value->front().timer_status == ScheduleReminderTimerStatus::kPending,
+          "取消命令不可用时应保留原有提醒任务");
 
     ScriptedFixture no_task_fixture({MakeSchedule(4, "无提醒任务", At(1'100))});
     Check(no_task_fixture.reminder.CancelScheduleReminder(4).ok(), "无提醒任务标识时取消应幂等成功");
@@ -655,12 +689,13 @@ void CheckStaleReminderCallbackIsIgnored() {
     const RegisterTaskCommand& registered = fixture.timing.register_commands.front();
     const auto task_id = voicelife::timing::TaskId::Create(registered.task_id.Value());
     Check(task_id.has_value(), "注册命令应包含有效 TaskId");
-    const int64_t first_task_id = *fixture.repository.FindById(1).value->reminder_task_id;
-    Check(first_task_id > 0, "启动后应持久化提醒任务标识");
+    const auto first_tasks = fixture.reminder_repository.FindBySchedule(1);
+    Check(first_tasks.ok() && !first_tasks.value->empty() && first_tasks.value->front().timing_task_id.has_value(),
+          "启动后应持久化提醒任务标识");
 
-    Schedule updated = *fixture.repository.FindById(1).value;
-    updated.reminder_task_id = first_task_id + 1;
-    Check(fixture.repository.Update(updated).ok(), "应模拟提醒任务已被替换");
+    auto replacement = first_tasks.value->front();
+    replacement.timing_task_id = "replacement-reminder";
+    Check(fixture.reminder_repository.Update(replacement).ok(), "应模拟提醒任务已经被替换");
     registered.callback(*task_id, Trigger(1'100));
     Check(fixture.speech.texts.empty(), "过期提醒回调不应触发 TTS");
 
@@ -680,7 +715,8 @@ void CheckGenerationRetryUnavailableAndStopCancelsRetry() {
     const auto first_task_id = voicelife::timing::TaskId::Create(first.task_id.Value());
     fixture.timing.register_acceptance = CommandAcceptance::kUnavailable;
     first.callback(*first_task_id, Trigger(1'100));
-    Check(fixture.rules.create_next_calls == 1 && fixture.timing.register_calls == 2, "生成失败后应尝试注册重试任务");
+    Check(fixture.rules.create_next_calls == 1 && fixture.timing.register_calls == 3,
+          "生成失败后应尝试注册下一次提醒和生成重试任务");
 
     fixture.reminder.Stop();
     Check(fixture.timing.cancel_calls == 0, "原实例完成后且重试注册不可用时 Stop 不应提交无效取消");
@@ -697,7 +733,7 @@ void CheckGenerationRetryDuplicateAndStaleCallbacks() {
     fixture.timing.report_register_result = true;
     fixture.timing.register_result = RegisterTaskResult::kDuplicate;
     first.callback(*first_task_id, Trigger(1'100));
-    Check(fixture.timing.register_calls == 2, "生成失败后应尝试注册重试任务");
+    Check(fixture.timing.register_calls == 3, "生成失败后应同时注册下一次提醒和生成重试任务");
 
     const RegisterTaskCommand& retry = fixture.timing.register_commands.back();
     const auto retry_task_id = voicelife::timing::TaskId::Create(retry.task_id.Value());
@@ -717,7 +753,7 @@ void CheckSuspendRetryTaskUnavailable() {
     const RegisterTaskCommand& first = fixture.timing.register_commands.front();
     const auto first_task_id = voicelife::timing::TaskId::Create(first.task_id.Value());
     first.callback(*first_task_id, Trigger(1'100));
-    Check(fixture.timing.register_calls == 2, "生成失败后应有重试注册命令");
+    Check(fixture.timing.register_calls == 3, "生成失败后应同时有下一次提醒和重试注册命令");
 
     fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;
     Check(!fixture.reminder.SuspendRuleReminders(13).ok(), "撤销重试取消命令不可用时应返回错误");

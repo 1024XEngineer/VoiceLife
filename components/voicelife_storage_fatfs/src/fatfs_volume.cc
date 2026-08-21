@@ -136,9 +136,9 @@ Status FatFsVolume::Mount() {
         return Status::Error(ErrorCode::kConflict, "FATFS 数据分区容量与 Storage Profile 不一致");
     }
 
-    // 开发期允许挂载失败时自动格式化：空分区首次启动时初始化 FATFS 文件系统。
+    // 生产数据卷禁止挂载失败时自动格式化；卷损坏必须显式报错，避免静默丢失日程与提醒记录。
     esp_vfs_fat_mount_config_t mount_config = VFS_FAT_MOUNT_DEFAULT_CONFIG();
-    mount_config.format_if_mount_failed = true;
+    mount_config.format_if_mount_failed = false;
     mount_config.max_files = config_.max_files;
     mount_config.allocation_unit_size = config_.allocation_unit_size;
     mount_config.disk_status_check_enable = config_.disk_status_check_enable;

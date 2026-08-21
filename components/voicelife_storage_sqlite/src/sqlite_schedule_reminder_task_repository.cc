@@ -9,6 +9,17 @@
 namespace voicelife::storage_sqlite {
 namespace {
 using schedule::ScheduleReminderTask;
+bool Valid(const ScheduleReminderTask& task) {
+    const int business_status = static_cast<int>(task.business_status);
+    const int timer_status = static_cast<int>(task.timer_status);
+    return task.schedule_id > 0 && task.chain_id > 0 && task.attempt >= 1 && task.attempt <= 3 &&
+           task.trigger_at != schedule::DateTime{} &&
+           business_status >= static_cast<int>(schedule::ScheduleReminderBusinessStatus::kScheduled) &&
+           business_status <= static_cast<int>(schedule::ScheduleReminderBusinessStatus::kCancelled) &&
+           timer_status >= static_cast<int>(schedule::ScheduleReminderTimerStatus::kPending) &&
+           timer_status <= static_cast<int>(schedule::ScheduleReminderTimerStatus::kFailed);
+}
+Status Invalid() { return Status::Error(ErrorCode::kInvalidArgument, "提醒任务字段无效"); }
 Status Unavailable() { return Status::Error(ErrorCode::kUnavailable, "SQLite 数据库尚未打开"); }
 Result<ScheduleReminderTask> ReadOne(SqliteStatement& statement) {
     const auto step = statement.Step();
@@ -35,6 +46,7 @@ SqliteScheduleReminderTaskRepository::SqliteScheduleReminderTaskRepository(Sqlit
 Result<ScheduleReminderTask> SqliteScheduleReminderTaskRepository::Insert(const ScheduleReminderTask& task) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!database_.IsOpen()) return Result<ScheduleReminderTask>::Failure(ErrorCode::kUnavailable, Unavailable().message);
+    if (!Valid(task)) return Result<ScheduleReminderTask>::Failure(ErrorCode::kInvalidArgument, Invalid().message);
     ScheduleReminderTask stored = task;
     const auto now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
     if (stored.created_at == schedule::DateTime{}) stored.created_at = now;
@@ -53,6 +65,7 @@ Result<ScheduleReminderTask> SqliteScheduleReminderTaskRepository::Insert(const 
 Status SqliteScheduleReminderTaskRepository::Update(const ScheduleReminderTask& task) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!database_.IsOpen()) return Unavailable();
+    if (!Valid(task)) return Invalid();
     auto prepared = database_.Prepare(sql::kUpdateScheduleReminderTask);
     if (!prepared.ok()) return prepared.status;
     auto statement = std::move(*prepared.value);

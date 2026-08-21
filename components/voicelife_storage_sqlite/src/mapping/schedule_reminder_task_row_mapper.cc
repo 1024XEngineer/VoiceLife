@@ -7,6 +7,16 @@ namespace {
 schedule::DateTime ReadTime(const SqliteStatement& statement, int column) {
     return schedule::DateTime{std::chrono::seconds{statement.ColumnInt64(column)}};
 }
+
+bool ValidBusinessStatus(int value) {
+    return value >= static_cast<int>(schedule::ScheduleReminderBusinessStatus::kScheduled) &&
+           value <= static_cast<int>(schedule::ScheduleReminderBusinessStatus::kCancelled);
+}
+
+bool ValidTimerStatus(int value) {
+    return value >= static_cast<int>(schedule::ScheduleReminderTimerStatus::kPending) &&
+           value <= static_cast<int>(schedule::ScheduleReminderTimerStatus::kFailed);
+}
 }
 
 Status BindScheduleReminderTask(SqliteStatement& statement, const schedule::ScheduleReminderTask& task) {
@@ -27,6 +37,11 @@ Status BindScheduleReminderTask(SqliteStatement& statement, const schedule::Sche
 }
 
 Result<schedule::ScheduleReminderTask> ReadScheduleReminderTask(const SqliteStatement& statement) {
+    const int business_status = statement.ColumnInt(6);
+    const int timer_status = statement.ColumnInt(7);
+    if (!ValidBusinessStatus(business_status) || !ValidTimerStatus(timer_status)) {
+        return Result<schedule::ScheduleReminderTask>::Failure(ErrorCode::kInternal, "提醒任务状态值非法");
+    }
     schedule::ScheduleReminderTask task;
     task.id = statement.ColumnInt64(0);
     task.schedule_id = statement.ColumnInt64(1);
@@ -34,8 +49,8 @@ Result<schedule::ScheduleReminderTask> ReadScheduleReminderTask(const SqliteStat
     task.attempt = statement.ColumnInt(3);
     if (!statement.IsNull(4)) task.timing_task_id = statement.ColumnText(4);
     task.trigger_at = ReadTime(statement, 5);
-    task.business_status = static_cast<schedule::ScheduleReminderBusinessStatus>(statement.ColumnInt(6));
-    task.timer_status = static_cast<schedule::ScheduleReminderTimerStatus>(statement.ColumnInt(7));
+    task.business_status = static_cast<schedule::ScheduleReminderBusinessStatus>(business_status);
+    task.timer_status = static_cast<schedule::ScheduleReminderTimerStatus>(timer_status);
     if (!statement.IsNull(8)) task.triggered_at = ReadTime(statement, 8);
     task.created_at = ReadTime(statement, 9);
     task.updated_at = ReadTime(statement, 10);

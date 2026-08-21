@@ -9,8 +9,14 @@ using schedule::ScheduleReminderTask;
 using schedule::ScheduleReminderTimerStatus;
 
 bool Valid(const ScheduleReminderTask& task) {
+    const int business_status = static_cast<int>(task.business_status);
+    const int timer_status = static_cast<int>(task.timer_status);
     return task.schedule_id > 0 && task.chain_id > 0 && task.attempt > 0 && task.attempt <= 3 &&
-           task.trigger_at != schedule::DateTime{};
+           task.trigger_at != schedule::DateTime{} &&
+           business_status >= static_cast<int>(ScheduleReminderBusinessStatus::kScheduled) &&
+           business_status <= static_cast<int>(ScheduleReminderBusinessStatus::kCancelled) &&
+           timer_status >= static_cast<int>(ScheduleReminderTimerStatus::kPending) &&
+           timer_status <= static_cast<int>(ScheduleReminderTimerStatus::kFailed);
 }
 }
 

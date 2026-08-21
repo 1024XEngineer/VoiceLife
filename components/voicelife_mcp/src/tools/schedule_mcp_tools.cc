@@ -497,7 +497,7 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
         });
     if (!status.ok()) return status;
 
-    return server.add_tool(
+    status = server.add_tool(
         "schedule.delete", "删除单次日程、未来周期单次或整条周期规则。", DeleteProperties(),
         [&service, rule_service, reminder_service](const PropertyList& properties) {
             // delete 根据定位参数拆三条路径：schedule_id 删实例，rule_id 删规则，rule_id + original_start_time

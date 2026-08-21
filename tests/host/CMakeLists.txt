@@ -270,6 +270,10 @@ add_voicelife_test(memory_schedule_repository_test "unit;storage;memory"
     "${ROOT_DIR}/components/voicelife_storage_memory/test/memory_schedule_repository_test.cc")
 target_link_libraries(memory_schedule_repository_test PRIVATE storage_memory schedule)
 
+add_voicelife_test(memory_schedule_reminder_task_repository_test "unit;storage;memory;reminder"
+    "${ROOT_DIR}/components/voicelife_storage_memory/test/memory_schedule_reminder_task_repository_test.cc")
+target_link_libraries(memory_schedule_reminder_task_repository_test PRIVATE storage_memory schedule)
+
 add_voicelife_test(mcp_server_test "unit;mcp"
     "${ROOT_DIR}/components/voicelife_mcp/test/mcp_server_test.cc")
 target_include_directories(mcp_server_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
@@ -288,7 +292,7 @@ target_link_libraries(schedule_mcp_tools_reminder_test PRIVATE mcp schedule timi
 add_voicelife_test(schedule_mcp_tools_branch_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_branch_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
-target_link_libraries(schedule_mcp_tools_branch_test PRIVATE mcp schedule timing)
+target_link_libraries(schedule_mcp_tools_branch_test PRIVATE mcp schedule timing storage_memory)
 
 add_voicelife_test(schedule_mcp_tools_failure_coverage_test "unit;mcp;schedule;runtime"
     schedule_mcp_tools_failure_coverage_test.cc
@@ -306,11 +310,11 @@ target_link_libraries(schedule_reminder_service_test PRIVATE schedule timing sto
 
 add_voicelife_test(schedule_reminder_uncovered_branch_test "unit;schedule;timing;reminder"
     schedule_reminder_uncovered_branch_test.cc)
-target_link_libraries(schedule_reminder_uncovered_branch_test PRIVATE schedule timing)
+target_link_libraries(schedule_reminder_uncovered_branch_test PRIVATE schedule timing storage_memory)
 
 add_voicelife_test(schedule_reminder_edge_cases_test "unit;schedule;timing;reminder"
     schedule_reminder_edge_cases_test.cc)
-target_link_libraries(schedule_reminder_edge_cases_test PRIVATE schedule timing)
+target_link_libraries(schedule_reminder_edge_cases_test PRIVATE schedule timing storage_memory)
 
 add_voicelife_test(schedule_rule_service_test "unit;schedule" schedule_rule_service_test.cc)
 target_link_libraries(schedule_rule_service_test PRIVATE schedule)
@@ -484,6 +488,13 @@ target_link_libraries(mcp_worker_policy_test PRIVATE im)
 add_voicelife_test(im_runtime_test "unit;im;runtime" im_runtime_test.cc)
 target_link_libraries(im_runtime_test PRIVATE im contracts)
 
+add_voicelife_test(schedule_reminder_im_adapter_test "unit;im;schedule;reminder;runtime"
+    schedule_reminder_im_adapter_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime/src/schedule_reminder_im_adapter.cc")
+target_include_directories(schedule_reminder_im_adapter_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_runtime/src")
+target_link_libraries(schedule_reminder_im_adapter_test PRIVATE im schedule timing storage_memory contracts)
+
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
 
@@ -510,6 +521,8 @@ target_link_libraries(sqlite_schema_test PRIVATE storage_sqlite)
 
 add_voicelife_test(voicelife_schema_test "integration;storage;sqlite;schema"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/test/voicelife_schema_test.cc")
+target_include_directories(voicelife_schema_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
 target_link_libraries(voicelife_schema_test PRIVATE storage_sqlite)
 
 add_voicelife_test(sqlite_schedule_repository_unit_test "unit;storage;sqlite;schedule;repository"
@@ -517,6 +530,10 @@ add_voicelife_test(sqlite_schedule_repository_unit_test "unit;storage;sqlite;sch
 target_include_directories(sqlite_schedule_repository_unit_test PRIVATE
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
 target_link_libraries(sqlite_schedule_repository_unit_test PRIVATE storage_sqlite schedule)
+
+add_voicelife_test(sqlite_schedule_reminder_task_repository_test "unit;storage;sqlite;reminder;repository"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_reminder_task_repository_test.cc")
+target_link_libraries(sqlite_schedule_reminder_task_repository_test PRIVATE storage_sqlite schedule)
 
 add_voicelife_test(sqlite_schedule_rule_repository_test "integration;storage;sqlite;schedule"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_rule_repository_test.cc")

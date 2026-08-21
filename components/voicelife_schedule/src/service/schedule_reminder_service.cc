@@ -251,11 +251,12 @@ std::string ScheduleReminderService::AllocateTaskId(std::string_view prefix) {
 }
 
 Status ScheduleReminderService::RegisterReminder(ScheduleId schedule_id, int64_t chain_id, int attempt, DateTime trigger_at) {
+    const DateTime now = Now();
     ScheduleReminderTask task{.schedule_id = schedule_id, .chain_id = chain_id, .attempt = attempt,
                               .timing_task_id = AllocateTaskId("schedule-reminder"), .trigger_at = trigger_at,
                               .business_status = ScheduleReminderBusinessStatus::kScheduled,
-                              .timer_status = ScheduleReminderTimerStatus::kPending,
-                              .created_at = Now(), .updated_at = Now()};
+                              .timer_status = ScheduleReminderTimerStatus::kPending, .triggered_at = std::nullopt,
+                              .created_at = now, .updated_at = now};
     const auto inserted = reminder_repository_.Insert(task);
     if (!inserted.ok()) return inserted.status;
     const Status registered = RegisterPersistedTask(*inserted.value);

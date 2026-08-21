@@ -4,8 +4,6 @@
 #include <string>
 #include <utility>
 
-#include "voicelife/storage_memory/memory_schedule_repository.h"
-#include "voicelife/storage_memory/memory_schedule_reminder_task_repository.h"
 #if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_STORAGE_FATFS_RUNTIME
 #include "voicelife/storage_fatfs/fatfs_volume.h"
 #include "voicelife/storage_sqlite/sqlite_database.h"
@@ -14,6 +12,9 @@
 #include "voicelife/storage_sqlite/sqlite_schedule_rule_repository.h"
 #include "voicelife/storage_sqlite/sqlite_schema.h"
 #include "voicelife/storage_sqlite/voicelife_schema.h"
+#else
+#include "voicelife/storage_memory/memory_schedule_repository.h"
+#include "voicelife/storage_memory/memory_schedule_reminder_task_repository.h"
 #endif
 
 #ifdef ESP_PLATFORM

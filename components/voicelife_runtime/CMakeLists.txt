@@ -1,10 +1,12 @@
 idf_component_register(
     SRCS "src/runtime.cc" "src/bootstrap/storage_bootstrap.cc" "src/im_runtime_bootstrap.cc"
+         "src/schedule_reminder_im_adapter.cc"
          "src/linx_mcp_bridge.cc" "src/linx_ota_bootstrap.cc" "src/wifi_provisioning.cc"
          "src/wifi_provisioning_esp.cc"
          "src/im_binding_mcp_tools.cc" "src/im_binding_presentation.cc"
          "src/serial_voice_test.cc"
     INCLUDE_DIRS "include" "src"
+    PRIV_INCLUDE_DIRS "../voicelife_im/src/transport"
     REQUIRES voicelife_contracts
     PRIV_REQUIRES voicelife_application voicelife_runtime_esp voicelife_mcp voicelife_voice voicelife_linx
                   voicelife_linx_esp voicelife_audio_esp voicelife_storage_memory
@@ -14,10 +16,6 @@ idf_component_register(
                   esp_driver_usb_serial_jtag led_strip
 )
 
-if(CONFIG_VOICELIFE_STORAGE_FATFS AND NOT CONFIG_VOICELIFE_STORAGE_SQLITE)
-    message(FATAL_ERROR "FATFS 持久化必须同时启用 VOICELIFE_STORAGE_SQLITE")
-endif()
-
-if(CONFIG_VOICELIFE_STORAGE_SQLITE AND NOT CONFIG_VOICELIFE_STORAGE_FATFS)
-    message(FATAL_ERROR "SQLite 持久化必须同时启用 VOICELIFE_STORAGE_FATFS")
+if(NOT CONFIG_VOICELIFE_STORAGE_FATFS OR NOT CONFIG_VOICELIFE_STORAGE_SQLITE)
+    message(FATAL_ERROR "设备 Runtime 必须同时启用 FATFS 与 SQLite 持久化存储")
 endif()
