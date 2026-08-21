@@ -15,6 +15,12 @@ class ProvisionImConfigTest(unittest.TestCase):
         self.assertEqual(PROVISION.provisioning_failure_code(b"IM_PROVISION_FAILED code=2\r\n"), 2)
         self.assertIsNone(PROVISION.provisioning_failure_code(b"unrelated log line\r\n"))
 
+    def test_extracts_sanitized_startup_failure_code(self):
+        self.assertEqual(
+            PROVISION.startup_failure_code(b"STARTUP_ERROR stage=storage_start code=3 database=canary\r\n"), 3
+        )
+        self.assertIsNone(PROVISION.startup_failure_code(b"unrelated log line\r\n"))
+
     def test_payload_matches_vli1_wire_format(self):
         payload = PROVISION.request_payload("https://gateway.example", "device-test", TOKEN, "user-test")
 

@@ -131,6 +131,7 @@ class CleanupError:
 @dataclass
 class _CleanupEntry:
     callback: Callable[[], None] = field(repr=False)
+    timeout_required: bool = True
     done: bool = False
 
 
@@ -140,28 +141,35 @@ class CleanupStack:
     def __init__(self) -> None:
         self._entries: list[_CleanupEntry] = []
 
-    def push(self, name: str, callback: Callable[[], None]) -> None:
+    def push(self, name: str, callback: Callable[[], None], *, timeout_required: bool = True) -> None:
         if not NAME_PATTERN.fullmatch(name):
             raise ValueError("cleanup name must be a safe lowercase identifier")
-        self._entries.append(_CleanupEntry(callback=callback))
+        self._entries.append(_CleanupEntry(callback=callback, timeout_required=timeout_required))
 
     def cleanup(self, deadline: float) -> list[CleanupError]:
         errors: list[CleanupError] = []
+        timed_out = False
         for entry in reversed(self._entries):
             if entry.done:
                 continue
-            if time.monotonic() >= deadline:
-                errors.append(CleanupError(code="cleanup_timeout"))
-                break
+            if timed_out or time.monotonic() >= deadline:
+                if not timed_out:
+                    errors.append(CleanupError(code="cleanup_timeout"))
+                    timed_out = True
+                if entry.timeout_required:
+                    continue
             entry.done = True
             try:
-                with _deadline_guard(deadline - time.monotonic()):
+                if entry.timeout_required:
+                    with _deadline_guard(deadline - time.monotonic()):
+                        entry.callback()
+                else:
                     entry.callback()
             except KeyboardInterrupt:
                 raise
             except RunnerDeadlineExceeded:
                 errors.append(CleanupError(code="cleanup_timeout"))
-                break
+                timed_out = True
             except Exception:
                 errors.append(CleanupError(code="cleanup_callback_failed"))
         return errors
@@ -250,7 +258,9 @@ def _new_context(config: RunnerConfig) -> RunContext:
     run_id = secrets.token_hex(16)
     cleanup = CleanupStack()
     temporary_directory = Path(tempfile.mkdtemp(prefix="voicelife-e2e-"))
-    cleanup.push("temporary-directory", lambda: shutil.rmtree(temporary_directory, ignore_errors=False))
+    cleanup.push(
+        "temporary-directory", lambda: shutil.rmtree(temporary_directory, ignore_errors=False), timeout_required=False
+    )
     return RunContext(
         config=config,
         run_id=run_id,

@@ -15,6 +15,7 @@ OVERWRITE_MAGIC = b"VLI2"
 READY_MARKER = b"IM_PROVISION_READY=1"
 FIELD_LIMITS = (255, 128, 512, 128)
 FAILURE_PATTERN = re.compile(rb"\bIM_PROVISION_FAILED code=(\d+)\b")
+STARTUP_FAILURE_PATTERN = re.compile(rb"\bSTARTUP_ERROR\b.*?\bcode=(\d+)\b")
 
 
 def parse_args() -> argparse.Namespace:
@@ -105,6 +106,11 @@ def provisioning_failure_code(line: bytes) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def startup_failure_code(line: bytes) -> int | None:
+    match = STARTUP_FAILURE_PATTERN.search(line)
+    return int(match.group(1)) if match else None
+
+
 def main() -> None:
     args = parse_args()
     token = getpass.getpass("IM device token (hidden): ")
@@ -132,6 +138,11 @@ def main() -> None:
             deadline = time.monotonic() + args.timeout
             while time.monotonic() < deadline:
                 line = device.readline()
+                startup_failure = startup_failure_code(line)
+                if startup_failure is not None:
+                    raise SystemExit(
+                        f"Board startup failed before provisioning (sanitized status code {startup_failure})."
+                    )
                 if READY_MARKER not in line:
                     continue
                 device.write(payload)
@@ -144,6 +155,11 @@ def main() -> None:
                     if b"IM_PROVISIONED=1" in line:
                         print("Provisioning completed; the board is restarting.")
                         return
+                    startup_failure = startup_failure_code(line)
+                    if startup_failure is not None:
+                        raise SystemExit(
+                            f"Board startup failed during provisioning (sanitized status code {startup_failure})."
+                        )
                     failure_code = provisioning_failure_code(line)
                     if failure_code is not None:
                         raise SystemExit(f"Board rejected provisioning (sanitized status code {failure_code}).")

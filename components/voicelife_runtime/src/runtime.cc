@@ -645,6 +645,10 @@ class Runtime final {
             if (im_readiness_.NetworkReady() && !im_readiness_.SystemTimeReady()) {
                 status = SynchronizeSystemTime();
             }
+            if (im_readiness_.SystemTimeReady() && !im_system_time_logged_) {
+                ESP_LOGI(kTag, "SNTP_SYNCED=1");
+                im_system_time_logged_ = true;
+            }
             status = im_runtime_.Start();
             if (im_runtime_.state() == im::ImRuntimeState::kProbing) {
                 response = im_runtime_.ProbeGateway();
@@ -1672,6 +1676,7 @@ class Runtime final {
     std::optional<BindingPresentation> deferred_binding_presentation_;
     std::string deferred_binding_speech_;
     std::atomic_bool im_lifecycle_started_{false};
+    bool im_system_time_logged_ = false;
     TaskHandle_t im_lifecycle_task_ = nullptr;
     mcp::McpServer mcp_server_;
     schedule::ScheduleOperationService schedule_operation_service_;

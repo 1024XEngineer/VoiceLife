@@ -19,10 +19,13 @@ EVENT_PATTERN = re.compile(
 )
 # IM 生命周期标记：只提取脱敏状态与数字，绝不透传原始行。
 IM_MARKER_PATTERN = re.compile(
-    r"(IM_RUNTIME_READY|IM_RUNTIME_DEGRADED|IM_PROVISION_READY|IM_PROVISIONED|SNTP_SYNCED)=1\b"
+    r"(IM_RUNTIME_READY|IM_RUNTIME_DEGRADED|IM_PROVISION_READY|IM_PROVISIONED|SNTP_SYNCED|WIFI_STA_GOT_IP)=1\b"
 )
+IM_CODE_FAILURE_PATTERN = re.compile(r"(IM_PROVISION_FAILED)\b.*?\bcode=(\d+)\b")
+STARTUP_FAILURE_PATTERN = re.compile(r"STARTUP_ERROR\b.*?\bcode=(\d+)\b")
 # parse_im_signal 产出的短信号名中，属于「IM 未就绪」的失败信号。
-IM_FAILURE_SIGNALS = frozenset({"degraded", "failure"})
+IM_FAILURE_SIGNALS = frozenset({"degraded", "failure", "provision_failure", "startup_failure"})
+HIL_READINESS_ORDER = ("provisioned", "wifi_ready", "sntp_synced", "ready")
 LABEL_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 FAILURE_EVENTS = frozenset(
     {"provider_error", "capture_stop_failed", "tts_capture_stop_failed", "stop_disconnect_failed"}
@@ -59,6 +62,12 @@ def parse_voice_event(line: str) -> dict[str, int | str] | None:
 
 def parse_im_signal(line: str) -> dict[str, int | str] | None:
     """Extract a sanitized IM lifecycle signal from one Runtime line."""
+    failure = IM_CODE_FAILURE_PATTERN.search(line)
+    if failure is not None:
+        return {"signal": "provision_failure", "code": int(failure.group(2))}
+    startup = STARTUP_FAILURE_PATTERN.search(line)
+    if startup is not None:
+        return {"signal": "startup_failure", "code": int(startup.group(1))}
     match = IM_MARKER_PATTERN.search(line)
     if match is None:
         return None
@@ -80,7 +89,26 @@ def parse_im_signal(line: str) -> dict[str, int | str] | None:
         return {"signal": "provisioned"}
     if marker == "SNTP_SYNCED":
         return {"signal": "sntp_synced"}
+    if marker == "WIFI_STA_GOT_IP":
+        return {"signal": "wifi_ready"}
     return None
+
+
+def hil_readiness_markers(signals: list[dict[str, int | str]]) -> list[str]:
+    """Return only public HIL readiness marker names in observed order."""
+    return [str(signal["signal"]) for signal in signals if str(signal["signal"]) in set(HIL_READINESS_ORDER)]
+
+
+def hil_readiness_status(signals: list[dict[str, int | str]]) -> tuple[bool, str]:
+    """Require provisioning, Wi-Fi, SNTP and authenticated IM readiness in order."""
+    observed = [str(signal["signal"]) for signal in signals]
+    failures = [signal for signal in observed if signal in IM_FAILURE_SIGNALS]
+    if failures:
+        return False, f"HIL readiness failure signal observed: {failures[-1]}"
+    markers = hil_readiness_markers(signals)
+    if markers != list(HIL_READINESS_ORDER):
+        return False, "HIL readiness markers are incomplete or out of order"
+    return True, ""
 
 
 def im_readiness_status(signals: list[dict[str, int | str]]) -> tuple[bool, str]:

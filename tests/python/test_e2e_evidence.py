@@ -47,6 +47,7 @@ class E2eEvidenceTest(unittest.TestCase):
             "metrics": {"resource_count": 2},
             "cleanup": {"status": "passed", "error_codes": []},
             "hardware_verified": False,
+            "hil": None,
         }
 
     def test_valid_document_passes_and_canonicalizes(self) -> None:
@@ -147,6 +148,58 @@ class E2eEvidenceTest(unittest.TestCase):
     def test_allowed_identifiers_do_not_trigger_sensitive_scan(self) -> None:
         document = self.document()
         self.assertEqual(EVIDENCE.scan_sensitive(document), [])
+
+    def hil_document(self) -> dict[str, object]:
+        document = self.document()
+        document.update(
+            {
+                "scope": "hil_im_pairing",
+                "layer": "hil",
+                "journey": "im-pairing",
+                "profile": "sparkbot",
+                "hardware_verified": True,
+                "assertions": [
+                    {"name": "readiness_complete", "passed": True, "code": "ok"},
+                    {"name": "pairing_complete", "passed": True, "code": "ok"},
+                ],
+                "hil": {
+                    "firmware_sha256": "a" * 64,
+                    "gateway_commit": "b" * 40,
+                    "device_fingerprint": "c" * 16,
+                    "readiness_markers": ["provisioned", "wifi_ready", "sntp_synced", "ready"],
+                    "pairing_markers": ["scope_matched", "code_valid", "pending", "expired"],
+                },
+            }
+        )
+        return document
+
+    def test_accepts_strict_hil_pairing_evidence(self) -> None:
+        document = self.hil_document()
+        EVIDENCE.validate_evidence(document)
+        self.assertEqual(json.loads(EVIDENCE.canonical_json(document)), document)
+
+    def test_hil_evidence_rejects_missing_gates_false_success_claim_and_sensitive_values(self) -> None:
+        missing = self.hil_document()
+        missing["hil"]["readiness_markers"] = ["ready"]
+        false_success_claim = self.hil_document()
+        false_success_claim["hardware_verified"] = False
+        display_code = self.hil_document()
+        display_code["hil"]["pairing_markers"] = ["scope_matched", "123456", "pending", "expired"]
+        raw_identity = self.hil_document()
+        raw_identity["hil"]["device_id"] = "device-1"
+
+        for document in (missing, false_success_claim, display_code, raw_identity):
+            with self.subTest(document=document), self.assertRaises(EVIDENCE.EvidenceValidationError):
+                EVIDENCE.validate_evidence(document)
+
+    def test_contract_only_evidence_cannot_claim_hardware_or_carry_hil_metadata(self) -> None:
+        claimed = self.document()
+        claimed["hardware_verified"] = True
+        metadata = self.document()
+        metadata["hil"] = self.hil_document()["hil"]
+        for document in (claimed, metadata):
+            with self.assertRaises(EVIDENCE.EvidenceValidationError):
+                EVIDENCE.validate_evidence(document)
 
     def test_atomic_write_creates_private_file_without_partial_temp_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
