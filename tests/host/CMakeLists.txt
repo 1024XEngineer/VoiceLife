@@ -271,30 +271,31 @@ add_voicelife_test(mcp_server_test "unit;mcp"
 target_include_directories(mcp_server_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
 target_link_libraries(mcp_server_test PRIVATE mcp)
 
+set(SCHEDULE_MCP_TOOLS_SOURCE "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 
 add_voicelife_test(schedule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_mcp_tools_test.cc
-    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
+    "${SCHEDULE_MCP_TOOLS_SOURCE}")
 target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule im)
 
 add_voicelife_test(schedule_mcp_tools_reminder_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_reminder_test.cc
-    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
+    "${SCHEDULE_MCP_TOOLS_SOURCE}")
 target_link_libraries(schedule_mcp_tools_reminder_test PRIVATE mcp schedule timing im)
 
 add_voicelife_test(schedule_mcp_tools_branch_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_branch_test.cc
-    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
+    "${SCHEDULE_MCP_TOOLS_SOURCE}")
 target_link_libraries(schedule_mcp_tools_branch_test PRIVATE mcp schedule timing im)
 
 add_voicelife_test(schedule_mcp_tools_failure_coverage_test "unit;mcp;schedule;runtime"
     schedule_mcp_tools_failure_coverage_test.cc
-    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
+    "${SCHEDULE_MCP_TOOLS_SOURCE}")
 target_link_libraries(schedule_mcp_tools_failure_coverage_test PRIVATE mcp schedule im)
 
 add_voicelife_test(schedule_mcp_tools_recovery_coverage_test "unit;mcp;schedule"
-    schedule_mcp_tools_recovery_coverage_test.cc
-    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
-target_link_libraries(schedule_mcp_tools_recovery_coverage_test PRIVATE mcp schedule)
+    "${CMAKE_CURRENT_LIST_DIR}/schedule_mcp_tools_recovery_coverage_test.cc"
+    "${SCHEDULE_MCP_TOOLS_SOURCE}")
+target_link_libraries(schedule_mcp_tools_recovery_coverage_test PRIVATE mcp schedule im)
 
 add_voicelife_test(schedule_rule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_rule_mcp_tools_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_rule_mcp_tools.cc")
