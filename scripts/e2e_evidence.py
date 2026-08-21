@@ -16,6 +16,7 @@ HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 HEX_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 HEX_FINGERPRINT = re.compile(r"^[0-9a-f]{16}$")
 SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+SAFE_MODEL = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 UTC_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3,6})?Z$")
 JWT_PATTERN = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\b")
 SENSITIVE_KEY_PATTERN = re.compile(
@@ -58,7 +59,36 @@ CLEANUP_KEYS = frozenset({"status", "error_codes"})
 HIL_KEYS = frozenset(
     {"firmware_sha256", "gateway_commit", "device_fingerprint", "readiness_markers", "pairing_markers"}
 )
-METRIC_KEYS = frozenset({"resource_count", "bound_port_count", "namespace_count"})
+VOICE_HIL_KEYS = frozenset(
+    {
+        "firmware_sha256",
+        "gateway_commit",
+        "device_fingerprint",
+        "readiness_markers",
+        "tts_model",
+        "tts_voice",
+        "input_tts",
+    }
+)
+METRIC_KEYS = frozenset(
+    {
+        "resource_count",
+        "bound_port_count",
+        "namespace_count",
+        "requested_turns",
+        "completed_turns",
+        "asr_exact_matches",
+        "test_in_frames",
+        "out_frames",
+        "in_drop",
+        "out_reject",
+        "short_write",
+        "in_i2s_err",
+        "out_i2s_err",
+        "serial_pcm_rejections",
+        "display_content_snapshots",
+    }
+)
 FAILURE_CATEGORIES = frozenset(
     {
         "configuration",
@@ -158,13 +188,26 @@ def _validate_hil(hil: Any) -> None:
     _reject(value["pairing_markers"] != ["scope_matched", "code_valid", "pending", "expired"])
 
 
+def _validate_voice_hil(hil: Any) -> None:
+    value = _exact_keys(hil, VOICE_HIL_KEYS)
+    _reject(not isinstance(value["firmware_sha256"], str) or HEX_SHA256.fullmatch(value["firmware_sha256"]) is None)
+    _reject(not isinstance(value["gateway_commit"], str) or HEX_COMMIT.fullmatch(value["gateway_commit"]) is None)
+    _reject(
+        not isinstance(value["device_fingerprint"], str)
+        or HEX_FINGERPRINT.fullmatch(value["device_fingerprint"]) is None
+    )
+    _reject(value["readiness_markers"] != ["provisioned", "wifi_ready", "sntp_synced", "ready"])
+    _reject(SAFE_MODEL.fullmatch(value["tts_model"]) is None or not _safe_name(value["tts_voice"]))
+    _reject(value["input_tts"] != "dashscope")
+
+
 def validate_evidence(document: dict[str, object]) -> None:
     """Validate the complete evidence allowlist and cross-field relations."""
     value = _exact_keys(document, TOP_LEVEL_KEYS)
     _reject(value["schema_version"] != 1)
     _reject(not isinstance(value["run_id"], str) or HEX_ID.fullmatch(value["run_id"]) is None)
     _reject(not isinstance(value["correlation_id"], str) or HEX_ID.fullmatch(value["correlation_id"]) is None)
-    _reject(value["scope"] not in {"runner_contract_only", "hil_im_pairing"})
+    _reject(value["scope"] not in {"runner_contract_only", "hil_im_pairing", "hil_voice"})
     _reject(value["layer"] not in {"host", "hil"})
     _reject(not _safe_name(value["journey"]) or not _safe_name(value["profile"]))
     _reject(not isinstance(value["started_at"], str) or UTC_TIMESTAMP.fullmatch(value["started_at"]) is None)
@@ -175,7 +218,7 @@ def validate_evidence(document: dict[str, object]) -> None:
     _reject(type(value["hardware_verified"]) is not bool)
     if value["scope"] == "runner_contract_only":
         _reject(value["hardware_verified"] or value["hil"] is not None)
-    else:
+    elif value["scope"] == "hil_im_pairing":
         _reject(
             value["layer"] != "hil"
             or value["journey"] != "im-pairing"
@@ -183,6 +226,15 @@ def validate_evidence(document: dict[str, object]) -> None:
             or value["hardware_verified"] is not True
         )
         _validate_hil(value["hil"])
+    else:
+        _reject(
+            value["layer"] != "hil"
+            or value["journey"] != "voice"
+            or value["profile"] != "sparkbot"
+            or value["status"] != "passed"
+            or value["hardware_verified"] is not True
+        )
+        _validate_voice_hil(value["hil"])
 
     failure_category = value["failure_category"]
     failed_phase = value["failed_phase"]

@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -27,7 +29,13 @@ from e2e_hil_device import (
     load_device_descriptor,
     validate_device_layout,
 )
-from e2e_runner import AssertionResult, FailureCategory, RunContext, RunnerDeadlineExceeded, RunnerFailure
+from e2e_runner import (
+    AssertionResult,
+    FailureCategory,
+    RunContext,
+    RunnerDeadlineExceeded,
+    RunnerFailure,
+)
 from start_im_pairing import PairingLifecycle, PairingLifecycleError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -212,6 +220,222 @@ class HilPairingAdapter:
             "readiness_markers": hil_readiness_markers(self._readiness),
             "pairing_markers": list(self._pairing_markers),
             "metrics": {"resource_count": 4},
+        }
+
+
+class HilVoiceAdapter:
+    """Run the real SparkBot DashScope-to-device multi-turn voice journey."""
+
+    VOICE_FIRMWARE_PROFILE = "esp32s3-esp-sparkbot-serial-voice"
+
+    def __init__(
+        self,
+        descriptor_path: Path,
+        lease_root: Path,
+        *,
+        hardware: HilHardware,
+        tts_model: str,
+        voice: str,
+        texts: list[str] | None,
+        expect_terminal: bool,
+        response_timeout: float,
+    ) -> None:
+        self._descriptor_path = descriptor_path
+        self._lease_root = lease_root
+        self._hardware = hardware
+        self._tts_model = tts_model
+        self._voice = voice
+        self._texts = texts or []
+        self._expect_terminal = expect_terminal
+        self._response_timeout = response_timeout
+        self._descriptor: DeviceDescriptor | None = None
+        self._lease: DeviceLease | None = None
+        self._partitions: list[Partition] = []
+        self._image: ApplicationImage | None = None
+        self._identity: TemporaryIdentity | None = None
+        self._pending_device_id = ""
+        self._readiness: list[dict[str, object]] = []
+        self._device_fingerprint = ""
+        self._result: dict[str, object] = {}
+        self.lease_held = False
+
+    def prepare(self, context: RunContext) -> None:
+        if not os.environ.get("DASHSCOPE_API_KEY"):
+            raise RunnerFailure(FailureCategory.CONFIGURATION, "dashscope_api_key_missing")
+        if shutil.which("ffmpeg") is None:
+            raise RunnerFailure(FailureCategory.CONFIGURATION, "ffmpeg_unavailable")
+        try:
+            import dashscope  # noqa: F401
+        except ImportError as error:
+            raise RunnerFailure(FailureCategory.CONFIGURATION, "dashscope_unavailable") from error
+        try:
+            descriptor = load_device_descriptor(self._descriptor_path, context.config.profile)
+            if descriptor.profile != "sparkbot":
+                raise HilProfileMismatch("voice journey requires sparkbot")
+            lease = DeviceLease(descriptor, self._lease_root)
+            lease.acquire()
+            self.lease_held = True
+            self._descriptor = descriptor
+            self._lease = lease
+            context.cleanup.push("hil-voice-device-lease", self._release_lease, timeout_required=False)
+            self._partitions = self._hardware.inspect(self._descriptor, context.temporary_directory)
+            validate_device_layout(self._descriptor, self._partitions)
+        except (HilConfigurationError, HilLeaseUnavailable, HilProfileMismatch) as error:
+            raise _runner_failure(error) from error
+
+    def _release_lease(self) -> None:
+        if self._lease is not None:
+            self._lease.release()
+        self.lease_held = False
+
+    def _recover(self) -> None:
+        if self._descriptor is not None:
+            self._hardware.recover(self._descriptor)
+
+    def _revoke(self) -> None:
+        if self._identity is not None:
+            self._hardware.revoke(self._identity)
+        elif self._pending_device_id:
+            self._hardware.revoke_device_id(self._pending_device_id)
+
+    @staticmethod
+    def _classify_voice_exit(returncode: int, stderr: str) -> RunnerFailure:
+        if returncode == 1:
+            return RunnerFailure(FailureCategory.PRODUCT, "voice_acceptance_failed")
+        if "cannot open serial port" in stderr:
+            return RunnerFailure(FailureCategory.DEVICE, "voice_serial_unavailable")
+        if any(marker in stderr for marker in ("DASHSCOPE_API_KEY", "dashscope is required", "pyserial is required")):
+            return RunnerFailure(FailureCategory.CONFIGURATION, "voice_dependency_missing")
+        if "input_preparation_failed" in stderr:
+            return RunnerFailure(FailureCategory.EXTERNAL, "voice_tts_failed")
+        return RunnerFailure(FailureCategory.EXTERNAL, "voice_harness_failed")
+
+    def _run_voice_script(self, context: RunContext) -> dict[str, object]:
+        if self._descriptor is None:
+            raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "voice_device_not_prepared")
+        script = ROOT / "scripts" / "voice_linx_serial_multiturn_test.py"
+        result_path = context.temporary_directory / "voice-result.json"
+        serial_log = context.temporary_directory / "voice-serial.log"
+        command = [
+            sys.executable,
+            str(script),
+            "--port",
+            str(self._descriptor.port),
+            "--input-tts",
+            "dashscope",
+            "--tts-model",
+            self._tts_model,
+            "--voice",
+            self._voice,
+            "--response-timeout",
+            str(self._response_timeout),
+            "--serial-log",
+            str(serial_log),
+            "--result-json",
+            str(result_path),
+        ]
+        if self._expect_terminal:
+            command.append("--expect-terminal")
+        for text in self._texts:
+            command.extend(("--text", text))
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=ROOT,
+                env=os.environ.copy(),
+                capture_output=True,
+                text=True,
+                timeout=max(0.1, context.remaining()),
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise RunnerDeadlineExceeded from error
+        except OSError as error:
+            raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "voice_harness_unavailable") from error
+        if completed.returncode != 0:
+            raise self._classify_voice_exit(completed.returncode, completed.stderr)
+        try:
+            value = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError) as error:
+            raise RunnerFailure(FailureCategory.PRODUCT, "voice_result_invalid") from error
+        if not isinstance(value, dict):
+            raise RunnerFailure(FailureCategory.PRODUCT, "voice_result_invalid")
+        return value
+
+    def run(self, context: RunContext) -> dict[str, object]:
+        if self._descriptor is None:
+            raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "hil_device_not_prepared")
+        try:
+            voice_descriptor = replace(self._descriptor, firmware_profile=self.VOICE_FIRMWARE_PROFILE)
+            build_directory = self._hardware.build(voice_descriptor)
+            self._image = self._hardware.image(build_directory, self._descriptor, self._partitions)
+            self._hardware.flash(voice_descriptor, self._image, context.remaining())
+            self._pending_device_id = f"e2e-{context.run_id}"
+            context.cleanup.push("voice-gateway-device-revoke", self._revoke)
+            self._identity = self._hardware.register(context.run_id)
+            self._device_fingerprint = device_fingerprint(self._identity.device_id, context.run_id)
+            context.cleanup.push("voice-hil-device-recovery", self._recover)
+            self._hardware.provision(self._descriptor, self._identity, context.remaining())
+            self._readiness = self._hardware.reboot_and_readiness(self._descriptor, context.remaining())
+            ready, _ = hil_readiness_status(self._readiness)
+            if not ready:
+                raise RunnerFailure(FailureCategory.PRODUCT, "voice_readiness_incomplete")
+            self._result = self._run_voice_script(context)
+            return self._result
+        except (HilConfigurationError, HilLeaseUnavailable, HilProfileMismatch) as error:
+            raise _runner_failure(error) from error
+
+    def assert_result(self, context: RunContext, result: object) -> list[AssertionResult]:
+        values = result if isinstance(result, dict) else {}
+        acceptance = values.get("acceptance")
+        acceptance_values = acceptance if isinstance(acceptance, dict) else {}
+        checks = {
+            "voice_turns_complete": values.get("completed_turns") == values.get("requested_turns")
+            and isinstance(values.get("requested_turns"), int)
+            and values.get("requested_turns", 0) > 0,
+            "voice_state_flow_clean": acceptance_values.get("state_flow_complete") is True,
+            "voice_display_flow_clean": acceptance_values.get("display_flow_complete") is True
+            and acceptance_values.get("display_text_trace_complete") is True,
+            "voice_wake_guard_clean": acceptance_values.get("terminal_guard_clean") is True,
+            "voice_acceptance_clean": isinstance(acceptance, dict)
+            and all(value is True for value in acceptance.values()),
+        }
+        return [
+            AssertionResult(name=name, passed=passed, code="ok" if passed else "mismatch")
+            for name, passed in checks.items()
+        ]
+
+    def collect(self, context: RunContext, result: object, assertions: list[AssertionResult]) -> dict[str, object]:
+        if self._descriptor is None or self._image is None or self._identity is None:
+            raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "voice_evidence_incomplete")
+        values = result if isinstance(result, dict) else {}
+        audio = values.get("audio_stats") if isinstance(values.get("audio_stats"), dict) else {}
+        display = values.get("display") if isinstance(values.get("display"), dict) else {}
+        serial_rejections = values.get("serial_pcm_rejections")
+        return {
+            "scope": "hil_voice",
+            "hardware_verified": all(assertion.passed for assertion in assertions),
+            "firmware_sha256": self._image.sha256,
+            "gateway_commit": self._identity.gateway_commit,
+            "device_fingerprint": self._device_fingerprint,
+            "readiness_markers": hil_readiness_markers(self._readiness),
+            "tts_model": self._tts_model,
+            "tts_voice": self._voice,
+            "input_tts": "dashscope",
+            "metrics": {
+                "requested_turns": values.get("requested_turns", 0),
+                "completed_turns": values.get("completed_turns", 0),
+                "asr_exact_matches": values.get("asr_exact_matches", 0),
+                "test_in_frames": audio.get("test_in_frames", 0),
+                "out_frames": audio.get("out_frames", 0),
+                "in_drop": audio.get("in_drop", 0),
+                "out_reject": audio.get("out_reject", 0),
+                "short_write": audio.get("short_write", 0),
+                "in_i2s_err": audio.get("in_i2s_err", 0),
+                "out_i2s_err": audio.get("out_i2s_err", 0),
+                "serial_pcm_rejections": len(serial_rejections) if isinstance(serial_rejections, list) else 0,
+                "display_content_snapshots": display.get("content_snapshots", 0),
+            },
         }
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import types
@@ -38,6 +39,7 @@ class FakeHardware:
         self.device_revoked = False
         self.serial_open = False
         self.reset_count = 0
+        self.build_profiles: list[str] = []
 
     def inspect(self, descriptor: object, temporary_directory: Path) -> object:
         self.calls.append("inspect")
@@ -54,6 +56,7 @@ class FakeHardware:
 
     def build(self, descriptor: object) -> Path:
         self.calls.append("build")
+        self.build_profiles.append(str(getattr(descriptor, "firmware_profile", "")))
         return Path("/safe/build")
 
     def image(self, build_directory: Path, descriptor: object, partitions: object) -> object:
@@ -280,6 +283,105 @@ class HilPairingAdapterTest(unittest.TestCase):
                 [{"signal": "provisioned"}, {"signal": "ready"}],
             )
         serial_module.Serial.assert_called_once_with("/dev/cu.test", 115200, timeout=0.2, write_timeout=2)
+
+
+class HilVoiceAdapterTest(HilPairingAdapterTest):
+    def voice_config(self) -> object:
+        return RUNNER.RunnerConfig(
+            layer="hil",
+            journey="voice",
+            profile="sparkbot",
+            hard_timeout_s=5.0,
+            phase_timeout_s=3.0,
+            cleanup_timeout_s=0.5,
+        )
+
+    def execute_voice(self, hardware: FakeHardware) -> tuple[HIL.HilVoiceAdapter, object]:
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = HIL.HilVoiceAdapter(
+                self.descriptor_file(directory),
+                Path(directory) / "leases",
+                hardware=hardware,
+                tts_model="qwen-audio-3.0-tts-flash",
+                voice="longanlingxi",
+                texts=["你好"],
+                expect_terminal=False,
+                response_timeout=5.0,
+            )
+            result = RUNNER.run_e2e(self.voice_config(), adapter)
+        return adapter, result
+
+    def test_dashscope_voice_journey_uses_voice_profile_and_sanitized_metrics(self) -> None:
+        hardware = FakeHardware()
+        voice_result = {
+            "requested_turns": 1,
+            "completed_turns": 1,
+            "asr_exact_matches": 1,
+            "audio_stats": {
+                "test_in_frames": 4,
+                "out_frames": 8,
+                "in_drop": 0,
+                "out_reject": 0,
+                "short_write": 0,
+                "in_i2s_err": 0,
+                "out_i2s_err": 0,
+            },
+            "serial_pcm_rejections": [],
+            "display": {"content_snapshots": 2},
+            "acceptance": {
+                "voice_ok": True,
+                "state_flow_complete": True,
+                "display_flow_complete": True,
+                "display_text_trace_complete": True,
+                "terminal_guard_clean": True,
+            },
+        }
+
+        def run_voice(command: list[str], **kwargs: object) -> object:
+            result_path = Path(command[command.index("--result-json") + 1])
+            result_path.write_text(json.dumps(voice_result), encoding="utf-8")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch.dict(os.environ, {"DASHSCOPE_API_KEY": "test-key"}, clear=False),
+            mock.patch.dict(sys.modules, {"dashscope": types.SimpleNamespace()}),
+            mock.patch.object(HIL.shutil, "which", return_value="/usr/bin/ffmpeg"),
+            mock.patch.object(HIL.subprocess, "run", side_effect=run_voice),
+        ):
+            adapter, result = self.execute_voice(hardware)
+
+        self.assertEqual(result.exit_code, RUNNER.ExitCode.SUCCESS)
+        self.assertEqual(hardware.build_profiles, ["esp32s3-esp-sparkbot-serial-voice"])
+        self.assertEqual(result.collected["scope"], "hil_voice")
+        self.assertTrue(result.collected["hardware_verified"])
+        self.assertEqual(result.collected["metrics"]["asr_exact_matches"], 1)
+        self.assertEqual(result.collected["tts_model"], "qwen-audio-3.0-tts-flash")
+        self.assertEqual(
+            [assertion.name for assertion in result.assertions],
+            [
+                "voice_turns_complete",
+                "voice_state_flow_clean",
+                "voice_display_flow_clean",
+                "voice_wake_guard_clean",
+                "voice_acceptance_clean",
+            ],
+        )
+        self.assertNotIn("你好", repr(result.collected))
+        self.assertFalse(adapter.lease_held)
+
+    def test_voice_script_exit_categories_are_stable(self) -> None:
+        self.assertEqual(
+            HIL.HilVoiceAdapter._classify_voice_exit(1, "").category,
+            RUNNER.FailureCategory.PRODUCT,
+        )
+        self.assertEqual(
+            HIL.HilVoiceAdapter._classify_voice_exit(2, "cannot open serial port").category,
+            RUNNER.FailureCategory.DEVICE,
+        )
+        self.assertEqual(
+            HIL.HilVoiceAdapter._classify_voice_exit(2, "input_preparation_failed:timeout").category,
+            RUNNER.FailureCategory.EXTERNAL,
+        )
 
 
 if __name__ == "__main__":

@@ -403,6 +403,43 @@ class RunE2eCliTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             RUN_E2E.build_adapter("host", "im-pairing", args)
 
+    def test_build_adapter_registers_voice_only_for_sparkbot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            descriptor = Path(directory) / "device.json"
+            descriptor.write_text(
+                json.dumps({"schema_version": 1, "name": "bench-a", "port": "/dev/cu.test", "profile": "sparkbot"}),
+                encoding="utf-8",
+            )
+            args = RUN_E2E.parse_args(
+                [
+                    "--layer",
+                    "hil",
+                    "--journey",
+                    "voice",
+                    "--profile",
+                    "sparkbot",
+                    "--artifact-dir",
+                    directory,
+                    "--timeout",
+                    "2",
+                    "--device",
+                    str(descriptor),
+                    "--server",
+                    "runner@example.test",
+                    "--server-dir",
+                    "/srv/voicelife",
+                    "--gateway-origin",
+                    "https://gateway.example.test",
+                    "--user-id",
+                    "user-test",
+                ]
+            )
+            adapter = RUN_E2E.build_adapter(args.layer, args.journey, args)
+        self.assertEqual(type(adapter).__name__, "HilVoiceAdapter")
+        args.profile = "pcb"
+        with self.assertRaises(ValueError):
+            RUN_E2E.build_adapter(args.layer, args.journey, args)
+
 
 if __name__ == "__main__":
     unittest.main()

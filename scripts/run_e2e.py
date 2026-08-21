@@ -16,8 +16,15 @@ from e2e_example_adapters import (
     HostImGatewayRecoveryE2EAdapter,
     HostLifecycleExampleAdapter,
 )
-from e2e_hil_adapters import HilPairingAdapter, RealHilHardware
-from e2e_runner import ExitCode, FailureCategory, RunnerConfig, RunnerResult, exit_code_for, run_e2e
+from e2e_hil_adapters import HilPairingAdapter, HilVoiceAdapter, RealHilHardware
+from e2e_runner import (
+    ExitCode,
+    FailureCategory,
+    RunnerConfig,
+    RunnerResult,
+    exit_code_for,
+    run_e2e,
+)
 
 PROFILES = {"host": frozenset({"host"}), "hil": frozenset({"sparkbot", "pcb"})}
 
@@ -43,6 +50,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--server-dir")
     parser.add_argument("--gateway-origin")
     parser.add_argument("--user-id")
+    parser.add_argument("--tts-model", default="qwen-audio-3.0-tts-flash")
+    parser.add_argument("--voice", default="longanlingxi")
+    parser.add_argument("--text", action="append")
+    parser.add_argument("--expect-terminal", action="store_true")
+    parser.add_argument("--response-timeout", type=float, default=45.0)
     return parser.parse_args(argv)
 
 
@@ -63,7 +75,7 @@ def build_adapter(layer: str, journey: str, args: argparse.Namespace | Path | No
     artifact_directory = args.artifact_dir if isinstance(args, argparse.Namespace) else args
     hil_options = ("device", "lease_dir", "server", "server_dir", "gateway_origin", "user_id")
     if (
-        journey != "im-pairing"
+        journey not in {"im-pairing", "voice"}
         and isinstance(args, argparse.Namespace)
         and any(getattr(args, name) is not None for name in hil_options)
     ):
@@ -79,6 +91,28 @@ def build_adapter(layer: str, journey: str, args: argparse.Namespace | Path | No
         lease_directory = args.lease_dir or Path.home() / ".voicelife" / "hil-leases"
         hardware = RealHilHardware(str(server), str(server_directory), str(gateway_origin), str(user_id))
         return HilPairingAdapter(Path(device), lease_directory, hardware=hardware)
+    if journey == "voice":
+        if layer != "hil" or not isinstance(args, argparse.Namespace) or args.profile != "sparkbot":
+            raise ValueError("voice journey requires the sparkbot HIL profile")
+        device = _required_hil_option(args, "device")
+        server = _required_hil_option(args, "server")
+        server_directory = _required_hil_option(args, "server_dir")
+        gateway_origin = _required_hil_option(args, "gateway_origin")
+        user_id = _required_hil_option(args, "user_id")
+        if args.response_timeout <= 0:
+            raise ValueError("response-timeout must be positive")
+        lease_directory = args.lease_dir or Path.home() / ".voicelife" / "hil-leases"
+        hardware = RealHilHardware(str(server), str(server_directory), str(gateway_origin), str(user_id))
+        return HilVoiceAdapter(
+            Path(device),
+            lease_directory,
+            hardware=hardware,
+            tts_model=args.tts_model,
+            voice=args.voice,
+            texts=args.text,
+            expect_terminal=args.expect_terminal,
+            response_timeout=args.response_timeout,
+        )
     if journey == "im-gateway-strong-reminder" and layer == "host":
         return HostImGatewayE2EAdapter()
     if journey == "im-gateway-recovery" and layer == "host":
@@ -135,14 +169,23 @@ def build_evidence(result: RunnerResult, config: RunnerConfig) -> dict[str, obje
         else False
     )
     hil = None
-    if scope == "hil_im_pairing" and result.status.value == "passed":
+    if scope in {"hil_im_pairing", "hil_voice"} and result.status.value == "passed":
         hil = {
             "firmware_sha256": collected.get("firmware_sha256"),
             "gateway_commit": collected.get("gateway_commit"),
             "device_fingerprint": collected.get("device_fingerprint"),
             "readiness_markers": collected.get("readiness_markers"),
-            "pairing_markers": collected.get("pairing_markers"),
         }
+        if scope == "hil_im_pairing":
+            hil["pairing_markers"] = collected.get("pairing_markers")
+        else:
+            hil.update(
+                {
+                    "tts_model": collected.get("tts_model"),
+                    "tts_voice": collected.get("tts_voice"),
+                    "input_tts": collected.get("input_tts"),
+                }
+            )
     return {
         "schema_version": 1,
         "run_id": result.run_id,

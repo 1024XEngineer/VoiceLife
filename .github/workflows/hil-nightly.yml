@@ -19,6 +19,7 @@ on:
         default: im-pairing
         options:
           - im-pairing
+          - voice
       device:
         description: Optional descriptor name; requires a single profile selection
         required: false
@@ -48,6 +49,7 @@ jobs:
       VOICELIFE_HIL_SERVER_DIR: ${{ secrets.VOICELIFE_HIL_SERVER_DIR }}
       VOICELIFE_HIL_GATEWAY_ORIGIN: ${{ secrets.VOICELIFE_HIL_GATEWAY_ORIGIN }}
       VOICELIFE_HIL_USER_ID: ${{ secrets.VOICELIFE_HIL_USER_ID }}
+      DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
       HIL_DEVICE_NAME: ${{ inputs.device || '' }}
     defaults:
       run:
@@ -73,6 +75,12 @@ jobs:
           test -n "${VOICELIFE_HIL_GATEWAY_ORIGIN:-}"
           test -n "${VOICELIFE_HIL_USER_ID:-}"
           python3 -c 'import serial, esptool' >/dev/null
+          if [[ "${{ inputs.journey || 'im-pairing' }}" == "voice" ]]; then
+            [[ "${{ inputs.profile || 'all' }}" == "sparkbot" ]]
+            test -n "${DASHSCOPE_API_KEY:-}"
+            python3 -c 'import dashscope' >/dev/null
+            command -v ffmpeg >/dev/null
+          fi
       - name: 运行 HIL journey
         id: journey
         run: |
@@ -84,7 +92,8 @@ jobs:
           else
             device_path="$HIL_DEVICE_ROOT/${{ matrix.profile }}.json"
           fi
-          python3 scripts/run_e2e.py \
+          run_args=(
+            python3 scripts/run_e2e.py \
             --layer hil \
             --journey "${{ inputs.journey || 'im-pairing' }}" \
             --profile "${{ matrix.profile }}" \
@@ -97,6 +106,17 @@ jobs:
             --server-dir "$VOICELIFE_HIL_SERVER_DIR" \
             --gateway-origin "$VOICELIFE_HIL_GATEWAY_ORIGIN" \
             --user-id "$VOICELIFE_HIL_USER_ID"
+          )
+          if [[ "${{ inputs.journey || 'im-pairing' }}" == "voice" ]]; then
+            run_args+=(
+              --tts-model "${VOICELIFE_TTS_MODEL:-qwen-audio-3.0-tts-flash}"
+              --voice "${VOICELIFE_TTS_VOICE:-longanlingxi}"
+              --text '你好牛牛，请介绍一下你自己。'
+              --text '把刚才的回答再简短一点。'
+              --text '请用一句话总结我们刚才的对话。'
+            )
+          fi
+          "${run_args[@]}"
           run_status=$?
           exit "$run_status"
       - name: 校验 HIL 脱敏 evidence
