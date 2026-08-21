@@ -60,7 +60,17 @@ HIL_KEYS = frozenset(
 )
 METRIC_KEYS = frozenset({"resource_count", "bound_port_count", "namespace_count"})
 FAILURE_CATEGORIES = frozenset(
-    {"configuration", "infrastructure", "product", "device", "external", "timeout", "interrupted", "cleanup"}
+    {
+        "configuration",
+        "infrastructure",
+        "product",
+        "device",
+        "lease",
+        "external",
+        "timeout",
+        "interrupted",
+        "cleanup",
+    }
 )
 PHASE_ORDER = ("prepare", "run", "assert", "collect", "cleanup")
 PHASES = frozenset(PHASE_ORDER)

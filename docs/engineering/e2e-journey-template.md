@@ -13,7 +13,7 @@
 
 | 阶段 | 资源与动作 | 超时 | 清理 | 失败分类 |
 | --- | --- | --- | --- | --- |
-| prepare | 租约、临时目录、进程或设备检查 | `<seconds>` | `<action>` | configuration/device/infrastructure |
+| prepare | 租约、临时目录、进程或设备检查 | `<seconds>` | `<action>` | configuration/lease/device/infrastructure |
 | run | 真实请求或串口旅程 | `<seconds>` | `<action>` | external/product/device |
 | assert | 有序状态和终态断言 | `<seconds>` | `<action>` | product |
 | collect | 只采集 allowlist 字段 | `<seconds>` | `<action>` | infrastructure |

@@ -29,6 +29,7 @@ class FailureCategory(str, Enum):
     INFRASTRUCTURE = "infrastructure"
     PRODUCT = "product"
     DEVICE = "device"
+    LEASE = "lease"
     EXTERNAL = "external"
     TIMEOUT = "timeout"
     INTERRUPTED = "interrupted"
@@ -43,6 +44,7 @@ class ExitCode(IntEnum):
     INFRASTRUCTURE = 10
     PRODUCT = 20
     DEVICE = 30
+    LEASE = 31
     EXTERNAL = 40
     TIMEOUT = 60
     INTERRUPTED = 70
@@ -59,6 +61,7 @@ _EXIT_CODES = {
     FailureCategory.INFRASTRUCTURE: ExitCode.INFRASTRUCTURE,
     FailureCategory.PRODUCT: ExitCode.PRODUCT,
     FailureCategory.DEVICE: ExitCode.DEVICE,
+    FailureCategory.LEASE: ExitCode.LEASE,
     FailureCategory.EXTERNAL: ExitCode.EXTERNAL,
     FailureCategory.TIMEOUT: ExitCode.TIMEOUT,
     FailureCategory.INTERRUPTED: ExitCode.INTERRUPTED,

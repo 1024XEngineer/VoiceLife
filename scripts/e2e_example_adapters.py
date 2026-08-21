@@ -43,6 +43,8 @@ class HostLifecycleExampleAdapter:
 
     def assert_result(self, context: RunContext, result: object) -> list[AssertionResult]:
         values = result if isinstance(result, dict) else {}
+        if os.environ.get("VOICELIFE_E2E_CONTRACT_FAILURE") == "1":
+            return [AssertionResult(name="lifecycle_complete", passed=False, code="contract_failure")]
         passed = all(values.get(name) is True for name in values)
         return [AssertionResult(name="lifecycle_complete", passed=passed, code="ok" if passed else "incomplete")]
 

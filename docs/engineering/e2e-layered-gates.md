@@ -48,8 +48,9 @@ Gateway host、目录、origin 和 user id 通过环境变量或受控 secret �
 ## workflow 与设备矩阵
 
 - `.github/workflows/ci.yml` 仅运行稳定 Host E2E，并上传 14 天的 JSON evidence。
+- PR Host job 另运行一次受控的 `lifecycle-example` 故意失败，验证失败 evidence 和 `product` 分类仍能通过脱敏校验。
 - `.github/workflows/hil-nightly.yml` 只接受 `self-hosted, voicelife-hil` 及 profile 标签；`fail-fast=false`，SparkBot 和 PCB 独立汇总、独立上传 artifact。
-- schedule 和 `workflow_dispatch` 复用同一条命令。手工触发可选 `sparkbot`、`pcb` 或 `all`，用于隔离故障设备。
+- schedule 和 `workflow_dispatch` 复用同一条命令。手工触发可选 `sparkbot`、`pcb` 或 `all`，并可在选择单一 Profile 后指定 device descriptor 名称，用于隔离故障设备。
 - public GitHub-hosted Runner 不接触硬件或长期平台凭据。受控 Runner 只保存原始串口日志；公开 artifact 只包含通过 `scripts/check_e2e_artifacts.py` 校验的脱敏 JSON。
 - artifact 保留 14 天，访问权限跟随仓库 Actions 权限；发现凭据或个人数据时立即删除公开 artifact，保留受控私有原始日志并按 [SECURITY.md](../../SECURITY.md) 上报。
 
@@ -60,7 +61,8 @@ Gateway host、目录、origin 和 user id 通过环境变量或受控 secret �
 | 分类 | 例子 | 处理 |
 | --- | --- | --- |
 | `configuration` | 缺 descriptor、缺 pyserial、Profile 参数错误 | 修 Runner 配置，不重试 |
-| `device` | 无租约、串口打开失败、分区/Profile 不匹配 | 隔离该设备，修复或替换后手动重跑 |
+| `lease` | 设备或串口租约冲突 | 等待或释放租约后重跑，不归因于产品 |
+| `device` | 串口打开失败、分区/Profile 不匹配 | 隔离该设备，修复或替换后手动重跑 |
 | `infrastructure` | 构建工具、SSH/进程或 artifact 写入失败 | 修 Runner 基础设施；不把产品判定为失败 |
 | `external` | Gateway/微信/ASR/TTS 服务不可用 | 记录外部依赖和时间窗口，允许一次可见的基础设施重试 |
 | `product` | readiness 或 pairing 断言失败 | 保留 evidence，按产品缺陷处理，不自动重跑掩盖 |

@@ -186,6 +186,14 @@ class HilPairingAdapterTest(unittest.TestCase):
         self.assertNotIn("flash", hardware.calls)
         self.assertFalse(adapter.lease_held)
 
+    def test_lease_conflict_is_classified_separately_from_device_failure(self) -> None:
+        hardware = FakeHardware()
+        with mock.patch.object(HIL.DeviceLease, "acquire", side_effect=HIL.HilLeaseUnavailable):
+            adapter, result = self.execute(hardware)
+        self.assertEqual(result.failure_category, RUNNER.FailureCategory.LEASE)
+        self.assertEqual(result.message_code, "device_lease_unavailable")
+        self.assertFalse(adapter.lease_held)
+
     def test_registration_failure_revokes_run_scoped_device_and_releases_lease(self) -> None:
         hardware = FakeHardware()
         hardware.register = mock.Mock(

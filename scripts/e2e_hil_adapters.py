@@ -82,7 +82,7 @@ def _runner_failure(error: Exception) -> RunnerFailure:
     if isinstance(error, HilConfigurationError):
         return RunnerFailure(FailureCategory.CONFIGURATION, "hil_configuration_invalid")
     if isinstance(error, HilLeaseUnavailable):
-        return RunnerFailure(FailureCategory.DEVICE, "device_lease_unavailable")
+        return RunnerFailure(FailureCategory.LEASE, "device_lease_unavailable")
     if isinstance(error, HilProfileMismatch):
         return RunnerFailure(FailureCategory.DEVICE, "device_profile_mismatch")
     raise error

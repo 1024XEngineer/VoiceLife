@@ -21,6 +21,11 @@ on:
         default: im-pairing
         options:
           - im-pairing
+      device:
+        description: Optional descriptor name; requires a single profile selection
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -45,6 +50,7 @@ jobs:
       VOICELIFE_HIL_SERVER_DIR: ${{ secrets.VOICELIFE_HIL_SERVER_DIR }}
       VOICELIFE_HIL_GATEWAY_ORIGIN: ${{ secrets.VOICELIFE_HIL_GATEWAY_ORIGIN }}
       VOICELIFE_HIL_USER_ID: ${{ secrets.VOICELIFE_HIL_USER_ID }}
+      HIL_DEVICE_NAME: ${{ inputs.device || '' }}
     defaults:
       run:
         shell: bash
@@ -55,7 +61,15 @@ jobs:
       - name: 检查受控 Runner 配置
         run: |
           set -euo pipefail
-          test -r "$HIL_DEVICE_ROOT/${{ matrix.profile }}.json"
+          device_name="$HIL_DEVICE_NAME"
+          if [[ -n "$device_name" ]]; then
+            [[ "${{ inputs.profile || 'all' }}" != "all" ]]
+            [[ "$device_name" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]]
+            descriptor="$HIL_DEVICE_ROOT/$device_name.json"
+          else
+            descriptor="$HIL_DEVICE_ROOT/${{ matrix.profile }}.json"
+          fi
+          test -r "$descriptor"
           test -n "${VOICELIFE_HIL_SERVER:-}"
           test -n "${VOICELIFE_HIL_SERVER_DIR:-}"
           test -n "${VOICELIFE_HIL_GATEWAY_ORIGIN:-}"
@@ -66,6 +80,12 @@ jobs:
         run: |
           set +e
           mkdir -p "artifacts/hil-${{ matrix.profile }}"
+          device_name="$HIL_DEVICE_NAME"
+          if [[ -n "$device_name" ]]; then
+            device_path="$HIL_DEVICE_ROOT/$device_name.json"
+          else
+            device_path="$HIL_DEVICE_ROOT/${{ matrix.profile }}.json"
+          fi
           python3 scripts/run_e2e.py \
             --layer hil \
             --journey "${{ inputs.journey || 'im-pairing' }}" \
@@ -73,22 +93,23 @@ jobs:
             --artifact-dir "artifacts/hil-${{ matrix.profile }}" \
             --timeout 900 \
             --retries 0 \
-            --device "$HIL_DEVICE_ROOT/${{ matrix.profile }}.json" \
+            --device "$device_path" \
             --lease-dir "$HIL_LEASE_ROOT" \
             --server "$VOICELIFE_HIL_SERVER" \
             --server-dir "$VOICELIFE_HIL_SERVER_DIR" \
             --gateway-origin "$VOICELIFE_HIL_GATEWAY_ORIGIN" \
             --user-id "$VOICELIFE_HIL_USER_ID"
           run_status=$?
-          python3 scripts/check_e2e_artifacts.py "artifacts/hil-${{ matrix.profile }}"
-          artifact_status=$?
-          if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-            python3 scripts/render_e2e_summary.py "artifacts/hil-${{ matrix.profile }}" >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [[ "$run_status" -ne 0 ]]; then exit "$run_status"; fi
-          exit "$artifact_status"
-      - name: 上传 HIL 脱敏 evidence
+          exit "$run_status"
+      - name: 校验 HIL 脱敏 evidence
+        id: validate-hil-evidence
         if: always()
+        run: python3 scripts/check_e2e_artifacts.py "artifacts/hil-${{ matrix.profile }}"
+      - name: 写入 HIL job summary
+        if: always()
+        run: python3 scripts/render_e2e_summary.py "artifacts/hil-${{ matrix.profile }}" >> "$GITHUB_STEP_SUMMARY"
+      - name: 上传 HIL 脱敏 evidence
+        if: always() && steps.validate-hil-evidence.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: hil-${{ matrix.profile }}-evidence

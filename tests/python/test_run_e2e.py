@@ -153,6 +153,17 @@ class RunE2eCliTest(unittest.TestCase):
                 self.assertFalse(document["hardware_verified"])
                 self.assertNotIn(str(evidence_paths[0]), result.stdout)
 
+    def test_contract_failure_writes_failed_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.run_cli(
+                *self.base_args(Path(directory)), env={**os.environ, "VOICELIFE_E2E_CONTRACT_FAILURE": "1"}
+            )
+            self.assertEqual(result.returncode, 20, result.stderr)
+            document = json.loads(next(Path(directory).glob("evidence-*.json")).read_text(encoding="utf-8"))
+            EVIDENCE.validate_evidence(document)
+            self.assertEqual(document["failure_category"], "product")
+            self.assertEqual(document["failed_phase"], "assert")
+
     def test_cli_rejects_nonzero_retries_and_hil_host_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             retry_args = self.base_args(Path(directory))

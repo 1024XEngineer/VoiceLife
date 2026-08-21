@@ -102,14 +102,30 @@ jobs:
             --artifact-dir artifacts/im-gateway-e2e \
             --timeout 120 \
             --retries 0
+      - name: 验证故意失败 evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          VOICELIFE_E2E_CONTRACT_FAILURE=1 python3 scripts/run_e2e.py \
+            --layer host \
+            --journey lifecycle-example \
+            --profile host \
+            --artifact-dir artifacts/im-gateway-e2e/contract-failure \
+            --timeout 60 \
+            --retries 0
+          failure_status=$?
+          set -e
+          test "$failure_status" -eq 20
       - name: 校验 Host E2E 脱敏 evidence
+        id: validate-host-evidence
         if: always()
         run: python3 scripts/check_e2e_artifacts.py artifacts/im-gateway-e2e
       - name: 写入 Host E2E job summary
         if: always()
         run: python3 scripts/render_e2e_summary.py artifacts/im-gateway-e2e >> "$GITHUB_STEP_SUMMARY"
       - name: 上传 Host E2E 脱敏证据
-        if: always()
+        if: always() && steps.validate-host-evidence.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: im-gateway-host-e2e-evidence

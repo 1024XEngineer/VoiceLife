@@ -115,6 +115,7 @@ class E2eRunnerTest(unittest.TestCase):
         self.assertEqual(RUNNER.exit_code_for(RUNNER.FailureCategory.INFRASTRUCTURE), 10)
         self.assertEqual(RUNNER.exit_code_for(RUNNER.FailureCategory.PRODUCT), 20)
         self.assertEqual(RUNNER.exit_code_for(RUNNER.FailureCategory.DEVICE), 30)
+        self.assertEqual(RUNNER.exit_code_for(RUNNER.FailureCategory.LEASE), 31)
         self.assertEqual(RUNNER.exit_code_for(RUNNER.FailureCategory.EXTERNAL), 40)
         self.assertEqual(RUNNER.exit_code_for(RUNNER.FailureCategory.TIMEOUT), 60)
         self.assertEqual(RUNNER.exit_code_for(RUNNER.FailureCategory.INTERRUPTED), 70)
