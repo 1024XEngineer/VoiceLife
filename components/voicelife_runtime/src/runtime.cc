@@ -270,10 +270,8 @@ class Runtime final {
         }
         timing_runtime_ = std::move(*timing_runtime.value);
         reminder_speech_ = std::make_unique<ReminderSpeech>([this](std::string_view text) {
-            if (!session_) {
-                return Status::Error(ErrorCode::kUnavailable, "语音会话尚未启动");
-            }
-            return session_->Speak(text);
+            return QueueSystemSpeech(text) ? Status::Ok()
+                                           : Status::Error(ErrorCode::kUnavailable, "系统提醒播报请求未进入板级队列");
         });
         schedule_reminder_service_ = std::make_unique<schedule::ScheduleReminderService>(
             storage_.GetScheduleRepository(), schedule_service_, schedule_rule_service_, *timing_runtime_,
@@ -725,6 +723,9 @@ class Runtime final {
             if (injection == nullptr) return Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
             const Status enabled = injection->SetTestInputEnabled(true);
             if (!enabled.ok()) return enabled;
+            // TTS 结束后 Runtime 会自动打开下一轮采集；串口夹具仍需显式
+            // 重新声明注入窗口，但不能再次投递 PressDown 破坏 Listening 状态。
+            if (interaction_.state() == voice::VoiceInteractionState::kListening) return Status::Ok();
             if (EnqueueBoardInput(BoardInputAction::kPressDown)) return Status::Ok();
             (void)injection->SetTestInputEnabled(false);
             return Status::Error(ErrorCode::kUnavailable, "语音测试开始事件未进入状态机队列");
@@ -831,7 +832,12 @@ class Runtime final {
         request.kind = BoardRequestKind::kInterrupt;
         std::memcpy(request.system_speech, text.data(), text.size());
         request.system_speech[text.size()] = '\0';
-        return EnqueueBoardRequest(request, "system_speech");
+        // 先让交互单写者离开待机，再由 WakeTask 取消旧回合并提交 TTS。
+        // 这样提醒的 tts.started/字幕不会在 Standby 门控中被丢弃。
+        if (!EnqueueEvent(voice::VoiceInteractionEvent::kSystemSpeechRequested)) return false;
+        if (EnqueueBoardRequest(request, "system_speech")) return true;
+        (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
+        return false;
     }
 
     // 下行长文本滚动由显示 Adapter 负责（Ssd1306PresentationAdapter）。

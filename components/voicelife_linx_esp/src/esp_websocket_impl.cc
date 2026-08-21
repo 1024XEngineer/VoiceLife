@@ -410,7 +410,14 @@ bool EspWebSocketTransport::Impl::PrepareWorker() {
     running_.store(true);
     // Process received frames ahead of the WebSocket client task so the
     // bounded queue drains during bursty STT/TTS traffic.
-    if (xTaskCreate(&WorkerEntry, "linx_ws_events", options_.worker_task_stack_size, this, 6, &worker_) != pdPASS) {
+#if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
+    if (xTaskCreateWithCaps(&WorkerEntry, "linx_ws_events", options_.worker_task_stack_size, this, 6, &worker_,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+#else
+    const uint32_t worker_stack_words = options_.worker_task_stack_size / sizeof(StackType_t);
+    if (worker_stack_words == 0 ||
+        xTaskCreate(&WorkerEntry, "linx_ws_events", worker_stack_words, this, 6, &worker_) != pdPASS) {
+#endif
         CleanupWorker();
         return false;
     }
