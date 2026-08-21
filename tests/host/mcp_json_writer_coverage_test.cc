@@ -3,6 +3,7 @@
 #include <string>
 #include <utility>
 
+#include "mcp_json_writer.h"
 #include "support/test_support.h"
 #include "voicelife/contracts/tool.h"
 #include "voicelife/mcp/mcp_server.h"
@@ -12,7 +13,13 @@ using voicelife::MakeToolOutput;
 using voicelife::ToolOutputArray;
 using voicelife::ToolOutputObject;
 using voicelife::ToolOutputValue;
+using voicelife::mcp::ListToolsResult;
+using voicelife::mcp::SerializeListToolsResult;
 using voicelife::mcp::SerializeToolOutputValue;
+using voicelife::mcp::ToolDefinition;
+using voicelife::mcp::ToolInputField;
+using voicelife::mcp::ToolInputSchema;
+using voicelife::mcp::ToolInputType;
 using voicelife::test::Check;
 
 namespace {
@@ -40,11 +47,70 @@ ToolOutputObject BuildObjectWithNull(ToolOutputArray array) {
 
 }  // namespace
 
+void CheckListToolsSchemaSerialization() {
+    auto nested = std::make_shared<ToolInputSchema>();
+    nested->properties.emplace(
+        "name",
+        ToolInputField{.type = ToolInputType::kString, .description = "嵌套名称", .min_length = 1, .max_length = 8});
+    nested->properties.emplace("enabled", ToolInputField{.type = ToolInputType::kBoolean});
+    nested->required.push_back("name");
+
+    ToolInputSchema schema;
+    schema.properties.emplace("flag", ToolInputField{.type = ToolInputType::kBoolean});
+    schema.properties.emplace(
+        "count", ToolInputField{.type = ToolInputType::kInteger, .description = "数量", .minimum = -2, .maximum = 9});
+    schema.properties.emplace(
+        "label",
+        ToolInputField{.type = ToolInputType::kString, .description = "标签", .min_length = 2, .max_length = 12});
+    schema.properties.emplace(
+        "settings", ToolInputField{.type = ToolInputType::kObject, .description = "设置", .object_schema = nested});
+    schema.required = {"flag", "settings"};
+
+    const std::string json = SerializeListToolsResult(ListToolsResult{
+        .tools = {ToolDefinition{.name = "coverage.schema", .description = "覆盖 Schema", .input_schema = schema}},
+        .total = 1,
+    });
+    yyjson_doc* document = yyjson_read(json.data(), json.size(), YYJSON_READ_NOFLAG);
+    Check(document != nullptr, "工具列表 Schema 应序列化为合法 JSON");
+    yyjson_val* root = yyjson_doc_get_root(document);
+    yyjson_val* tools = yyjson_obj_get(root, "tools");
+    Check(yyjson_is_arr(tools) && yyjson_arr_size(tools) == 1, "工具列表应包含定义");
+    yyjson_val* tool = yyjson_arr_get(tools, 0);
+    Check(yyjson_equals_str(yyjson_obj_get(tool, "name"), "coverage.schema") &&
+              yyjson_equals_str(yyjson_obj_get(tool, "description"), "覆盖 Schema"),
+          "工具名称和描述应序列化");
+
+    yyjson_val* input_schema = yyjson_obj_get(tool, "inputSchema");
+    yyjson_val* properties = yyjson_obj_get(input_schema, "properties");
+    yyjson_val* count = yyjson_obj_get(properties, "count");
+    yyjson_val* label = yyjson_obj_get(properties, "label");
+    Check(yyjson_equals_str(yyjson_obj_get(input_schema, "type"), "object") &&
+              yyjson_equals_str(yyjson_obj_get(yyjson_obj_get(properties, "flag"), "type"), "boolean") &&
+              yyjson_equals_str(yyjson_obj_get(count, "type"), "integer") &&
+              yyjson_get_sint(yyjson_obj_get(count, "minimum")) == -2 &&
+              yyjson_get_sint(yyjson_obj_get(count, "maximum")) == 9 &&
+              yyjson_get_sint(yyjson_obj_get(label, "minLength")) == 2 &&
+              yyjson_get_sint(yyjson_obj_get(label, "maxLength")) == 12,
+          "标量字段的类型、描述约束应序列化");
+
+    yyjson_val* settings = yyjson_obj_get(properties, "settings");
+    yyjson_val* nested_properties = yyjson_obj_get(settings, "properties");
+    yyjson_val* required = yyjson_obj_get(settings, "required");
+    yyjson_val* schema_required = yyjson_obj_get(input_schema, "required");
+    Check(yyjson_equals_str(yyjson_obj_get(settings, "type"), "object") &&
+              yyjson_equals_str(yyjson_obj_get(yyjson_obj_get(nested_properties, "name"), "description"), "嵌套名称") &&
+              yyjson_arr_size(required) == 1 && yyjson_equals_str(yyjson_arr_get(required, 0), "name") &&
+              yyjson_arr_size(schema_required) == 2,
+          "嵌套对象属性和 required 数组应序列化");
+    yyjson_doc_free(document);
+}
+
 /**
  * @brief 执行新增的 MCP JSON 输出序列化覆盖测试。
  * @return 全部断言通过时返回 0。
  */
 int main() {
+    CheckListToolsSchemaSerialization();
     const std::string json =
         SerializeToolOutputValue(ToolOutputValue::Object(BuildObjectWithNull(BuildArrayWithNull())));
     yyjson_doc* document = yyjson_read(json.data(), json.size(), YYJSON_READ_NOFLAG);

@@ -336,6 +336,7 @@ target_link_libraries(schedule_helpers_coverage_test PRIVATE schedule)
 
 add_voicelife_test(mcp_json_writer_coverage_test "unit;mcp" mcp_json_writer_coverage_test.cc)
 target_include_directories(mcp_json_writer_coverage_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
+target_include_directories(mcp_json_writer_coverage_test PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src")
 target_link_libraries(mcp_json_writer_coverage_test PRIVATE mcp)
 
 add_voicelife_test(mcp_server_coverage_test "unit;mcp" mcp_server_coverage_test.cc)

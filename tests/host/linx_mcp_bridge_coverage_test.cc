@@ -98,10 +98,62 @@ void CheckUnavailableAndOutcomeBranches() {
     Check(!voicelife::runtime::IsBindingMcpToolSummary("操作已完成"), "非绑定摘要不得误判为绑定结果");
 }
 
+void CheckAdditionalProtocolBranches() {
+    McpServer server;
+    voicelife::test::InMemoryScheduleRepository repository;
+    voicelife::schedule::ScheduleService service(repository);
+    Check(voicelife::mcp::RegisterScheduleMcpTools(server, service).ok(), "协议边界测试应注册日程工具");
+
+    const auto initialized = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"initialize","id":"init-1"})", server, "session\n\"id");
+    Check(initialized.ok() && initialized.value->find("session\\n\\\"id") != std::string::npos,
+          "initialize 应转义并回传特殊 session_id");
+
+    const auto notification =
+        voicelife::runtime::HandleLinxMcpPayload(R"({"jsonrpc":"2.0","method":"notifications/progress"})", server);
+    Check(notification.ok() && notification.value->empty(), "任意 notifications/ 通知都不应回包");
+
+    const auto list_with_boolean_id =
+        voicelife::runtime::HandleLinxMcpPayload(R"({"jsonrpc":"2.0","method":"tools/list","id":true})", server);
+    Check(list_with_boolean_id.ok() && list_with_boolean_id.value->find("\"id\":true") != std::string::npos,
+          "非字符串 JSON-RPC id 应按原类型序列化");
+
+    const auto missing_arguments = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create"},"id":7})", server);
+    Check(missing_arguments.ok() && missing_arguments.value->find("-32602") != std::string::npos,
+          "缺少必填工具参数应返回 invalid params");
+
+    const auto null_params = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":null,"id":8})", server);
+    Check(null_params.ok() && null_params.value->find("-32602") != std::string::npos,
+          "null params 应返回 invalid params");
+
+    const auto failed_response = voicelife::Result<std::string>::Failure(ErrorCode::kUnavailable, "transport");
+    const auto failed_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"im.binding.start"},"id":1})", failed_response);
+    Check(!failed_outcome.success && failed_outcome.summary == "绑定操作失败", "传输失败应返回绑定失败摘要");
+
+    const auto non_object_envelope = voicelife::Result<std::string>::Success("[]");
+    Check(!voicelife::runtime::InspectLinxMcpToolOutcome("{}", non_object_envelope).success,
+          "非对象响应信封不得判定成功");
+    const auto missing_payload = voicelife::Result<std::string>::Success(R"({"type":"mcp"})");
+    Check(!voicelife::runtime::InspectLinxMcpToolOutcome("{}", missing_payload).success,
+          "缺少 payload 的响应不得判定成功");
+    const auto non_object_result =
+        voicelife::Result<std::string>::Success(R"({"type":"mcp","payload":{"result":null}})");
+    Check(!voicelife::runtime::InspectLinxMcpToolOutcome("{}", non_object_result).success,
+          "非对象 result 不得判定成功");
+    const auto invalid_is_error =
+        voicelife::Result<std::string>::Success(R"({"type":"mcp","payload":{"result":{"isError":"false"}}})");
+    Check(!voicelife::runtime::InspectLinxMcpToolOutcome("{}", invalid_is_error).success,
+          "非布尔 isError 不得判定成功");
+}
+
 }  // namespace
 
 int main() {
     CheckBridgeProtocolFailures();
     CheckUnavailableAndOutcomeBranches();
+    CheckAdditionalProtocolBranches();
     return 0;
 }
