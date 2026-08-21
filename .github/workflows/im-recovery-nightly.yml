@@ -59,6 +59,12 @@ jobs:
             --artifact-dir artifacts/im-gateway-recovery \
             --timeout 300 \
             --retries 0
+      - name: 校验恢复矩阵脱敏 evidence
+        if: always()
+        run: python3 scripts/check_e2e_artifacts.py artifacts/im-gateway-recovery
+      - name: 写入恢复矩阵 job summary
+        if: always()
+        run: python3 scripts/render_e2e_summary.py artifacts/im-gateway-recovery >> "$GITHUB_STEP_SUMMARY"
       - name: 上传恢复矩阵脱敏证据
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -66,3 +72,4 @@ jobs:
           name: im-gateway-recovery-nightly-evidence
           path: artifacts/im-gateway-recovery
           if-no-files-found: ignore
+          retention-days: 14

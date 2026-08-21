@@ -49,6 +49,7 @@ class FakeHardware:
             HIL.Partition("linx_secrets", 1, 2, 0x2E0000, 0x10000, 0),
             HIL.Partition("assets", 1, 0x82, 0x300000, 0x100000, 0),
             HIL.Partition("model", 1, 0x82, 0x400000, 0x300000, 0),
+            HIL.Partition("voicelife", 1, 0x81, 0x700000, 0x900000, 0),
         ]
 
     def build(self, descriptor: object) -> Path:
@@ -95,6 +96,16 @@ class FakeHardware:
 
 
 class HilPairingAdapterTest(unittest.TestCase):
+    def test_real_hardware_prepares_sqlite_component_before_build(self) -> None:
+        with (
+            mock.patch.object(HIL, "SQLITE_COMPONENT_FILES", (Path("/definitely-missing-sqlite.c"),)),
+            mock.patch.object(HIL.subprocess, "run") as run,
+        ):
+            HIL.ensure_sqlite_component()
+        run.assert_called_once()
+        command = run.call_args.args[0]
+        self.assertEqual(command[-1], str(HIL.ROOT / "scripts" / "prepare_sqlite.py"))
+
     def descriptor_file(self, directory: str) -> Path:
         path = Path(directory) / "device.json"
         path.write_text(
@@ -228,6 +239,22 @@ class HilPairingAdapterTest(unittest.TestCase):
             hardware._run(["missing-command"], 1.0)
         self.assertEqual(raised.exception.category, RUNNER.FailureCategory.INFRASTRUCTURE)
         self.assertEqual(raised.exception.message_code, "hil_command_unavailable")
+
+    def test_real_hardware_classifies_remote_service_failure_as_external(self) -> None:
+        hardware = HIL.RealHilHardware(
+            "runner@example.test", "/srv/voicelife", "https://gateway.example.test", "user-test"
+        )
+        with (
+            mock.patch.object(
+                hardware,
+                "_run",
+                side_effect=RUNNER.RunnerFailure(RUNNER.FailureCategory.INFRASTRUCTURE, "hil_command_failed"),
+            ),
+            self.assertRaises(RUNNER.RunnerFailure) as raised,
+        ):
+            hardware._remote("safe script")
+        self.assertEqual(raised.exception.category, RUNNER.FailureCategory.EXTERNAL)
+        self.assertEqual(raised.exception.message_code, "external_service_unavailable")
 
     def test_real_hardware_passes_serial_path_as_string(self) -> None:
         serial_port = mock.Mock()

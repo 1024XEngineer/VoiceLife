@@ -1,0 +1,97 @@
+name: HIL Nightly
+
+on:
+  schedule:
+    - cron: "43 18 * * *"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Device profile to run (the default runs both profiles)
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - sparkbot
+          - pcb
+      journey:
+        description: HIL journey
+        required: false
+        type: choice
+        default: im-pairing
+        options:
+          - im-pairing
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hil-nightly-${{ github.ref }}-${{ inputs.profile || 'all' }}
+  cancel-in-progress: false
+
+jobs:
+  hil:
+    name: HIL / ${{ matrix.profile }}
+    runs-on: [self-hosted, voicelife-hil, "${{ matrix.profile }}"]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: ${{ fromJSON(inputs.profile == 'sparkbot' && '["sparkbot"]' || inputs.profile == 'pcb' && '["pcb"]' || '["sparkbot", "pcb"]') }}
+    env:
+      HIL_DEVICE_ROOT: ${{ vars.VOICELIFE_HIL_DEVICE_ROOT || '/opt/voicelife/hil/devices' }}
+      HIL_LEASE_ROOT: ${{ vars.VOICELIFE_HIL_LEASE_ROOT || '/opt/voicelife/hil/leases' }}
+      VOICELIFE_HIL_SERVER: ${{ secrets.VOICELIFE_HIL_SERVER }}
+      VOICELIFE_HIL_SERVER_DIR: ${{ secrets.VOICELIFE_HIL_SERVER_DIR }}
+      VOICELIFE_HIL_GATEWAY_ORIGIN: ${{ secrets.VOICELIFE_HIL_GATEWAY_ORIGIN }}
+      VOICELIFE_HIL_USER_ID: ${{ secrets.VOICELIFE_HIL_USER_ID }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: 检查受控 Runner 配置
+        run: |
+          set -euo pipefail
+          test -r "$HIL_DEVICE_ROOT/${{ matrix.profile }}.json"
+          test -n "${VOICELIFE_HIL_SERVER:-}"
+          test -n "${VOICELIFE_HIL_SERVER_DIR:-}"
+          test -n "${VOICELIFE_HIL_GATEWAY_ORIGIN:-}"
+          test -n "${VOICELIFE_HIL_USER_ID:-}"
+          python3 -c 'import serial, esptool' >/dev/null
+      - name: 运行 HIL journey
+        id: journey
+        run: |
+          set +e
+          mkdir -p "artifacts/hil-${{ matrix.profile }}"
+          python3 scripts/run_e2e.py \
+            --layer hil \
+            --journey "${{ inputs.journey || 'im-pairing' }}" \
+            --profile "${{ matrix.profile }}" \
+            --artifact-dir "artifacts/hil-${{ matrix.profile }}" \
+            --timeout 900 \
+            --retries 0 \
+            --device "$HIL_DEVICE_ROOT/${{ matrix.profile }}.json" \
+            --lease-dir "$HIL_LEASE_ROOT" \
+            --server "$VOICELIFE_HIL_SERVER" \
+            --server-dir "$VOICELIFE_HIL_SERVER_DIR" \
+            --gateway-origin "$VOICELIFE_HIL_GATEWAY_ORIGIN" \
+            --user-id "$VOICELIFE_HIL_USER_ID"
+          run_status=$?
+          python3 scripts/check_e2e_artifacts.py "artifacts/hil-${{ matrix.profile }}"
+          artifact_status=$?
+          if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            python3 scripts/render_e2e_summary.py "artifacts/hil-${{ matrix.profile }}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ "$run_status" -ne 0 ]]; then exit "$run_status"; fi
+          exit "$artifact_status"
+      - name: 上传 HIL 脱敏 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hil-${{ matrix.profile }}-evidence
+          path: artifacts/hil-${{ matrix.profile }}
+          if-no-files-found: error
+          retention-days: 14

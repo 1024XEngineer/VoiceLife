@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,11 @@ from e2e_runner import AssertionResult, FailureCategory, RunContext, RunnerDeadl
 from start_im_pairing import PairingLifecycle, PairingLifecycleError
 
 ROOT = Path(__file__).resolve().parents[1]
+SQLITE_COMPONENT_FILES = (
+    ROOT / "third_party" / "sqlite3" / "sqlite3.c",
+    ROOT / "third_party" / "sqlite3" / "sqlite3.h",
+    ROOT / "third_party" / "sqlite3" / "CMakeLists.txt",
+)
 
 
 @dataclass
@@ -80,6 +86,25 @@ def _runner_failure(error: Exception) -> RunnerFailure:
     if isinstance(error, HilProfileMismatch):
         return RunnerFailure(FailureCategory.DEVICE, "device_profile_mismatch")
     raise error
+
+
+def ensure_sqlite_component() -> None:
+    """Prepare the checked-in SQLite component before an ESP-IDF build."""
+    if all(path.is_file() for path in SQLITE_COMPONENT_FILES):
+        return
+    try:
+        subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "prepare_sqlite.py")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=True,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RunnerDeadlineExceeded from error
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "sqlite_component_prepare_failed") from error
 
 
 class HilPairingAdapter:
@@ -247,6 +272,7 @@ class RealHilHardware:
         from firmware import build
 
         try:
+            ensure_sqlite_component()
             return build(descriptor.firmware_profile)
         except RunnerDeadlineExceeded:
             raise
@@ -267,7 +293,12 @@ class RealHilHardware:
             self._run(list(operation.argv), timeout_s)
 
     def _remote(self, script: str, timeout_s: float = 180.0) -> str:
-        return self._run(["ssh", "-o", "BatchMode=yes", self._server, "bash", "-s"], timeout_s, input_text=script)
+        try:
+            return self._run(["ssh", "-o", "BatchMode=yes", self._server, "bash", "-s"], timeout_s, input_text=script)
+        except RunnerFailure as error:
+            if error.message_code == "hil_command_failed":
+                raise RunnerFailure(FailureCategory.EXTERNAL, "external_service_unavailable") from error
+            raise
 
     def register(self, run_id: str) -> TemporaryIdentity:
         from provision_device import server_register_script, validate_credential

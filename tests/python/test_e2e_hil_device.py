@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -69,6 +70,7 @@ class HilProfileGuardTest(unittest.TestCase):
             self.partition("linx_secrets", 1, 2, 0x2E0000, 0x10000),
             self.partition("assets", 1, 0x82, 0x300000, 0x100000),
             self.partition("model", 1, 0x82, 0x400000, 0x300000),
+            self.partition("voicelife", 1, 0x81, 0x700000, 0x900000),
         ]
 
     def pcb_layout(self) -> list[object]:
@@ -117,6 +119,23 @@ class HilProfileGuardTest(unittest.TestCase):
                 json.dumps({"flash_files": {"0x20000": "voicelife.bin"}}), encoding="utf-8"
             )
             with self.assertRaises(HIL.HilProfileMismatch):
+                HIL.load_application_image(build, descriptor, self.sparkbot_layout())
+
+    def test_application_image_rejects_build_layout_different_from_board(self) -> None:
+        descriptor = self.descriptor("sparkbot")
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            (build / "voicelife.bin").write_bytes(b"firmware")
+            (build / "flasher_args.json").write_text(
+                json.dumps({"flash_files": {"0x10000": "voicelife.bin"}}), encoding="utf-8"
+            )
+            table = build / "partition_table" / "partition-table.bin"
+            table.parent.mkdir()
+            table.write_bytes(b"partition-table")
+            with (
+                patch.object(HIL, "parse_partition_table", return_value=self.pcb_layout()),
+                self.assertRaises(HIL.HilProfileMismatch),
+            ):
                 HIL.load_application_image(build, descriptor, self.sparkbot_layout())
 
     def test_flash_plan_writes_and_verifies_only_the_validated_application(self) -> None:
