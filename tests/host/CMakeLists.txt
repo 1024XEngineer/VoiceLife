@@ -297,12 +297,16 @@ target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule im)
 add_voicelife_test(schedule_mcp_tools_reminder_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_reminder_test.cc
     $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
-target_link_libraries(schedule_mcp_tools_reminder_test PRIVATE mcp schedule timing im)
+target_include_directories(schedule_mcp_tools_reminder_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_storage_memory/include")
+target_link_libraries(schedule_mcp_tools_reminder_test PRIVATE mcp schedule timing im storage_memory)
 
 add_voicelife_test(schedule_mcp_tools_branch_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_branch_test.cc
     $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
-target_link_libraries(schedule_mcp_tools_branch_test PRIVATE mcp schedule timing im)
+target_include_directories(schedule_mcp_tools_branch_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_storage_memory/include")
+target_link_libraries(schedule_mcp_tools_branch_test PRIVATE mcp schedule timing im storage_memory)
 
 add_voicelife_test(schedule_mcp_tools_failure_coverage_test "unit;mcp;schedule;runtime"
     schedule_mcp_tools_failure_coverage_test.cc
