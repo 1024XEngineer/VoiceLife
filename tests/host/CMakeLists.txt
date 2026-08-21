@@ -363,7 +363,10 @@ target_link_libraries(linx_mcp_bridge_test PRIVATE contracts mcp schedule im)
 add_voicelife_test(linx_mcp_bridge_coverage_test "unit;mcp;linx;runtime" linx_mcp_bridge_coverage_test.cc
     $<TARGET_OBJECTS:linx_mcp_bridge_coverage_impl>
     $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
-target_include_directories(linx_mcp_bridge_coverage_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_include_directories(linx_mcp_bridge_coverage_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_runtime/src"
+    "${ROOT_DIR}/components/voicelife_mcp/src"
+    "${ROOT_DIR}/third_party/yyjson")
 target_link_libraries(linx_mcp_bridge_coverage_test PRIVATE contracts mcp schedule im)
 
 add_voicelife_test(linx_ota_contract_test "unit;linx;contract" linx_ota_contract_test.cc)

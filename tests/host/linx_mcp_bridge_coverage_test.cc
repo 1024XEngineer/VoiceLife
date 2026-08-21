@@ -1,3 +1,7 @@
+#define main ExistingMcpJsonWriterCoverageTestMain
+#include "mcp_json_writer_coverage_test.cc"
+#undef main
+
 #define main ExistingLinxMcpBridgeTestMain
 #include "linx_mcp_bridge_test.cc"
 #undef main
@@ -152,6 +156,7 @@ void CheckAdditionalProtocolBranches() {
 }  // namespace
 
 int main() {
+    Check(ExistingMcpJsonWriterCoverageTestMain() == 0, "MCP JSON Writer 覆盖测试应通过");
     CheckBridgeProtocolFailures();
     CheckUnavailableAndOutcomeBranches();
     CheckAdditionalProtocolBranches();
