@@ -6,9 +6,10 @@
 
 namespace voicelife::storage_memory {
 
-/// Volatile reminder-task repository used by host and memory profiles.
+/// @brief 供主机和内存配置使用的易失提醒任务仓储。
 class MemoryScheduleReminderTaskRepository final : public schedule::ScheduleReminderTaskRepository {
    public:
+    /// @brief 插入提醒任务。
     Result<schedule::ScheduleReminderTask> Insert(const schedule::ScheduleReminderTask& task) override;
     Status Update(const schedule::ScheduleReminderTask& task) override;
     [[nodiscard]] Result<schedule::ScheduleReminderTask> FindById(int64_t id) const override;
@@ -25,3 +26,8 @@ class MemoryScheduleReminderTaskRepository final : public schedule::ScheduleRemi
 };
 
 }  // namespace voicelife::storage_memory
+   /// @brief 更新提醒任务。
+   /// @brief 按标识查询任务。
+   /// @brief 查询日程的提醒任务。
+   /// @brief 查询全部提醒任务。
+   /// @brief 查询时间范围内已触发任务。
