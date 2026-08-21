@@ -8,6 +8,11 @@
 
 using voicelife::ErrorCode;
 using voicelife::Result;
+using voicelife::ToolOutputValue;
+using voicelife::ToolResult;
+using voicelife::mcp::Property;
+using voicelife::mcp::PropertyList;
+using voicelife::mcp::PropertyType;
 using voicelife::test::Check;
 
 namespace {
@@ -153,6 +158,39 @@ void CheckAdditionalProtocolBranches() {
           "非布尔 isError 不得判定成功");
 }
 
+void CheckProtocolSerializationBranches() {
+    McpServer server;
+    Check(server
+              .add_tool("protocol.echo", "协议序列化回显",
+                        PropertyList({Property::Optional("text", PropertyType::kString),
+                                      Property::Optional("enabled", PropertyType::kBoolean),
+                                      Property::Optional("count", PropertyType::kInteger),
+                                      Property::Optional("metadata", PropertyType::kObject)}),
+                        [](const PropertyList& properties) {
+                            (void)properties;
+                            ToolResult result = ToolResult::Success(ToolOutputValue::String("ignored"));
+                            result.text_output = "quote:\" slash:\\ control:\b\f\n\r\t\x01";
+                            return result;
+                        })
+              .ok(),
+          "协议序列化测试工具应注册成功");
+
+    const std::string session_id = "quote:\" slash:\\ control:\b\f\n\r\t\x01";
+    const auto list = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"tools/list","id":{"request":"list","items":[null,false,2]}})", server,
+        session_id);
+    Check(list.ok(), "对象和数组 request id 的 tools/list 应成功");
+    voicelife::JsonValue list_response;
+    Check(voicelife::ParseJson(*list.value, list_response).ok(), "复合 request id 和 session id 必须正确转义");
+
+    const auto call = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"protocol.echo","arguments":{"text":"value","enabled":true,"count":7,"metadata":{"nested":"value"}}},"id":[null,true,false,7,"call"]})",
+        server, session_id);
+    Check(call.ok(), "全部支持参数类型的 tools/call 应成功");
+    voicelife::JsonValue call_response;
+    Check(voicelife::ParseJson(*call.value, call_response).ok(), "含控制字符的工具文本必须正确转义");
+}
+
 }  // namespace
 
 int main() {
@@ -161,5 +199,6 @@ int main() {
     CheckBridgeProtocolFailures();
     CheckUnavailableAndOutcomeBranches();
     CheckAdditionalProtocolBranches();
+    CheckProtocolSerializationBranches();
     return 0;
 }
