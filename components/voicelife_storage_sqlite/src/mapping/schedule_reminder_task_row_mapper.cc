@@ -17,7 +17,7 @@ bool ValidTimerStatus(int value) {
     return value >= static_cast<int>(schedule::ScheduleReminderTimerStatus::kPending) &&
            value <= static_cast<int>(schedule::ScheduleReminderTimerStatus::kFailed);
 }
-}
+}  // namespace
 
 Status BindScheduleReminderTask(SqliteStatement& statement, const schedule::ScheduleReminderTask& task) {
     int index = 1;
@@ -26,12 +26,17 @@ Status BindScheduleReminderTask(SqliteStatement& statement, const schedule::Sche
     if (!(status = statement.BindInt64(index++, task.chain_id)).ok()) return status;
     if (!(status = statement.BindInt(index++, task.attempt)).ok()) return status;
     if (!(status = task.timing_task_id.has_value() ? statement.BindText(index++, *task.timing_task_id)
-                                                   : statement.BindNull(index++)).ok()) return status;
+                                                   : statement.BindNull(index++))
+             .ok())
+        return status;
     if (!(status = statement.BindInt64(index++, task.trigger_at.time_since_epoch().count())).ok()) return status;
     if (!(status = statement.BindInt(index++, static_cast<int>(task.business_status))).ok()) return status;
     if (!(status = statement.BindInt(index++, static_cast<int>(task.timer_status))).ok()) return status;
-    if (!(status = task.triggered_at.has_value() ? statement.BindInt64(index++, task.triggered_at->time_since_epoch().count())
-                                                 : statement.BindNull(index++)).ok()) return status;
+    if (!(status = task.triggered_at.has_value()
+                       ? statement.BindInt64(index++, task.triggered_at->time_since_epoch().count())
+                       : statement.BindNull(index++))
+             .ok())
+        return status;
     if (!(status = statement.BindInt64(index++, task.created_at.time_since_epoch().count())).ok()) return status;
     return statement.BindInt64(index, task.updated_at.time_since_epoch().count());
 }

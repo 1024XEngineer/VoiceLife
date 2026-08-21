@@ -12,9 +12,9 @@
 #include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/schedule/schedule_exception_repository.h"
-#include "voicelife/storage_memory/memory_schedule_reminder_task_repository.h"
 #include "voicelife/schedule/schedule_reminder_task_repository.h"
 #include "voicelife/schedule/schedule_rule_repository.h"
+#include "voicelife/storage_memory/memory_schedule_reminder_task_repository.h"
 #include "voicelife/timing/timing_task.h"
 
 using voicelife::ErrorCode;
@@ -26,11 +26,11 @@ using voicelife::schedule::LocalDate;
 using voicelife::schedule::LocalTime;
 using voicelife::schedule::Schedule;
 using voicelife::schedule::ScheduleException;
+using voicelife::schedule::ScheduleReminderBusinessStatus;
 using voicelife::schedule::ScheduleReminderService;
 using voicelife::schedule::ScheduleReminderSpeechPort;
 using voicelife::schedule::ScheduleReminderTask;
 using voicelife::schedule::ScheduleReminderTimerStatus;
-using voicelife::schedule::ScheduleReminderBusinessStatus;
 using voicelife::schedule::ScheduleRule;
 using voicelife::schedule::ScheduleRuleId;
 using voicelife::schedule::ScheduleRuleService;
@@ -295,9 +295,9 @@ void CheckFutureMemoAndExpiredRestoration() {
     const auto future_tasks = fixture.reminder_repository.FindBySchedule(1);
     const auto memo_tasks = fixture.reminder_repository.FindBySchedule(2);
     const auto expired_tasks = fixture.reminder_repository.FindBySchedule(3);
-    Check(future.ok() && future_tasks.ok() && future_tasks.value->size() == 1 &&
-              future_tasks.value->front().attempt == 1,
-          "未来日程应持久化独立提醒任务");
+    Check(
+        future.ok() && future_tasks.ok() && future_tasks.value->size() == 1 && future_tasks.value->front().attempt == 1,
+        "未来日程应持久化独立提醒任务");
     Check(memo.ok() && memo_tasks.ok() && memo_tasks.value->empty(), "备忘录不应注册提醒");
     Check(expired.ok() && expired.value->status == ScheduleStatus::kActive && expired_tasks.ok() &&
               expired_tasks.value->empty(),
@@ -401,8 +401,7 @@ void CheckInvalidAndNotRunningPaths() {
     fixture.timing.ProcessPendingCommands(Trigger(1'000));
     const auto cancelled = fixture.repository.FindById(2);
     const auto cancelled_tasks = fixture.reminder_repository.FindBySchedule(2);
-    Check(cancelled.ok() && cancelled_tasks.ok() && cancelled_tasks.value->empty(),
-          "已取消日程启动时不应注册提醒");
+    Check(cancelled.ok() && cancelled_tasks.ok() && cancelled_tasks.value->empty(), "已取消日程启动时不应注册提醒");
 }
 
 void CheckCompleteScheduleErrorPaths() {
@@ -418,8 +417,7 @@ void CheckCompleteScheduleErrorPaths() {
 
     Check(fixture.schedule_service.complete_schedule(1).ok(), "完成 Active 日程应成功");
     const auto completed = fixture.repository.FindById(1);
-    Check(completed.ok() && completed.value->status == ScheduleStatus::kCompleted,
-          "完成后应更新日程状态");
+    Check(completed.ok() && completed.value->status == ScheduleStatus::kCompleted, "完成后应更新日程状态");
 
     Check(fixture.schedule_service.complete_schedule(3).ok(), "完成 Active 日程应成功");
     const auto completed_without_expected_task = fixture.repository.FindById(3);
@@ -487,7 +485,8 @@ void CheckPartialSynchronizationContinues() {
     Check(start_fixture.reminder.SynchronizeSchedule(2).ok(), "启动后可单独同步后续日程");
     start_fixture.timing.ProcessPendingCommands(Trigger(1'000));
     const auto second = start_fixture.repository.FindById(2);
-    Check(second.ok() && !start_fixture.reminder_repository.FindBySchedule(2).value->empty(), "首项失败不应阻断后续日程提醒注册");
+    Check(second.ok() && !start_fixture.reminder_repository.FindBySchedule(2).value->empty(),
+          "首项失败不应阻断后续日程提醒注册");
 
     Fixture rule_fixture({
         MakeSchedule(3, "规则首项失败", At(1'300), 21),
@@ -499,7 +498,8 @@ void CheckPartialSynchronizationContinues() {
     rule_fixture.repository.FailNextFindById(Status::Error(ErrorCode::kUnavailable, "规则首项查询失败"));
     Check(!rule_fixture.reminder.SynchronizeRule(21).ok(), "规则首项同步失败时应返回错误");
     const auto rule_second = rule_fixture.repository.FindById(4);
-    Check(rule_second.ok() && !rule_fixture.reminder_repository.FindBySchedule(4).value->empty(), "规则同步失败不应阻断后续实例");
+    Check(rule_second.ok() && !rule_fixture.reminder_repository.FindBySchedule(4).value->empty(),
+          "规则同步失败不应阻断后续实例");
 
     rule_fixture.reminder.Stop();
     rule_fixture.reminder.Stop();
@@ -562,8 +562,10 @@ void CheckSuspendAndSynchronizeRule() {
     const auto first = fixture.repository.FindById(1);
     const auto second = fixture.repository.FindById(2);
     const auto other = fixture.repository.FindById(3);
-    Check(first.ok() && fixture.reminder_repository.FindBySchedule(1).value->size() >= 1, "规则实例一应保留已取消提醒记录");
-    Check(second.ok() && fixture.reminder_repository.FindBySchedule(2).value->size() >= 1, "规则实例二应保留已取消提醒记录");
+    Check(first.ok() && fixture.reminder_repository.FindBySchedule(1).value->size() >= 1,
+          "规则实例一应保留已取消提醒记录");
+    Check(second.ok() && fixture.reminder_repository.FindBySchedule(2).value->size() >= 1,
+          "规则实例二应保留已取消提醒记录");
     Check(other.ok() && !fixture.reminder_repository.FindBySchedule(3).value->empty(), "其他规则提醒不应被撤销");
 
     Check(fixture.reminder.SynchronizeRule(7).ok(), "重新同步规则提醒应成功");
@@ -647,7 +649,7 @@ void CheckTimingFailureAndDuplicatePaths() {
     Check(!fixture.reminder.Start().ok(), "注册命令不可用时启动应返回错误");
     const auto unavailable_register = fixture.repository.FindById(1);
     Check(unavailable_register.ok() && fixture.reminder_repository.FindBySchedule(1).value->front().timer_status ==
-              ScheduleReminderTimerStatus::kFailed,
+                                           ScheduleReminderTimerStatus::kFailed,
           "注册命令不可用时应将持久化提醒任务标记失败");
 
     ScriptedFixture duplicate_fixture({MakeSchedule(2, "重复提醒", At(1'100))});
@@ -656,7 +658,8 @@ void CheckTimingFailureAndDuplicatePaths() {
     Check(duplicate_fixture.reminder.Start().ok(), "重复注册结果不应使启动失败");
     const auto duplicate = duplicate_fixture.repository.FindById(2);
     Check(duplicate.ok() && duplicate_fixture.reminder_repository.FindBySchedule(2).value->front().timer_status ==
-              ScheduleReminderTimerStatus::kFailed, "注册结果重复时应标记持久化提醒任务失败");
+                                ScheduleReminderTimerStatus::kFailed,
+          "注册结果重复时应标记持久化提醒任务失败");
 
     ScriptedFixture cancel_fixture({MakeSchedule(3, "取消失败", At(1'100))});
     cancel_fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;

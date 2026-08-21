@@ -97,9 +97,7 @@ class ProfileValidationTest(unittest.TestCase):
             "capabilities": ["atomic-calendar-write"],
         }
         profile["sdkconfig"] = [
-            setting
-            for setting in profile["sdkconfig"]
-            if not setting.startswith("CONFIG_VOICELIFE_STORAGE_")
+            setting for setting in profile["sdkconfig"] if not setting.startswith("CONFIG_VOICELIFE_STORAGE_")
         ]
 
         with self.assertRaisesRegex(firmware.ProfileError, "必须使用 persistent-sqlite"):
@@ -108,9 +106,7 @@ class ProfileValidationTest(unittest.TestCase):
     def test_rejects_persistent_profile_without_storage_flags(self) -> None:
         profile = copy.deepcopy(self.profile)
         profile["sdkconfig"] = [
-            setting
-            for setting in profile["sdkconfig"]
-            if not setting.startswith("CONFIG_VOICELIFE_STORAGE_")
+            setting for setting in profile["sdkconfig"] if not setting.startswith("CONFIG_VOICELIFE_STORAGE_")
         ]
 
         with self.assertRaisesRegex(firmware.ProfileError, "持久化存储缺少"):

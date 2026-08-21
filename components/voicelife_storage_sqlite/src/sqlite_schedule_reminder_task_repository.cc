@@ -24,14 +24,16 @@ Status Unavailable() { return Status::Error(ErrorCode::kUnavailable, "SQLite 数
 Result<ScheduleReminderTask> ReadOne(SqliteStatement& statement) {
     const auto step = statement.Step();
     if (!step.ok()) return Result<ScheduleReminderTask>::Failure(step.status.code, step.status.message);
-    if (*step.value != SqliteStep::kRow) return Result<ScheduleReminderTask>::Failure(ErrorCode::kNotFound, "提醒任务不存在");
+    if (*step.value != SqliteStep::kRow)
+        return Result<ScheduleReminderTask>::Failure(ErrorCode::kNotFound, "提醒任务不存在");
     return mapping::ReadScheduleReminderTask(statement);
 }
 Result<std::vector<ScheduleReminderTask>> ReadMany(SqliteStatement& statement) {
     std::vector<ScheduleReminderTask> result;
     while (true) {
         const auto step = statement.Step();
-        if (!step.ok()) return Result<std::vector<ScheduleReminderTask>>::Failure(step.status.code, step.status.message);
+        if (!step.ok())
+            return Result<std::vector<ScheduleReminderTask>>::Failure(step.status.code, step.status.message);
         if (*step.value == SqliteStep::kDone) break;
         const auto row = mapping::ReadScheduleReminderTask(statement);
         if (!row.ok()) return Result<std::vector<ScheduleReminderTask>>::Failure(row.status.code, row.status.message);
@@ -39,13 +41,15 @@ Result<std::vector<ScheduleReminderTask>> ReadMany(SqliteStatement& statement) {
     }
     return Result<std::vector<ScheduleReminderTask>>::Success(std::move(result));
 }
-}
+}  // namespace
 
-SqliteScheduleReminderTaskRepository::SqliteScheduleReminderTaskRepository(SqliteDatabase& database) : database_(database) {}
+SqliteScheduleReminderTaskRepository::SqliteScheduleReminderTaskRepository(SqliteDatabase& database)
+    : database_(database) {}
 
 Result<ScheduleReminderTask> SqliteScheduleReminderTaskRepository::Insert(const ScheduleReminderTask& task) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!database_.IsOpen()) return Result<ScheduleReminderTask>::Failure(ErrorCode::kUnavailable, Unavailable().message);
+    if (!database_.IsOpen())
+        return Result<ScheduleReminderTask>::Failure(ErrorCode::kUnavailable, Unavailable().message);
     if (!Valid(task)) return Result<ScheduleReminderTask>::Failure(ErrorCode::kInvalidArgument, Invalid().message);
     ScheduleReminderTask stored = task;
     const auto now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
@@ -79,7 +83,8 @@ Status SqliteScheduleReminderTaskRepository::Update(const ScheduleReminderTask& 
 
 Result<ScheduleReminderTask> SqliteScheduleReminderTaskRepository::FindById(int64_t id) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!database_.IsOpen()) return Result<ScheduleReminderTask>::Failure(ErrorCode::kUnavailable, Unavailable().message);
+    if (!database_.IsOpen())
+        return Result<ScheduleReminderTask>::Failure(ErrorCode::kUnavailable, Unavailable().message);
     auto prepared = database_.Prepare(sql::kFindScheduleReminderTaskById);
     if (!prepared.ok()) return Result<ScheduleReminderTask>::Failure(prepared.status.code, prepared.status.message);
     auto statement = std::move(*prepared.value);
@@ -88,11 +93,14 @@ Result<ScheduleReminderTask> SqliteScheduleReminderTaskRepository::FindById(int6
     return ReadOne(statement);
 }
 
-Result<std::vector<ScheduleReminderTask>> SqliteScheduleReminderTaskRepository::FindBySchedule(schedule::ScheduleId id) const {
+Result<std::vector<ScheduleReminderTask>> SqliteScheduleReminderTaskRepository::FindBySchedule(
+    schedule::ScheduleId id) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!database_.IsOpen()) return Result<std::vector<ScheduleReminderTask>>::Failure(ErrorCode::kUnavailable, Unavailable().message);
+    if (!database_.IsOpen())
+        return Result<std::vector<ScheduleReminderTask>>::Failure(ErrorCode::kUnavailable, Unavailable().message);
     auto prepared = database_.Prepare(sql::kFindScheduleReminderTasksBySchedule);
-    if (!prepared.ok()) return Result<std::vector<ScheduleReminderTask>>::Failure(prepared.status.code, prepared.status.message);
+    if (!prepared.ok())
+        return Result<std::vector<ScheduleReminderTask>>::Failure(prepared.status.code, prepared.status.message);
     auto statement = std::move(*prepared.value);
     auto status = statement.BindInt64(1, id);
     if (!status.ok()) return Result<std::vector<ScheduleReminderTask>>::Failure(status.code, status.message);
@@ -101,18 +109,23 @@ Result<std::vector<ScheduleReminderTask>> SqliteScheduleReminderTaskRepository::
 
 Result<std::vector<ScheduleReminderTask>> SqliteScheduleReminderTaskRepository::FindAll() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!database_.IsOpen()) return Result<std::vector<ScheduleReminderTask>>::Failure(ErrorCode::kUnavailable, Unavailable().message);
+    if (!database_.IsOpen())
+        return Result<std::vector<ScheduleReminderTask>>::Failure(ErrorCode::kUnavailable, Unavailable().message);
     auto prepared = database_.Prepare(sql::kFindAllScheduleReminderTasks);
-    if (!prepared.ok()) return Result<std::vector<ScheduleReminderTask>>::Failure(prepared.status.code, prepared.status.message);
+    if (!prepared.ok())
+        return Result<std::vector<ScheduleReminderTask>>::Failure(prepared.status.code, prepared.status.message);
     auto statement = std::move(*prepared.value);
     return ReadMany(statement);
 }
 
-Result<std::vector<ScheduleReminderTask>> SqliteScheduleReminderTaskRepository::FindTriggered(schedule::DateTime from, schedule::DateTime to) const {
+Result<std::vector<ScheduleReminderTask>> SqliteScheduleReminderTaskRepository::FindTriggered(
+    schedule::DateTime from, schedule::DateTime to) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!database_.IsOpen()) return Result<std::vector<ScheduleReminderTask>>::Failure(ErrorCode::kUnavailable, Unavailable().message);
+    if (!database_.IsOpen())
+        return Result<std::vector<ScheduleReminderTask>>::Failure(ErrorCode::kUnavailable, Unavailable().message);
     auto prepared = database_.Prepare(sql::kFindTriggeredScheduleReminderTasks);
-    if (!prepared.ok()) return Result<std::vector<ScheduleReminderTask>>::Failure(prepared.status.code, prepared.status.message);
+    if (!prepared.ok())
+        return Result<std::vector<ScheduleReminderTask>>::Failure(prepared.status.code, prepared.status.message);
     auto statement = std::move(*prepared.value);
     auto status = statement.BindInt64(1, from.time_since_epoch().count());
     if (!status.ok()) return Result<std::vector<ScheduleReminderTask>>::Failure(status.code, status.message);

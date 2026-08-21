@@ -18,7 +18,7 @@ bool Valid(const ScheduleReminderTask& task) {
            timer_status >= static_cast<int>(ScheduleReminderTimerStatus::kPending) &&
            timer_status <= static_cast<int>(ScheduleReminderTimerStatus::kFailed);
 }
-}
+}  // namespace
 
 Result<schedule::ScheduleReminderTask> MemoryScheduleReminderTaskRepository::Insert(
     const schedule::ScheduleReminderTask& task) {
@@ -45,15 +45,18 @@ Result<schedule::ScheduleReminderTask> MemoryScheduleReminderTaskRepository::Ins
 
 Status MemoryScheduleReminderTaskRepository::Update(const ScheduleReminderTask& task) {
     std::lock_guard<std::mutex> lock(mutex_);
-    const auto found = std::find_if(tasks_.begin(), tasks_.end(), [&task](const auto& value) { return value.id == task.id; });
+    const auto found =
+        std::find_if(tasks_.begin(), tasks_.end(), [&task](const auto& value) { return value.id == task.id; });
     if (found == tasks_.end()) return Status::Error(ErrorCode::kNotFound, "提醒任务不存在");
     if (!Valid(task)) return Status::Error(ErrorCode::kInvalidArgument, "提醒任务字段无效");
     if (std::any_of(tasks_.begin(), tasks_.end(), [&task](const auto& value) {
             return value.id != task.id && value.chain_id == task.chain_id && value.attempt == task.attempt;
-        })) return Status::Error(ErrorCode::kAlreadyExists, "提醒链尝试次数已存在");
+        }))
+        return Status::Error(ErrorCode::kAlreadyExists, "提醒链尝试次数已存在");
     if (task.timing_task_id.has_value() && std::any_of(tasks_.begin(), tasks_.end(), [&task](const auto& value) {
             return value.id != task.id && value.timing_task_id == task.timing_task_id;
-        })) return Status::Error(ErrorCode::kAlreadyExists, "Timing task 标识已存在");
+        }))
+        return Status::Error(ErrorCode::kAlreadyExists, "Timing task 标识已存在");
     *found = task;
     return Status::Ok();
 }
@@ -69,7 +72,8 @@ Result<std::vector<ScheduleReminderTask>> MemoryScheduleReminderTaskRepository::
     schedule::ScheduleId schedule_id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<ScheduleReminderTask> result;
-    for (const auto& task : tasks_) if (task.schedule_id == schedule_id) result.push_back(task);
+    for (const auto& task : tasks_)
+        if (task.schedule_id == schedule_id) result.push_back(task);
     return Result<std::vector<ScheduleReminderTask>>::Success(std::move(result));
 }
 

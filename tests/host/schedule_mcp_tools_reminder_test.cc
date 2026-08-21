@@ -13,11 +13,11 @@
 #include "voicelife/mcp/schedule_mcp_tools.h"
 #include "voicelife/schedule/schedule_exception_repository.h"
 #include "voicelife/schedule/schedule_operation_service.h"
-#include "voicelife/storage_memory/memory_schedule_reminder_task_repository.h"
 #include "voicelife/schedule/schedule_reminder_service.h"
 #include "voicelife/schedule/schedule_rule_repository.h"
 #include "voicelife/schedule/schedule_rule_service.h"
 #include "voicelife/schedule/schedule_service.h"
+#include "voicelife/storage_memory/memory_schedule_reminder_task_repository.h"
 #include "voicelife/timing/timing_task.h"
 
 using voicelife::ErrorCode;
@@ -51,9 +51,7 @@ namespace {
 
 TriggerAt Trigger(int64_t seconds) { return TriggerAt{std::chrono::seconds{seconds}}; }
 
-DateTime CurrentTime() {
-    return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
-}
+DateTime CurrentTime() { return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()); }
 
 class FakeSpeech final : public ScheduleReminderSpeechPort {
    public:
@@ -321,10 +319,9 @@ void CheckOneShotReminderLifecycle() {
     Check(deleted.status.ok() && OutputString(deleted, "status") == "success", "删除提醒日程应成功");
     const auto deleted_schedule = schedules.FindById(1);
     const auto deleted_tasks = reminder_tasks.FindBySchedule(1);
-    Check(deleted_schedule.ok() && deleted_schedule.value->status == ScheduleStatus::kCancelled &&
-              deleted_tasks.ok() && !deleted_tasks.value->empty() &&
-              deleted_tasks.value->back().timer_status ==
-                  voicelife::schedule::ScheduleReminderTimerStatus::kCancelled,
+    Check(deleted_schedule.ok() && deleted_schedule.value->status == ScheduleStatus::kCancelled && deleted_tasks.ok() &&
+              !deleted_tasks.value->empty() &&
+              deleted_tasks.value->back().timer_status == voicelife::schedule::ScheduleReminderTimerStatus::kCancelled,
           "删除后应取消日程并保留已取消的提醒任务记录");
     Check(timing.RunDueTasks(Trigger(1'893'546'000)).processed_count == 0 && speech.texts.empty(),
           "删除后的新提醒任务也不应触发");
@@ -621,8 +618,7 @@ void CheckReminderActionTools() {
         .name = "schedule.reminder_acknowledge",
         .arguments = {},
     });
-    Check(repeated.status.ok() && OutputString(repeated, "status") == "failure",
-          "已确认终态不能被重复动作复活");
+    Check(repeated.status.ok() && OutputString(repeated, "status") == "failure", "已确认终态不能被重复动作复活");
 }
 
 }  // namespace

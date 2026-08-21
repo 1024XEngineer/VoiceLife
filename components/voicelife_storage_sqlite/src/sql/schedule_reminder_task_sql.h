@@ -7,4 +7,4 @@ extern const char kFindScheduleReminderTaskById[];
 extern const char kFindScheduleReminderTasksBySchedule[];
 extern const char kFindTriggeredScheduleReminderTasks[];
 extern const char kUpdateScheduleReminderTask[];
-}
+}  // namespace voicelife::storage_sqlite::sql

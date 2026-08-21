@@ -9,9 +9,7 @@ namespace {
 using namespace voicelife;
 using namespace voicelife::schedule;
 
-DateTime At(int64_t seconds) {
-    return DateTime{std::chrono::seconds{seconds}};
-}
+DateTime At(int64_t seconds) { return DateTime{std::chrono::seconds{seconds}}; }
 
 void Check(bool condition, const char* message) {
     if (condition) {
@@ -21,8 +19,7 @@ void Check(bool condition, const char* message) {
     std::exit(1);
 }
 
-ScheduleReminderTask MakeTask(int64_t schedule_id, int64_t chain_id, int attempt,
-                              std::string timing_task_id) {
+ScheduleReminderTask MakeTask(int64_t schedule_id, int64_t chain_id, int attempt, std::string timing_task_id) {
     return {
         .schedule_id = schedule_id,
         .chain_id = chain_id,
@@ -41,16 +38,15 @@ int main() {
 
     MemoryScheduleReminderTaskRepository repository;
     const auto first = repository.Insert(MakeTask(1, 10, 1, "timing-1"));
-    Check(first.ok() && first.value->id == 1 && first.value->attempt == 1,
-          "插入必须分配提醒任务标识并保留字段");
+    Check(first.ok() && first.value->id == 1 && first.value->attempt == 1, "插入必须分配提醒任务标识并保留字段");
 
     const auto second = repository.Insert(MakeTask(1, 10, 2, "timing-2"));
     const auto third = repository.Insert(MakeTask(2, 20, 1, "timing-3"));
     Check(second.ok() && third.ok(), "仓储必须保存多个日程和尝试次数");
     Check(repository.FindById(first.value->id).ok() && !repository.FindById(999).ok(),
           "按标识查询必须区分存在和不存在记录");
-    Check(repository.FindBySchedule(1).value->size() == 2 &&
-              repository.FindBySchedule(999).value->empty() && repository.FindAll().value->size() == 3,
+    Check(repository.FindBySchedule(1).value->size() == 2 && repository.FindBySchedule(999).value->empty() &&
+              repository.FindAll().value->size() == 3,
           "仓储必须支持按日程和全量查询");
 
     auto triggered = *first.value;
@@ -68,24 +64,20 @@ int main() {
     exhausted.timer_status = ScheduleReminderTimerStatus::kTriggered;
     exhausted.triggered_at = At(1'190);
     Check(repository.Update(exhausted).ok(), "仓储必须保存耗尽终态");
-    Check(repository.FindTriggered(At(1'190), At(1'200)).value->size() == 2,
-          "触发查询必须同时返回等待确认和耗尽任务");
+    Check(repository.FindTriggered(At(1'190), At(1'200)).value->size() == 2, "触发查询必须同时返回等待确认和耗尽任务");
 
     exhausted.business_status = ScheduleReminderBusinessStatus::kAcknowledged;
     Check(repository.Update(exhausted).ok(), "仓储必须保存确认终态");
-    Check(repository.FindTriggered(At(1'190), At(1'200)).value->size() == 1,
-          "触发查询必须排除已确认终态");
+    Check(repository.FindTriggered(At(1'190), At(1'200)).value->size() == 1, "触发查询必须排除已确认终态");
 
     auto cancelled = triggered;
     cancelled.business_status = ScheduleReminderBusinessStatus::kCancelled;
     Check(repository.Update(cancelled).ok(), "仓储必须保存取消终态");
-    Check(repository.FindTriggered(At(1'190), At(1'200)).value->empty(),
-          "触发查询必须排除已取消终态");
+    Check(repository.FindTriggered(At(1'190), At(1'200)).value->empty(), "触发查询必须排除已取消终态");
 
     Check(!repository.Insert(MakeTask(1, 10, 1, "timing-duplicate-attempt")).ok(),
           "同一提醒链不能重复保存相同尝试次数");
-    Check(!repository.Insert(MakeTask(3, 30, 1, "timing-2")).ok(),
-          "Timing task 标识必须唯一");
+    Check(!repository.Insert(MakeTask(3, 30, 1, "timing-2")).ok(), "Timing task 标识必须唯一");
     Check(!repository.Insert(MakeTask(0, 30, 1, "invalid-schedule")).ok() &&
               !repository.Insert(MakeTask(3, 0, 1, "invalid-chain")).ok() &&
               !repository.Insert(MakeTask(3, 30, 0, "invalid-attempt-zero")).ok() &&

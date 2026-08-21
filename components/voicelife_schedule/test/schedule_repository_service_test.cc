@@ -381,7 +381,7 @@ void CheckRepositoryQuery() {
             .location = std::nullopt,
             .notes = std::nullopt,
             .rule_id = std::nullopt,
-                .status = ScheduleStatus::kActive,
+            .status = ScheduleStatus::kActive,
             .created_at = At(5'000),
             .updated_at = At(5'000),
         },

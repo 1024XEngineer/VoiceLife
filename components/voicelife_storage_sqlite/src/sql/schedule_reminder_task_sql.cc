@@ -29,4 +29,4 @@ const char kUpdateScheduleReminderTask[] = R"sql(
 UPDATE schedule_reminder_task SET schedule_id = ?, chain_id = ?, attempt = ?, timing_task_id = ?, trigger_at = ?,
  business_status = ?, timer_status = ?, triggered_at = ?, created_at = ?, updated_at = ? WHERE id = ?
 )sql";
-}
+}  // namespace voicelife::storage_sqlite::sql

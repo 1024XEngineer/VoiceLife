@@ -14,10 +14,12 @@ Status WithField(Status status, const char* field) {
     if (!status.message.empty()) message += "；" + status.message;
     return Status::Error(status.code, std::move(message));
 }
-Status BindOptionalInt64(SqliteStatement& statement, int index, const std::optional<int64_t>& value, const char* field) {
+Status BindOptionalInt64(SqliteStatement& statement, int index, const std::optional<int64_t>& value,
+                         const char* field) {
     return WithField(value.has_value() ? statement.BindInt64(index, *value) : statement.BindNull(index), field);
 }
-Status BindOptionalText(SqliteStatement& statement, int index, const std::optional<std::string>& value, const char* field) {
+Status BindOptionalText(SqliteStatement& statement, int index, const std::optional<std::string>& value,
+                        const char* field) {
     return WithField(value.has_value() ? statement.BindText(index, *value) : statement.BindNull(index), field);
 }
 bool IsValidStatus(int value) {
@@ -33,15 +35,21 @@ std::optional<std::string> ReadOptionalText(const SqliteStatement& statement, in
     if (statement.IsNull(column)) return std::nullopt;
     return statement.ColumnText(column);
 }
-}
+}  // namespace
 
 Status BindSchedule(SqliteStatement& statement, const schedule::Schedule& schedule) {
     int index = 1;
     Status status = WithField(statement.BindText(index++, schedule.event), "event");
     if (!status.ok()) return status;
-    status = WithField(schedule.start_time.has_value() ? statement.BindInt64(index++, schedule.start_time->time_since_epoch().count()) : statement.BindNull(index++), "start_time");
+    status = WithField(schedule.start_time.has_value()
+                           ? statement.BindInt64(index++, schedule.start_time->time_since_epoch().count())
+                           : statement.BindNull(index++),
+                       "start_time");
     if (!status.ok()) return status;
-    status = WithField(schedule.end_time.has_value() ? statement.BindInt64(index++, schedule.end_time->time_since_epoch().count()) : statement.BindNull(index++), "end_time");
+    status = WithField(schedule.end_time.has_value()
+                           ? statement.BindInt64(index++, schedule.end_time->time_since_epoch().count())
+                           : statement.BindNull(index++),
+                       "end_time");
     if (!status.ok()) return status;
     status = BindOptionalText(statement, index++, schedule.location, "location");
     if (!status.ok()) return status;
@@ -58,7 +66,8 @@ Status BindSchedule(SqliteStatement& statement, const schedule::Schedule& schedu
 
 Result<schedule::Schedule> ReadSchedule(const SqliteStatement& statement) {
     const int status_value = statement.ColumnInt(7);
-    if (!IsValidStatus(status_value)) return Result<schedule::Schedule>::Failure(ErrorCode::kInternal, "数据库中的日程状态无效");
+    if (!IsValidStatus(status_value))
+        return Result<schedule::Schedule>::Failure(ErrorCode::kInternal, "数据库中的日程状态无效");
     if (statement.IsNull(1)) return Result<schedule::Schedule>::Failure(ErrorCode::kInternal, "数据库中的日程名称为空");
     schedule::Schedule schedule{
         .id = statement.ColumnInt64(0),

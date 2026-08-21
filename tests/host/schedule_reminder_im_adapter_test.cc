@@ -65,9 +65,8 @@ class RuntimeInputs final : public voicelife::im::ImConfigProvider,
                             public ImRuntimeReadinessPort {
    public:
     Result<ImRuntimeConfig> Load() override {
-        return Result<ImRuntimeConfig>::Success({.enabled = true,
-                                                .gateway_origin = "https://im.example.com",
-                                                .user_id = "user-1"});
+        return Result<ImRuntimeConfig>::Success(
+            {.enabled = true, .gateway_origin = "https://im.example.com", .user_id = "user-1"});
     }
     std::string DeviceToken() const override { return "token-1"; }
     std::string DeviceId() const override { return "device-1"; }
@@ -102,13 +101,16 @@ class Rules final : public voicelife::schedule::ScheduleRuleRepository {
         return Result<std::vector<ScheduleRule>>::Success({});
     }
     Result<ScheduleRule> FindById(ScheduleRuleId) const override { std::abort(); }
-    Result<ScheduleRule> CreateWithFirstInstance(const ScheduleRule&,
-                                                 const std::optional<Schedule>&) override { std::abort(); }
-    Result<ScheduleRule> UpdateAndRebuild(const ScheduleRule&,
-                                         const std::optional<Schedule>&) override { std::abort(); }
+    Result<ScheduleRule> CreateWithFirstInstance(const ScheduleRule&, const std::optional<Schedule>&) override {
+        std::abort();
+    }
+    Result<ScheduleRule> UpdateAndRebuild(const ScheduleRule&, const std::optional<Schedule>&) override {
+        std::abort();
+    }
     Status CancelRuleAndInstances(ScheduleRuleId, int64_t&) override { std::abort(); }
-    Result<Schedule> CreateNextInstance(const Schedule&,
-                                        const std::optional<ScheduleException>&) override { std::abort(); }
+    Result<Schedule> CreateNextInstance(const Schedule&, const std::optional<ScheduleException>&) override {
+        std::abort();
+    }
 };
 
 class Timing final : public voicelife::timing::TimingTaskService {
@@ -128,26 +130,19 @@ class Timing final : public voicelife::timing::TimingTaskService {
 int main() {
     RuntimeInputs inputs;
     FakeTransport* transport_ptr = nullptr;
-    ImRuntime runtime(inputs, inputs, inputs,
-                      [&transport_ptr](const std::string&) {
-                          auto created = std::make_unique<FakeTransport>();
-                          transport_ptr = created.get();
-                          return created;
-                      });
+    ImRuntime runtime(inputs, inputs, inputs, [&transport_ptr](const std::string&) {
+        auto created = std::make_unique<FakeTransport>();
+        transport_ptr = created.get();
+        return created;
+    });
     Check(runtime.Start().ok(), "IM Runtime 应进入探针状态");
-    Check(runtime.ProbeGateway().status == ImTransportStatus::kSuccess,
-          "IM Runtime 探针应成功");
+    Check(runtime.ProbeGateway().status == ImTransportStatus::kSuccess, "IM Runtime 探针应成功");
 
     std::optional<voicelife::im::ActionWindow> action_window;
-    ImScheduleReminderNotification notification(runtime, [&](auto value) {
-        action_window = std::move(value);
-    });
+    ImScheduleReminderNotification notification(runtime, [&](auto value) { action_window = std::move(value); });
     transport_ptr->response_body =
         R"({"businessEventId":"schedule-reminder-task-10","status":"accepted","deliveries":[],"actionStream":{"reminderTriggerId":"timing-1","expiresAt":"2026-08-03T00:10:00.000Z"}})";
-    Schedule schedule{.id = 1,
-                      .event = "喝水",
-                      .start_time = At(2'000'000'000),
-                      .status = ScheduleStatus::kActive};
+    Schedule schedule{.id = 1, .event = "喝水", .start_time = At(2'000'000'000), .status = ScheduleStatus::kActive};
     ScheduleReminderTask task{.id = 10,
                               .schedule_id = 1,
                               .chain_id = 20,
@@ -160,8 +155,7 @@ int main() {
                               .created_at = At(1'999'999'000),
                               .updated_at = At(2'000'000'001)};
     Check(notification.SendScheduleReminder(schedule, task).ok(), "提醒通知应提交到 IM 公共接口");
-    Check(action_window.has_value() && action_window->reminderTriggerId == "timing-1",
-          "强提醒响应应发布动作窗口");
+    Check(action_window.has_value() && action_window->reminderTriggerId == "timing-1", "强提醒响应应发布动作窗口");
 
     InMemoryScheduleRepository schedules({schedule});
     voicelife::storage_memory::MemoryScheduleReminderTaskRepository reminders;
@@ -181,8 +175,8 @@ int main() {
     ScheduleService schedule_service(schedules);
     Timing timing;
     Speech speech;
-    ScheduleReminderService reminder_service(schedules, reminders, schedule_service, rule_service,
-                                              timing, speech, nullptr, [] { return At(2'000'000'100); });
+    ScheduleReminderService reminder_service(schedules, reminders, schedule_service, rule_service, timing, speech,
+                                             nullptr, [] { return At(2'000'000'100); });
     ImScheduleReminderActionExecutor executor(reminder_service);
 
     ReminderActionCommand snooze;
@@ -192,8 +186,7 @@ int main() {
     snooze.action = "snooze";
     snooze.minutes = 10;
     const auto snoozed = executor.Execute(snooze);
-    Check(snoozed.status == "succeeded" && timing.cancel_count == 0,
-          "IM 延迟动作不应取消或重建默认后续提醒");
+    Check(snoozed.status == "succeeded" && timing.cancel_count == 0, "IM 延迟动作不应取消或重建默认后续提醒");
 
     ReminderActionCommand acknowledge = snooze;
     acknowledge.operationId = "operation-ack";
@@ -202,7 +195,6 @@ int main() {
     const auto acknowledged = executor.Execute(acknowledge);
     Check(acknowledged.status == "succeeded" && timing.cancel_count == 1,
           "IM 确认动作应复用提醒服务并取消默认后续提醒");
-    Check(schedules.FindById(1).value->status == ScheduleStatus::kCompleted,
-          "IM 确认动作应完成关联日程");
+    Check(schedules.FindById(1).value->status == ScheduleStatus::kCompleted, "IM 确认动作应完成关联日程");
     return 0;
 }

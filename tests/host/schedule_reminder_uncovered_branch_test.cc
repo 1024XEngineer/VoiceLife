@@ -39,8 +39,7 @@ void CheckRetryResultOrderingBranches() {
     retry.on_result(RegisterTaskResult::kDuplicate);
     retry.on_result(RegisterTaskResult::kRegistered);
     duplicate_fixture.reminder.Stop();
-    Check(duplicate_fixture.timing.cancel_calls == 1,
-          "重复结果清理后停止服务只应取消默认后续提醒");
+    Check(duplicate_fixture.timing.cancel_calls == 1, "重复结果清理后停止服务只应取消默认后续提醒");
 
     ScriptedFixture rejected_fixture({MakeSchedule(2, "拒绝重试", At(1'100), 32)});
     rejected_fixture.rules.rules.push_back(DailyRule(32));
@@ -69,14 +68,12 @@ void CheckSuspendKeepsFirstCancellationFailure() {
     const RegisterTaskCommand due = fixture.timing.register_commands.front();
     const auto due_id = voicelife::timing::TaskId::Create(due.task_id.Value());
     due.callback(*due_id, Trigger(1'100));
-    Check(fixture.timing.register_commands.size() == 4,
-          "到期失败后应保留未来提醒并注册默认后续提醒和重试");
+    Check(fixture.timing.register_commands.size() == 4, "到期失败后应保留未来提醒并注册默认后续提醒和重试");
 
     fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;
     const Status suspended = fixture.reminder.SuspendRuleReminders(33);
     Check(!suspended.ok(), "实例和重试取消均失败时应返回首个错误");
-    Check(fixture.timing.cancel_calls == 3,
-          "即使两个实例取消失败也应继续尝试取消生成重试");
+    Check(fixture.timing.cancel_calls == 3, "即使两个实例取消失败也应继续尝试取消生成重试");
 }
 
 }  // namespace

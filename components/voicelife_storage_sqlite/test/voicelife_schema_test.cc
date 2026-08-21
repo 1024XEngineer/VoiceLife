@@ -90,12 +90,15 @@ void CheckVersionOneSchema(const std::filesystem::path& path) {
     Check(ScalarInt64(database,
                       "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schedule_reminder_task'") == 1,
           "当前 Schema 应创建独立提醒任务表");
-    Check(ScalarInt64(database,
-                      "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='schedule_reminder_task_triggered_idx'") ==
-              1,
-          "当前 Schema 应创建提醒触发查询索引");
-    Check(ScalarInt64(database,
-                      "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='schedule_reminder_task_schedule_idx'") ==
+    Check(
+        ScalarInt64(
+            database,
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='schedule_reminder_task_triggered_idx'") ==
+            1,
+        "当前 Schema 应创建提醒触发查询索引");
+    Check(ScalarInt64(
+              database,
+              "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='schedule_reminder_task_schedule_idx'") ==
               1,
           "当前 Schema 应创建提醒日程查询索引");
 
@@ -262,7 +265,6 @@ void CheckSchemaCollisionRejected(const std::filesystem::path& path) {
     Check(version.ok() && *version.value == 0, "结构冲突后版本号应保持为零");
 }
 
-
 /**
  * @brief 验证真实 v005 数据升级到 v006 时提醒任务和日程表均正确迁移。
  * @param path 临时数据库路径。
@@ -279,8 +281,7 @@ void CheckVersionFiveToSixMigration(const std::filesystem::path& path) {
         {.version = 4, .apply = &ApplyV004CreateOperationRecord},
         {.version = 5, .apply = &ApplyV005AddScheduleReminderTaskId},
     };
-    Check(SqliteSchema::ApplyMigrations(database, 5, migrations, std::size(migrations)).ok(),
-          "应成功创建 v005 数据库");
+    Check(SqliteSchema::ApplyMigrations(database, 5, migrations, std::size(migrations)).ok(), "应成功创建 v005 数据库");
     Check(database
               .Execute("INSERT INTO schedule (event, start_time, status, reminder_task_id, created_at, updated_at) "
                        "VALUES ('待迁移提醒', 2000, 1, 77, 1000, 1100)")
@@ -294,22 +295,19 @@ void CheckVersionFiveToSixMigration(const std::filesystem::path& path) {
 
     Check(VoiceLifeSchema::Initialize(database).ok(), "v005 到 v006 升级应成功");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule") == 2, "升级后应保留全部日程");
-    Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule') WHERE name='reminder_task_id'") == 0,
-          "升级后日程表应移除旧提醒任务标识");
+    Check(
+        ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule') WHERE name='reminder_task_id'") == 0,
+        "升级后日程表应移除旧提醒任务标识");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule_reminder_task") == 1,
           "旧提醒任务应迁移为一条独立提醒记录");
-    Check(ScalarInt64(database,
-                      "SELECT schedule_id FROM schedule_reminder_task WHERE chain_id=77 AND attempt=1") == 1,
+    Check(ScalarInt64(database, "SELECT schedule_id FROM schedule_reminder_task WHERE chain_id=77 AND attempt=1") == 1,
           "迁移提醒应关联原日程");
-    Check(ScalarInt64(database,
-                      "SELECT trigger_at FROM schedule_reminder_task WHERE chain_id=77") == 2000,
+    Check(ScalarInt64(database, "SELECT trigger_at FROM schedule_reminder_task WHERE chain_id=77") == 2000,
           "迁移提醒应使用原日程开始时间作为触发时间");
-    Check(ScalarInt64(database,
-                      "SELECT timer_status FROM schedule_reminder_task WHERE chain_id=77") == 1,
+    Check(ScalarInt64(database, "SELECT timer_status FROM schedule_reminder_task WHERE chain_id=77") == 1,
           "迁移提醒初始计时状态应为 pending");
     Check(VoiceLifeSchema::Initialize(database).ok(), "v006 重复初始化应保持幂等");
-    Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule_reminder_task") == 1,
-          "v006 重复初始化不应重复迁移提醒");
+    Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule_reminder_task") == 1, "v006 重复初始化不应重复迁移提醒");
 }
 
 /**
@@ -342,9 +340,11 @@ void CheckVersionFiveToSixRollback(const std::filesystem::path& path) {
     Check(!VoiceLifeSchema::Initialize(database).ok(), "冲突链标识应使 v006 迁移失败");
     const auto version = SqliteSchema::ReadVersion(database);
     Check(version.ok() && *version.value == 5, "迁移失败后版本号应回滚到 v005");
-    Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule') WHERE name='reminder_task_id'") == 1,
-          "迁移失败后旧日程表结构应保持不变");
-    Check(ScalarInt64(database, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schedule_reminder_task'") == 0,
+    Check(
+        ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule') WHERE name='reminder_task_id'") == 1,
+        "迁移失败后旧日程表结构应保持不变");
+    Check(ScalarInt64(database,
+                      "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schedule_reminder_task'") == 0,
           "迁移失败后提醒任务表不应残留");
 }
 

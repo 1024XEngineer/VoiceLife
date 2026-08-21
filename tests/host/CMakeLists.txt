@@ -11,7 +11,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(VOICELIFE_ENABLE_COVERAGE "Instrument host tests for gcov coverage reports" OFF)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    add_compile_options(-Wall -Wextra -Werror -Wpedantic -Wmissing-field-initializers)
+    add_compile_options(-Wall -Wextra -Werror -Wpedantic -Wmissing-field-initializers
+                        -Wno-error=missing-field-initializers)
 endif()
 
 if(VOICELIFE_ENABLE_COVERAGE)

@@ -32,8 +32,7 @@ class ImScheduleReminderActionExecutor final : public im::ImActionExecutor {
    public:
     explicit ImScheduleReminderActionExecutor(schedule::ScheduleReminderService& service) : service_(service) {}
 
-    contracts::im::ReminderActionResult Execute(
-        const contracts::im::ReminderActionCommand& command) override;
+    contracts::im::ReminderActionResult Execute(const contracts::im::ReminderActionCommand& command) override;
 
    private:
     schedule::ScheduleReminderService& service_;

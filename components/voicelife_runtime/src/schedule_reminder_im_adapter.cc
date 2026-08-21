@@ -29,9 +29,8 @@ std::string FormatIso(schedule::DateTime value) {
 
 std::string DecimalId(int64_t value) { return std::to_string(value); }
 
-contracts::im::ReminderActionResult ActionResult(
-    const contracts::im::ReminderActionCommand& command, std::string status,
-    std::string error_code, std::string occurred_at) {
+contracts::im::ReminderActionResult ActionResult(const contracts::im::ReminderActionCommand& command,
+                                                 std::string status, std::string error_code, std::string occurred_at) {
     contracts::im::ReminderActionResult result;
     result.schemaVersion = contracts::im::kDeviceContractVersion;
     result.operationId = command.operationId;
@@ -44,8 +43,8 @@ contracts::im::ReminderActionResult ActionResult(
 
 }  // namespace
 
-Status ImScheduleReminderNotification::SendScheduleReminder(
-    const schedule::Schedule& schedule, const schedule::ScheduleReminderTask& task) {
+Status ImScheduleReminderNotification::SendScheduleReminder(const schedule::Schedule& schedule,
+                                                            const schedule::ScheduleReminderTask& task) {
     im::ImReportingChannel* reporting = runtime_.reporting_channel();
     if (reporting == nullptr || runtime_.state() != im::ImRuntimeState::kReady) {
         return Status::Error(ErrorCode::kUnavailable, "IM Runtime 尚未就绪");
@@ -84,9 +83,8 @@ Status ImScheduleReminderNotification::SendScheduleReminder(
         }
         return Status::Ok();
     }
-    const ErrorCode code = result.status == im::ReportStatus::kRetryable
-                               ? ErrorCode::kUnavailable
-                               : ErrorCode::kInternal;
+    const ErrorCode code =
+        result.status == im::ReportStatus::kRetryable ? ErrorCode::kUnavailable : ErrorCode::kInternal;
     return Status::Error(code, result.message.empty() ? "IM 提醒通知提交失败" : result.message);
 }
 
