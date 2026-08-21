@@ -10,7 +10,7 @@ namespace voicelife::display_sparkbot {
 /**
  * @brief 校验资源标识是否为受控 asset_id。
  *
- * 与 assets 资源清单（manifest.json）的 10 个官方 key 一致；拒绝空值、
+ * 与 assets 资源清单（manifest.json）的官方表情和 idle_eyes key 一致；拒绝空值、
  * 路径分隔符与 ..。host 与 ESP 构建均可使用。
  * @param asset_id 调用方提供的资源标识。
  * @return 是受控 asset_id 时返回 true。
@@ -78,7 +78,7 @@ class SparkBotEmojiAssets {
     [[nodiscard]] voicelife::Result<GifAssetView> Load(std::string_view asset_id);
 
     /**
-     * @brief 加载固定的官方 Noto Sans common 16px/4bpp 字库。
+     * @brief 加载固定的官方 Noto Sans common 14px/1bpp 中文字库。
      *
      * 不接受调用方路径或名称，确保 Runtime 不能扩展资源访问边界。
      * @return 字库资源视图。

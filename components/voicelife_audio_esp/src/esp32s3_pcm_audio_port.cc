@@ -87,10 +87,58 @@ bool Esp32s3PcmAudioPorts::Impl::OutputPort::IsIdle() const { return owner_.Outp
 void Esp32s3PcmAudioPorts::Impl::OutputPort::Close() { (void)owner_.CloseOutput(); }
 
 Esp32s3PcmAudioPorts::Impl::~Impl() {
-    (void)CloseInput();
-    (void)CloseOutput();
+    const Status input_status = CloseInput();
+#ifdef ESP_PLATFORM
+    if (!input_status.ok()) {
+        // Destruction cannot leave a task holding an Impl pointer alive. The
+        // public close path remains bounded, while owner teardown waits for a
+        // late task to observe the stop flag before releasing its state.
+        WaitForInputTasks();
+        (void)CloseInput();
+    }
+#endif
+    const Status output_status = CloseOutput();
+#ifdef ESP_PLATFORM
+    if (!output_status.ok()) {
+        WaitForOutputTask();
+        (void)FinalizeOutputClose();
+    }
+#endif
     DestroyChannels();
+#ifdef ESP_PLATFORM
+    ReleaseTaskStorage();
+#endif
 }
+
+#ifdef ESP_PLATFORM
+void Esp32s3PcmAudioPorts::Impl::ReleaseTaskStorage() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Static task storage must remain valid until the corresponding task has
+    // exited. A timeout intentionally leaves it allocated rather than risking
+    // a use-after-free from a late task callback during teardown.
+    if (capture_task_ != nullptr || delivery_task_ != nullptr) {
+        return;
+    }
+    heap_caps_free(capture_stack_);
+    heap_caps_free(capture_tcb_);
+    heap_caps_free(delivery_stack_);
+    heap_caps_free(delivery_tcb_);
+    capture_stack_ = nullptr;
+    capture_tcb_ = nullptr;
+    delivery_stack_ = nullptr;
+    delivery_tcb_ = nullptr;
+}
+
+void Esp32s3PcmAudioPorts::Impl::WaitForInputTasks() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    done_cv_.wait(lock, [this]() { return capture_task_ == nullptr && delivery_task_ == nullptr; });
+}
+
+void Esp32s3PcmAudioPorts::Impl::WaitForOutputTask() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    done_cv_.wait(lock, [this]() { return output_task_ == nullptr; });
+}
+#endif
 
 AudioPortStats Esp32s3PcmAudioPorts::Impl::stats() const {
     AudioPortStats result;
@@ -378,12 +426,34 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
     if (input_running_) {
         return Status::Ok();
     }
+    if (capture_task_ != nullptr || delivery_task_ != nullptr) {
+        return Status::Error(ErrorCode::kConflict, "上一次 I2S 采集任务尚未退出");
+    }
+    // voice_audio_in 的 4096-word 栈需要 16KB 连续内存。网络、Codec 和
+    // MultiNet 就绪后内部 RAM 最大连续块可能不足该大小，因此和投递任务
+    // 一样把可复用栈放入 PSRAM，只把 FreeRTOS TCB 留在内部 RAM。
+    constexpr uint32_t kCaptureStackWords = 4096;
+    if (capture_stack_ == nullptr || capture_tcb_ == nullptr) {
+        capture_stack_ = static_cast<StackType_t*>(
+            heap_caps_malloc(sizeof(StackType_t) * kCaptureStackWords, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        capture_tcb_ =
+            static_cast<StaticTask_t*>(heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        if (capture_stack_ == nullptr || capture_tcb_ == nullptr) {
+            heap_caps_free(capture_stack_);
+            heap_caps_free(capture_tcb_);
+            capture_stack_ = nullptr;
+            capture_tcb_ = nullptr;
+            return detail::Unavailable("PSRAM 分配 I2S 采集任务失败");
+        }
+    }
     input_running_ = true;
     if (profile_.topology != AudioBoardTopology::kExternalCodecDuplex && i2s_channel_enable(rx_channel_) != ESP_OK) {
         input_running_ = false;
         return detail::Unavailable("启动 I2S 采集通道失败");
     }
-    if (xTaskCreate(&CaptureTaskEntry, "voice_audio_in", 4096, this, 5, &capture_task_) != pdPASS) {
+    capture_task_ = xTaskCreateStatic(&CaptureTaskEntry, "voice_audio_in", kCaptureStackWords, this, 5, capture_stack_,
+                                      capture_tcb_);
+    if (capture_task_ == nullptr) {
         input_running_ = false;
         if (profile_.topology != AudioBoardTopology::kExternalCodecDuplex) i2s_channel_disable(rx_channel_);
         input_cv_.notify_all();
@@ -416,7 +486,10 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
             return detail::Unavailable("PSRAM 分配 I2S 音频投递任务失败");
         }
     }
-    TaskHandle_t delivery_task = xTaskCreateStatic(&DeliveryTaskEntry, "voice_audio_sink", kDeliveryStackWords, this, 4,
+    // The capture task is priority 5. Delivery must be scheduled at the same
+    // real-time priority: it drains the only bounded PCM handoff queue and
+    // may run a local detector while the Wi-Fi/TLS tasks reconnect.
+    TaskHandle_t delivery_task = xTaskCreateStatic(&DeliveryTaskEntry, "voice_audio_sink", kDeliveryStackWords, this, 5,
                                                    delivery_stack_, delivery_tcb_);
     if (delivery_task == nullptr) {
         input_running_ = false;
@@ -440,7 +513,7 @@ Status Esp32s3PcmAudioPorts::Impl::StopCapture() {
 #else
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!input_running_) {
+        if (!input_running_ && capture_task_ == nullptr && delivery_task_ == nullptr) {
             input_queue_.clear();
             return Status::Ok();
         }
@@ -467,6 +540,11 @@ Status Esp32s3PcmAudioPorts::Impl::StopCapture() {
 Status Esp32s3PcmAudioPorts::Impl::CloseInput() {
     const Status stop_status = StopCapture();
 #ifdef ESP_PLATFORM
+    if (!stop_status.ok()) {
+        // Keep the assembler, sink and channels alive until late tasks have
+        // exited; they still hold this Impl as their callback owner.
+        return stop_status;
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     input_sink_ = {};
     input_open_ = false;
@@ -505,10 +583,27 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(voice::AudioFrame frame) {
     }
     if (output_queue_.size() >= options_.output_queue_depth) {
         ++rejected_output_frames_;
+#ifdef ESP_PLATFORM
+        ESP_LOGW(
+            voicelife::audio_esp::detail::kAudioRuntimeTag,
+            "OUTPUT_REJECT reason=queue_full queued_frames=%u queued_ms=%llu incoming_ms=%llu capacity=%u budget_ms=%u",
+            static_cast<unsigned>(output_queue_.size()), static_cast<unsigned long long>(output_queue_duration_ms_),
+            static_cast<unsigned long long>(frame_duration_ms), static_cast<unsigned>(options_.output_queue_depth),
+            static_cast<unsigned>(options_.maximum_playback_latency_ms));
+#endif
         return Status::Error(ErrorCode::kConflict, "播放队列已满，拒绝新帧");
     }
     if (output_queue_duration_ms_ + frame_duration_ms > options_.maximum_playback_latency_ms) {
         ++rejected_output_frames_;
+#ifdef ESP_PLATFORM
+        ESP_LOGW(voicelife::audio_esp::detail::kAudioRuntimeTag,
+                 "OUTPUT_REJECT reason=latency_budget queued_frames=%u queued_ms=%llu incoming_ms=%llu capacity=%u "
+                 "budget_ms=%u",
+                 static_cast<unsigned>(output_queue_.size()),
+                 static_cast<unsigned long long>(output_queue_duration_ms_),
+                 static_cast<unsigned long long>(frame_duration_ms), static_cast<unsigned>(options_.output_queue_depth),
+                 static_cast<unsigned>(options_.maximum_playback_latency_ms));
+#endif
         return Status::Error(ErrorCode::kConflict, "播放队列超过最大延迟预算，拒绝新帧");
     }
     // 重采样由唯一的输出任务使用启动期预留的 scratch 完成。网络接收回调只

@@ -15,6 +15,7 @@ const PAIRING_SESSION_PATH = /^\/v1\/im\/pairing-sessions\/([^/]+)$/u;
 const ACTION_RESULT_PATH = /^\/v1\/devices\/([^/]+)\/reminder-actions\/([^/]+)\/result$/u;
 const ACTION_STREAM_PATH = /^\/v1\/devices\/([^/]+)\/reminder-actions\/stream$/u;
 const ACTION_UI_PATH = /^\/voicelife\/reminder-actions\/([^/]+)$/u;
+const SCHEDULE_QUERY_PAGE_PATH = /^\/voicelife\/reminder-actions\/query-result\/([^/]+)$/u;
 
 /** 结构化日志条目允许的 JSON 标量和字段集合。 */
 export interface GatewayLogEntry {
@@ -181,6 +182,19 @@ async function routeRequest(
         notifyDeliveryWorker(submission.deliveries, options);
         return;
     }
+    if (url.pathname === '/v1/im/schedule-query-results' && method === 'POST') {
+        context.route = 'device.schedule-query-result.create';
+        const body = await readJson(request);
+        const submission = await options.runtime.deviceApi.postScheduleQueryResult({
+            authorization: authorization(request),
+            idempotencyKey: requiredHeader(request, 'idempotency-key'),
+            body,
+        });
+        context.correlationId = correlationId(body);
+        writeJson(response, 202, submission);
+        notifyDeliveryWorker(submission.deliveries, options);
+        return;
+    }
     if (url.pathname === '/v1/im/notifications' && method === 'POST') {
         context.route = 'device.notification.create';
         const body = await readJson(request);
@@ -244,6 +258,19 @@ async function routeRequest(
             return;
         }
         writeMethodNotAllowed(response, 'GET, POST');
+        return;
+    }
+    const scheduleQueryPageMatch = SCHEDULE_QUERY_PAGE_PATH.exec(url.pathname);
+    if (scheduleQueryPageMatch !== null) {
+        context.route = 'schedule-query-page';
+        if (method !== 'GET') {
+            writeMethodNotAllowed(response, 'GET');
+            return;
+        }
+        writePage(
+            response,
+            await options.runtime.scheduleQueryPageApi.get(decodePathSegment(scheduleQueryPageMatch[1]!)),
+        );
         return;
     }
     const actionUiMatch = ACTION_UI_PATH.exec(url.pathname);
@@ -371,7 +398,18 @@ function writePage(response: ServerResponse, page: ActionUiPageResponse): void {
 
 function writeJson(response: ServerResponse, status: number, value: unknown): void {
     response.writeHead(status, responseHeaders('application/json; charset=utf-8'));
-    response.end(JSON.stringify(value));
+    response.end(serializeJson(value));
+}
+
+function serializeJson(value: unknown): string {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) return 'null';
+    return serialized
+        .replaceAll('<', '\\u003c')
+        .replaceAll('>', '\\u003e')
+        .replaceAll('&', '\\u0026')
+        .replaceAll('\u2028', '\\u2028')
+        .replaceAll('\u2029', '\\u2029');
 }
 
 function writeText(response: ServerResponse, status: number, body: string): void {
@@ -417,24 +455,48 @@ function writeUnhandledError(response: ServerResponse, error: unknown): void {
 }
 
 function writeGatewayError(response: ServerResponse, error: ImGatewayError): void {
-    const status =
-        error.code === 'unauthorized'
-            ? 401
-            : error.code === 'binding_not_found' ||
-                error.code === 'delivery_not_found' ||
-                error.code === 'action_not_found'
-              ? 404
-              : error.code === 'action_expired'
-                ? 410
-                : error.code === 'idempotency_conflict' || error.code === 'duplicate_event'
-                  ? 409
-                  : error.code === 'resource_exhausted'
-                    ? 429
-                    : error.code === 'invalid_transition'
-                      ? 403
-                      : 400;
-    if (status === 401) response.setHeader('www-authenticate', 'Bearer');
-    writeJson(response, status, { error: error.code });
+    switch (error.code) {
+        case 'unauthorized':
+            response.setHeader('www-authenticate', 'Bearer');
+            writeJson(response, 401, { error: 'unauthorized' });
+            return;
+        case 'binding_not_found':
+            writeJson(response, 404, { error: 'binding_not_found' });
+            return;
+        case 'delivery_not_found':
+            writeJson(response, 404, { error: 'delivery_not_found' });
+            return;
+        case 'action_not_found':
+            writeJson(response, 404, { error: 'action_not_found' });
+            return;
+        case 'action_expired':
+            writeJson(response, 410, { error: 'action_expired' });
+            return;
+        case 'idempotency_conflict':
+            writeJson(response, 409, { error: 'idempotency_conflict' });
+            return;
+        case 'duplicate_event':
+            writeJson(response, 409, { error: 'duplicate_event' });
+            return;
+        case 'resource_exhausted':
+            writeJson(response, 429, { error: 'resource_exhausted' });
+            return;
+        case 'invalid_transition':
+            writeJson(response, 403, { error: 'invalid_transition' });
+            return;
+        case 'invalid_contract':
+            writeJson(response, 400, { error: 'invalid_contract' });
+            return;
+        case 'pairing_code_invalid':
+            writeJson(response, 400, { error: 'pairing_code_invalid' });
+            return;
+        case 'capability_not_supported':
+            writeJson(response, 400, { error: 'capability_not_supported' });
+            return;
+        case 'not_implemented':
+            writeJson(response, 400, { error: 'not_implemented' });
+            return;
+    }
 }
 
 function safeErrorCode(error: unknown): string {

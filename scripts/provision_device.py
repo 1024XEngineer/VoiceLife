@@ -19,6 +19,7 @@ import re
 import runpy
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -350,48 +351,58 @@ def main() -> None:
     else:
         print("跳过注册（无法 provisioning/smoke，请确认设备已注册）")
 
-    if credential_data is not None:
-        print(f"[4/5] USB provisioning（{config['description']}）")
-        if not args.skip_provision:
-            run_with_getpass(
-                PROVISION_SCRIPT,
-                [
-                    "--port",
-                    port,
-                    "--gateway-origin",
-                    origin,
-                    "--device-id",
-                    credential_data["deviceId"],
-                    "--user-id",
-                    credential_data["userId"],
-                ]
-                + (["--force"] if args.force else []),
-                credential_data["deviceToken"],
-            )
-        else:
-            print("跳过 provisioning")
+    token_file: str | None = None
+    try:
+        if credential_data is not None:
+            with tempfile.NamedTemporaryFile(
+                prefix=f"im-{board}-credentials.", suffix=".json", mode="w", delete=False
+            ) as handle:
+                handle.write(json.dumps(credential_data))
+                token_file = handle.name
+            print(f"[4/5] USB provisioning（{config['description']}）")
+            if not args.skip_provision:
+                run_with_getpass(
+                    PROVISION_SCRIPT,
+                    [
+                        "--port",
+                        port,
+                        "--gateway-origin",
+                        origin,
+                        "--device-id",
+                        credential_data["deviceId"],
+                        "--user-id",
+                        credential_data["userId"],
+                    ]
+                    + (["--force"] if args.force else []),
+                    credential_data["deviceToken"],
+                )
+            else:
+                print("跳过 provisioning")
 
-        print("[5/5] 真机认证冒烟（需设备已联网）")
-        if not args.skip_smoke:
-            run_with_getpass(
-                PAIRING_SCRIPT,
-                [
-                    "--port",
-                    port,
-                    "--auth-smoke",
-                    "--expected-device-id",
-                    credential_data["deviceId"],
-                    "--expected-user-id",
-                    credential_data["userId"],
-                    "--timeout",
-                    str(args.smoke_timeout),
-                ],
-                "",
-            )
+            print("[5/5] 真机认证冒烟（需设备已联网）")
+            if not args.skip_smoke:
+                run_with_getpass(
+                    PAIRING_SCRIPT,
+                    [
+                        "--port",
+                        port,
+                        "--auth-smoke",
+                        "--expected-device-id",
+                        credential_data["deviceId"],
+                        "--expected-user-id",
+                        credential_data["userId"],
+                        "--timeout",
+                        str(args.smoke_timeout),
+                    ],
+                    "",
+                )
+            else:
+                print("跳过认证冒烟")
         else:
-            print("跳过认证冒烟")
-    else:
-        print("未注册新设备；跳过 provisioning 与冒烟")
+            print("未注册新设备；跳过 provisioning 与冒烟")
+    finally:
+        if token_file is not None:
+            Path(token_file).unlink(missing_ok=True)
 
     print(f"完成：{config['description']}（{board}）")
 

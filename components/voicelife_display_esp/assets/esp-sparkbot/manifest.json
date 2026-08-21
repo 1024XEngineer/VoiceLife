@@ -14,7 +14,7 @@
       "Shenzhen Xinzhi Future Technology Co., Ltd.",
       "Project Contributors"
     ],
-    "note": "官方 emoji 目录另有 neutral.gif 与 robot_2.gif，本轮未复制，不在本清单范围内。"
+    "note": "官方 emoji 目录另有 neutral.gif 与 robot_2.gif，本轮未复制；idle_eyes.gif 为 VoiceLife 待机屏保资源。"
   },
   "loading": {
     "mode": "embedded_manifest_only",
@@ -23,25 +23,25 @@
     "allow_arbitrary_bytes": false
   },
   "budget": {
-    "gif_bytes": 142683,
-    "common_text_font_bytes": 885948,
-    "total_bytes": 1028631,
+    "gif_bytes": 144722,
+    "common_text_font_bytes": 269580,
+    "total_bytes": 414302,
     "assets_partition_bytes": 1048576,
     "single_frame_rgb565_bytes": 18432,
     "psram_decode_peak_bytes": null,
     "psram_note": "GIF 解码峰值内存尚未测量；Renderer 移植时以真机 heap 证据补充。",
-    "assets_image_sha256": "bbb9c25b3812b60b74837176e267c147132ae0ff17185da123ad4514deb832af",
-    "assets_image_bytes": 1029149
+    "assets_image_sha256": "aa6bd3960d0a0baa0463d6bdb3aab7875f1a9539778491df8026427dfb008e13",
+    "assets_image_bytes": 414866
   },
   "text_font": {
-    "file": "font_noto_sans_common_16_4.bin",
+    "file": "font_noto_sans_common_14_1.bin",
     "source": "78/xiaozhi-fonts@2.0.0",
-    "size_px": 16,
-    "bpp": 4,
-    "line_height": 25,
-    "base_line": 9,
-    "size_bytes": 885948,
-    "sha256": "6c801b34ec686e6e31223eceedea2efe5b0cf294b3556d91087a683c86a54384"
+    "size_px": 14,
+    "bpp": 1,
+    "line_height": 16,
+    "base_line": 2,
+    "size_bytes": 269580,
+    "sha256": "ccdfa4a7de73f584f0d7519be2d2785c4e9880446edf66c1635e676969c030ee"
   },
   "verification": {
     "verified_on_device": false,
@@ -97,6 +97,16 @@
       "duration_ms": 2200,
       "size_bytes": 13251,
       "sha256": "187be038ad8573f490869d72699d4d6716e03f95cd72dac6cb4aac2c6201ed15"
+    },
+    {
+      "asset_id": "idle_eyes",
+      "file": "idle_eyes.gif",
+      "width": 96,
+      "height": 96,
+      "frame_count": 7,
+      "duration_ms": 4000,
+      "size_bytes": 2039,
+      "sha256": "2bc6bfdbc9ca8b11746f9c52f30d65d7cdffd91cd4664fe7ef2ec57845f9b500"
     },
     {
       "asset_id": "listening",

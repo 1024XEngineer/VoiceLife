@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
 import type { ActionUiPageController, ActionUiPageResponse } from './action-ui-api.js';
+import type { ScheduleQueryPageController } from './schedule-query-page-api.js';
 import type { WechatWebhookController } from './wechat-api.js';
 import type { DeviceId } from '../../contracts/ids.js';
 import type { DeviceAuthenticationPort } from '../../ports/external.js';
@@ -9,6 +10,7 @@ import { ImGatewayError } from '../../shared/errors.js';
 const WECHAT_BODY_LIMIT = 64 * 1024;
 const FORM_BODY_LIMIT = 8 * 1024;
 const ACTION_UI_PATH = /^\/voicelife\/reminder-actions\/([^/]+)$/u;
+const SCHEDULE_QUERY_PAGE_PATH = /^\/voicelife\/reminder-actions\/query-result\/([^/]+)$/u;
 const DELIVERY_PATH = /^\/__dev\/wechat\/deliveries\/([^/]+)$/u;
 
 /** 开发联调端点返回的脱敏投递摘要。 */
@@ -28,6 +30,7 @@ export interface WechatDevHttpHarnessOptions {
     readonly expectedDeviceId: DeviceId;
     readonly webhookApi: Pick<WechatWebhookController, 'verify' | 'post'>;
     readonly actionUiPageApi: Pick<ActionUiPageController, 'get' | 'post'>;
+    readonly scheduleQueryPageApi: Pick<ScheduleQueryPageController, 'get'>;
     readonly sendTestNotification: () => Promise<WechatDevDeliverySnapshot>;
     readonly inspectDelivery: (deliveryId: string) => Promise<WechatDevDeliverySnapshot | undefined>;
 }
@@ -98,6 +101,16 @@ async function routeRequest(
             return;
         }
         writeMethodNotAllowed(response, 'GET, POST');
+        return;
+    }
+
+    const scheduleQueryPageMatch = SCHEDULE_QUERY_PAGE_PATH.exec(url.pathname);
+    if (scheduleQueryPageMatch !== null) {
+        if (method !== 'GET') {
+            writeMethodNotAllowed(response, 'GET');
+            return;
+        }
+        writePage(response, await options.scheduleQueryPageApi.get(decodePathSegment(scheduleQueryPageMatch[1]!)));
         return;
     }
 

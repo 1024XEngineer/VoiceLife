@@ -9,6 +9,7 @@ const deviceToken = 'fixture-device-token-with-enough-entropy';
 async function withHarness(overrides, work) {
     const webhookRequests = [];
     const actionRequests = [];
+    const scheduleQueryPageRequests = [];
     const harness = await startWechatDevHttpHarness({
         host: '127.0.0.1',
         port: 0,
@@ -47,6 +48,16 @@ async function withHarness(overrides, work) {
                 };
             },
         },
+        scheduleQueryPageApi: {
+            get: async (token) => {
+                scheduleQueryPageRequests.push(token);
+                return {
+                    status: 200,
+                    headers: { 'content-type': 'text/html; charset=utf-8' },
+                    body: `<h1>日程 ${token}</h1>`,
+                };
+            },
+        },
         sendTestNotification: async () => ({
             deliveryId: 'delivery-fixture',
             status: 'accepted',
@@ -62,14 +73,14 @@ async function withHarness(overrides, work) {
         ...overrides,
     });
     try {
-        await work({ ...harness, webhookRequests, actionRequests });
+        await work({ ...harness, webhookRequests, actionRequests, scheduleQueryPageRequests });
     } finally {
         await harness.close();
     }
 }
 
-test('WeChat development harness exposes health, webhook and Action UI routes', async () => {
-    await withHarness({}, async ({ origin, webhookRequests, actionRequests }) => {
+test('WeChat development harness exposes health, webhook and protected page routes', async () => {
+    await withHarness({}, async ({ origin, webhookRequests, actionRequests, scheduleQueryPageRequests }) => {
         const health = await globalThis.fetch(`${origin}/healthz`);
         assert.equal(health.status, 200);
         assert.deepEqual(await health.json(), { status: 'ok' });
@@ -126,6 +137,17 @@ test('WeChat development harness exposes health, webhook and Action UI routes', 
                 input: { action: 'snooze', 'params.minutes': '10', token: 'untrusted' },
             },
         ]);
+
+        const queryPage = await globalThis.fetch(`${origin}/voicelife/reminder-actions/query-result/token%2Evalue`);
+        assert.equal(queryPage.status, 200);
+        assert.equal(await queryPage.text(), '<h1>日程 token.value</h1>');
+        assert.deepEqual(scheduleQueryPageRequests, ['token.value']);
+
+        const queryWrite = await globalThis.fetch(`${origin}/voicelife/reminder-actions/query-result/token%2Evalue`, {
+            method: 'POST',
+        });
+        assert.equal(queryWrite.status, 405);
+        assert.equal(queryWrite.headers.get('allow'), 'GET');
     });
 });
 

@@ -67,6 +67,26 @@ export interface ScheduleReceiptIntent {
     readonly occurredAt: IsoDateTime;
 }
 
+/** 语音日程查询通过 IM 返回的完整结果。 */
+export interface ScheduleQueryResultIntent {
+    readonly schemaVersion: typeof DEVICE_CONTRACT_VERSION;
+    readonly businessEventId: EventId;
+    readonly correlationId: CorrelationId;
+    readonly userId?: UserId;
+    readonly deviceId: DeviceId;
+    readonly query: {
+        readonly keyword?: string;
+        readonly status: 'all' | 'active' | 'cancelled' | 'completed';
+        readonly startDate?: string;
+        readonly endDate?: string;
+    };
+    readonly resultCount: number;
+    readonly schedules: readonly JsonValue[];
+    readonly futureOccurrences: readonly JsonValue[];
+    readonly exceptions: readonly JsonValue[];
+    readonly queriedAt: IsoDateTime;
+}
+
 /** 提醒的强弱等级。 */
 export type ReminderType = 'weak' | 'strong';
 /** 设备能够执行的提醒动作。 */

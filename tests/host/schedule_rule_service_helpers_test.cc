@@ -102,6 +102,26 @@ int main() {
     monthly.day_of_month = 0;
     Check(ValidateRuleFields(monthly).code == ErrorCode::kInvalidArgument, "每月指定日期越界应失败");
 
+    // 固定月日遇到短月必须跳过，不得静默改成月末；月末模式则使用每月实际最后一天。
+    ScheduleRule monthly_31 = DailyRule();
+    monthly_31.freq_type = Frequency::kMonthly;
+    monthly_31.monthly_mode = MonthlyMode::kSpecificDay;
+    monthly_31.day_of_month = 31;
+    monthly_31.start_date = LocalDate{2099, 1, 31};
+    const auto monthly_31_occurrences = NextOccurrences(monthly_31, AtLocalDate({2099, 1, 1}, {0, 0, 0}), 3);
+    Check(monthly_31_occurrences.size() == 3 && monthly_31_occurrences[0] == AtLocalDate({2099, 1, 31}, {9, 0, 0}) &&
+              monthly_31_occurrences[1] == AtLocalDate({2099, 3, 31}, {9, 0, 0}) &&
+              monthly_31_occurrences[2] == AtLocalDate({2099, 5, 31}, {9, 0, 0}),
+          "每月 31 号遇 2 月等短月必须跳过该月");
+    ScheduleRule monthly_last = monthly_31;
+    monthly_last.monthly_mode = MonthlyMode::kLastDay;
+    const auto monthly_last_occurrences = NextOccurrences(monthly_last, AtLocalDate({2099, 1, 1}, {0, 0, 0}), 3);
+    Check(monthly_last_occurrences.size() == 3 &&
+              monthly_last_occurrences[0] == AtLocalDate({2099, 1, 31}, {9, 0, 0}) &&
+              monthly_last_occurrences[1] == AtLocalDate({2099, 2, 28}, {9, 0, 0}) &&
+              monthly_last_occurrences[2] == AtLocalDate({2099, 3, 31}, {9, 0, 0}),
+          "每月最后一天必须按实际月长展开");
+
     ScheduleRule yearly = DailyRule();
     yearly.freq_type = Frequency::kYearly;
     Check(ValidateRuleFields(yearly).code == ErrorCode::kInvalidArgument, "每年规则缺少日期应失败");
@@ -114,8 +134,19 @@ int main() {
     yearly.month_of_year = 2;
     yearly.day_of_month = 29;
     Check(ValidateRuleFields(yearly).ok(), "每年规则 2 月 29 日应通过基准校验");
+    yearly.start_date = LocalDate{2028, 2, 29};
+    const auto leap_day_occurrences = NextOccurrences(yearly, AtLocalDate({2028, 1, 1}, {0, 0, 0}), 2);
+    Check(leap_day_occurrences.size() == 2 && leap_day_occurrences[0] == AtLocalDate({2028, 2, 29}, {9, 0, 0}) &&
+              leap_day_occurrences[1] == AtLocalDate({2032, 2, 29}, {9, 0, 0}),
+          "每年 2 月 29 日在非闰年必须跳过并命中下一次闰年");
     yearly.day_of_month = 30;
     Check(ValidateRuleFields(yearly).code == ErrorCode::kInvalidArgument, "每年规则无效日期应失败");
+
+    ScheduleRule bounded = DailyRule();
+    bounded.end_date = LocalDate{2099, 1, 2};
+    const auto bounded_occurrences = NextOccurrences(bounded, AtLocalDate({2099, 1, 1}, {0, 0, 0}), 4);
+    Check(bounded_occurrences.size() == 2 && bounded_occurrences.back() == AtLocalDate({2099, 1, 2}, {9, 0, 0}),
+          "周期结束日期必须包含结束日且阻止后续 occurrence");
 
     ScheduleRule invalid_time = DailyRule();
     invalid_time.start_time = LocalTime{24, 0, 0};

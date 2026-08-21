@@ -4,7 +4,13 @@ import assert from 'node:assert/strict';
 
 import { WechatOfficialAdapter, createMockImGateway } from '../dist/index.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
-import { bindFixtureUser, scheduleReceiptIntent, strongIntent, weakIntent } from './helpers.mjs';
+import {
+    bindFixtureUser,
+    scheduleQueryResultIntent,
+    scheduleReceiptIntent,
+    strongIntent,
+    weakIntent,
+} from './helpers.mjs';
 
 const webhookToken = 'fixture-webhook-token';
 const expectedToUserName = 'gh_fixture';
@@ -29,6 +35,12 @@ function outboundAdapter(fetchImpl, overrides = {}) {
                 title: 'thing1',
                 body: 'thing2',
                 time: 'time3',
+            },
+            queryTemplateId: 'fixture-query-template',
+            queryTemplateFields: {
+                title: 'first',
+                body: 'keyword1',
+                time: 'keyword2',
             },
             revealExternalUserId: async (ciphertext) => ciphertext.replace(/^(?:ciphertext|encrypted):/u, ''),
             fetch: fetchImpl,
@@ -110,8 +122,10 @@ test('WeChat outbound rejects invalid deployment configuration before making a r
         { appId: 'invalid-app' },
         { appSecret: '' },
         { templateId: 'bad template' },
+        { queryTemplateId: 'fixture-template' },
         { actionUiBaseUrl: 'http://gateway.example/actions' },
         { templateFields: { title: 'same', body: 'same', time: 'time3' } },
+        { queryTemplateFields: { title: 'same', body: 'same', time: 'time3' } },
         { requestTimeoutMs: 0 },
         { requestTimeoutMs: 10_001 },
         { displayTimeZone: 'not/a-time-zone' },
@@ -121,6 +135,39 @@ test('WeChat outbound rejects invalid deployment configuration before making a r
             (error) => error.code === 'invalid_contract',
         );
     }
+});
+
+test('query template payload passes send validation with its own field mapping', async () => {
+    const requests = [];
+    const responses = [
+        new globalThis.Response(JSON.stringify({ access_token: 'fixture-query-access-token', expires_in: 7200 })),
+        new globalThis.Response(JSON.stringify({ errcode: 0, msgid: '123' })),
+    ];
+    const adapter = outboundAdapter(async (url, init) => {
+        requests.push({ url: String(url), init });
+        return responses.shift();
+    });
+    const account = { id: 'channel-1', platform: 'wechat_official', status: 'active' };
+    const content = await adapter.render(
+        {
+            channelAccountId: 'channel-1',
+            presentationType: 'template',
+            kind: 'schedule_query_result',
+            semanticPayload: scheduleQueryResultIntent(),
+        },
+        account,
+        await adapter.capabilities(account),
+        { scheduleQueryToken: 'opaque-query-token' },
+    );
+
+    assert.deepEqual(await adapter.sendToUser('fixture-open-id', content), {
+        accepted: true,
+        platformMessageId: '123',
+    });
+    const body = JSON.parse(requests[1].init.body);
+    assert.equal(body.template_id, 'fixture-query-template');
+    assert.deepEqual(Object.keys(body.data).sort(), ['first', 'keyword1', 'keyword2']);
+    assert.equal(body.url, 'https://gateway.example/voicelife/reminder-actions/query-result/opaque-query-token');
 });
 
 test('renders template times in the configured IANA time zone', async () => {
@@ -195,6 +242,29 @@ test('WeChat outbound validates delivery scope and payload shape before network 
             time3: { value: '2026年8月3日 08:00' },
         },
     });
+    const queryResult = scheduleQueryResultIntent();
+    const renderedQueryResult = await adapter.render(
+        { ...validDelivery, kind: 'schedule_query_result', semanticPayload: queryResult },
+        account,
+        capabilities,
+        {},
+    );
+    assert.equal(renderedQueryResult.templateId, 'fixture-query-template');
+    assert.equal(renderedQueryResult.data.first.value, '日程查询结果（2 条）');
+    assert.equal(
+        renderedQueryResult.data.keyword1.value,
+        [
+            '共 2 条日程',
+            '1. 一次性日程',
+            '   时间：2026年8月3日 09:00',
+            '2. 周期日程',
+            '   时间：2026年8月4日 09:00',
+            '例外调整：1 条',
+            '查询条件：2026-08-03 至 2026-08-10',
+            '状态：进行中',
+        ].join('\n'),
+    );
+    assert.equal(renderedQueryResult.data.keyword2.value, '2026年8月3日 08:00');
     for (const delivery of [
         { ...validDelivery, channelAccountId: 'channel-other' },
         { ...validDelivery, presentationType: 'text' },

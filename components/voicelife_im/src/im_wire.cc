@@ -29,6 +29,7 @@ namespace {
 using contracts::im::NotificationAction;
 using contracts::im::NotificationIntent;
 using contracts::im::ReminderActionResult;
+using contracts::im::ScheduleQueryResultIntent;
 using contracts::im::ScheduleReceiptIntent;
 
 /// 追加一个 JSON 字符串字面量，转义引号、反斜杠与控制字符。
@@ -167,6 +168,51 @@ std::string SerializeScheduleReceiptIntent(const ScheduleReceiptIntent& intent) 
     out.push_back(',');
     AppendKey(out, "occurredAt");
     AppendJsonString(out, intent.occurredAt);
+    out.push_back('}');
+    return out;
+}
+
+std::string SerializeScheduleQueryResultIntent(const ScheduleQueryResultIntent& intent) {
+    std::string out;
+    out.reserve(2048);
+    out.push_back('{');
+    AppendKey(out, "schemaVersion");
+    AppendJsonString(out, intent.schemaVersion);
+    out.push_back(',');
+    AppendKey(out, "businessEventId");
+    AppendJsonString(out, intent.businessEventId);
+    out.push_back(',');
+    AppendKey(out, "correlationId");
+    AppendJsonString(out, intent.correlationId);
+    if (intent.userId.has_value()) {
+        out += ",\"userId\":";
+        AppendJsonString(out, *intent.userId);
+    }
+    out += ",\"deviceId\":";
+    AppendJsonString(out, intent.deviceId);
+    out += ",\"query\":{\"status\":";
+    AppendJsonString(out, intent.status);
+    if (intent.keyword.has_value()) {
+        out += ",\"keyword\":";
+        AppendJsonString(out, *intent.keyword);
+    }
+    if (intent.startDate.has_value()) {
+        out += ",\"startDate\":";
+        AppendJsonString(out, *intent.startDate);
+    }
+    if (intent.endDate.has_value()) {
+        out += ",\"endDate\":";
+        AppendJsonString(out, *intent.endDate);
+    }
+    out += "},\"resultCount\":" + std::to_string(intent.resultCount);
+    out += ",\"schedules\":";
+    AppendJsonValue(out, intent.schedules);
+    out += ",\"futureOccurrences\":";
+    AppendJsonValue(out, intent.futureOccurrences);
+    out += ",\"exceptions\":";
+    AppendJsonValue(out, intent.exceptions);
+    out += ",\"queriedAt\":";
+    AppendJsonString(out, intent.queriedAt);
     out.push_back('}');
     return out;
 }

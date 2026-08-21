@@ -51,6 +51,12 @@ interface WechatDevConfiguration {
         readonly body: string;
         readonly time: string;
     };
+    readonly queryTemplateId: string;
+    readonly queryTemplateFields: {
+        readonly title: string;
+        readonly body: string;
+        readonly time: string;
+    };
     readonly displayTimeZone: string;
     readonly actionUiBaseUrl: string;
     readonly openId: string;
@@ -83,6 +89,8 @@ export async function startConfiguredWechatDevHarness(
             appSecret: config.appSecret,
             templateId: config.templateId,
             templateFields: config.templateFields,
+            queryTemplateId: config.queryTemplateId,
+            queryTemplateFields: config.queryTemplateFields,
             displayTimeZone: config.displayTimeZone,
             actionUiBaseUrl: config.actionUiBaseUrl,
             revealExternalUserId: (ciphertext) => identityProtector.reveal(ciphertext),
@@ -142,6 +150,7 @@ export async function startConfiguredWechatDevHarness(
             expectedDeviceId: deviceId,
             webhookApi: requiredWechatApi(runtime.wechatApi),
             actionUiPageApi: runtime.actionUiPageApi,
+            scheduleQueryPageApi: runtime.scheduleQueryPageApi,
             sendTestNotification: async () => {
                 const now = clock.now();
                 const unique = randomUUID();
@@ -235,6 +244,12 @@ function readConfiguration(environment: WechatDevEnvironment): WechatDevConfigur
             title: templateField(environment, 'WECHAT_TEMPLATE_TITLE_FIELD'),
             body: templateField(environment, 'WECHAT_TEMPLATE_BODY_FIELD'),
             time: templateField(environment, 'WECHAT_TEMPLATE_TIME_FIELD'),
+        },
+        queryTemplateId: requiredEnvironment(environment, 'WECHAT_QUERY_TEMPLATE_ID'),
+        queryTemplateFields: {
+            title: templateField(environment, 'WECHAT_QUERY_TEMPLATE_TITLE_FIELD'),
+            body: templateField(environment, 'WECHAT_QUERY_TEMPLATE_BODY_FIELD'),
+            time: templateField(environment, 'WECHAT_QUERY_TEMPLATE_TIME_FIELD'),
         },
         displayTimeZone: displayTimeZone(environment),
         actionUiBaseUrl,

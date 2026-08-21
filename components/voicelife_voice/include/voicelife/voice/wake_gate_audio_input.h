@@ -31,7 +31,7 @@ class LocalWakeDetectorPort {
      * @param frame 采集到的待机音频帧。
      * @return 检测器接受该帧时返回成功。
      */
-    virtual Status Submit(const AudioFrame& frame) = 0;
+    virtual Status Submit(AudioFrame frame) = 0;
 };
 
 /**

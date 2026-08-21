@@ -36,6 +36,9 @@ struct QueryScheduleRulesCommand {
     std::optional<ScheduleRuleId> rule_id;
     std::optional<std::string> keyword;
     ScheduleStatusFilter status = ScheduleStatusFilter::kActive;
+    /// 查询窗口的本地日期时间边界；为空时只返回从当前时刻开始的少量预览。
+    std::optional<DateTime> occurrence_start;
+    std::optional<DateTime> occurrence_end;
     int64_t limit = 10;
     int64_t offset = 0;
 };

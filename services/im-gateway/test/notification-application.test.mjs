@@ -7,10 +7,27 @@ import {
     expectGatewayError,
     fixedCapabilities,
     scheduleReceiptIntent,
+    scheduleQueryResultIntent,
     seedDevice,
     strongIntent,
     weakIntent,
 } from './helpers.mjs';
+
+test('schedule query result preserves all entries and is idempotent', async () => {
+    const { gateway } = buildGateway();
+    await bindFixtureUser(gateway);
+
+    const intent = scheduleQueryResultIntent();
+    const first = await gateway.application.notifications.submitScheduleQueryResult(intent);
+    const replay = await gateway.application.notifications.submitScheduleQueryResult(intent);
+    assert.equal(first.deliveries.length, 1);
+    assert.deepEqual(replay, first);
+    const details = await gateway.application.deliveries.find(first.deliveries[0].deliveryId);
+    assert.equal(details.delivery.kind, 'schedule_query_result');
+    assert.deepEqual(details.delivery.semanticPayload.schedules, intent.schedules);
+    assert.deepEqual(details.delivery.semanticPayload.futureOccurrences, intent.futureOccurrences);
+    assert.deepEqual(details.delivery.semanticPayload.exceptions, intent.exceptions);
+});
 
 test('strong reminder creates a pending delivery with an action stream', async () => {
     const { gateway } = buildGateway();
