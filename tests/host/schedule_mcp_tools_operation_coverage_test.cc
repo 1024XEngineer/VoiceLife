@@ -1,8 +1,9 @@
 #define main ExistingScheduleMcpToolsReminderTestMain
-#include "schedule_mcp_tools_reminder_test.cc"
+#include "schedule_mcp_tools_test.cc"
 #undef main
 
 #include "im_runtime_test_support.h"
+#include "voicelife/schedule/schedule_operation_service.h"
 
 using voicelife::ErrorCode;
 using voicelife::im::ImTransportStatus;
@@ -115,6 +116,7 @@ void CheckScheduleQueryReportingPaths() {
 }  // namespace
 
 int main() {
+    Check(ExistingScheduleMcpToolsReminderTestMain() == 0, "完整日程 MCP 覆盖测试应通过");
     CheckOperationQueryPaths();
     CheckScheduleQueryReportingPaths();
     return 0;
