@@ -297,6 +297,11 @@ add_voicelife_test(schedule_mcp_tools_recovery_coverage_test "unit;mcp;schedule"
     "${SCHEDULE_MCP_TOOLS_SOURCE}")
 target_link_libraries(schedule_mcp_tools_recovery_coverage_test PRIVATE mcp schedule im)
 
+add_voicelife_test(schedule_mcp_tools_operation_coverage_test "unit;mcp;schedule"
+    schedule_mcp_tools_operation_coverage_test.cc
+    "${SCHEDULE_MCP_TOOLS_SOURCE}")
+target_link_libraries(schedule_mcp_tools_operation_coverage_test PRIVATE mcp schedule im)
+
 add_voicelife_test(schedule_rule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_rule_mcp_tools_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_rule_mcp_tools.cc")
 target_include_directories(schedule_rule_mcp_tools_test PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src/tools")
@@ -346,6 +351,12 @@ add_voicelife_test(linx_mcp_bridge_test "unit;mcp;linx;runtime" linx_mcp_bridge_
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 target_include_directories(linx_mcp_bridge_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
 target_link_libraries(linx_mcp_bridge_test PRIVATE contracts mcp schedule im)
+
+add_voicelife_test(linx_mcp_bridge_coverage_test "unit;mcp;linx;runtime" linx_mcp_bridge_coverage_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime/src/linx_mcp_bridge.cc"
+    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
+target_include_directories(linx_mcp_bridge_coverage_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_link_libraries(linx_mcp_bridge_coverage_test PRIVATE contracts mcp schedule im)
 
 add_voicelife_test(linx_ota_contract_test "unit;linx;contract" linx_ota_contract_test.cc)
 target_link_libraries(linx_ota_contract_test PRIVATE contracts linx)

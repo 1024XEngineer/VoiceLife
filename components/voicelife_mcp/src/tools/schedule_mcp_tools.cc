@@ -644,7 +644,7 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
         });
     if (!status.ok()) return status;
 
-    return server.add_tool(
+    status = server.add_tool(
         "schedule.delete", "删除单次日程、未来周期单次或整条周期规则。", DeleteProperties(),
         [&service, rule_service, reminder_service](const PropertyList& properties) {
             // delete 根据定位参数拆三条路径：schedule_id 删实例，rule_id 删规则，rule_id + original_start_time
@@ -724,6 +724,9 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
             });
         });
     if (!status.ok()) return status;
+
+    // 只有装配操作记录服务时才暴露查询工具；基础运行时保持原有四个日程工具。
+    if (operation_service == nullptr) return Status::Ok();
 
     // 操作记录查询：记录写入不经过 tool，由变更 service 显式推送；本工具只读查询。
     return server.add_tool(
