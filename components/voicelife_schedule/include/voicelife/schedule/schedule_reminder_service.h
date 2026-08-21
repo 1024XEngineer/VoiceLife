@@ -16,7 +16,7 @@
 namespace voicelife::timing {
 /** @brief 提供一次性定时任务调度能力的服务。 */
 class TimingTaskService;
-}
+}  // namespace voicelife::timing
 
 namespace voicelife::schedule {
 

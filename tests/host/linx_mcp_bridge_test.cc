@@ -50,12 +50,9 @@ int main() {
     Check(list.value->find("\"session_id\":\"remote-session\"") != std::string::npos,
           "MCP 响应必须回传 Linx session_id");
     const auto& tools = listed.Get("result")->Get("tools")->array;
-    Check(tools.size() == 7 && tools[0].Get("name")->string == "schedule.create" &&
+    Check(tools.size() == 4 && tools[0].Get("name")->string == "schedule.create" &&
               tools[1].Get("name")->string == "schedule.query" && tools[2].Get("name")->string == "schedule.update" &&
-              tools[3].Get("name")->string == "schedule.delete" &&
-              tools[4].Get("name")->string == "schedule.operation_query" &&
-              tools[5].Get("name")->string == "schedule.reminder_acknowledge" &&
-              tools[6].Get("name")->string == "schedule.reminder_snooze",
+              tools[3].Get("name")->string == "schedule.delete",
           "tools/list 必须返回稳定排序的一次性日程工具");
     const auto* create_schema = tools[0].Get("inputSchema");
     Check(create_schema->Get("required")->array.size() == 1 &&

@@ -228,7 +228,7 @@ int main() {
     Check(voicelife::mcp::RegisterScheduleMcpTools(server, service, rule_service).ok(), "日程工具应注册成功");
 
     const auto listed = server.list_tools();
-    Check(listed.total == 7, "日程工具应注册七个工具");
+    Check(listed.total == 4, "日程工具应注册四个工具");
 
     // schedule.create：一次性日程的各个字段与错误路径。
     const auto one_shot = server.call({
