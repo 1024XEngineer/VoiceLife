@@ -725,6 +725,9 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
         });
     if (!status.ok()) return status;
 
+    // 只有装配操作记录服务时才暴露查询工具；基础运行时保持原有四个日程工具。
+    if (operation_service == nullptr) return Status::Ok();
+
     // 操作记录查询：记录写入不经过 tool，由变更 service 显式推送；本工具只读查询。
     status = server.add_tool(
         "schedule.operation_query", "查询最近的操作记录，支持按对象类型、操作类型和名称筛选。",

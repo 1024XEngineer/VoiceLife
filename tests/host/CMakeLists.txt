@@ -281,9 +281,17 @@ add_voicelife_test(mcp_server_test "unit;mcp"
 target_include_directories(mcp_server_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
 target_link_libraries(mcp_server_test PRIVATE mcp)
 
+set(SCHEDULE_MCP_TOOLS_SOURCE "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
+add_library(schedule_mcp_tools_coverage_impl OBJECT "${SCHEDULE_MCP_TOOLS_SOURCE}")
+target_include_directories(schedule_mcp_tools_coverage_impl PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src/tools")
+target_link_libraries(schedule_mcp_tools_coverage_impl PRIVATE mcp schedule im)
+
+add_library(linx_mcp_bridge_coverage_impl OBJECT
+    "${ROOT_DIR}/components/voicelife_runtime/src/linx_mcp_bridge.cc")
+target_link_libraries(linx_mcp_bridge_coverage_impl PRIVATE contracts mcp)
 
 add_voicelife_test(schedule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_mcp_tools_test.cc
-    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
+    $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
 target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule im)
 
 add_voicelife_test(schedule_mcp_tools_reminder_test "unit;mcp;schedule;reminder"
@@ -295,11 +303,28 @@ add_voicelife_test(schedule_mcp_tools_branch_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_branch_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 target_link_libraries(schedule_mcp_tools_branch_test PRIVATE mcp schedule timing storage_memory im)
+    $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
+target_link_libraries(schedule_mcp_tools_reminder_test PRIVATE mcp schedule timing im)
+
+add_voicelife_test(schedule_mcp_tools_branch_test "unit;mcp;schedule;reminder"
+    schedule_mcp_tools_branch_test.cc
+    $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
+target_link_libraries(schedule_mcp_tools_branch_test PRIVATE mcp schedule timing im)
 
 add_voicelife_test(schedule_mcp_tools_failure_coverage_test "unit;mcp;schedule;runtime"
     schedule_mcp_tools_failure_coverage_test.cc
-    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
+    $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
 target_link_libraries(schedule_mcp_tools_failure_coverage_test PRIVATE mcp schedule im)
+
+add_voicelife_test(schedule_mcp_tools_recovery_coverage_test "unit;mcp;schedule"
+    "${CMAKE_CURRENT_LIST_DIR}/schedule_mcp_tools_recovery_coverage_test.cc"
+    $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
+target_link_libraries(schedule_mcp_tools_recovery_coverage_test PRIVATE mcp schedule im)
+
+add_voicelife_test(schedule_mcp_tools_operation_coverage_test "unit;mcp;schedule"
+    schedule_mcp_tools_operation_coverage_test.cc
+    $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
+target_link_libraries(schedule_mcp_tools_operation_coverage_test PRIVATE mcp schedule im)
 
 add_voicelife_test(schedule_rule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_rule_mcp_tools_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_rule_mcp_tools.cc")
@@ -335,6 +360,7 @@ target_link_libraries(schedule_helpers_coverage_test PRIVATE schedule)
 
 add_voicelife_test(mcp_json_writer_coverage_test "unit;mcp" mcp_json_writer_coverage_test.cc)
 target_include_directories(mcp_json_writer_coverage_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
+target_include_directories(mcp_json_writer_coverage_test PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src")
 target_link_libraries(mcp_json_writer_coverage_test PRIVATE mcp)
 
 add_voicelife_test(mcp_server_coverage_test "unit;mcp" mcp_server_coverage_test.cc)
@@ -346,10 +372,19 @@ target_include_directories(schedule_mcp_tools_input_test PRIVATE "${ROOT_DIR}/co
 target_link_libraries(schedule_mcp_tools_input_test PRIVATE mcp schedule)
 
 add_voicelife_test(linx_mcp_bridge_test "unit;mcp;linx;runtime" linx_mcp_bridge_test.cc
-    "${ROOT_DIR}/components/voicelife_runtime/src/linx_mcp_bridge.cc"
-    "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
+    $<TARGET_OBJECTS:linx_mcp_bridge_coverage_impl>
+    $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
 target_include_directories(linx_mcp_bridge_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
 target_link_libraries(linx_mcp_bridge_test PRIVATE contracts mcp schedule im)
+
+add_voicelife_test(linx_mcp_bridge_coverage_test "unit;mcp;linx;runtime" linx_mcp_bridge_coverage_test.cc
+    $<TARGET_OBJECTS:linx_mcp_bridge_coverage_impl>
+    $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
+target_include_directories(linx_mcp_bridge_coverage_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_runtime/src"
+    "${ROOT_DIR}/components/voicelife_mcp/src"
+    "${ROOT_DIR}/third_party/yyjson")
+target_link_libraries(linx_mcp_bridge_coverage_test PRIVATE contracts mcp schedule im)
 
 add_voicelife_test(linx_ota_contract_test "unit;linx;contract" linx_ota_contract_test.cc)
 target_link_libraries(linx_ota_contract_test PRIVATE contracts linx)
