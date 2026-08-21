@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
@@ -106,6 +107,23 @@ class ExampleAdapterTest(unittest.TestCase):
                     adapter.run(Context())
                 self.assertEqual(raised.exception.category, RUNNER.FailureCategory.INFRASTRUCTURE)
                 self.assertEqual(raised.exception.message_code, "host_recovery_journey_failed")
+
+    def test_recovery_details_stay_out_of_public_artifacts(self) -> None:
+        class Context:
+            run_id = "a" * 32
+            temporary_directory = Path("/tmp/voicelife-e2e-test")
+            cleanup = mock.Mock()
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(ADAPTERS.subprocess, "Popen") as popen:
+            artifact_directory = Path(directory) / "artifacts"
+            adapter = ADAPTERS.HostImGatewayRecoveryE2EAdapter(artifact_directory)
+            adapter.prepare(Context())
+
+        environment = popen.call_args.kwargs["env"]
+        detail_path = Path(environment["E2E_RECOVERY_EVIDENCE"])
+        self.assertEqual(detail_path.parent.parent, Context.temporary_directory)
+        self.assertNotEqual(detail_path.parent, artifact_directory)
+        self.assertFalse(artifact_directory.exists())
 
 
 class RunE2eCliTest(unittest.TestCase):

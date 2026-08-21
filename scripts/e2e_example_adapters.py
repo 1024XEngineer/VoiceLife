@@ -161,8 +161,9 @@ class HostImGatewayRecoveryE2EAdapter:
         self._process: subprocess.Popen[str] | None = None
 
     def prepare(self, context: RunContext) -> None:
-        self.artifact_directory.mkdir(parents=True, exist_ok=True)
-        detail_path = self.artifact_directory / f"recovery-{context.run_id}.json"
+        # Detailed recovery snapshots may contain internal database fields; keep them
+        # in the runner-owned temporary directory instead of the public artifact tree.
+        detail_path = context.temporary_directory / "recovery-details" / f"recovery-{context.run_id}.json"
         environment = {
             **os.environ,
             "E2E_RUN_ID": context.run_id,
