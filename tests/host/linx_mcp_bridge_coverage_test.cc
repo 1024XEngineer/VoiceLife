@@ -157,6 +157,7 @@ void CheckAdditionalProtocolBranches() {
 
 int main() {
     Check(ExistingMcpJsonWriterCoverageTestMain() == 0, "MCP JSON Writer 覆盖测试应通过");
+    Check(ExistingLinxMcpBridgeTestMain() == 0, "完整 Linx MCP 桥接测试应通过");
     CheckBridgeProtocolFailures();
     CheckUnavailableAndOutcomeBranches();
     CheckAdditionalProtocolBranches();
