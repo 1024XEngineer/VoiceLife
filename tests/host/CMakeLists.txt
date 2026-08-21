@@ -291,7 +291,7 @@ add_voicelife_test(schedule_mcp_tools_failure_coverage_test "unit;mcp;schedule;r
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 target_link_libraries(schedule_mcp_tools_failure_coverage_test PRIVATE mcp schedule im)
 
-add_voicelife_test(schedule_mcp_tools_recovery_coverage_test "unit;mcp;schedule;runtime"
+add_voicelife_test(schedule_mcp_tools_recovery_coverage_test "unit;mcp;schedule"
     schedule_mcp_tools_recovery_coverage_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 target_link_libraries(schedule_mcp_tools_recovery_coverage_test PRIVATE mcp schedule)
