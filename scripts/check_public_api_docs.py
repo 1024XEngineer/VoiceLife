@@ -81,14 +81,6 @@ def returns_value(line: str) -> bool:
 
 
 def check_header(path: Path) -> list[str]:
-    # 提醒仓储接口使用行式 Doxygen 注释，保持与现有 schedule API 注释风格一致。
-    if path.name in {
-        "schedule_reminder_service.h",
-        "schedule_reminder_task_repository.h",
-        "memory_schedule_reminder_task_repository.h",
-        "sqlite_schedule_reminder_task_repository.h",
-    }:
-        return []
     lines = path.read_text(encoding="utf-8").splitlines()
     errors: list[str] = []
     access = "public"
@@ -116,6 +108,7 @@ def check_header(path: Path) -> list[str]:
         if not is_public_function:
             continue
         if doc.style != "block":
+            errors.append(f"{path}:{number + 1}: 公开函数必须使用 /** ... */ 块注释")
             continue
         if "@brief" not in doc.text:
             errors.append(f"{path}:{number + 1}: 公开函数文档缺少 @brief")
