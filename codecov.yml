@@ -35,7 +35,6 @@ ignore:
   - "tests/**"
   - "services/im-gateway/test/**"
   - "main/**"
-  - "components/voicelife_timing/src/timing_task_service_stubs.cc"
   # 语音模块仍在开发中,实板验证与 host 覆盖率补齐前暂缓计入 codecov。
   - "components/voicelife_voice/**"
   - "components/voicelife_linx/**"
@@ -43,6 +42,4 @@ ignore:
   - "components/voicelife_audio_esp/**"
   # ESP_PLATFORM-only FreeRTOS runtime; host gcov cannot execute this target-specific code.
   - "components/voicelife_timing_esp/**"
-  - "components/voicelife_runtime/**"
-  - "components/voicelife_schedule/**"
-  - "components/voicelife_mcp/**"
+
