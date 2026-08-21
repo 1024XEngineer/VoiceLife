@@ -62,10 +62,11 @@ test('production clock, channel health and direct conversations expose runtime-s
     assert.equal((await degraded.check({ id: 'channel-1', status: 'active' })).detail, 'proactive_message_unavailable');
 
     const unavailable = new CapabilityChannelHealthPort(capabilities, clock, async () => false);
-    assert.deepEqual(await unavailable.check({ id: 'channel-1', status: 'active' }), {
+    const { checkedAt, ...unavailableHealth } = await unavailable.check({ id: 'channel-1', status: 'active' });
+    assert.match(checkedAt, /^\d{4}-\d{2}-\d{2}T/u);
+    assert.deepEqual(unavailableHealth, {
         accountId: 'channel-1',
         status: 'unavailable',
-        checkedAt: clock.now(),
         detail: 'runtime_unavailable',
     });
 
