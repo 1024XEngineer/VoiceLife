@@ -50,15 +50,16 @@ config VOICELIFE_STATE_FLOW_TEST
         is a test-only build option and must remain disabled in production.
 
 config VOICELIFE_SERIAL_VOICE_TEST
-    bool "Enable SparkBot serial PCM voice regression harness"
+    bool "Enable serial PCM voice regression harness"
     default n
-    depends on VOICELIFE_BOARD_ESP_SPARKBOT && ESP_CONSOLE_USB_SERIAL_JTAG && !VOICELIFE_STATE_FLOW_TEST
+    depends on ESP_CONSOLE_USB_SERIAL_JTAG && !VOICELIFE_STATE_FLOW_TEST
     help
         Start a test-only USB Serial/JTAG PCM input reader. It accepts a fixed,
         bounded 16 kHz S16LE mono protocol and routes frames through the normal
-        audio queue, VoiceSession, Linx transport and ES8311 output. The test
-        build emits unredacted voice text and detailed hardware telemetry for
-        board diagnosis. It must remain disabled in production profiles.
+        audio queue, VoiceSession, Linx transport and board-specific output.
+        The test build emits unredacted voice text and detailed hardware
+        telemetry for board diagnosis. It must remain disabled in production
+        profiles.
 
 if VOICELIFE_AUDIO_PROBE
 

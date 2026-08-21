@@ -92,8 +92,8 @@ def build_adapter(layer: str, journey: str, args: argparse.Namespace | Path | No
         hardware = RealHilHardware(str(server), str(server_directory), str(gateway_origin), str(user_id))
         return HilPairingAdapter(Path(device), lease_directory, hardware=hardware)
     if journey == "voice":
-        if layer != "hil" or not isinstance(args, argparse.Namespace) or args.profile != "sparkbot":
-            raise ValueError("voice journey requires the sparkbot HIL profile")
+        if layer != "hil" or not isinstance(args, argparse.Namespace) or args.profile not in {"sparkbot", "pcb"}:
+            raise ValueError("voice journey requires a supported HIL profile")
         device = _required_hil_option(args, "device")
         server = _required_hil_option(args, "server")
         server_directory = _required_hil_option(args, "server_dir")

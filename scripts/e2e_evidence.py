@@ -230,7 +230,7 @@ def validate_evidence(document: dict[str, object]) -> None:
         _reject(
             value["layer"] != "hil"
             or value["journey"] != "voice"
-            or value["profile"] != "sparkbot"
+            or value["profile"] not in {"sparkbot", "pcb"}
             or value["status"] != "passed"
             or value["hardware_verified"] is not True
         )

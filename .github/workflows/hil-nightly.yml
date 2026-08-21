@@ -76,7 +76,6 @@ jobs:
           test -n "${VOICELIFE_HIL_USER_ID:-}"
           python3 -c 'import serial, esptool' >/dev/null
           if [[ "${{ inputs.journey || 'im-pairing' }}" == "voice" ]]; then
-            [[ "${{ inputs.profile || 'all' }}" == "sparkbot" ]]
             test -n "${DASHSCOPE_API_KEY:-}"
             python3 -c 'import dashscope' >/dev/null
             command -v ffmpeg >/dev/null
@@ -114,6 +113,7 @@ jobs:
               --text '你好牛牛，请介绍一下你自己。'
               --text '把刚才的回答再简短一点。'
               --text '请用一句话总结我们刚才的对话。'
+              --expect-terminal
             )
           fi
           "${run_args[@]}"

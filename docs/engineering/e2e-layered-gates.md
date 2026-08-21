@@ -43,7 +43,9 @@ python3 scripts/run_e2e.py --layer hil --journey im-pairing \
 python3 scripts/check_e2e_artifacts.py artifacts/hil-sparkbot
 ```
 
-SparkBot 真实语音 HIL 使用专用 `esp32s3-esp-sparkbot-serial-voice` 测试 Profile。它需要受控环境中的 `DASHSCOPE_API_KEY`、`dashscope` Python 包和 `ffmpeg`；API Key 不进入命令行参数或 evidence：
+SparkBot 与 PCB 真实语音 HIL 分别使用 `esp32s3-esp-sparkbot-serial-voice` 和
+`esp32s3-voicelife-pcb-serial-voice` 测试 Profile。它需要受控环境中的
+`DASHSCOPE_API_KEY`、`dashscope` Python 包和 `ffmpeg`；API Key 不进入命令行参数或 evidence：
 
 ```bash
 DASHSCOPE_API_KEY="$DASHSCOPE_API_KEY" \
@@ -63,7 +65,10 @@ python3 scripts/run_e2e.py --layer hil --journey voice \
 python3 scripts/check_e2e_artifacts.py artifacts/hil-voice
 ```
 
-`voice` journey 会先完成 application-only flash、临时设备注册、USB 配网和 readiness，再调用现有 `voice_linx_serial_multiturn_test.py` 将 DashScope TTS 结果转为 16 kHz mono S16LE PCM 注入真实设备。它只允许 SparkBot；PCB 没有 `CONFIG_VOICELIFE_SERIAL_VOICE_TEST`，不得套用该命令。结果证明真实云端语音和设备数字播放链路，不替代麦克风声学、AEC 或全双工验收。
+`voice` journey 会先完成 application-only flash、临时设备注册、USB 配网和 readiness，再调用
+`voice_linx_serial_multiturn_test.py` 将 DashScope TTS 结果转为 16 kHz mono S16LE PCM 注入真实设备。
+SparkBot 验证 LVGL 文本轨迹与滚动；PCB 验证 SSD1306 在每轮中实际绘制。结果证明真实云端语音和
+设备数字播放链路，不替代麦克风声学、AEC 或全双工验收。
 
 Gateway host、目录、origin 和 user id 通过环境变量或受控 secret 注入；token 不进入 shell 参数、日志或 evidence。HIL 默认 `retries=0`，只允许基础设施层在 workflow 外显式重试，并且必须在 summary 中可见。
 
@@ -71,7 +76,7 @@ Gateway host、目录、origin 和 user id 通过环境变量或受控 secret �
 
 - `.github/workflows/ci.yml` 仅运行稳定 Host E2E，并上传 14 天的 JSON evidence。
 - PR Host job 另运行一次受控的 `lifecycle-example` 故意失败，验证失败 evidence 和 `product` 分类仍能通过脱敏校验。
-- `.github/workflows/hil-nightly.yml` 当前仅开放 `workflow_dispatch`，只接受 `self-hosted, voicelife-hil` 及 profile 标签；`fail-fast=false`，SparkBot 和 PCB 独立汇总、独立上传 artifact。`voice` 只允许选择 SparkBot，并需要受控 `DASHSCOPE_API_KEY`。
+- `.github/workflows/hil-nightly.yml` 当前仅开放 `workflow_dispatch`，只接受 `self-hosted, voicelife-hil` 及 profile 标签；`fail-fast=false`，SparkBot 和 PCB 独立汇总、独立上传 artifact。`voice` 需要受控 `DASHSCOPE_API_KEY`。
 - 手工触发可选 `sparkbot`、`pcb` 或 `all`，并可在选择单一 Profile 后指定 device descriptor 名称，用于隔离故障设备；配置受控 Runner 后再执行。
 - public GitHub-hosted Runner 不接触硬件或长期平台凭据。受控 Runner 只保存原始串口日志；公开 artifact 只包含通过 `scripts/check_e2e_artifacts.py` 校验的脱敏 JSON。
 - artifact 保留 14 天，访问权限跟随仓库 Actions 权限；发现凭据或个人数据时立即删除公开 artifact，保留受控私有原始日志并按 [SECURITY.md](../../SECURITY.md) 上报。

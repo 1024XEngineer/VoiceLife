@@ -15,7 +15,7 @@ Host E2E 和 HIL 结果只能证明软件旅程的有限边界，不能替代真
 - [ ] H5 推迟/确认链接在真实 HTTPS origin 下通过，过期、重复点击和错误 scope 有记录。
 - [ ] SSE 断线重连、Gateway 重启和 PostgreSQL 恢复通过。
 - [ ] 真实 Linx/ASR/TTS 凭据在受控环境使用；凭据未进入 PR、artifact 或设备镜像。
-- [ ] SparkBot voice HIL 通过：DashScope TTS -> PCM 注入 -> ASR -> Linx/WSS -> 下行 TTS/I2S/显示；记录 model、voice、Profile、固件 commit 和脱敏 evidence。
+- [ ] SparkBot、PCB voice HIL 通过：DashScope TTS -> PCM 注入 -> ASR -> Linx/WSS -> 下行 TTS/I2S/显示；记录 model、voice、Profile、固件 commit 和脱敏 evidence。
 - [ ] 声学：唤醒、AEC、全双工抢话和误唤醒在真实扬声器/麦克风下观察并记录。
 - [ ] 显示：SparkBot 状态、表情、字幕和物理输入在实板观察通过。
 - [ ] 掉电、重启、配网和旧凭据撤销/恢复通过。

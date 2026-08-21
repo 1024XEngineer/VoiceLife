@@ -223,6 +223,11 @@ class E2eEvidenceTest(unittest.TestCase):
         EVIDENCE.validate_evidence(document)
         self.assertEqual(json.loads(EVIDENCE.canonical_json(document)), document)
 
+    def test_accepts_pcb_hil_voice_evidence(self) -> None:
+        document = self.voice_document()
+        document["profile"] = "pcb"
+        EVIDENCE.validate_evidence(document)
+
     def test_voice_evidence_rejects_pairing_fields_and_unsafe_model(self) -> None:
         pairing_fields = self.voice_document()
         pairing_fields["hil"]["pairing_markers"] = ["pending"]

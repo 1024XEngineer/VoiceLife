@@ -224,9 +224,12 @@ class HilPairingAdapter:
 
 
 class HilVoiceAdapter:
-    """Run the real SparkBot DashScope-to-device multi-turn voice journey."""
+    """Run the real board-specific DashScope-to-device multi-turn voice journey."""
 
-    VOICE_FIRMWARE_PROFILE = "esp32s3-esp-sparkbot-serial-voice"
+    VOICE_FIRMWARE_PROFILES = {
+        "sparkbot": "esp32s3-esp-sparkbot-serial-voice",
+        "pcb": "esp32s3-voicelife-pcb-serial-voice",
+    }
 
     def __init__(
         self,
@@ -270,8 +273,8 @@ class HilVoiceAdapter:
             raise RunnerFailure(FailureCategory.CONFIGURATION, "dashscope_unavailable") from error
         try:
             descriptor = load_device_descriptor(self._descriptor_path, context.config.profile)
-            if descriptor.profile != "sparkbot":
-                raise HilProfileMismatch("voice journey requires sparkbot")
+            if descriptor.profile not in self.VOICE_FIRMWARE_PROFILES:
+                raise HilProfileMismatch("voice journey requires a supported profile")
             lease = DeviceLease(descriptor, self._lease_root)
             lease.acquire()
             self.lease_held = True
@@ -327,6 +330,8 @@ class HilVoiceAdapter:
             self._tts_model,
             "--voice",
             self._voice,
+            "--display-profile",
+            self._descriptor.profile,
             "--response-timeout",
             str(self._response_timeout),
             "--serial-log",
@@ -366,7 +371,10 @@ class HilVoiceAdapter:
         if self._descriptor is None:
             raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "hil_device_not_prepared")
         try:
-            voice_descriptor = replace(self._descriptor, firmware_profile=self.VOICE_FIRMWARE_PROFILE)
+            voice_descriptor = replace(
+                self._descriptor,
+                firmware_profile=self.VOICE_FIRMWARE_PROFILES[self._descriptor.profile],
+            )
             build_directory = self._hardware.build(voice_descriptor)
             self._image = self._hardware.image(build_directory, self._descriptor, self._partitions)
             self._hardware.flash(voice_descriptor, self._image, context.remaining())
