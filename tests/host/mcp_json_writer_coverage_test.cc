@@ -47,23 +47,38 @@ ToolOutputObject BuildObjectWithNull(ToolOutputArray array) {
 
 }  // namespace
 
+ToolInputField MakeField(ToolInputType type) {
+    ToolInputField field{};
+    field.type = type;
+    return field;
+}
+
 void CheckListToolsSchemaSerialization() {
     auto nested = std::make_shared<ToolInputSchema>();
-    nested->properties.emplace(
-        "name",
-        ToolInputField{.type = ToolInputType::kString, .description = "嵌套名称", .min_length = 1, .max_length = 8});
-    nested->properties.emplace("enabled", ToolInputField{.type = ToolInputType::kBoolean});
+    ToolInputField nested_name = MakeField(ToolInputType::kString);
+    nested_name.description = "嵌套名称";
+    nested_name.min_length = 1;
+    nested_name.max_length = 8;
+    nested->properties.emplace("name", std::move(nested_name));
+    nested->properties.emplace("enabled", MakeField(ToolInputType::kBoolean));
     nested->required.push_back("name");
 
     ToolInputSchema schema;
-    schema.properties.emplace("flag", ToolInputField{.type = ToolInputType::kBoolean});
-    schema.properties.emplace(
-        "count", ToolInputField{.type = ToolInputType::kInteger, .description = "数量", .minimum = -2, .maximum = 9});
-    schema.properties.emplace(
-        "label",
-        ToolInputField{.type = ToolInputType::kString, .description = "标签", .min_length = 2, .max_length = 12});
-    schema.properties.emplace(
-        "settings", ToolInputField{.type = ToolInputType::kObject, .description = "设置", .object_schema = nested});
+    schema.properties.emplace("flag", MakeField(ToolInputType::kBoolean));
+    ToolInputField count_field = MakeField(ToolInputType::kInteger);
+    count_field.description = "数量";
+    count_field.minimum = -2;
+    count_field.maximum = 9;
+    schema.properties.emplace("count", std::move(count_field));
+    ToolInputField label_field = MakeField(ToolInputType::kString);
+    label_field.description = "标签";
+    label_field.min_length = 2;
+    label_field.max_length = 12;
+    schema.properties.emplace("label", std::move(label_field));
+    ToolInputField settings_field = MakeField(ToolInputType::kObject);
+    settings_field.description = "设置";
+    settings_field.object_schema = nested;
+    schema.properties.emplace("settings", std::move(settings_field));
     schema.required = {"flag", "settings"};
 
     const std::string json = SerializeListToolsResult(ListToolsResult{
