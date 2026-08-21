@@ -152,7 +152,7 @@ void WakeGateAudioInput::HandlePhysicalFrame(AudioFrame frame) {
     if (audio_sink) {
         (void)audio_sink(std::move(frame));
     } else if (detector != nullptr) {
-        (void)detector->Submit(frame);
+        (void)detector->Submit(std::move(frame));
     }
 }
 

@@ -6,7 +6,9 @@ VoiceLife 当前只允许把 `SQLite 3.53.4 + FATFS/Wear Levelling` 作为板上
 
 ## 已确认的结论
 
-目标环境：ESP32-S3、ESP-IDF 6.0.2、2 MiB `voicelife` 数据分区。
+探针实验环境：ESP32-S3、ESP-IDF 6.0.2、2 MiB `voicelife` 数据分区。生产
+ESP-SparkBot 保留实板现有的 9 MiB FATFS/SQLite 卷（地址仍为 `0x700000`），
+避免升级时缩小卷导致既有日程不可见；生产 Profile 的容量约束以实板分区表为准。
 
 通过配置：
 

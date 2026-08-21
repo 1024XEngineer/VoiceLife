@@ -208,6 +208,14 @@ std::string OutputString(const ToolResult& result, const std::string& key) {
     return {};
 }
 
+std::size_t OutputArraySize(const ToolResult& result, const std::string& key) {
+    if (!result.output.IsObject()) return 0;
+    for (const auto& field : *result.output.object) {
+        if (field.first == key && field.second->IsArray()) return field.second->array->size();
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -283,6 +291,10 @@ int main() {
         .arguments = {{"status", std::string("active")}},
     });
     Check(queried.status.ok() && OutputString(queried, "status") == "success", "查询应返回成功结果");
+    Check(queried.text_output.has_value() && queried.text_output->find("条日程") != std::string::npos,
+          "语音查询结果必须提供日程数量");
+    Check(queried.text_output.has_value() && queried.text_output->find("第 1 条：") != std::string::npos,
+          "语音查询结果必须逐条播报完整日程");
 
     // schedule.query：带日期范围与关键字，触发规则未来 occurrence 与例外展开。
     const auto queried_range = server.call({
@@ -310,6 +322,51 @@ int main() {
         .arguments = {{"start_date", std::string("2099-13-01")}},
     });
     Check(OutputString(bad_query_date, "status") == "failure", "非法 start_date 应失败");
+
+    // 日期边界：真实日历日期与完整字符串都必须通过边界解析器校验，不能把 sscanf 的尾随内容带入领域层。
+    const auto impossible_query_date = server.call({
+        .request_id = "query-impossible-date",
+        .name = "schedule.query",
+        .arguments = {{"start_date", std::string("2099-02-29")}},
+    });
+    Check(OutputString(impossible_query_date, "status") == "failure", "不存在的日历日期应失败");
+
+    const auto trailing_query_date = server.call({
+        .request_id = "query-trailing-date",
+        .name = "schedule.query",
+        .arguments = {{"start_date", std::string("2099-01-01垃圾")}},
+    });
+    Check(OutputString(trailing_query_date, "status") == "failure", "带尾随文本的日期应失败");
+
+    const auto trailing_create_time = server.call({
+        .request_id = "create-trailing-time",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("非法时间")}, {"start_time", std::string("2099-01-01 09:00:00extra")}},
+    });
+    Check(OutputString(trailing_create_time, "status") == "failure", "带尾随文本的时间应失败");
+
+    const auto impossible_repeat_date = server.call({
+        .request_id = "create-impossible-repeat-date",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("非法周期日期")},
+                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("daily")},
+                                                    {"start_date", JsonValue::String("2099-02-29")},
+                                                    {"start_time", JsonValue::String("09:00:00")}})}},
+    });
+    Check(OutputString(impossible_repeat_date, "status") == "failure", "不存在的周期起始日期应失败");
+
+    const auto unsupported_repeat_field = server.call({
+        .request_id = "create-unsupported-repeat-field",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("不支持的相对周期")},
+                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("monthly")},
+                                                    {"start_date", JsonValue::String("2099-01-01")},
+                                                    {"start_time", JsonValue::String("09:00:00")},
+                                                    {"monthly_mode", JsonValue::String("ordinal_weekday")},
+                                                    {"weekday_ordinal", JsonValue::Number(2)}})}},
+    });
+    Check(!unsupported_repeat_field.status.ok() || OutputString(unsupported_repeat_field, "status") == "failure",
+          "未声明的周期字段不得被静默忽略");
 
     const auto reversed_date = server.call({
         .request_id = "query-reversed",
@@ -730,6 +787,44 @@ int main() {
     });
     Check(update_rule_full.status.ok() && OutputString(update_rule_full, "status") == "success",
           "带位置与备注更新规则应成功");
+
+    // IM Gateway 对完整查询结果的每个数组最多接受 100 项；查询输出必须在设备端完成截断。
+    InMemoryScheduleRepository capped_schedules;
+    FakeExceptionRepository capped_exceptions;
+    FakeRuleRepository capped_rules(capped_schedules, capped_exceptions);
+    for (int64_t index = 0; index < 34; ++index) {
+        ScheduleRule rule;
+        rule.id = 1'000 + index;
+        rule.event = "批量周期日程";
+        rule.freq_type = voicelife::schedule::Frequency::kDaily;
+        rule.interval_val = 1;
+        rule.start_date = {.year = 2030, .month = 1, .day = 1};
+        rule.start_time = {.hour = 9, .minute = 0, .second = 0};
+        rule.status = ScheduleStatus::kActive;
+        capped_rules.rules.push_back(rule);
+    }
+    for (int64_t index = 0; index < 101; ++index) {
+        ScheduleException exception;
+        exception.id = 2'000 + index;
+        exception.rule_id = 1'000;
+        exception.original_start_time = DateTime{std::chrono::seconds{1'893'456'000 + index}};
+        exception.type = ExceptionType::kSkip;
+        capped_exceptions.exceptions.push_back(std::move(exception));
+    }
+    ScheduleRuleService capped_rule_service(capped_rules, capped_exceptions, capped_schedules);
+    ScheduleService capped_service(capped_schedules);
+    McpServer capped_server;
+    Check(voicelife::mcp::RegisterScheduleMcpTools(capped_server, capped_service, capped_rule_service).ok(),
+          "受限查询日程工具应注册成功");
+    const auto capped_query = capped_server.call({
+        .request_id = "query-capped-results",
+        .name = "schedule.query",
+        .arguments = {{"status", std::string("active")}},
+    });
+    Check(capped_query.status.ok() && OutputString(capped_query, "status") == "success", "大结果查询应成功");
+    Check(OutputArraySize(capped_query, "future_occurrences") == 100 &&
+              OutputArraySize(capped_query, "exceptions") == 100,
+          "查询输出必须限制到 Gateway 每个数组的 100 项上限");
 
     // 未启用周期日程能力时（2 参数重载），repeat / rule_id 路径应返回明确失败。
     McpServer one_shot_server;

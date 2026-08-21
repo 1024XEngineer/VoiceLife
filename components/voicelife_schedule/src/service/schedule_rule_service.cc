@@ -24,6 +24,25 @@ using schedule_rule_service_helpers::Now;
 using schedule_rule_service_helpers::ValidateRuleDateRange;
 using schedule_rule_service_helpers::ValidateRuleFields;
 
+std::vector<DateTime> OccurrencesForQuery(const ScheduleRule& rule, DateTime now,
+                                          const QueryScheduleRulesCommand& command) {
+    DateTime from = command.occurrence_start.value_or(now);
+    if (!command.occurrence_end.has_value()) return NextOccurrences(rule, from, 3);
+    if (*command.occurrence_end <= from) return {};
+
+    // 有明确日期窗口时不能用固定的“未来三条”预览，否则远期的单日查询会漏掉目标 occurrence。
+    std::vector<DateTime> occurrences;
+    DateTime cursor = from;
+    constexpr int kMaximumQueryOccurrences = 256;
+    for (int index = 0; index < kMaximumQueryOccurrences; ++index) {
+        const std::optional<DateTime> next = NextOccurrence(rule, cursor);
+        if (!next.has_value() || *next >= *command.occurrence_end) break;
+        occurrences.push_back(*next);
+        cursor = *next + std::chrono::seconds{1};
+    }
+    return occurrences;
+}
+
 }  // namespace
 
 ScheduleRuleService::ScheduleRuleService(ScheduleRuleRepository& rule_repository,
@@ -115,7 +134,7 @@ QueryScheduleRulesResult ScheduleRuleService::query_schedule_rules(const QuerySc
 
         ScheduleRuleView view;
         view.rule = rule;
-        view.upcoming_occurrences = NextOccurrences(rule, now, 3);
+        view.upcoming_occurrences = OccurrencesForQuery(rule, now, command);
         const Result<std::vector<ScheduleException>> exceptions = exception_repository_.FindByRule(rule.id);
         if (!exceptions.ok()) {
             return FailedQueryScheduleRulesResult(exceptions.status);

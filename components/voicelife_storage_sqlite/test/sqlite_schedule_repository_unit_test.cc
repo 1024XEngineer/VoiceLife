@@ -181,8 +181,7 @@ void CheckMapperValidation(const std::filesystem::path& path) {
     auto eight_parameters = database.Prepare("SELECT ?, ?, ?, ?, ?, ?, ?, ?");
     Check(eight_parameters.ok(), "应创建八参数语句");
     const auto reminder_error = mapping::BindSchedule(*eight_parameters.value, CompleteSchedule());
-    Check(reminder_error.code == ErrorCode::kInternal &&
-              reminder_error.message.find("updated_at") != std::string::npos,
+    Check(reminder_error.code == ErrorCode::kInternal && reminder_error.message.find("updated_at") != std::string::npos,
           "Mapper 应为更新时间绑定错误补充字段名");
 }
 
@@ -414,16 +413,17 @@ void CheckOperationRepository(const std::filesystem::path& path) {
               by_id_result.value->front().id == saved_update.value->id,
           "按操作 ID 应精确命中");
 
-    // 时间窗口闭区间：全部操作同秒应命中，未来窗口无命中。
+    // 时间窗口闭区间：窗口覆盖全部写入，最晚写入后的窗口无命中。
     QueryOperationCommand window;
     window.operated_from = saved_create.value->operated_at;
-    window.operated_to = saved_create.value->operated_at;
+    window.operated_to = saved_delete.value->operated_at;
     const auto ranged = repository.FindOperations(window);
-    Check(ranged.ok() && ranged.value->size() == 3, "时间窗口应命中同秒操作");
+    Check(ranged.ok(), "时间窗口查询应成功");
+    Check(ranged.value->size() == 3, "时间窗口应命中全部操作");
 
     QueryOperationCommand empty_window;
-    empty_window.operated_from = saved_create.value->operated_at + std::chrono::seconds{1};
-    empty_window.operated_to = saved_create.value->operated_at + std::chrono::seconds{10};
+    empty_window.operated_from = saved_delete.value->operated_at + std::chrono::seconds{1};
+    empty_window.operated_to = saved_delete.value->operated_at + std::chrono::seconds{10};
     const auto empty_ranged = repository.FindOperations(empty_window);
     Check(empty_ranged.ok() && empty_ranged.value->empty(), "未来时间窗口应无命中");
 

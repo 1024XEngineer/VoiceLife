@@ -20,6 +20,56 @@ TERMINAL_STATUSES = frozenset(
 )
 
 
+class PairingLifecycleError(RuntimeError):
+    """Sanitized pairing markers do not form the expected HIL lifecycle."""
+
+
+class PairingLifecycle:
+    """Validate scope, code, pending and expected expiry without retaining identities."""
+
+    def __init__(self, expected_device_id: str, expected_user_id: str) -> None:
+        self._expected_device_id = expected_device_id
+        self._expected_user_id = expected_user_id
+        self.public_markers: list[str] = []
+        self.complete = False
+
+    def observe(self, event: dict[str, str]) -> None:
+        if self.complete:
+            raise PairingLifecycleError("pairing marker appeared after expiry")
+        if event.get("status") == "pending" and "pending" in self.public_markers:
+            return
+        expected = ("scope_matched", "code_valid", "pending", "expired")
+        position = len(self.public_markers)
+        if "failure_code" in event:
+            raise PairingLifecycleError("pairing failure marker observed")
+        if "device_id" in event:
+            if (
+                position != 0
+                or event["device_id"] != self._expected_device_id
+                or event["user_id"] != self._expected_user_id
+            ):
+                raise PairingLifecycleError("pairing scope did not match run identity")
+            marker = "scope_matched"
+        elif "code" in event:
+            if position != 1 or re.fullmatch(r"\d{6}", event["code"]) is None or not event.get("expires_at"):
+                raise PairingLifecycleError("pairing code marker is invalid or out of order")
+            marker = "code_valid"
+        elif event.get("status") == "pending":
+            if position != 2:
+                raise PairingLifecycleError("pairing pending marker is out of order")
+            marker = "pending"
+        elif "status" in event:
+            if event["status"] != "expired" or position != 3:
+                raise PairingLifecycleError("pairing terminal status is not expected expiry")
+            marker = "expired"
+            self.complete = True
+        else:
+            raise PairingLifecycleError("unknown pairing marker")
+        if marker != expected[position]:
+            raise PairingLifecycleError("pairing marker order is invalid")
+        self.public_markers.append(marker)
+
+
 def trigger_payload(expires_in_minutes: int) -> bytes:
     """Build the fixed-size, credential-free VLP1 physical trigger frame."""
     if not 1 <= expires_in_minutes <= 10:

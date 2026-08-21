@@ -69,6 +69,12 @@
         "schedule-receipt-invalid-version.json"
       ]
     },
+    "schedule-query-result": {
+      "valid": [
+        "schedule-query-result.json"
+      ],
+      "invalid": []
+    },
     "reminder-action-result": {
       "valid": [
         "reminder-action-result.json"

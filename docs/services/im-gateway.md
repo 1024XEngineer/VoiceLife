@@ -49,11 +49,10 @@ pnpm --dir services/im-gateway test
 `/wechat` 和 `/healthz`。生产进程不使用 `createMockImGateway()`。
 
 企业微信 AI Bot 是可选渠道。只有同时提供 `WECOM_AIBOT_CHANNEL_ACCOUNT_ID`、
-`WECOM_AIBOT_BOT_ID`、`WECOM_AIBOT_WEBHOOK_TOKEN` 与 `WECOM_AIBOT_ENCODING_AES_KEY` 时，Gateway 才会在
-`/wecom/aibot` 接收企业微信的加密 URL 回调；四项中任一项缺失会在启动时明确失败。企业微信后台应把
-`https://<公网域名>/wecom/aibot` 配置为接收消息 URL，并填写相同的 Token 与 EncodingAESKey。
-未提供这四项时，现有微信公众号部署与 `/wechat` 路由保持不变。回调 Token 与 EncodingAESKey 只保留在进程内存，
-不能写入 `ChannelAccount`、日志、fixture 或 Issue。
+`WECOM_AIBOT_BOT_ID` 与 `WECOM_AIBOT_SECRET` 时，Gateway 才会主动连接
+`wss://openws.work.weixin.qq.com`，发送订阅请求并接收单聊文本回调；三项中任一项缺失会在启动时明确失败。
+未提供这三项时，现有微信公众号部署与 `/wechat` 路由保持不变。长连接 Secret 只保留在进程内存，不能写入
+`ChannelAccount`、日志、fixture 或 Issue。
 
 复制 [`.env.example`](../../.env.example) 后填入部署值；其中的 `replace-me` 会被生产配置故意拒绝，不能直接启动。
 生产进程不再读取单例 `DEVICE_ID`、`DEVICE_USER_ID` 或 `DEVICE_TOKEN`。设备必须先通过下述 CLI 注册，Gateway
@@ -83,9 +82,11 @@ docker compose ps
 通过后启动，自身 healthcheck 会持续探测数据库中的渠道账号与 Koishi Bot 运行状态。Compose 默认只把
 Gateway 端口绑定到宿主机 loopback，避免设备 API 绕过公网 HTTPS 入口。
 
-企业微信 URL 回调不维护入站长连接，`/healthz` 因而只检查数据库中的渠道账号与 Koishi Bot 运行状态。异常回退时移除
-全部 `WECOM_AIBOT_*` 变量并重启 Gateway；已存在的微信公众号账号和 HTTP 路由不受影响。本切片只接收企业微信单聊
-入站事件，不发送主动消息、提醒或日程回执。
+企业微信配置存在时，`/healthz` 还要求 WSS 订阅已成功；连接断开后 Runtime 保持单活并从 1 秒开始指数退避重连，
+最高间隔 30 秒。停机时会停止心跳并取消重连。异常回退时移除全部 `WECOM_AIBOT_*` 变量并重启 Gateway；已存在的
+微信公众号账号和 HTTP 路由不受影响。WSS Runtime 可发送 Markdown 和按钮交互模板卡片，并等待企业微信的即时受理结果；
+模板卡片按钮 key 只携带短期加密动作令牌，收到 `aibot_event_callback` 后会先解析已绑定的外部身份，再交给
+`ActionApplication` 做动作、过期和幂等校验。企业微信后台必须具备模板卡片交互回调能力；真实机器人点击和送达回执仍需独立联调。
 
 监听器使用 HTTP，公网 HTTPS 必须由宿主机上的 Cloudflare Tunnel 或反向代理终止 TLS。Quick Tunnel 联调可先运行：
 
@@ -100,11 +101,16 @@ Tunnel 或服务器反向代理，以免 Quick Tunnel 重启后域名改变。
 生产监听路由包括：
 
 - `POST /v1/im/pairing-sessions` 与 `GET /v1/im/pairing-sessions/:pairingSessionId`
-- `POST /v1/im/schedule-receipts` 与 `POST /v1/im/notifications`
+- `POST /v1/im/schedule-receipts`、`POST /v1/im/schedule-query-results` 与 `POST /v1/im/notifications`
 - `GET /v1/devices/:deviceId/reminder-actions/stream`（SSE）
 - `POST /v1/devices/:deviceId/reminder-actions/:commandId/result`
 - `GET|POST /voicelife/reminder-actions/:token`
+- `GET /voicelife/reminder-actions/query-result/:token`
 - `GET|POST /wechat` 与 `GET /healthz`
+
+日程查询模板消息会附带一条 7 天有效的只读 H5 链接，路径为
+`WECHAT_ACTION_UI_BASE_URL/query-result/<token>`。页面仅从已持久化的查询结果读取数据，不包含 JSON 载荷、表单或写入接口，
+并复用 `WECHAT_ACTION_UI_BASE_URL`，无需新增环境变量。
 
 通知受理与 Delivery Outbox 事件在同一 PostgreSQL 事务内提交；常驻 worker 领取事件后派发，并在启动时恢复
 `pending`、`retryable_failed` 与租约已过期的 `sending` Delivery。临时失败按 `availableAt` 延迟重试，HTTP
@@ -209,6 +215,10 @@ Infrastructure 内完成归一化后直接调用 `PlatformEventApplication`，�
 `2026年8月10日 16:42` 这类用户可读文本。用户发送“帮助”或未识别的文本时，Webhook 会同步返回微信被动文本 XML，
 提示其以 `绑定 123456` 的格式发送六码绑定码；有效绑定会同步返回成功提示，无效或过期的绑定码会返回重新获取提示。
 这些被动回复均不依赖模板消息权限。
+
+提醒和日程变更回执使用 `WECHAT_TEMPLATE_*` 配置的模板；日程查询结果使用独立的
+`WECHAT_QUERY_TEMPLATE_ID`、`WECHAT_QUERY_TEMPLATE_TITLE_FIELD`、`WECHAT_QUERY_TEMPLATE_BODY_FIELD` 与
+`WECHAT_QUERY_TEMPLATE_TIME_FIELD`。两套模板 ID 必须不同，每套模板的三个字段也必须互不相同。
 
 新的 pending 会话再次确认完全相同组合时复用已有有效绑定。设备改绑新身份或身份改绑新设备时，旧关系会保留为
 `unbound` 历史；任一设备和任一外部身份最多各有一条 active 绑定。设备吊销不会删除绑定或投递历史。

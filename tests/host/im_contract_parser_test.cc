@@ -8,6 +8,7 @@
 #include "voicelife/contracts/im/pairing_session.h"
 #include "voicelife/contracts/im/reminder_action_command.h"
 #include "voicelife/contracts/im/reminder_action_result.h"
+#include "voicelife/contracts/im/schedule_query_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/contracts/json.h"
 
@@ -27,9 +28,11 @@ using voicelife::contracts::im::ParseNotificationSubmission;
 using voicelife::contracts::im::ParsePairingSessionStatus;
 using voicelife::contracts::im::ParseReminderActionCommand;
 using voicelife::contracts::im::ParseReminderActionResult;
+using voicelife::contracts::im::ParseScheduleQueryResultIntent;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
 using voicelife::contracts::im::ReminderActionCommand;
 using voicelife::contracts::im::ReminderActionResult;
+using voicelife::contracts::im::ScheduleQueryResultIntent;
 using voicelife::contracts::im::ScheduleReceiptIntent;
 using voicelife::test::Check;
 
@@ -68,6 +71,12 @@ Status ParseScheduleReceiptFixture(const char* name, ScheduleReceiptIntent& out)
     return ParseScheduleReceiptIntent(root, out);
 }
 
+Status ParseScheduleQueryResultFixture(const char* name, ScheduleQueryResultIntent& out) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) return json_status;
+    return ParseScheduleQueryResultIntent(root, out);
+}
+
 Status ParseActionResultFixture(const char* name, ReminderActionResult& out) {
     JsonValue root;
     if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) {
@@ -85,6 +94,12 @@ void RequireRejected(const char* name, const char* message) {
 void RequireScheduleReceiptRejected(const char* name, const char* message) {
     ScheduleReceiptIntent intent;
     const Status status = ParseScheduleReceiptFixture(name, intent);
+    Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
+}
+
+void RequireScheduleQueryResultRejected(const JsonValue& root, const char* message) {
+    ScheduleQueryResultIntent intent;
+    const Status status = ParseScheduleQueryResultIntent(root, intent);
     Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
 }
 
@@ -276,6 +291,62 @@ int main() {
     Check(receipt.deviceId == "device-fixture", "日程回执 deviceId 必须被保留");
     Check(receipt.operationType == "created" && receipt.result == "succeeded", "日程回执枚举必须与 TS 语义一致");
     Check(receipt.scheduleId == "schedule-fixture" && receipt.summary == "日程已创建", "日程回执载荷必须被保留");
+
+    ScheduleQueryResultIntent query_result;
+    Check(ParseScheduleQueryResultFixture("schedule-query-result.json", query_result).ok(),
+          "完整日程查询结果 fixture 必须被 C++ 解析");
+    Check(query_result.resultCount == 2 && query_result.schedules.array.size() == 1 &&
+              query_result.futureOccurrences.array.size() == 1 && query_result.exceptions.array.size() == 1,
+          "完整日程查询结果必须保留一次性、未来周期和例外条目");
+    JsonValue query_root;
+    Check(ParseJson(ReadFixture("schedule-query-result.json"), query_root).ok(),
+          "查询结果 fixture 必须可作为拒绝测试基线");
+    RequireScheduleQueryResultRejected(JsonValue::Array({}), "非对象查询结果必须被 C++ 拒绝");
+    for (const auto& [name, invalid] : std::initializer_list<std::pair<const char*, JsonValue>>{
+             {"schemaVersion", JsonValue::String("2")},
+             {"businessEventId", JsonValue::String("")},
+             {"correlationId", JsonValue::String("")},
+             {"userId", JsonValue::Number(1)},
+             {"deviceId", JsonValue::String("")},
+             {"resultCount", JsonValue::String("2")},
+             {"resultCount", JsonValue::Number(-1)},
+             {"resultCount", JsonValue::Number(1001)},
+             {"resultCount", JsonValue::Number(1.5)},
+             {"schedules", JsonValue::String("invalid")},
+             {"futureOccurrences", JsonValue::String("invalid")},
+             {"exceptions", JsonValue::String("invalid")},
+             {"queriedAt", JsonValue::String("invalid")},
+         }) {
+        JsonValue invalid_root = query_root;
+        invalid_root.object[name] = invalid;
+        RequireScheduleQueryResultRejected(invalid_root, "查询结果关键字段非法必须被 C++ 拒绝");
+    }
+    for (const auto& [field, value] : std::initializer_list<std::pair<const char*, JsonValue>>{
+             {"status", JsonValue::String("unknown")},
+             {"keyword", JsonValue::Number(1)},
+             {"startDate", JsonValue::String("2026/08/03")},
+             {"endDate", JsonValue::String("2026-08")},
+         }) {
+        JsonValue invalid_root = query_root;
+        invalid_root.object["query"].object[field] = value;
+        RequireScheduleQueryResultRejected(invalid_root, "查询范围字段非法必须被 C++ 拒绝");
+    }
+    JsonValue missing_query = query_root;
+    missing_query.object.erase("query");
+    RequireScheduleQueryResultRejected(missing_query, "缺少 query 对象必须被 C++ 拒绝");
+    JsonValue mismatch_count = query_root;
+    mismatch_count.object["resultCount"] = JsonValue::Number(0);
+    RequireScheduleQueryResultRejected(mismatch_count, "条目数量不匹配必须被 C++ 拒绝");
+    for (const char* field : {"schedules", "futureOccurrences", "exceptions"}) {
+        JsonValue oversized = query_root;
+        oversized.object[field] = JsonValue::Array(std::vector<JsonValue>(101, JsonValue::Object({})));
+        if (std::string(field) == "schedules") {
+            oversized.object["resultCount"] = JsonValue::Number(101);
+        } else if (std::string(field) == "futureOccurrences") {
+            oversized.object["resultCount"] = JsonValue::Number(102);
+        }
+        RequireScheduleQueryResultRejected(oversized, "超过 Gateway 上限的查询结果数组必须被 C++ 拒绝");
+    }
 
     // 非法日程回执 fixture：与 TS 一致的拒绝语义
     RequireScheduleReceiptRejected("schedule-receipt-invalid-version.json", "非法版本日程回执必须被 C++ 拒绝");

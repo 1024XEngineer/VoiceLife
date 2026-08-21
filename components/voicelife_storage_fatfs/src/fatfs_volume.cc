@@ -136,7 +136,8 @@ Status FatFsVolume::Mount() {
         return Status::Error(ErrorCode::kConflict, "FATFS 数据分区容量与 Storage Profile 不一致");
     }
 
-    // 生产数据卷禁止挂载失败时自动格式化；卷损坏必须显式报错，避免静默丢失日程与提醒记录。
+    // 生产数据卷禁止在挂载失败时自动格式化。脏挂载、断电或介质故障
+    // 必须保留现场并让 Runtime 暴露明确失败，不能静默删除用户日程。
     esp_vfs_fat_mount_config_t mount_config = VFS_FAT_MOUNT_DEFAULT_CONFIG();
     mount_config.format_if_mount_failed = false;
     mount_config.max_files = config_.max_files;

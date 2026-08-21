@@ -9,11 +9,12 @@ import {
     SSE_RESPONSE_HEADERS,
     SseActionCommandHub,
 } from '../dist/index.js';
-import { buildGateway, expectGatewayError, strongIntent } from './helpers.mjs';
+import { buildGateway, expectGatewayError, scheduleQueryResultIntent, strongIntent } from './helpers.mjs';
 
 test('device route metadata matches the Issue #65 transport contract', () => {
     assert.equal(DEVICE_API_ROUTES.pairingSessions, '/v1/im/pairing-sessions');
     assert.equal(DEVICE_API_ROUTES.scheduleReceipts, '/v1/im/schedule-receipts');
+    assert.equal(DEVICE_API_ROUTES.scheduleQueryResults, '/v1/im/schedule-query-results');
     assert.equal(DEVICE_API_ROUTES.notifications, '/v1/im/notifications');
     assert.equal(DEVICE_API_ROUTES.reminderActionStream, '/v1/devices/:deviceId/reminder-actions/stream');
     assert.equal(DEVICE_API_ROUTES.reminderActionResults, '/v1/devices/:deviceId/reminder-actions/:commandId/result');
@@ -28,6 +29,32 @@ test('device route metadata matches the Issue #65 transport contract', () => {
         'X-Accel-Buffering': 'no',
     });
     assert.equal(SSE_HEARTBEAT_INTERVAL_SECONDS >= 15 && SSE_HEARTBEAT_INTERVAL_SECONDS <= 30, true);
+});
+
+test('schedule query result enforces device identity and idempotency', async () => {
+    const { gateway } = buildGateway();
+    const body = scheduleQueryResultIntent();
+    const first = await gateway.deviceApi.postScheduleQueryResult({
+        authorization: 'Bearer fixture-device-token',
+        idempotencyKey: body.businessEventId,
+        body,
+    });
+    const replay = await gateway.deviceApi.postScheduleQueryResult({
+        authorization: 'Bearer fixture-device-token',
+        idempotencyKey: body.businessEventId,
+        body,
+    });
+    assert.deepEqual(replay, first);
+    await expectGatewayError(
+        () =>
+            gateway.deviceApi.postScheduleQueryResult({
+                authorization: 'Bearer fixture-device-token',
+                idempotencyKey: 'other-event',
+                body,
+            }),
+        'duplicate_event',
+        'A mismatched query result Idempotency-Key was accepted',
+    );
 });
 
 test('notification rejects an Idempotency-Key different from businessEventId', async () => {

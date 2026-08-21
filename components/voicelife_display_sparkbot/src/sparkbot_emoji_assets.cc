@@ -16,15 +16,16 @@ namespace voicelife::display_sparkbot {
 
 namespace {
 
-/** @brief 官方 SparkBot 牛头表情的受控标识列表（与 manifest.json 一致）。 */
-constexpr std::array<std::string_view, 10> kControlledAssetIds = {
-    "boot", "connecting", "error", "happy", "idle", "listening", "provisioning", "sleepy", "speaking", "thinking",
+/** @brief SparkBot 表情和待机屏保的受控标识列表（与 manifest.json 一致）。 */
+constexpr std::array<std::string_view, 11> kControlledAssetIds = {
+    "boot",      "connecting",   "error",  "happy",    "idle",     "idle_eyes",
+    "listening", "provisioning", "sleepy", "speaking", "thinking",
 };
 
 #ifdef ESP_PLATFORM
 constexpr const char* kTag = "sparkbot_emoji";
 constexpr const char* kPartitionLabel = "assets";
-constexpr std::string_view kCommonTextFontFilename = "font_noto_sans_common_16_4.bin";
+constexpr std::string_view kCommonTextFontFilename = "font_noto_sans_common_14_1.bin";
 
 /** @brief 官方 assets 分区文件表项（xiaozhi-esp32@37d1aee main/assets.cc）。 */
 struct MmappedAssetEntry {
@@ -62,16 +63,12 @@ std::string_view AssetFilenameForId(std::string_view asset_id) {
         return {};
     }
     // manifest 的 file 字段为固定的单段文件名；不由 Runtime 或调用方传入。
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 10> kAssetFiles = {
-        std::pair{"boot", "boot.gif"},
-        std::pair{"connecting", "connecting.gif"},
-        std::pair{"error", "error.gif"},
-        std::pair{"happy", "happy.gif"},
-        std::pair{"idle", "idle.gif"},
-        std::pair{"listening", "listening.gif"},
-        std::pair{"provisioning", "provisioning.gif"},
-        std::pair{"sleepy", "sleepy.gif"},
-        std::pair{"speaking", "speaking.gif"},
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 11> kAssetFiles = {
+        std::pair{"boot", "boot.gif"},           std::pair{"connecting", "connecting.gif"},
+        std::pair{"error", "error.gif"},         std::pair{"happy", "happy.gif"},
+        std::pair{"idle", "idle.gif"},           std::pair{"idle_eyes", "idle_eyes.gif"},
+        std::pair{"listening", "listening.gif"}, std::pair{"provisioning", "provisioning.gif"},
+        std::pair{"sleepy", "sleepy.gif"},       std::pair{"speaking", "speaking.gif"},
         std::pair{"thinking", "thinking.gif"},
     };
     for (const auto& [id, filename] : kAssetFiles) {
@@ -115,7 +112,7 @@ voicelife::Status SparkBotEmojiAssets::Initialize() {
         esp_partition_munmap(mmap_handle);
         return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "assets 分区数据长度非法");
     }
-    // 文件表边界：10 个 GIF 和固定 common 16px 字体。ESP-SR 模型从独立
+    // 文件表边界：11 个 GIF 和固定 common 14px 字体。ESP-SR 模型从独立
     // model 分区加载，不属于显示 assets 容器。
     constexpr std::size_t kMaxControlledFiles = 12;
     const std::size_t table_bytes = static_cast<std::size_t>(stored_files) * sizeof(MmappedAssetEntry);

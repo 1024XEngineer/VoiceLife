@@ -8,6 +8,7 @@
 #include "esp_websocket_client.h"
 #include "esp_websocket_impl.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 
 namespace voicelife::linx_esp {
@@ -82,7 +83,11 @@ void EspWebSocketTransport::Impl::Enqueue(int32_t event_id, const esp_websocket_
 
 void EspWebSocketTransport::Impl::WorkerEntry(void* argument) {
     static_cast<Impl*>(argument)->WorkerLoop();
+#if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
+    vTaskDeleteWithCaps(nullptr);
+#else
     vTaskDelete(nullptr);
+#endif
 }
 
 void EspWebSocketTransport::Impl::WorkerLoop() {

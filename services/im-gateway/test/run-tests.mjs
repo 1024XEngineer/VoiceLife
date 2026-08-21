@@ -8,6 +8,7 @@ import {
     parseReminderActionIntent,
     parseReminderActionResult,
     parseScheduleReceiptIntent,
+    parseScheduleQueryResultIntent,
     runMockNotificationScenario,
 } from '../dist/index.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
@@ -77,6 +78,7 @@ async function runContractFixtureTests() {
     const expiredPairing = await readFixture('pairing-status-expired.json');
     const cancelledPairing = await readFixture('pairing-status-cancelled.json');
     const scheduleReceipt = await readFixture('schedule-receipt.json');
+    const scheduleQueryResult = await readFixture('schedule-query-result.json');
     const strong = await readFixture('notification-strong.json');
     const replay = await readFixture('notification-strong-replay.json');
     const weak = await readFixture('notification-weak.json');
@@ -108,6 +110,40 @@ async function runContractFixtureTests() {
         parseScheduleReceiptIntent(scheduleReceipt).scheduleId === 'schedule-fixture',
         'ScheduleReceiptIntent fixture did not preserve its opaque string ID',
     );
+    assert(
+        parseScheduleQueryResultIntent(scheduleQueryResult).resultCount === 2,
+        'ScheduleQueryResultIntent fixture did not preserve the complete result count',
+    );
+    const minimalScheduleQueryResult = JSON.parse(JSON.stringify(scheduleQueryResult));
+    delete minimalScheduleQueryResult.userId;
+    minimalScheduleQueryResult.query = { status: 'all' };
+    minimalScheduleQueryResult.resultCount = 0;
+    minimalScheduleQueryResult.schedules = [];
+    minimalScheduleQueryResult.futureOccurrences = [];
+    minimalScheduleQueryResult.exceptions = [];
+    assert(
+        parseScheduleQueryResultIntent(minimalScheduleQueryResult).query.status === 'all',
+        'ScheduleQueryResultIntent must accept an empty result without optional query filters',
+    );
+    for (const invalidScheduleQueryResult of [
+        { ...scheduleQueryResult, query: { ...scheduleQueryResult.query, status: 'unknown' } },
+        { ...scheduleQueryResult, query: { ...scheduleQueryResult.query, startDate: '2026/08/03' } },
+        { ...scheduleQueryResult, query: { ...scheduleQueryResult.query, endDate: '2026-08' } },
+        { ...scheduleQueryResult, resultCount: 1.5 },
+        { ...scheduleQueryResult, resultCount: 1001 },
+        { ...scheduleQueryResult, schedules: {} },
+        { ...scheduleQueryResult, futureOccurrences: {} },
+        { ...scheduleQueryResult, exceptions: {} },
+        { ...scheduleQueryResult, schedules: Array.from({ length: 101 }, () => ({ id: 1 })) },
+        { ...scheduleQueryResult, schedules: [undefined] },
+        { ...scheduleQueryResult, resultCount: 0 },
+    ]) {
+        await expectGatewayError(
+            () => Promise.resolve(parseScheduleQueryResultIntent(invalidScheduleQueryResult)),
+            'invalid_contract',
+            'Invalid ScheduleQueryResultIntent was accepted by the runtime parser',
+        );
+    }
     assert(parseNotificationIntent(strong).reminderType === 'strong', 'Strong notification fixture did not parse');
     assert(
         parseNotificationIntent(weak).actions.length === 0,

@@ -6,7 +6,6 @@ import type { ActionId, DeviceId, PairingSessionId } from '../../contracts/ids.j
 import { unsafeId } from '../../contracts/ids.js';
 import type { ActionUiPageResponse } from './action-ui-api.js';
 import { streamReminderActions } from './gateway-sse-response.js';
-import type { WecomAibotUrlCallbackController } from './wecom-aibot-url-callback.js';
 import { ImGatewayError } from '../../shared/errors.js';
 
 const JSON_BODY_LIMIT = 64 * 1024;
@@ -16,6 +15,7 @@ const PAIRING_SESSION_PATH = /^\/v1\/im\/pairing-sessions\/([^/]+)$/u;
 const ACTION_RESULT_PATH = /^\/v1\/devices\/([^/]+)\/reminder-actions\/([^/]+)\/result$/u;
 const ACTION_STREAM_PATH = /^\/v1\/devices\/([^/]+)\/reminder-actions\/stream$/u;
 const ACTION_UI_PATH = /^\/voicelife\/reminder-actions\/([^/]+)$/u;
+const SCHEDULE_QUERY_PAGE_PATH = /^\/voicelife\/reminder-actions\/query-result\/([^/]+)$/u;
 
 /** 结构化日志条目允许的 JSON 标量和字段集合。 */
 export interface GatewayLogEntry {
@@ -51,8 +51,6 @@ export interface GatewayHttpServerOptions {
     readonly deliveryAvailable?: () => void;
     /** 可选的 SSE 心跳间隔，供基础设施层确定性验证使用。 */
     readonly sseHeartbeatIntervalMs?: number;
-    /** 可选的企业微信 AI Bot URL 回调控制器。 */
-    readonly wecomAibotApi?: WecomAibotUrlCallbackController;
     /**
      * 探测数据库等关键依赖是否仍可用。
      * @returns 健康响应；抛错时监听器返回 503。
@@ -184,6 +182,19 @@ async function routeRequest(
         notifyDeliveryWorker(submission.deliveries, options);
         return;
     }
+    if (url.pathname === '/v1/im/schedule-query-results' && method === 'POST') {
+        context.route = 'device.schedule-query-result.create';
+        const body = await readJson(request);
+        const submission = await options.runtime.deviceApi.postScheduleQueryResult({
+            authorization: authorization(request),
+            idempotencyKey: requiredHeader(request, 'idempotency-key'),
+            body,
+        });
+        context.correlationId = correlationId(body);
+        writeJson(response, 202, submission);
+        notifyDeliveryWorker(submission.deliveries, options);
+        return;
+    }
     if (url.pathname === '/v1/im/notifications' && method === 'POST') {
         context.route = 'device.notification.create';
         const body = await readJson(request);
@@ -249,23 +260,17 @@ async function routeRequest(
         writeMethodNotAllowed(response, 'GET, POST');
         return;
     }
-    if (url.pathname === '/wecom/aibot') {
-        context.route = 'wecom.aibot.webhook';
-        const webhookApi = options.wecomAibotApi;
-        if (webhookApi === undefined) throw new Error('WeCom AI Bot webhook is not configured');
-        if (method === 'GET') {
-            writeText(response, 200, webhookApi.verify(wecomAibotWebhookRequest(url)));
+    const scheduleQueryPageMatch = SCHEDULE_QUERY_PAGE_PATH.exec(url.pathname);
+    if (scheduleQueryPageMatch !== null) {
+        context.route = 'schedule-query-page';
+        if (method !== 'GET') {
+            writeMethodNotAllowed(response, 'GET');
             return;
         }
-        if (method === 'POST') {
-            const result = await webhookApi.post({
-                ...wecomAibotWebhookRequest(url),
-                body: await readBody(request, WECHAT_BODY_LIMIT),
-            });
-            writeText(response, result.status, result.body);
-            return;
-        }
-        writeMethodNotAllowed(response, 'GET, POST');
+        writePage(
+            response,
+            await options.runtime.scheduleQueryPageApi.get(decodePathSegment(scheduleQueryPageMatch[1]!)),
+        );
         return;
     }
     const actionUiMatch = ACTION_UI_PATH.exec(url.pathname);
@@ -364,21 +369,6 @@ function webhookRequest(url: URL): {
     readonly encrypt_type?: string;
 } {
     const values = ['signature', 'timestamp', 'nonce', 'echostr', 'encrypt_type'] as const;
-    return Object.fromEntries(
-        values.flatMap((name) => {
-            const value = url.searchParams.get(name);
-            return value === null ? [] : [[name, value]];
-        }),
-    );
-}
-
-function wecomAibotWebhookRequest(url: URL): {
-    readonly msg_signature?: string;
-    readonly timestamp?: string;
-    readonly nonce?: string;
-    readonly echostr?: string;
-} {
-    const values = ['msg_signature', 'timestamp', 'nonce', 'echostr'] as const;
     return Object.fromEntries(
         values.flatMap((name) => {
             const value = url.searchParams.get(name);

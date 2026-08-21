@@ -80,6 +80,20 @@ class CleanupStackTest(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual([error.code for error in errors], ["cleanup_timeout"])
 
+    def test_cleanup_timeout_continues_with_unbounded_local_callbacks(self) -> None:
+        calls: list[str] = []
+        stack = RUNNER.CleanupStack()
+        stack.push("local-release", lambda: calls.append("local"), timeout_required=False)
+
+        def remote_timeout() -> None:
+            calls.append("remote")
+            raise RUNNER.RunnerDeadlineExceeded
+
+        stack.push("remote-revoke", remote_timeout)
+        errors = stack.cleanup(time.monotonic() + 1.0)
+        self.assertEqual(calls, ["remote", "local"])
+        self.assertEqual([error.code for error in errors], ["cleanup_timeout"])
+
 
 class E2eRunnerTest(unittest.TestCase):
     def config(self, **changes: object) -> object:

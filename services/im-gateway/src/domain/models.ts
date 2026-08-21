@@ -127,7 +127,7 @@ export interface Delivery {
     readonly correlationId: CorrelationId;
     readonly bindingId: BindingId;
     readonly channelAccountId: ChannelAccountId;
-    readonly kind: 'reminder_due' | 'schedule_receipt';
+    readonly kind: 'reminder_due' | 'schedule_receipt' | 'schedule_query_result';
     readonly semanticPayload: JsonValue;
     readonly presentationType: PresentationType;
     readonly status: DeliveryStatus;

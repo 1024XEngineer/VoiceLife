@@ -17,6 +17,8 @@ function outboundAdapter(fetchImpl, overrides = {}) {
             templateId: 'fixture-template',
             actionUiBaseUrl: 'https://gateway.example/voicelife/reminder-actions',
             templateFields: { title: 'thing1', body: 'thing2', time: 'time3' },
+            queryTemplateId: 'fixture-query-template',
+            queryTemplateFields: { title: 'first', body: 'keyword1', time: 'keyword2' },
             revealExternalUserId: async (ciphertext) => ciphertext.replace(/^(?:ciphertext|encrypted):/u, ''),
             fetch: fetchImpl,
             ...overrides,

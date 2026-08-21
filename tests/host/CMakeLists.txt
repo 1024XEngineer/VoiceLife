@@ -44,6 +44,7 @@ add_voicelife_library(contracts voicelife_contracts
     "${ROOT_DIR}/components/voicelife_contracts/src/json.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_intent.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_receipt.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_query_result.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_result.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_command.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_submission.cc"
@@ -115,7 +116,7 @@ add_voicelife_library(linx voicelife_linx
     "${ROOT_DIR}/components/voicelife_linx/src/linx_json_codec.cc"
     "${ROOT_DIR}/components/voicelife_linx/src/linx_ota.cc"
     "${ROOT_DIR}/components/voicelife_linx/src/linx_speech_provider.cc")
-target_link_libraries(linx PUBLIC voice cjson)
+target_link_libraries(linx PUBLIC voice cjson Threads::Threads)
 add_voicelife_library(linx_esp voicelife_linx_esp
     "${ROOT_DIR}/components/voicelife_linx_esp/src/websocket_fragment_assembler.cc")
 target_link_libraries(linx_esp PUBLIC contracts linx)
@@ -282,22 +283,22 @@ target_link_libraries(mcp_server_test PRIVATE mcp)
 
 add_voicelife_test(schedule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_mcp_tools_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
-target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule)
+target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule im)
 
 add_voicelife_test(schedule_mcp_tools_reminder_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_reminder_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
-target_link_libraries(schedule_mcp_tools_reminder_test PRIVATE mcp schedule timing storage_memory)
+target_link_libraries(schedule_mcp_tools_reminder_test PRIVATE mcp schedule timing storage_memory im)
 
 add_voicelife_test(schedule_mcp_tools_branch_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_branch_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
-target_link_libraries(schedule_mcp_tools_branch_test PRIVATE mcp schedule timing storage_memory)
+target_link_libraries(schedule_mcp_tools_branch_test PRIVATE mcp schedule timing storage_memory im)
 
 add_voicelife_test(schedule_mcp_tools_failure_coverage_test "unit;mcp;schedule;runtime"
     schedule_mcp_tools_failure_coverage_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
-target_link_libraries(schedule_mcp_tools_failure_coverage_test PRIVATE mcp schedule)
+target_link_libraries(schedule_mcp_tools_failure_coverage_test PRIVATE mcp schedule im)
 
 add_voicelife_test(schedule_rule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_rule_mcp_tools_test.cc
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_rule_mcp_tools.cc")
@@ -347,7 +348,7 @@ add_voicelife_test(linx_mcp_bridge_test "unit;mcp;linx;runtime" linx_mcp_bridge_
     "${ROOT_DIR}/components/voicelife_runtime/src/linx_mcp_bridge.cc"
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 target_include_directories(linx_mcp_bridge_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
-target_link_libraries(linx_mcp_bridge_test PRIVATE contracts mcp schedule)
+target_link_libraries(linx_mcp_bridge_test PRIVATE contracts mcp schedule im)
 
 add_voicelife_test(linx_ota_contract_test "unit;linx;contract" linx_ota_contract_test.cc)
 target_link_libraries(linx_ota_contract_test PRIVATE contracts linx)
@@ -427,7 +428,7 @@ target_link_libraries(sparkbot_emoji_assets_test PRIVATE display_sparkbot)
 
 add_voicelife_test(pcm_frame_assembler_contract_test "unit;voice;audio;esp;contract"
     pcm_frame_assembler_contract_test.cc)
-target_link_libraries(pcm_frame_assembler_contract_test PRIVATE audio_esp)
+target_link_libraries(pcm_frame_assembler_contract_test PRIVATE audio_esp Threads::Threads)
 
 add_voicelife_test(im_gateway_contract_test "unit;im" im_gateway_contract_test.cc)
 target_compile_definitions(im_gateway_contract_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")

@@ -13,6 +13,7 @@ import {
     DefaultPairingApplication,
     DefaultPlatformEventApplication,
     DefaultReceiptApplication,
+    DefaultScheduleQueryPageApplication,
 } from '../application/services.js';
 import type { DeviceId, UserId } from '../contracts/ids.js';
 import { unsafeId } from '../contracts/ids.js';
@@ -21,6 +22,7 @@ import {
     ActionUiPageController,
     type ActionUiSubmissionObserver,
 } from '../infrastructure/http/action-ui-api.js';
+import { ScheduleQueryPageController } from '../infrastructure/http/schedule-query-page-api.js';
 import { DeviceIntentController, ReminderActionStreamController } from '../infrastructure/http/device-api.js';
 import { WechatWebhookController } from '../infrastructure/http/wechat-api.js';
 import type { WechatOfficialAdapter } from '../infrastructure/wechat/wechat-official-adapter.js';
@@ -83,6 +85,7 @@ export interface ImGatewayRuntime {
     readonly actionStreamApi: ReminderActionStreamController;
     readonly actionUiApi: ActionUiController;
     readonly actionUiPageApi: ActionUiPageController;
+    readonly scheduleQueryPageApi: ScheduleQueryPageController;
     readonly wechatApi?: WechatWebhookController;
 }
 
@@ -122,6 +125,11 @@ export function createImGateway(dependencies: ImGatewayDependencies): ImGatewayR
         dependencies.clock,
     );
     const actionUi = new DefaultActionUiApplication(dependencies.actionTokens, actions, dependencies.clock);
+    const scheduleQueryPage = new DefaultScheduleQueryPageApplication(
+        dependencies.actionTokens,
+        dependencies.unitOfWork,
+        dependencies.clock,
+    );
     const deliveryDispatch = new DefaultDeliveryDispatchApplication(
         dependencies.unitOfWork,
         dependencies.ids,
@@ -131,6 +139,7 @@ export function createImGateway(dependencies: ImGatewayDependencies): ImGatewayR
         dependencies.deliveryRenderer,
         dependencies.imChannel,
         actionUi,
+        scheduleQueryPage,
     );
     const platformEvents = new DefaultPlatformEventApplication(inboundEvents, pairing, receipts, actionUi);
     const application: ImGatewayApplication = {
@@ -145,6 +154,7 @@ export function createImGateway(dependencies: ImGatewayDependencies): ImGatewayR
         receipts,
         actions,
         actionUi,
+        scheduleQueryPage,
     };
 
     return {
@@ -157,6 +167,7 @@ export function createImGateway(dependencies: ImGatewayDependencies): ImGatewayR
         ),
         actionUiApi: new ActionUiController(actionUi),
         actionUiPageApi: new ActionUiPageController(actionUi, dependencies.actionUiObserver),
+        scheduleQueryPageApi: new ScheduleQueryPageController(scheduleQueryPage),
         ...(dependencies.wechatAdapter === undefined
             ? {}
             : { wechatApi: new WechatWebhookController(dependencies.wechatAdapter, platformEvents) }),

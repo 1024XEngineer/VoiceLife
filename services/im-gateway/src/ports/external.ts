@@ -175,6 +175,8 @@ export interface DeliveryRendererPort {
         capabilities: ChannelCapabilities,
         context: {
             readonly actionToken?: string;
+            /** 日程查询结果 H5 的只读链接令牌。 */
+            readonly scheduleQueryToken?: string;
         },
     ): Promise<JsonValue>;
 }

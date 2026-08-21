@@ -180,7 +180,7 @@ int main() {
     yyjson_val* assets = yyjson_obj_get(root, "assets");
     Check(assets != nullptr && yyjson_is_arr(assets), "assets 必须是数组");
     const std::size_t asset_count = yyjson_arr_size(assets);
-    Check(asset_count == 10, "SparkBot 牛头素材清单必须恰好包含 10 个 GIF");
+    Check(asset_count == 11, "SparkBot 表情和待机屏保清单必须恰好包含 11 个 GIF");
 
     std::set<std::string> asset_ids;
     std::uint64_t total_bytes = 0;
@@ -281,21 +281,21 @@ int main() {
         Check(ToHex(hasher.Final()) == sha, "文件 SHA-256 必须与 manifest 记录一致");
     }
 
-    Check(total_bytes == 142683, "GIF 总大小必须与已验证的 142683 字节一致");
+    Check(total_bytes == 144722, "GIF 总大小必须与已验证的 144722 字节一致");
     Check(yyjson_get_uint(yyjson_obj_get(budget, "gif_bytes")) == total_bytes,
           "budget.gif_bytes 必须等于全部 GIF 字节数之和");
 
     // 字体是固定受控资源，不进入 Runtime 可传入的 GIF asset_id 集合。
     yyjson_val* text_font = yyjson_obj_get(root, "text_font");
     Check(text_font != nullptr && yyjson_is_obj(text_font), "common 文本字体声明必须存在");
-    Check(yyjson_equals_str(yyjson_obj_get(text_font, "file"), "font_noto_sans_common_16_4.bin"),
-          "文本字体必须固定为官方 common 16px 文件");
-    Check(yyjson_get_int(yyjson_obj_get(text_font, "size_px")) == 16 &&
-              yyjson_get_int(yyjson_obj_get(text_font, "bpp")) == 4 &&
-              yyjson_get_int(yyjson_obj_get(text_font, "line_height")) == 25 &&
-              yyjson_get_int(yyjson_obj_get(text_font, "base_line")) == 9,
-          "common 文本字体必须保持官方 16px/4bpp/line_height=25/base_line=9");
-    const std::string font_file_path = asset_dir + "/fonts/font_noto_sans_common_16_4.bin";
+    Check(yyjson_equals_str(yyjson_obj_get(text_font, "file"), "font_noto_sans_common_14_1.bin"),
+          "文本字体必须固定为官方 common 14px 文件");
+    Check(yyjson_get_int(yyjson_obj_get(text_font, "size_px")) == 14 &&
+              yyjson_get_int(yyjson_obj_get(text_font, "bpp")) == 1 &&
+              yyjson_get_int(yyjson_obj_get(text_font, "line_height")) == 16 &&
+              yyjson_get_int(yyjson_obj_get(text_font, "base_line")) == 2,
+          "common 文本字体必须保持官方 14px/1bpp/line_height=16/base_line=2");
+    const std::string font_file_path = asset_dir + "/fonts/font_noto_sans_common_14_1.bin";
     const std::string font_data = ReadFile(font_file_path);
     Check(!font_data.empty(), "common 文本字体文件必须存在");
     Check(yyjson_get_uint(yyjson_obj_get(text_font, "size_bytes")) == font_data.size(),
@@ -317,10 +317,10 @@ int main() {
     // 防止 manifest 与 Adapter 校验失同步。
     {
         const std::string_view kExpectedIds[] = {
-            "boot",      "connecting",   "error",  "happy",    "idle",
+            "boot",      "connecting",   "error",  "happy",    "idle",     "idle_eyes",
             "listening", "provisioning", "sleepy", "speaking", "thinking",
         };
-        std::set<std::string> expected_ids(kExpectedIds, kExpectedIds + 10);
+        std::set<std::string> expected_ids(kExpectedIds, kExpectedIds + 11);
         Check(expected_ids == asset_ids, "manifest asset_id 集合必须与受控 allowlist 一致");
         for (const std::string& id : asset_ids) {
             Check(voicelife::display_sparkbot::IsControlledAssetId(id), "每个清单 asset_id 必须能被受控解析器接受");

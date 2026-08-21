@@ -156,14 +156,21 @@ export class WechatOfficialAdapter
         delivery: Delivery,
         account: ChannelAccount,
         capabilities: ChannelCapabilities,
-        context: { readonly actionToken?: string },
+        context: { readonly actionToken?: string; readonly scheduleQueryToken?: string },
     ): Promise<JsonValue> {
         if (this.outbound === undefined) {
             return Promise.reject(
                 new ImGatewayError('capability_not_supported', 'WeChat outbound template delivery is not configured'),
             );
         }
-        return this.outbound.render(this.channelAccountId, delivery, account, capabilities, context.actionToken);
+        return this.outbound.render(
+            this.channelAccountId,
+            delivery,
+            account,
+            capabilities,
+            context.actionToken,
+            context.scheduleQueryToken,
+        );
     }
 
     /** {@inheritDoc ImChannelPort.send} */

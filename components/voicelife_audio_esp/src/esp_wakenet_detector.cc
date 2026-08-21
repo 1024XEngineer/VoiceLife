@@ -52,7 +52,7 @@ class EspWakeNetDetector::Impl final {
         return Status::Ok();
     }
 
-    Status Submit(const voice::AudioFrame& frame) {
+    Status Submit(voice::AudioFrame frame) {
         std::unique_lock<std::mutex> lock(mutex_);
         if (!running_ || iface_ == nullptr || model_data_ == nullptr) {
             return Failure(ErrorCode::kUnavailable, "WakeNet 检测器未运行");
@@ -205,7 +205,7 @@ EspWakeNetDetector::EspWakeNetDetector(const void* model_root) : impl_(std::make
 EspWakeNetDetector::~EspWakeNetDetector() = default;
 Status EspWakeNetDetector::Start(WakeSink sink) { return impl_->Start(std::move(sink)); }
 Status EspWakeNetDetector::Stop() { return impl_->Stop(); }
-Status EspWakeNetDetector::Submit(const voice::AudioFrame& frame) { return impl_->Submit(frame); }
+Status EspWakeNetDetector::Submit(voice::AudioFrame frame) { return impl_->Submit(std::move(frame)); }
 
 }  // namespace voicelife::audio_esp
 
@@ -217,7 +217,7 @@ EspWakeNetDetector::EspWakeNetDetector(const void*) : impl_(std::make_unique<Imp
 EspWakeNetDetector::~EspWakeNetDetector() = default;
 Status EspWakeNetDetector::Start(WakeSink) { return Status::Error(ErrorCode::kUnavailable, "WakeNet 仅支持 ESP 平台"); }
 Status EspWakeNetDetector::Stop() { return Status::Ok(); }
-Status EspWakeNetDetector::Submit(const voice::AudioFrame&) {
+Status EspWakeNetDetector::Submit(voice::AudioFrame) {
     return Status::Error(ErrorCode::kUnavailable, "WakeNet 仅支持 ESP 平台");
 }
 }  // namespace voicelife::audio_esp
