@@ -9,7 +9,7 @@
 | unit | 主机 | `./scripts/run_checks.sh` | 领域、契约和适配器边界 | PR required |
 | integration | 主机 + Postgres | Gateway `pnpm run ci` | 服务边界、持久化和 SSE | PR required |
 | Host E2E | GitHub-hosted runner | `python3 scripts/run_e2e.py --layer host ...` | 真实 Gateway 进程和最小强提醒旅程 | PR required，硬超时，retries=0 |
-| HIL smoke | 受控 self-hosted + 一台设备 | `--layer hil --journey im-pairing` | 烧录、配网、就绪和配对主链路 | nightly/manual，非 required |
+| HIL smoke | 受控 self-hosted + 一台设备 | `--layer hil --journey im-pairing` | 烧录、配网、就绪和配对主链路 | manual，非 required |
 | HIL E2E | 受控 self-hosted + 设备池 | 同一 runner CLI，按 profile 矩阵 | SparkBot/PCB 真实串口旅程 | 稳定门槛达成后再升级 |
 | 手工验收 | 真实平台和物理场景 | [release checklist](release-checklist.md) | 微信、声学、显示、掉电和真实 Linx/ASR/TTS | 发布阻断，不由 Host/HIL 替代 |
 
@@ -49,8 +49,8 @@ Gateway host、目录、origin 和 user id 通过环境变量或受控 secret �
 
 - `.github/workflows/ci.yml` 仅运行稳定 Host E2E，并上传 14 天的 JSON evidence。
 - PR Host job 另运行一次受控的 `lifecycle-example` 故意失败，验证失败 evidence 和 `product` 分类仍能通过脱敏校验。
-- `.github/workflows/hil-nightly.yml` 只接受 `self-hosted, voicelife-hil` 及 profile 标签；`fail-fast=false`，SparkBot 和 PCB 独立汇总、独立上传 artifact。
-- schedule 和 `workflow_dispatch` 复用同一条命令。手工触发可选 `sparkbot`、`pcb` 或 `all`，并可在选择单一 Profile 后指定 device descriptor 名称，用于隔离故障设备。
+- `.github/workflows/hil-nightly.yml` 当前仅开放 `workflow_dispatch`，只接受 `self-hosted, voicelife-hil` 及 profile 标签；`fail-fast=false`，SparkBot 和 PCB 独立汇总、独立上传 artifact。
+- 手工触发可选 `sparkbot`、`pcb` 或 `all`，并可在选择单一 Profile 后指定 device descriptor 名称，用于隔离故障设备；配置受控 Runner 后再执行。
 - public GitHub-hosted Runner 不接触硬件或长期平台凭据。受控 Runner 只保存原始串口日志；公开 artifact 只包含通过 `scripts/check_e2e_artifacts.py` 校验的脱敏 JSON。
 - artifact 保留 14 天，访问权限跟随仓库 Actions 权限；发现凭据或个人数据时立即删除公开 artifact，保留受控私有原始日志并按 [SECURITY.md](../../SECURITY.md) 上报。
 
@@ -76,6 +76,6 @@ Gateway host、目录、origin 和 user id 通过环境变量或受控 secret �
 
 ## 稳定门槛
 
-HIL 连续 14 次 nightly、每个 Profile 至少 10 次通过，且没有未分类失败、泄露扫描失败或设备租约泄露，才能提议升级为 required check。任意设备连续两次 `device`/`infrastructure` 失败即隔离并暂停该 Profile；不得通过增加 retries 把红灯隐藏。
+HIL 连续 14 次手工执行、每个 Profile 至少 10 次通过，且没有未分类失败、泄露扫描失败或设备租约泄露，才能提议升级为 required check。任意设备连续两次 `device`/`infrastructure` 失败即隔离并暂停该 Profile；不得通过增加 retries 把红灯隐藏。
 
 真实微信公众号、H5 推迟、SSE 重连、声学、显示、物理输入和掉电验收仍见 [release checklist](release-checklist.md) 与 [Issue #132](https://github.com/1024XEngineer/VoiceLife/issues/132)。

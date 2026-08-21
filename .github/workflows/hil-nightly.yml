@@ -1,8 +1,6 @@
-name: HIL Nightly
+name: HIL Manual
 
 on:
-  schedule:
-    - cron: "43 18 * * *"
   workflow_dispatch:
     inputs:
       profile:

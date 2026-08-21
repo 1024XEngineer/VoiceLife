@@ -5,7 +5,7 @@ Host E2E 和 HIL 结果只能证明软件旅程的有限边界，不能替代真
 ## 自动门禁
 
 - [ ] PR 的 Host unit/integration/Host E2E 通过，失败 evidence 已上传并完成敏感字段扫描。
-- [ ] 最近一次 nightly 对 SparkBot、PCB 分别有结果；HIL 仍为非 required 时记录原因。
+- [ ] 最近一次手工 HIL 对 SparkBot、PCB 分别有结果；HIL 仍为非 required 时记录原因。
 - [ ] workflow、设备标签、artifact retention 和 `retries=0` 配置未漂移。
 - [ ] 失败按 product / infrastructure / device / external / configuration 分类，没有用重试掩盖。
 
@@ -24,6 +24,6 @@ Host E2E 和 HIL 结果只能证明软件旅程的有限边界，不能替代真
 - [ ] PR 只附最小连续非敏感摘录；原始串口和音频保留在受控私有目录。
 - [ ] 记录测试时间窗口、板型、固件/Gateway commit、Profile、账号类型和 evidence URL。
 - [ ] 已知 flaky 或外部故障有分类和后续负责人，不标记为产品通过。
-- [ ] 发布后发现回归时可暂停 HIL schedule 或将 Host E2E 降为非 required，但不得删除 journey、失败 evidence 或本清单。
+- [ ] 发布后发现回归时可暂停 HIL 手工 workflow 或将 Host E2E 降为非 required，但不得删除 journey、失败 evidence 或本清单。
 
 关联：[#132](https://github.com/1024XEngineer/VoiceLife/issues/132)、[#288](https://github.com/1024XEngineer/VoiceLife/issues/288)。
