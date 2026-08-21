@@ -88,8 +88,7 @@ class FailingRuleRepository final : public voicelife::schedule::ScheduleRuleRepo
         return voicelife::Result<ScheduleRule>::Failure(ErrorCode::kUnavailable, "规则仓储暂不可用");
     }
 
-    Status CancelRuleAndInstances(voicelife::schedule::ScheduleRuleId id,
-                                  int64_t& cancelled_instance_count) override {
+    Status CancelRuleAndInstances(voicelife::schedule::ScheduleRuleId id, int64_t& cancelled_instance_count) override {
         (void)id;
         (void)cancelled_instance_count;
         return Status::Error(ErrorCode::kUnavailable, "规则仓储暂不可用");
@@ -112,14 +111,14 @@ void CheckCreateFailurePropagates() {
     McpServer server;
     Check(voicelife::mcp::RegisterScheduleMcpTools(server, service, rule_service).ok(), "日程工具应注册成功");
 
-    const auto response = server.call({.request_id = "create-failure",
-                                       .name = "schedule.create",
-                                       .arguments = {{"event", std::string("创建会议")},
-                                                     {"start_time", std::string("2030-03-18 09:00:00")}}});
+    const auto response = server.call({
+        .request_id = "create-failure",
+        .name = "schedule.create",
+        .arguments = {{"event", std::string("创建会议")}, {"start_time", std::string("2030-03-18 09:00:00")}},
+    });
     Check(response.status.ok(), "工具应返回结构化结果");
     Check(response.output.IsObject(), "失败结果应带结构化对象输出");
-    Check(response.output.kind == voicelife::ToolOutputValue::Kind::kObject,
-          "创建失败应返回对象输出");
+    Check(response.output.kind == voicelife::ToolOutputValue::Kind::kObject, "创建失败应返回对象输出");
 }
 
 void CheckQueryFailurePropagates() {
@@ -131,13 +130,14 @@ void CheckQueryFailurePropagates() {
     McpServer server;
     Check(voicelife::mcp::RegisterScheduleMcpTools(server, service, rule_service).ok(), "日程工具应注册成功");
 
-    const auto response = server.call({.request_id = "query-failure",
-                                       .name = "schedule.query",
-                                       .arguments = {{"keyword", std::string("会议")}}});
+    const auto response = server.call({
+        .request_id = "query-failure",
+        .name = "schedule.query",
+        .arguments = {{"keyword", std::string("会议")}},
+    });
     Check(response.status.ok(), "查询失败应返回结构化结果");
     Check(response.output.IsObject(), "查询失败应带结构化对象输出");
-    Check(response.output.kind == voicelife::ToolOutputValue::Kind::kObject,
-          "查询失败应返回对象输出");
+    Check(response.output.kind == voicelife::ToolOutputValue::Kind::kObject, "查询失败应返回对象输出");
 }
 
 }  // namespace
