@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import types
@@ -38,9 +39,21 @@ class FakeHardware:
         self.device_revoked = False
         self.serial_open = False
         self.reset_count = 0
+        self.build_profiles: list[str] = []
 
     def inspect(self, descriptor: object, temporary_directory: Path) -> object:
         self.calls.append("inspect")
+        if getattr(descriptor, "profile", "") == "pcb":
+            return [
+                HIL.Partition("nvs", 1, 2, 0x9000, 0x6000, 0),
+                HIL.Partition("otadata", 1, 0, 0xF000, 0x2000, 0),
+                HIL.Partition("phy_init", 1, 1, 0x11000, 0x1000, 0),
+                HIL.Partition("ota_0", 0, 0x10, 0x20000, 0x3E0000, 0),
+                HIL.Partition("ota_1", 0, 0x11, 0x400000, 0x3E0000, 0),
+                HIL.Partition("voicelife", 1, 0x82, 0x7E0000, 0x200000, 0),
+                HIL.Partition("linx_secrets", 1, 2, 0xA00000, 0x10000, 0),
+                HIL.Partition("model", 1, 0x82, 0xA10000, 0x300000, 0),
+            ]
         return [
             HIL.Partition("nvs", 1, 2, 0x9000, 0x4000, 0),
             HIL.Partition("otadata", 1, 0, 0xD000, 0x2000, 0),
@@ -49,15 +62,18 @@ class FakeHardware:
             HIL.Partition("linx_secrets", 1, 2, 0x2E0000, 0x10000, 0),
             HIL.Partition("assets", 1, 0x82, 0x300000, 0x100000, 0),
             HIL.Partition("model", 1, 0x82, 0x400000, 0x300000, 0),
+            HIL.Partition("voicelife", 1, 0x81, 0x700000, 0x900000, 0),
         ]
 
     def build(self, descriptor: object) -> Path:
         self.calls.append("build")
+        self.build_profiles.append(str(getattr(descriptor, "firmware_profile", "")))
         return Path("/safe/build")
 
     def image(self, build_directory: Path, descriptor: object, partitions: object) -> object:
         self.calls.append("image")
-        return HIL.ApplicationImage(Path("/safe/voicelife.bin"), 0x10000, 8, "a" * 64)
+        offset = 0x20000 if getattr(descriptor, "profile", "") == "pcb" else 0x10000
+        return HIL.ApplicationImage(Path("/safe/voicelife.bin"), offset, 8, "a" * 64)
 
     def flash(self, descriptor: object, image: object, timeout_s: float) -> None:
         self.calls.append("flash")
@@ -95,10 +111,20 @@ class FakeHardware:
 
 
 class HilPairingAdapterTest(unittest.TestCase):
-    def descriptor_file(self, directory: str) -> Path:
+    def test_real_hardware_prepares_sqlite_component_before_build(self) -> None:
+        with (
+            mock.patch.object(HIL, "SQLITE_COMPONENT_FILES", (Path("/definitely-missing-sqlite.c"),)),
+            mock.patch.object(HIL.subprocess, "run") as run,
+        ):
+            HIL.ensure_sqlite_component()
+        run.assert_called_once()
+        command = run.call_args.args[0]
+        self.assertEqual(command[-1], str(HIL.ROOT / "scripts" / "prepare_sqlite.py"))
+
+    def descriptor_file(self, directory: str, profile: str = "sparkbot") -> Path:
         path = Path(directory) / "device.json"
         path.write_text(
-            json.dumps({"schema_version": 1, "name": "bench-a", "port": "/dev/cu.test-a", "profile": "sparkbot"}),
+            json.dumps({"schema_version": 1, "name": "bench-a", "port": "/dev/cu.test-a", "profile": profile}),
             encoding="utf-8",
         )
         return path
@@ -175,6 +201,14 @@ class HilPairingAdapterTest(unittest.TestCase):
         self.assertNotIn("flash", hardware.calls)
         self.assertFalse(adapter.lease_held)
 
+    def test_lease_conflict_is_classified_separately_from_device_failure(self) -> None:
+        hardware = FakeHardware()
+        with mock.patch.object(HIL.DeviceLease, "acquire", side_effect=HIL.HilLeaseUnavailable):
+            adapter, result = self.execute(hardware)
+        self.assertEqual(result.failure_category, RUNNER.FailureCategory.LEASE)
+        self.assertEqual(result.message_code, "device_lease_unavailable")
+        self.assertFalse(adapter.lease_held)
+
     def test_registration_failure_revokes_run_scoped_device_and_releases_lease(self) -> None:
         hardware = FakeHardware()
         hardware.register = mock.Mock(
@@ -229,6 +263,22 @@ class HilPairingAdapterTest(unittest.TestCase):
         self.assertEqual(raised.exception.category, RUNNER.FailureCategory.INFRASTRUCTURE)
         self.assertEqual(raised.exception.message_code, "hil_command_unavailable")
 
+    def test_real_hardware_classifies_remote_service_failure_as_external(self) -> None:
+        hardware = HIL.RealHilHardware(
+            "runner@example.test", "/srv/voicelife", "https://gateway.example.test", "user-test"
+        )
+        with (
+            mock.patch.object(
+                hardware,
+                "_run",
+                side_effect=RUNNER.RunnerFailure(RUNNER.FailureCategory.INFRASTRUCTURE, "hil_command_failed"),
+            ),
+            self.assertRaises(RUNNER.RunnerFailure) as raised,
+        ):
+            hardware._remote("safe script")
+        self.assertEqual(raised.exception.category, RUNNER.FailureCategory.EXTERNAL)
+        self.assertEqual(raised.exception.message_code, "external_service_unavailable")
+
     def test_real_hardware_passes_serial_path_as_string(self) -> None:
         serial_port = mock.Mock()
         serial_port.__enter__ = mock.Mock(return_value=serial_port)
@@ -245,6 +295,114 @@ class HilPairingAdapterTest(unittest.TestCase):
                 [{"signal": "provisioned"}, {"signal": "ready"}],
             )
         serial_module.Serial.assert_called_once_with("/dev/cu.test", 115200, timeout=0.2, write_timeout=2)
+
+
+class HilVoiceAdapterTest(HilPairingAdapterTest):
+    def voice_config(self, profile: str = "sparkbot") -> object:
+        return RUNNER.RunnerConfig(
+            layer="hil",
+            journey="voice",
+            profile=profile,
+            hard_timeout_s=5.0,
+            phase_timeout_s=3.0,
+            cleanup_timeout_s=0.5,
+        )
+
+    def execute_voice(self, hardware: FakeHardware, profile: str = "sparkbot") -> tuple[HIL.HilVoiceAdapter, object]:
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = HIL.HilVoiceAdapter(
+                self.descriptor_file(directory, profile),
+                Path(directory) / "leases",
+                hardware=hardware,
+                tts_model="qwen-audio-3.0-tts-flash",
+                voice="longanlingxi",
+                texts=["你好"],
+                expect_terminal=False,
+                response_timeout=5.0,
+            )
+            result = RUNNER.run_e2e(self.voice_config(profile), adapter)
+        return adapter, result
+
+    def test_dashscope_voice_journey_uses_voice_profile_and_sanitized_metrics(self) -> None:
+        hardware = FakeHardware()
+        voice_result = {
+            "requested_turns": 1,
+            "completed_turns": 1,
+            "asr_exact_matches": 1,
+            "audio_stats": {
+                "test_in_frames": 4,
+                "out_frames": 8,
+                "in_drop": 0,
+                "out_reject": 0,
+                "short_write": 0,
+                "in_i2s_err": 0,
+                "out_i2s_err": 0,
+            },
+            "serial_pcm_rejections": [],
+            "display": {"content_snapshots": 2},
+            "acceptance": {
+                "voice_ok": True,
+                "state_flow_complete": True,
+                "display_flow_complete": True,
+                "display_text_trace_complete": True,
+                "terminal_guard_clean": True,
+            },
+        }
+
+        commands: list[list[str]] = []
+
+        def run_voice(command: list[str], **kwargs: object) -> object:
+            commands.append(command)
+            result_path = Path(command[command.index("--result-json") + 1])
+            result_path.write_text(json.dumps(voice_result), encoding="utf-8")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch.dict(os.environ, {"DASHSCOPE_API_KEY": "test-key"}, clear=False),
+            mock.patch.dict(sys.modules, {"dashscope": types.SimpleNamespace()}),
+            mock.patch.object(HIL.shutil, "which", return_value="/usr/bin/ffmpeg"),
+            mock.patch.object(HIL.subprocess, "run", side_effect=run_voice),
+        ):
+            for profile, firmware_profile in (
+                ("sparkbot", "esp32s3-esp-sparkbot-serial-voice"),
+                ("pcb", "esp32s3-voicelife-pcb-serial-voice"),
+            ):
+                with self.subTest(profile=profile):
+                    adapter, result = self.execute_voice(hardware, profile)
+                    self.assertEqual(result.exit_code, RUNNER.ExitCode.SUCCESS)
+                    self.assertEqual(hardware.build_profiles[-1], firmware_profile)
+                    self.assertEqual(commands[-1][commands[-1].index("--display-profile") + 1], profile)
+                    self.assertEqual(result.collected["scope"], "hil_voice")
+                    self.assertTrue(result.collected["hardware_verified"])
+                    self.assertEqual(result.collected["metrics"]["asr_exact_matches"], 1)
+                    self.assertEqual(result.collected["tts_model"], "qwen-audio-3.0-tts-flash")
+                    self.assertNotIn("你好", repr(result.collected))
+                    self.assertFalse(adapter.lease_held)
+
+        self.assertEqual(
+            [assertion.name for assertion in result.assertions],
+            [
+                "voice_turns_complete",
+                "voice_state_flow_clean",
+                "voice_display_flow_clean",
+                "voice_wake_guard_clean",
+                "voice_acceptance_clean",
+            ],
+        )
+
+    def test_voice_script_exit_categories_are_stable(self) -> None:
+        self.assertEqual(
+            HIL.HilVoiceAdapter._classify_voice_exit(1, "").category,
+            RUNNER.FailureCategory.PRODUCT,
+        )
+        self.assertEqual(
+            HIL.HilVoiceAdapter._classify_voice_exit(2, "cannot open serial port").category,
+            RUNNER.FailureCategory.DEVICE,
+        )
+        self.assertEqual(
+            HIL.HilVoiceAdapter._classify_voice_exit(2, "input_preparation_failed:timeout").category,
+            RUNNER.FailureCategory.EXTERNAL,
+        )
 
 
 if __name__ == "__main__":

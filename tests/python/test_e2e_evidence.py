@@ -178,6 +178,65 @@ class E2eEvidenceTest(unittest.TestCase):
         EVIDENCE.validate_evidence(document)
         self.assertEqual(json.loads(EVIDENCE.canonical_json(document)), document)
 
+    def voice_document(self) -> dict[str, object]:
+        document = self.document()
+        document.update(
+            {
+                "scope": "hil_voice",
+                "layer": "hil",
+                "journey": "voice",
+                "profile": "sparkbot",
+                "hardware_verified": True,
+                "assertions": [
+                    {"name": "voice_turns_complete", "passed": True, "code": "ok"},
+                    {"name": "voice_acceptance_clean", "passed": True, "code": "ok"},
+                ],
+                "metrics": {
+                    "requested_turns": 3,
+                    "completed_turns": 3,
+                    "asr_exact_matches": 3,
+                    "test_in_frames": 120,
+                    "out_frames": 240,
+                    "in_drop": 0,
+                    "out_reject": 0,
+                    "short_write": 0,
+                    "in_i2s_err": 0,
+                    "out_i2s_err": 0,
+                    "serial_pcm_rejections": 0,
+                    "display_content_snapshots": 6,
+                },
+                "hil": {
+                    "firmware_sha256": "a" * 64,
+                    "gateway_commit": "b" * 40,
+                    "device_fingerprint": "c" * 16,
+                    "readiness_markers": ["provisioned", "wifi_ready", "sntp_synced", "ready"],
+                    "tts_model": "qwen-audio-3.0-tts-flash",
+                    "tts_voice": "longanlingxi",
+                    "input_tts": "dashscope",
+                },
+            }
+        )
+        return document
+
+    def test_accepts_strict_hil_voice_evidence_without_raw_conversation(self) -> None:
+        document = self.voice_document()
+        EVIDENCE.validate_evidence(document)
+        self.assertEqual(json.loads(EVIDENCE.canonical_json(document)), document)
+
+    def test_accepts_pcb_hil_voice_evidence(self) -> None:
+        document = self.voice_document()
+        document["profile"] = "pcb"
+        EVIDENCE.validate_evidence(document)
+
+    def test_voice_evidence_rejects_pairing_fields_and_unsafe_model(self) -> None:
+        pairing_fields = self.voice_document()
+        pairing_fields["hil"]["pairing_markers"] = ["pending"]
+        unsafe_model = self.voice_document()
+        unsafe_model["hil"]["tts_model"] = "model with spaces"
+        for document in (pairing_fields, unsafe_model):
+            with self.subTest(document=document), self.assertRaises(EVIDENCE.EvidenceValidationError):
+                EVIDENCE.validate_evidence(document)
+
     def test_hil_evidence_rejects_missing_gates_false_success_claim_and_sensitive_values(self) -> None:
         missing = self.hil_document()
         missing["hil"]["readiness_markers"] = ["ready"]

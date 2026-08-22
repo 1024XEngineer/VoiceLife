@@ -43,6 +43,8 @@ class HostLifecycleExampleAdapter:
 
     def assert_result(self, context: RunContext, result: object) -> list[AssertionResult]:
         values = result if isinstance(result, dict) else {}
+        if os.environ.get("VOICELIFE_E2E_CONTRACT_FAILURE") == "1":
+            return [AssertionResult(name="lifecycle_complete", passed=False, code="contract_failure")]
         passed = all(values.get(name) is True for name in values)
         return [AssertionResult(name="lifecycle_complete", passed=passed, code="ok" if passed else "incomplete")]
 
@@ -159,8 +161,9 @@ class HostImGatewayRecoveryE2EAdapter:
         self._process: subprocess.Popen[str] | None = None
 
     def prepare(self, context: RunContext) -> None:
-        self.artifact_directory.mkdir(parents=True, exist_ok=True)
-        detail_path = self.artifact_directory / f"recovery-{context.run_id}.json"
+        # Detailed recovery snapshots may contain internal database fields; keep them
+        # in the runner-owned temporary directory instead of the public artifact tree.
+        detail_path = context.temporary_directory / "recovery-details" / f"recovery-{context.run_id}.json"
         environment = {
             **os.environ,
             "E2E_RUN_ID": context.run_id,

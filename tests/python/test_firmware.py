@@ -129,6 +129,15 @@ class ProfileValidationTest(unittest.TestCase):
 
         self.assertIn("CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y", profile["sdkconfig"])
 
+    def test_pcb_serial_voice_profile_keeps_im_and_enables_test_harness(self) -> None:
+        profile_path = ROOT / "config" / "profiles" / "esp32s3-voicelife-pcb-serial-voice.json"
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(profile["adapters"]["im"]["driver"], "voicelife-gateway")
+        self.assertIn("CONFIG_VOICELIFE_SERIAL_VOICE_TEST=y", profile["sdkconfig"])
+        self.assertIn('CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="config/partitions/voicelife-pcb.csv"', profile["sdkconfig"])
+        self.assertNotIn("CONFIG_VOICELIFE_BOARD_ESP_SPARKBOT=y", profile["sdkconfig"])
+
 
 if __name__ == "__main__":
     unittest.main()

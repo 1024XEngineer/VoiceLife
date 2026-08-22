@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
@@ -107,6 +108,23 @@ class ExampleAdapterTest(unittest.TestCase):
                 self.assertEqual(raised.exception.category, RUNNER.FailureCategory.INFRASTRUCTURE)
                 self.assertEqual(raised.exception.message_code, "host_recovery_journey_failed")
 
+    def test_recovery_details_stay_out_of_public_artifacts(self) -> None:
+        class Context:
+            run_id = "a" * 32
+            temporary_directory = Path("/tmp/voicelife-e2e-test")
+            cleanup = mock.Mock()
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(ADAPTERS.subprocess, "Popen") as popen:
+            artifact_directory = Path(directory) / "artifacts"
+            adapter = ADAPTERS.HostImGatewayRecoveryE2EAdapter(artifact_directory)
+            adapter.prepare(Context())
+
+        environment = popen.call_args.kwargs["env"]
+        detail_path = Path(environment["E2E_RECOVERY_EVIDENCE"])
+        self.assertEqual(detail_path.parent.parent, Context.temporary_directory)
+        self.assertNotEqual(detail_path.parent, artifact_directory)
+        self.assertFalse(artifact_directory.exists())
+
 
 class RunE2eCliTest(unittest.TestCase):
     def run_cli(self, *arguments: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -152,6 +170,17 @@ class RunE2eCliTest(unittest.TestCase):
                 self.assertEqual(document["layer"], layer)
                 self.assertFalse(document["hardware_verified"])
                 self.assertNotIn(str(evidence_paths[0]), result.stdout)
+
+    def test_contract_failure_writes_failed_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.run_cli(
+                *self.base_args(Path(directory)), env={**os.environ, "VOICELIFE_E2E_CONTRACT_FAILURE": "1"}
+            )
+            self.assertEqual(result.returncode, 20, result.stderr)
+            document = json.loads(next(Path(directory).glob("evidence-*.json")).read_text(encoding="utf-8"))
+            EVIDENCE.validate_evidence(document)
+            self.assertEqual(document["failure_category"], "product")
+            self.assertEqual(document["failed_phase"], "assert")
 
     def test_cli_rejects_nonzero_retries_and_hil_host_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -373,6 +402,41 @@ class RunE2eCliTest(unittest.TestCase):
         self.assertEqual(type(adapter).__name__, "HilPairingAdapter")
         with self.assertRaises(ValueError):
             RUN_E2E.build_adapter("host", "im-pairing", args)
+
+    def test_build_adapter_registers_voice_for_supported_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            descriptor = Path(directory) / "device.json"
+            for profile in ("sparkbot", "pcb"):
+                descriptor.write_text(
+                    json.dumps({"schema_version": 1, "name": "bench-a", "port": "/dev/cu.test", "profile": profile}),
+                    encoding="utf-8",
+                )
+                args = RUN_E2E.parse_args(
+                    [
+                        "--layer",
+                        "hil",
+                        "--journey",
+                        "voice",
+                        "--profile",
+                        profile,
+                        "--artifact-dir",
+                        directory,
+                        "--timeout",
+                        "2",
+                        "--device",
+                        str(descriptor),
+                        "--server",
+                        "runner@example.test",
+                        "--server-dir",
+                        "/srv/voicelife",
+                        "--gateway-origin",
+                        "https://gateway.example.test",
+                        "--user-id",
+                        "user-test",
+                    ]
+                )
+                with self.subTest(profile=profile):
+                    self.assertEqual(type(RUN_E2E.build_adapter(args.layer, args.journey, args)).__name__, "HilVoiceAdapter")
 
 
 if __name__ == "__main__":

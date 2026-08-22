@@ -207,6 +207,39 @@ def parse_audio_stats(line: str) -> dict[str, int]:
     return {key: int(value) for key, value in re.findall(r"(\w+)=([0-9]+)", line)}
 
 
+def display_evidence(
+    display_profile: str, raw_lines: list[str], results: list[TurnResult], requested_turns: int
+) -> tuple[bool, int, bool]:
+    """Return (complete, content_snapshots, scroll_observed) without retaining display text."""
+    if display_profile == "sparkbot":
+        rendered_text_lines = [line for line in raw_lines if "SPARKBOT_TEXT_RENDER" in line]
+        content_render_lines = [line for line in rendered_text_lines if "content_visible=1" in line]
+        complete = (
+            bool(rendered_text_lines)
+            and all(
+                "generation=" in line
+                and "revision=" in line
+                and "content_height=" in line
+                and "viewport_height=" in line
+                and "overflow_width=" in line
+                and "manual_line_breaks=" in line
+                and " status=" in line
+                and " content=" in line
+                for line in rendered_text_lines
+            )
+            and all("viewport_height=120" in line and "content_height=0" not in line for line in content_render_lines)
+        )
+        return complete, len(content_render_lines), any(
+            re.search(r"overflow_width=[1-9][0-9]*", line) for line in content_render_lines
+        )
+
+    display_draws_by_turn = [
+        sum("DISPLAY_DRAW=1" in line for line in raw_lines[result.log_start : result.log_end]) for result in results
+    ]
+    complete = len(results) == requested_turns and all(count > 0 for count in display_draws_by_turn)
+    return complete, sum(display_draws_by_turn), False
+
+
 def prepare_turns(texts: list[str], input_tts: str, model: str, voice: str, say_voice: str) -> list[PreparedTurn]:
     """Generate every host utterance before opening the first device capture.
 
@@ -356,6 +389,12 @@ def parse_args() -> argparse.Namespace:
         help="Require at least one subtitle wider than the safe one-line viewport to enter horizontal scrolling.",
     )
     parser.add_argument(
+        "--display-profile",
+        choices=("sparkbot", "pcb"),
+        default="sparkbot",
+        help="Board-specific display evidence contract used by the test firmware.",
+    )
+    parser.add_argument(
         "--allow-asr-mismatch",
         action="store_true",
         help="Record but do not fail on STT text mismatches; disabled by default for fidelity stress tests.",
@@ -457,23 +496,9 @@ def main() -> int:
     serial_pcm_rejections = [line for line in raw_lines if "SERIAL_VOICE_PCM=reject" in line]
     required_active_phases = (3, 4, 5, 6)
     rendered_text_lines = [line for line in raw_lines if "SPARKBOT_TEXT_RENDER" in line]
-    content_render_lines = [line for line in rendered_text_lines if "content_visible=1" in line]
-    display_text_trace_complete = (
-        bool(rendered_text_lines)
-        and all(
-            "generation=" in line
-            and "revision=" in line
-            and "content_height=" in line
-            and "viewport_height=" in line
-            and "overflow_width=" in line
-            and "manual_line_breaks=" in line
-            and " status=" in line
-            and " content=" in line
-            for line in rendered_text_lines
-        )
-        and all("viewport_height=120" in line and "content_height=0" not in line for line in content_render_lines)
+    display_text_trace_complete, display_content_snapshots, display_scroll_observed = display_evidence(
+        args.display_profile, raw_lines, results, len(texts)
     )
-    display_scroll_observed = any(re.search(r"overflow_width=[1-9][0-9]*", line) for line in content_render_lines)
 
     def turn_phases_complete(marker: str) -> bool:
         return len(results) == len(texts) and all(
@@ -515,7 +540,7 @@ def main() -> int:
         "serial_pcm_rejections": serial_pcm_rejections,
         "display": {
             "rendered_text_snapshots": len(rendered_text_lines),
-            "content_snapshots": len(content_render_lines),
+            "content_snapshots": display_content_snapshots,
             "scroll_observed": display_scroll_observed,
         },
         "acceptance": acceptance,

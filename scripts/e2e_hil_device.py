@@ -20,9 +20,9 @@ except ImportError:  # pragma: no cover - HIL runners are POSIX hosts.
     fcntl = None
 
 try:
-    from sqlite_board_probe_protocol import Partition, partition_by_label
+    from sqlite_board_probe_protocol import Partition, ProbeError, parse_partition_table, partition_by_label
 except ModuleNotFoundError:
-    from scripts.sqlite_board_probe_protocol import Partition, partition_by_label
+    from scripts.sqlite_board_probe_protocol import Partition, ProbeError, parse_partition_table, partition_by_label
 
 SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -66,6 +66,7 @@ OFFICIAL_PROFILES = {
             ("linx_secrets", 1, 2, 0x2E0000, 0x10000),
             ("assets", 1, 0x82, 0x300000, 0x100000),
             ("model", 1, 0x82, 0x400000, 0x300000),
+            ("voicelife", 1, 0x81, 0x700000, 0x900000),
         ),
     ),
     "pcb": OfficialProfile(
@@ -267,6 +268,16 @@ def load_application_image(
     build_directory: Path, descriptor: DeviceDescriptor, partitions: list[Partition]
 ) -> ApplicationImage:
     application = validate_device_layout(descriptor, partitions)
+    built_partition_table = build_directory / "partition_table" / "partition-table.bin"
+    if built_partition_table.is_file():
+        try:
+            built_partitions = parse_partition_table(built_partition_table.read_bytes())
+        except (OSError, ProbeError, ValueError) as error:
+            raise HilConfigurationError("application build partition table is invalid") from error
+        if tuple(_partition_tuple(partition) for partition in built_partitions) != tuple(
+            _partition_tuple(partition) for partition in partitions
+        ):
+            raise HilProfileMismatch("application build partition layout does not match board")
     binary = build_directory / "voicelife.bin"
     flasher = build_directory / "flasher_args.json"
     try:
