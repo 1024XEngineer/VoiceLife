@@ -65,6 +65,39 @@ class GatewayOriginTest(unittest.TestCase):
 
 
 class EnvironmentConfigTest(unittest.TestCase):
+    def test_resolve_idf_dir_prefers_explicit_directory(self) -> None:
+        root = Path("/tmp/provision-device-idf-explicit")
+        (root / "tools").mkdir(parents=True, exist_ok=True)
+        (root / "export.sh").touch()
+        (root / "tools" / "idf.py").touch()
+        try:
+            self.assertEqual(provision_device.resolve_idf_dir(str(root)), root)
+        finally:
+            (root / "tools" / "idf.py").unlink(missing_ok=True)
+            (root / "export.sh").unlink(missing_ok=True)
+            (root / "tools").rmdir()
+            root.rmdir()
+
+    def test_resolve_idf_dir_uses_idf_path_before_home_fallbacks(self) -> None:
+        configured = Path("/tmp/provision-device-idf-configured")
+        (configured / "tools").mkdir(parents=True, exist_ok=True)
+        (configured / "export.sh").touch()
+        (configured / "tools" / "idf.py").touch()
+        try:
+            self.assertEqual(
+                provision_device.resolve_idf_dir(environ={"IDF_PATH": str(configured)}, home=Path("/tmp/empty-home")),
+                configured,
+            )
+        finally:
+            (configured / "tools" / "idf.py").unlink(missing_ok=True)
+            (configured / "export.sh").unlink(missing_ok=True)
+            (configured / "tools").rmdir()
+            configured.rmdir()
+
+    def test_resolve_idf_dir_rejects_invalid_explicit_directory(self) -> None:
+        with self.assertRaises(ValueError):
+            provision_device.resolve_idf_dir("/tmp/not-an-idf")
+
     def test_load_dotenv_parses_key_values(self) -> None:
         env_file = Path("/tmp/provision-device-test.env")
         env_file.write_text(

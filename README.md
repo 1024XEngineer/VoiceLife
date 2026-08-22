@@ -76,10 +76,16 @@ pnpm --dir services/im-gateway test
 
 ```bash
 source /path/to/esp-idf-v6.0.2/export.sh
+python3 -m pip install -r scripts/requirements-hardware.txt
 python3 scripts/prepare_sqlite.py
 python3 scripts/firmware.py build esp32s3-storage-dev
 python3 scripts/firmware.py package esp32s3-storage-dev
 ```
+
+SparkBot 的 `scripts/provision_device.py` 会按 `IDF_PATH`、本机
+`~/esp-idf-v6.0.2`、`~/esp-idf`、`~/esp/esp-idf` 的顺序自动加载有效的
+ESP-IDF 环境；也可以用 `--idf-dir` 显式指定。硬件测试依赖统一记录在
+[`scripts/requirements-hardware.txt`](./scripts/requirements-hardware.txt)。
 
 ## 模块边界
 
