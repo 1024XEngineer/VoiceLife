@@ -555,7 +555,28 @@ class Runtime final {
         return method != nullptr && method->IsString() && method->string == "tools/call";
     }
 
+    static std::string McpMethod(std::string_view payload) {
+        JsonValue request;
+        if (!ParseJson(payload, request).ok() || !request.IsObject()) return "invalid";
+        const JsonValue* method = request.Get("method");
+        return method != nullptr && method->IsString() ? method->string : "missing";
+    }
+
+    static std::string McpRequestId(std::string_view payload) {
+        JsonValue request;
+        if (!ParseJson(payload, request).ok() || !request.IsObject()) return "invalid";
+        const JsonValue* id = request.Get("id");
+        if (id == nullptr) return "notification";
+        if (id->IsString()) return id->string;
+        if (id->kind == JsonValue::Kind::kNumber) return std::to_string(static_cast<int64_t>(id->number));
+        return "non_scalar";
+    }
+
     Result<std::string> HandleMcpRequest(std::string_view payload, std::string_view session_id) {
+        const std::string method = McpMethod(payload);
+        const std::string request_id = McpRequestId(payload);
+        ESP_LOGI(kTag, "MCP_RX method=%s id=%s bytes=%u session_len=%u", method.c_str(), request_id.c_str(),
+                 static_cast<unsigned>(payload.size()), static_cast<unsigned>(session_id.size()));
         auto request = std::make_shared<McpRequest>();
         request->payload.assign(payload);
         request->session_id.assign(session_id);
@@ -567,7 +588,8 @@ class Runtime final {
             }
             mcp_queue_.push_back(request);
         }
-        ESP_LOGI(kTag, "MCP_REQUEST_QUEUED bytes=%u", static_cast<unsigned>(payload.size()));
+        ESP_LOGI(kTag, "MCP_REQUEST_QUEUED method=%s id=%s bytes=%u", method.c_str(), request_id.c_str(),
+                 static_cast<unsigned>(payload.size()));
         mcp_cv_.notify_one();
 
         std::unique_lock<std::mutex> lock(request->mutex);
@@ -603,6 +625,10 @@ class Runtime final {
                 const LinxMcpToolOutcome outcome = InspectLinxMcpToolOutcome(request->payload, response);
                 session_->ReportToolResult(TruncateUtf8(outcome.summary, 96), outcome.success);
             }
+            ESP_LOGI(kTag, "MCP_TX method=%s id=%s bytes=%u result=%d", McpMethod(request->payload).c_str(),
+                     McpRequestId(request->payload).c_str(),
+                     response.ok() && response.value.has_value() ? static_cast<unsigned>(response.value->size()) : 0U,
+                     response.ok() ? 1 : 0);
             ESP_LOGI(kTag, "MCP_TOOL_EXECUTED tool_call=%d result=%d", tool_call ? 1 : 0, response.ok() ? 1 : 0);
             {
                 std::lock_guard<std::mutex> lock(request->mutex);
