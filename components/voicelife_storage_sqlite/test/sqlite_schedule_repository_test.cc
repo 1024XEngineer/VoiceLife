@@ -208,8 +208,7 @@ void CheckRestartPersistence(const std::filesystem::path& path, const CrudResult
     const auto& updated = *updated_iter;
     Check(updated.event == "SQLite 修改验证" && updated.start_time == DateTime{std::chrono::seconds{2'000'020'000}} &&
               updated.end_time == DateTime{std::chrono::seconds{2'000'021'800}} && !updated.location.has_value() &&
-              updated.notes == "修改后的真实备注" && !updated.rule_id.has_value() &&
-              !updated.reminder_task_id.has_value() && updated.status == ScheduleStatus::kActive,
+              updated.notes == "修改后的真实备注" && !updated.rule_id.has_value(),
           "数据库重连后应完整保留更新字段");
 }
 

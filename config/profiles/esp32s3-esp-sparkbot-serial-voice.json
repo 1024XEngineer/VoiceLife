@@ -5,7 +5,7 @@
   "adapters": {
     "audio": { "driver": "esp32s3-es8311-duplex", "capabilities": ["es8311-duplex"], "configRef": "env://VOICELIFE_AUDIO_PROFILE" },
     "speech": { "driver": "xrobot-websocket", "capabilities": ["streaming-asr", "tts", "cancel-generation", "pcm"], "configRef": "nvs://linx/websocket_url" },
-    "storage": { "driver": "sqlite", "capabilities": ["atomic-calendar-write", "durable-calendar"] },
+    "storage": { "driver": "fatfs-sqlite", "capabilities": ["persistent-sqlite", "atomic-calendar-write", "durable-calendar"] },
     "im": { "driver": "disabled", "capabilities": [] }
   },
   "sdkconfig": [

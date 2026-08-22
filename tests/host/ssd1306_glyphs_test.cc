@@ -2,12 +2,18 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
+#include <cstdlib>
 #include <string_view>
 
 #include "ssd1306_glyph_assets.h"
 
 namespace {
+
+void Check(bool condition) {
+    if (!condition) {
+        std::abort();
+    }
+}
 
 template <std::size_t N>
 uint32_t Fnv1a(std::array<uint8_t, N> glyph) {
@@ -47,15 +53,15 @@ int main() {
         {'/', 0x28bd14b3}, {' ', 0x1210d00f},
     }};
     for (const AsciiGlyphGolden golden : kAsciiGoldens) {
-        assert(Fnv1a(LookupAsciiGlyph(golden.value)) == golden.hash);
+        Check(Fnv1a(LookupAsciiGlyph(golden.value)) == golden.hash);
     }
-    assert((LookupAsciiGlyph('?') == std::array<uint8_t, 5>{0x00, 0x00, 0x00, 0x00, 0x00}));
+    Check((LookupAsciiGlyph('?') == std::array<uint8_t, 5>{0x00, 0x00, 0x00, 0x00, 0x00}));
 
     constexpr std::array<uint8_t, 32> kUnknownGlyph = {
         0x00, 0xff, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0xff, 0x00,
         0x00, 0xff, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0xff, 0x00,
     };
-    assert(LookupGlyph16(0x10ffff) == kUnknownGlyph);
+    Check(LookupGlyph16(0x10ffff) == kUnknownGlyph);
 
     constexpr std::array<GlyphGolden, 132> kFallbackGoldens = {{
         {0x7a7a, 0x2c9e205e}, {0x95f2, 0x616f7168}, {0x8046, 0x119e06f3}, {0x542c, 0x3eae1d63}, {0x601d, 0x84e5b3cf},
@@ -87,7 +93,7 @@ int main() {
         {0x8d35, 0x9ee17ada}, {0x8c22, 0x677c6c30},
     }};
     for (const GlyphGolden golden : kFallbackGoldens) {
-        assert(Fnv1a(LookupFallbackGlyph16(golden.codepoint)) == golden.hash);
+        Check(Fnv1a(LookupFallbackGlyph16(golden.codepoint)) == golden.hash);
     }
 
     constexpr std::array<std::pair<std::string_view, uint32_t>, 7> kMoodGoldens = {{
@@ -100,8 +106,8 @@ int main() {
         {"neutral", 0x8f220d25},
     }};
     for (const auto& [mood, hash] : kMoodGoldens) {
-        assert(Fnv1a(LookupMoodGlyph(mood)) == hash);
-        assert(Fnv1a(LookupBuiltinMoodGlyph(mood)) == hash);
+        Check(Fnv1a(LookupMoodGlyph(mood)) == hash);
+        Check(Fnv1a(LookupBuiltinMoodGlyph(mood)) == hash);
     }
-    assert(LookupMoodGlyph("unknown") == LookupMoodGlyph("neutral"));
+    Check(LookupMoodGlyph("unknown") == LookupMoodGlyph("neutral"));
 }
