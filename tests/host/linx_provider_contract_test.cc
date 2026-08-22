@@ -202,6 +202,9 @@ int main() {
     Check(transport.texts[1].find("\"session_id\":\"remote-linx-session\"") != std::string::npos &&
               transport.texts[5].find("\"session_id\":\"remote-linx-session\"") != std::string::npos,
           "服务端 hello 分配的 session_id 必须用于后续控制消息");
+    Check(transport.texts[3].find("\"state\":\"stop\"") != std::string::npos &&
+              transport.texts[3].find("\"mode\":\"realtime\"") != std::string::npos,
+          "listen.stop 必须携带与 listen.start 一致的 Linx mode 字段");
     const auto events_before_mismatched_session = events.size();
     transport.EmitText(R"({"type":"stt","session_id":"wrong-session","text":"不应接受"})");
     Check(events.size() == events_before_mismatched_session + 1 &&
