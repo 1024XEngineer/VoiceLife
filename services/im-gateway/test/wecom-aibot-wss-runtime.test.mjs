@@ -129,6 +129,68 @@ test('WeCom AI Bot WSS runtime posts template card click events', async (context
     assert.equal(events[0].type, 'action.triggered');
     assert.equal(events[0].externalIdentityId, 'identity-fixture');
     assert.deepEqual(events[0].payload, { token: 'v1.token.fixture', action: 'acknowledge' });
+    assert.deepEqual(socket.sent[1], {
+        cmd: 'aibot_respond_update_msg',
+        headers: { req_id: 'callback-fixture' },
+        body: {
+            response_type: 'update_template_card',
+            template_card: {
+                card_type: 'button_interaction',
+                main_title: { title: '操作已受理', desc: '正在同步到设备' },
+                button_list: [],
+            },
+        },
+    });
+    socket.emit('message', {
+        data: JSON.stringify({ headers: { req_id: 'callback-fixture' }, errcode: 0 }),
+    });
+    await runtime.close();
+});
+
+test('WeCom AI Bot WSS runtime leaves a card actionable when the action is rejected', async (context) => {
+    const socket = new FakeWebSocket();
+    const runtime = new WecomAibotWssRuntime({
+        adapter: new WecomAibotInboundAdapter({
+            channelAccountId: 'channel-wecom',
+            botId: 'bot-fixture',
+            resolveExternalIdentityId: async () => 'identity-fixture',
+        }),
+        botId: 'bot-fixture',
+        secret: 'secret-fixture',
+        postEvent: async () => {
+            throw new Error('action rejected');
+        },
+        createWebSocket: () => socket,
+        nextRequestId: () => 'request-fixture',
+    });
+    context.after(() => runtime.close());
+
+    runtime.start();
+    socket.emit('open', {});
+    socket.emit('message', {
+        data: JSON.stringify({ headers: { req_id: 'request-fixture' }, errcode: 0 }),
+    });
+    socket.emit('message', {
+        data: JSON.stringify({
+            cmd: 'aibot_event_callback',
+            headers: { req_id: 'callback-fixture' },
+            body: {
+                msgid: 'card-click-fixture',
+                create_time: 1_786_665_600,
+                aibotid: 'bot-fixture',
+                from: { userid: 'userid-fixture' },
+                chattype: 'single',
+                msgtype: 'event',
+                event: {
+                    eventtype: 'template_card_event',
+                    event_key: 'voicelife-action:v1:v1.token.fixture:acknowledge:',
+                },
+            },
+        }),
+    });
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+
+    assert.equal(socket.sent.length, 1);
     await runtime.close();
 });
 

@@ -211,11 +211,24 @@ export class WecomAibotWssRuntime {
     }
 
     private sendMessage(chatId: string, body: Readonly<Record<string, JsonValue>>): Promise<ImSendAcceptance> {
+        const requestId = this.nextRequestId();
+        return this.sendRequest(requestId, {
+            cmd: 'aibot_send_msg',
+            body: {
+                chatid: chatId,
+                ...body,
+            },
+        });
+    }
+
+    private sendRequest(
+        requestId: string,
+        frame: Readonly<{ readonly cmd: string; readonly body: Readonly<Record<string, JsonValue>> }>,
+    ): Promise<ImSendAcceptance> {
         const socket = this.socket;
-        if (!this.healthy || socket === undefined || this.closed) {
+        if (!this.healthy || socket === undefined || this.closed || this.outboundRequests.has(requestId)) {
             return Promise.resolve({ accepted: false, retryable: true, errorCode: 'wecom_aibot_unavailable' });
         }
-        const requestId = this.nextRequestId();
         return new Promise((resolve) => {
             const timeout = setTimeout(() => {
                 if (!this.outboundRequests.delete(requestId)) return;
@@ -225,12 +238,9 @@ export class WecomAibotWssRuntime {
             try {
                 socket.send(
                     JSON.stringify({
-                        cmd: 'aibot_send_msg',
+                        cmd: frame.cmd,
                         headers: { req_id: requestId },
-                        body: {
-                            chatid: chatId,
-                            ...body,
-                        },
+                        body: frame.body,
                     }),
                 );
             } catch {
@@ -285,10 +295,32 @@ export class WecomAibotWssRuntime {
         if (this.settleOutboundResponse(frame)) return;
         if (!this.healthy || (frame.cmd !== 'aibot_msg_callback' && frame.cmd !== 'aibot_event_callback')) return;
         try {
-            await this.options.postEvent(await this.options.adapter.normalizeInbound(frame.body));
+            const event = await this.options.adapter.normalizeInbound(frame.body);
+            await this.options.postEvent(event);
+            if (frame.cmd === 'aibot_event_callback' && event.type === 'action.triggered') {
+                this.updateAcceptedTemplateCard(frame);
+            }
         } catch {
             // Untrusted platform input must not terminate the connection loop.
         }
+    }
+
+    private updateAcceptedTemplateCard(frame: Record<string, unknown>): void {
+        const headers = frame.headers;
+        if (headers === null || typeof headers !== 'object') return;
+        const requestId = (headers as Record<string, unknown>).req_id;
+        if (typeof requestId !== 'string' || requestId.trim() === '') return;
+        void this.sendRequest(requestId, {
+            cmd: 'aibot_respond_update_msg',
+            body: {
+                response_type: 'update_template_card',
+                template_card: {
+                    card_type: 'button_interaction',
+                    main_title: { title: '操作已受理', desc: '正在同步到设备' },
+                    button_list: [],
+                },
+            },
+        });
     }
 
     private isSubscriptionResponse(frame: Record<string, unknown>): boolean {
