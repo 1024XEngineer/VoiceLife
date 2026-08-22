@@ -34,7 +34,8 @@ class SerialVoiceTest::Impl final {
         return Unavailable("串口语音测试只能在 ESP-IDF 目标运行");
 #else
         if (task_ != nullptr) return Status::Ok();
-        if (!callbacks_.begin_turn || !callbacks_.submit_pcm || !callbacks_.end_turn) {
+        if (!callbacks_.begin_turn || !callbacks_.submit_pcm || !callbacks_.end_turn || !callbacks_.begin_wake ||
+            !callbacks_.end_wake) {
             return Status::Error(ErrorCode::kInvalidArgument, "串口语音测试回调不完整");
         }
         payload_pool_ = voice::AudioPayloadPool::Create(16, detail::kSerialVoicePcmBytes);
@@ -136,6 +137,14 @@ class SerialVoiceTest::Impl final {
             }
             if (frame_header.kind == detail::kSerialVoiceEnd) {
                 LogResult("TURN_END", callbacks_.end_turn());
+                continue;
+            }
+            if (frame_header.kind == detail::kSerialVoiceWakeBegin) {
+                LogResult("WAKE_BEGIN", callbacks_.begin_wake());
+                continue;
+            }
+            if (frame_header.kind == detail::kSerialVoiceWakeEnd) {
+                LogResult("WAKE_END", callbacks_.end_wake());
                 continue;
             }
             if (frame_header.kind != detail::kSerialVoicePcm) {

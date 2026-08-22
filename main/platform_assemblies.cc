@@ -26,8 +26,8 @@ namespace {
 // stress run, while 16 / 320 ms completed it losslessly with more than 4 MiB
 // of free heap remaining. Keep this finite: it absorbs short transport bursts
 // without turning downlink playback into an unbounded backlog.
-constexpr std::size_t kSparkBotPlaybackQueueDepth = 16;
-constexpr uint32_t kSparkBotPlaybackLatencyBudgetMs = 320;
+constexpr std::size_t kSparkBotPlaybackQueueDepth = 32;
+constexpr uint32_t kSparkBotPlaybackLatencyBudgetMs = 640;
 
 /** @brief 从官方 SparkBot 板级 Profile 填充 LVGL 显示配置。 */
 voicelife::display_sparkbot::SparkBotLcdConfig MakeSparkBotLcdConfig() {

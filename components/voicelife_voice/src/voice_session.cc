@@ -388,6 +388,12 @@ Status VoiceSession::EndCapture() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (state_ != VoiceSessionState::kCapturing) {
+            // VAD、物理松键和串口夹具可能同时提交结束请求。一次 stop
+            // 已经把会话收口到 ready 后，重复请求必须是幂等成功，不能
+            // 把正常竞态升级成 Runtime failure。
+            if (state_ == VoiceSessionState::kReady) {
+                return Status::Ok();
+            }
             return Status::Error(ErrorCode::kUnavailable, "语音会话当前没有采集");
         }
     }

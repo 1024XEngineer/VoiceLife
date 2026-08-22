@@ -121,6 +121,36 @@ def packet(kind: int, payload: bytes = b"") -> bytes:
     return MAGIC + bytes((VERSION, kind)) + len(payload).to_bytes(2, "little") + payload
 
 
+def open_serial(port: str, baud: int) -> serial.Serial:
+    """Open USB UART without toggling SparkBot reset lines by default."""
+    device = serial.Serial()
+    device.port = port
+    device.baudrate = baud
+    device.timeout = 0.2
+    device.write_timeout = 5
+    # SparkBot maps RTS to EN. Keep both modem-control lines inactive while
+    # pyserial opens the USB-JTAG endpoint; enabling flow control here can
+    # suppress the later reset pulse or reset the board during open().
+    device.dsrdtr = False
+    device.rtscts = False
+    device.dtr = False
+    device.rts = False
+    device.open()
+    return device
+
+
+def reset_usb_serial_jtag(device: serial.Serial) -> None:
+    """Reset SparkBot's application through the USB-Serial/JTAG EN line."""
+    # SparkBot exposes EN on RTS and has no boot-button automation. Keep DTR
+    # deasserted so the pulse cannot select the ROM downloader.
+    device.rts = False
+    device.dtr = False
+    device.rts = True
+    time.sleep(0.15)
+    device.rts = False
+    time.sleep(0.2)
+
+
 def synthesize(text: str, model: str, voice: str) -> bytes:
     synthesizer = SpeechSynthesizer(model=model, voice=voice)
     audio = synthesizer.call(text)
@@ -391,15 +421,8 @@ def main() -> int:
     except (RuntimeError, subprocess.SubprocessError, TimeoutError) as error:
         print(f"input_preparation_failed:{error}", file=sys.stderr)
         return 2
-    device = serial.Serial()
-    device.port = args.port
-    device.baudrate = args.baud
-    device.timeout = 0.2
-    device.write_timeout = 5
-    device.dtr = False
-    device.rts = False
     try:
-        device.open()
+        device = open_serial(args.port, args.baud)
     except serial.SerialException as error:
         print(f"cannot open serial port: {type(error).__name__}", file=sys.stderr)
         return 2
@@ -408,11 +431,7 @@ def main() -> int:
     results: list[TurnResult] = []
     try:
         if args.reset_before_run:
-            # USB-Serial/JTAG maps RTS to EN. Keeping DTR deasserted avoids
-            # entering the bootloader; this is an explicit test-only reset.
-            device.rts = True
-            time.sleep(0.12)
-            device.rts = False
+            reset_usb_serial_jtag(device)
         log.wait_for("SERIAL_VOICE_TEST_READY=1", 0, 20)
         # READY means the serial endpoint and I2S port exist, not that the
         # asynchronous local wake-model bootstrap has returned the controller
