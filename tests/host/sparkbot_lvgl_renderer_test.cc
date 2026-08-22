@@ -58,7 +58,8 @@ int main() {
     // 半高布局契约：当前从上半区观察，但不贴左右边缘；三个产品槽位
     // 必须在半高视口内，正文明确采用单行横向循环滚动。
     const auto layout = DefaultSparkBotDisplayLayout();
-    Check(layout.viewport_y == 0 && layout.viewport_height == 120, "当前观察布局必须占用可调的上半屏视口");
+    Check(layout.viewport_y == 6 && layout.viewport_height == 120, "当前观察布局必须下移并占用可调的上半屏视口");
+    Check(layout.viewport_y + layout.viewport_height <= 240, "下移后的产品视口仍必须落在物理屏范围内");
     Check(layout.horizontal_inset >= 8 && 240 - layout.horizontal_inset * 2 < 240, "产品视口必须保留左右安全边距");
     Check(layout.status_top + layout.status_height <= layout.emoji_top, "状态栏和表情舞台不能重叠");
     Check(layout.emoji_top + layout.emoji_size <= layout.content_top, "表情舞台和正文栏不能重叠");

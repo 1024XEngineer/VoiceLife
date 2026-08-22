@@ -109,11 +109,11 @@ class SparkBotAssetManifestTest(unittest.TestCase):
         self.assertEqual(self.manifest["source"]["license"], "MIT")
         self.assertTrue(self.manifest["source"]["upstream_commit"])
         self.assertEqual(len(self.assets), 11)
-        self.assertEqual(self.manifest["budget"]["gif_bytes"], 144722)
+        self.assertEqual(self.manifest["budget"]["gif_bytes"], 147018)
         self.assertEqual(self.manifest["budget"]["common_text_font_bytes"], 269580)
         self.assertNotIn("wake_model", self.manifest)
         self.assertNotIn("wakenet_packed_bytes", self.manifest["budget"])
-        self.assertEqual(self.manifest["budget"]["total_bytes"], 414302)
+        self.assertEqual(self.manifest["budget"]["total_bytes"], 416598)
 
     def test_common_font_matches_official_14px_spec(self) -> None:
         font = self.manifest["text_font"]

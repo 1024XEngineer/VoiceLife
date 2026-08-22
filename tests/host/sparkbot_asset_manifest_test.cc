@@ -281,7 +281,7 @@ int main() {
         Check(ToHex(hasher.Final()) == sha, "文件 SHA-256 必须与 manifest 记录一致");
     }
 
-    Check(total_bytes == 144722, "GIF 总大小必须与已验证的 144722 字节一致");
+    Check(total_bytes == 147018, "GIF 总大小必须与已验证的 147018 字节一致");
     Check(yyjson_get_uint(yyjson_obj_get(budget, "gif_bytes")) == total_bytes,
           "budget.gif_bytes 必须等于全部 GIF 字节数之和");
 
