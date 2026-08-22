@@ -17,6 +17,7 @@ import json
 import os
 import re
 import runpy
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,15 @@ BOARD_CONFIGS: dict[str, dict] = {
 
 # 与真机烧录一致的 esptool 固定参数。
 FLASH_SETTINGS = ("--flash-mode", "dio", "--flash-size", "16MB", "--flash-freq", "80m")
+
+# CI and the SparkBot board are validated with ESP-IDF 6.0.2. Keep the
+# machine-specific paths in one ordered fallback list, while allowing an
+# explicitly selected IDF_PATH to take precedence.
+DEFAULT_IDF_RELATIVE_DIRS = (
+    Path("esp-idf-v6.0.2"),
+    Path("esp-idf"),
+    Path("esp") / "esp-idf",
+)
 
 UUID_V4_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 DEVICE_ID_PATTERN = re.compile(r"^[!-~]{1,128}$")
@@ -75,7 +85,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--gateway-origin", help="Gateway HTTPS origin（缺省 PROVISION_GATEWAY_ORIGIN 或 WECHAT_ACTION_UI_BASE_URL）"
     )
     parser.add_argument("--user-id", help="内部 userId；缺省继承服务器上最新 active 设备的所有者")
-    parser.add_argument("--idf-dir", help="ESP-IDF 安装目录（缺省 ~/esp/esp-idf）")
+    parser.add_argument("--idf-dir", help="ESP-IDF 安装目录（缺省自动选择 IDF_PATH 或 ESP-IDF 6.0.2）")
     parser.add_argument("--force", action="store_true", help="provisioning 时覆盖板子已有 IM 配置（VLI2）")
     parser.add_argument("--skip-build", action="store_true", help="跳过固件构建")
     parser.add_argument("--skip-flash", action="store_true", help="跳过烧录应用分区")
@@ -171,14 +181,38 @@ def validate_credential(data: dict, expected_user_id: str | None = None, *, requ
     return data
 
 
-def idf_bootstrap(idf_dir: str | None = None) -> str:
-    """返回加载 ESP-IDF 环境的 bash 前缀。"""
+def resolve_idf_dir(
+    idf_dir: str | None = None,
+    *,
+    environ: dict[str, str] | None = None,
+    home: Path | None = None,
+) -> Path | None:
+    """Resolve an ESP-IDF installation that can build the SparkBot profile."""
+    environment = os.environ if environ is None else environ
+    home_directory = Path.home() if home is None else home
     if idf_dir:
-        return f"source {idf_dir}/export.sh &&"
-    home = Path.home()
-    if (home / "esp" / "esp-idf" / "export.sh").is_file():
-        return f"source {home}/esp/esp-idf/export.sh &&"
-    return ""
+        candidate = Path(idf_dir).expanduser()
+        if not (candidate / "export.sh").is_file() or not (candidate / "tools" / "idf.py").is_file():
+            raise ValueError(f"ESP-IDF 安装无效：{candidate}")
+        return candidate
+
+    candidates: list[Path] = []
+    configured = environment.get("IDF_PATH")
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    candidates.extend(home_directory / relative for relative in DEFAULT_IDF_RELATIVE_DIRS)
+    for candidate in candidates:
+        if (candidate / "export.sh").is_file() and (candidate / "tools" / "idf.py").is_file():
+            return candidate
+    return None
+
+
+def idf_bootstrap(idf_dir: str | None = None) -> str:
+    """Return a shell prefix that loads the selected ESP-IDF environment."""
+    resolved = resolve_idf_dir(idf_dir)
+    if resolved is None:
+        return ""
+    return f"source {shlex.quote(str(resolved / 'export.sh'))} &&"
 
 
 def build_command(board: str, idf_dir: str | None = None) -> str:

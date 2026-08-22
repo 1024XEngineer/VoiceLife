@@ -1,0 +1,8 @@
+# Host-side hardware and end-to-end test tools for SparkBot.
+pyserial==3.5
+esptool==5.3.1
+dashscope>=1.27,<2
+websockets>=17,<18
+pytest>=9,<10
+pytest-cov>=7,<8
+ruff==0.12.7
