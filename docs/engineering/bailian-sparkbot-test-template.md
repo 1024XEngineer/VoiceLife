@@ -90,6 +90,10 @@ SERIAL_VOICE_EVIDENCE event=tts_first_audio
 SERIAL_VOICE_EVIDENCE event=capture_started
 ```
 
+唤醒脚本用 `WAKE_BEGIN` 的请求/响应确认测试任务和待机状态，不把只在固件启动时打印一次的
+`SERIAL_VOICE_TEST_READY=1` 当作每次串口连接的就绪信号。因此设备已经运行、重新打开串口时也可以重复执行；
+显式传入 `--reset-before-run` 时则会先通过 USB-Serial/JTAG 复位，再等待同一个握手。
+
 若出现 `STARTUP_ERROR stage=session_start`、`provider_connect_failed` 或 `Connection reset by peer`，先标记为 Linx 连接失败并重试启动，不得把它写成“唤醒词识别失败”。
 
 ## 5. 普通对话和多轮

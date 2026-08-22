@@ -536,6 +536,14 @@ int main() {
               stop_capture_failure_provider.generation_ == stop_capture_failure.generation(),
           "本地已停止而远端停止失败时回 ready 并使旧代次失效，不得卡死在 capturing");
 
+    FakeInput duplicate_end_input;
+    FakeOutput duplicate_end_output;
+    FakeProvider duplicate_end_provider;
+    voicelife::voice::VoiceSession duplicate_end(duplicate_end_input, duplicate_end_output, duplicate_end_provider);
+    Check(duplicate_end.Start(Config()).ok() && duplicate_end.BeginCapture().ok() && duplicate_end.EndCapture().ok() &&
+              duplicate_end.EndCapture().ok() && duplicate_end_input.stops == 1 && duplicate_end_provider.stops == 1,
+          "重复结束采集必须幂等成功且只发送一次本地/远端 stop");
+
     FakeInput disconnect_failure_input;
     FakeOutput disconnect_failure_output;
     FakeProvider disconnect_failure_provider;

@@ -740,9 +740,26 @@ class Runtime final {
                                         : Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
         };
         callbacks.end_turn = [this]() {
+            auto* injection = assembly_ != nullptr ? assembly_->test_audio_injection() : nullptr;
+            if (injection == nullptr) return Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
+            const Status disabled = injection->SetTestInputEnabled(false);
+            if (!disabled.ok()) return disabled;
             return EnqueueBoardInput(BoardInputAction::kPressUp)
                        ? Status::Ok()
                        : Status::Error(ErrorCode::kUnavailable, "语音测试结束事件未进入状态机队列");
+        };
+        callbacks.begin_wake = [this]() {
+            auto* injection = assembly_ != nullptr ? assembly_->test_audio_injection() : nullptr;
+            if (injection == nullptr) return Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
+            if (!assembly_->wake_gate().standby()) {
+                return Status::Error(ErrorCode::kConflict, "本地唤醒注入要求设备处于待机");
+            }
+            return injection->SetTestInputEnabled(true);
+        };
+        callbacks.end_wake = [this]() {
+            auto* injection = assembly_ != nullptr ? assembly_->test_audio_injection() : nullptr;
+            return injection != nullptr ? injection->SetTestInputEnabled(false)
+                                        : Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
         };
         serial_voice_test_ = std::make_unique<SerialVoiceTest>(std::move(callbacks));
         return serial_voice_test_->Start();
