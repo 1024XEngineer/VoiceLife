@@ -382,7 +382,9 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
 
     const bool snapshot_changed = !has_snapshot_ || snapshot.generation != last_snapshot_generation_ ||
                                   snapshot.revision != last_snapshot_revision_;
-    if (screen_saver_active_ && snapshot_changed) {
+    // 待机时钟会正常推进 revision；只有语义离开纯待机状态时才退出屏保。
+    // 不能把每次快照刷新都当作用户活动，否则屏保进入后会立即被时钟刷新打断。
+    if (screen_saver_active_ && snapshot_changed && ShouldExitIdleScreenSaver(snapshot)) {
         ExitIdleScreenSaver();
     }
     has_snapshot_ = true;
