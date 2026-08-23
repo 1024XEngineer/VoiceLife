@@ -364,9 +364,10 @@ class Runtime final {
         voice::VoiceSessionConfig config;
         config.session_id = "voicelife-linx-session";
         config.provider_id = "xrobot-websocket";
-        // A/B probe: keep the current transport and wake sequencing unchanged
-        // while measuring the historical realtime mode on the same SparkBot.
-        config.mode = voice::VoiceMode::kRealtime;
+        // SparkBot has no playback reference channel or AEC. Match the
+        // Xiaozhi SparkBot default: server VAD closes an auto-stop turn after
+        // playback drains, while realtime is reserved for AEC-capable boards.
+        config.mode = voice::VoiceMode::kAuto;
         config.audio.codec = voice::AudioCodec::kPcmS16Le;
         config.audio.sample_rate_hz = 16000;
         config.audio.channels = 1;
@@ -1634,8 +1635,14 @@ class Runtime final {
         } else if (evidence.event == "local_wake_detect_requested") {
             // detect 已进入 TX FIFO。Linx 可能随后发送本地唤醒问候 TTS；
             // 先确认协议顺序，再等待 tts.stop，超时才开启干净的用户采集。
-            ESP_LOGI(kTag, "LOCAL_WAKE_PROTOCOL_ACCEPTED action=await_greeting mode=%s",
-                     session_ != nullptr && session_->config().mode == voice::VoiceMode::kAuto ? "auto" : "realtime");
+            const auto mode = session_ != nullptr ? session_->config().mode : voice::VoiceMode::kManual;
+            const char* mode_name = "manual";
+            if (mode == voice::VoiceMode::kAuto) {
+                mode_name = "auto";
+            } else if (mode == voice::VoiceMode::kRealtime) {
+                mode_name = "realtime";
+            }
+            ESP_LOGI(kTag, "LOCAL_WAKE_PROTOCOL_ACCEPTED action=await_greeting mode=%s", mode_name);
             (void)EnqueueEvent(voice::VoiceInteractionEvent::kWakeDetectionAccepted);
             StartListenTimer(kWakeAckFirstAudioTimeoutMs);
         } else if (evidence.event == "local_wake_ack_requested" || evidence.event == "interrupt_ack_requested") {
