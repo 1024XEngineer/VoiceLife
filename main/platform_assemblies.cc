@@ -22,12 +22,11 @@ namespace voicelife::runtime {
 namespace {
 
 // Linx can deliver several 20 ms PCM frames in one TLS/WebSocket burst. The
-// 32-frame / 640 ms bound still rejected four frames during the 2026-08-22
-// long-reply run, so give SparkBot one additional burst window while keeping
-// the queue finite. This is still a bounded 960 ms playback backlog, not an
-// unbounded cache that could make barge-in unresponsive.
-constexpr std::size_t kSparkBotPlaybackQueueDepth = 48;
-constexpr uint32_t kSparkBotPlaybackLatencyBudgetMs = 960;
+// The V3 CRUD probe exposed a longer Linx TTS burst than the previous 960 ms
+// window. Keep a finite 1.92 s jitter buffer so a burst is played in order
+// without dropping PCM or turning playback into an unbounded cache.
+constexpr std::size_t kSparkBotPlaybackQueueDepth = 96;
+constexpr uint32_t kSparkBotPlaybackLatencyBudgetMs = 1920;
 
 /** @brief 从官方 SparkBot 板级 Profile 填充 LVGL 显示配置。 */
 voicelife::display_sparkbot::SparkBotLcdConfig MakeSparkBotLcdConfig() {

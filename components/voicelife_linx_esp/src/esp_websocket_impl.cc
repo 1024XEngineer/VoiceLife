@@ -448,8 +448,11 @@ bool EspWebSocketTransport::Impl::PrepareWorker() {
         return false;
     }
     // 统一 TX 队列：文本/音频/barrier 由唯一 TxTask 顺序发送。
-    // 32 x 20 ms 约 640 ms；音频满载时由 SendAudio 有界等待，不淘汰旧 PCM。
-    constexpr int kTxQueueDepth = 32;
+    // 64 x 20 ms 约 1.28 s；音频满载时由 SendAudio 有界等待，不淘汰旧 PCM。
+    // A long Chinese utterance can briefly outpace the TLS writer by more than
+    // the previous 640 ms media FIFO. Keep this finite at 1.28 s; the item pool
+    // is sized to cover this queue plus the control lane and in-flight write.
+    constexpr int kTxQueueDepth = 64;
 #if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
     tx_queue_ = xQueueCreateWithCaps(kTxQueueDepth, sizeof(detail::LinxTxItem*), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     tx_queue_uses_caps_ = tx_queue_ != nullptr;

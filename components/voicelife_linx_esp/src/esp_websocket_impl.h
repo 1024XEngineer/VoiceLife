@@ -25,10 +25,10 @@ namespace detail {
 
 constexpr char kTag[] = "voicelife_linx_esp";
 constexpr size_t kMaxEventChunkBytes = 4096;
-// 32 media + 16 control + one in-flight writer + one stop item.
-// Audio items hold pooled PCM leases, so this remains bounded while allowing
-// short TLS stalls without silently evicting an earlier speech frame.
-constexpr size_t kTxItemPoolCapacity = 50;
+// 64 media + 16 control + one in-flight writer + one stop item. Audio items
+// hold pooled PCM leases, so this remains bounded while absorbing the measured
+// sub-second TLS stalls without silently evicting an earlier speech frame.
+constexpr size_t kTxItemPoolCapacity = 82;
 constexpr EventBits_t kConnectedBit = BIT0;
 constexpr EventBits_t kFailedBit = BIT1;
 
