@@ -38,7 +38,10 @@ class SerialVoiceTest::Impl final {
             !callbacks_.end_wake) {
             return Status::Error(ErrorCode::kInvalidArgument, "串口语音测试回调不完整");
         }
-        payload_pool_ = voice::AudioPayloadPool::Create(16, detail::kSerialVoicePcmBytes);
+        // The Linx TX worker can briefly retain more than 16 input frames while
+        // TLS is flushing. Keep the serial fixture from rejecting valid PCM
+        // merely because the network is momentarily slower than realtime.
+        payload_pool_ = voice::AudioPayloadPool::Create(32, detail::kSerialVoicePcmBytes);
         if (payload_pool_ == nullptr) return Unavailable("创建串口语音 payload pool 失败");
         if (!usb_serial_jtag_is_driver_installed()) {
             usb_serial_jtag_driver_config_t config = {

@@ -112,6 +112,15 @@ class WakeGateAudioInput final : public AudioInputPort {
     bool physical_running_ = false;
     bool detector_running_ = false;
     bool forwarding_ = false;
+    // StartCapture() restarts the physical producer to establish a hard
+    // boundary between detector PCM and cloud PCM. Frames delivered while the
+    // producer is being stopped/restarted belong to the old boundary and are
+    // dropped.
+    bool capture_transitioning_ = false;
+    // One 20 ms hardware period can already be outside the queue when the
+    // wake callback is consumed. Drop a bounded tail of such frames after the
+    // queue reset; later frames are the user's actual follow-up speech.
+    std::size_t capture_boundary_frames_to_drop_ = 0;
     std::chrono::steady_clock::time_point wake_suppressed_until_{};
 };
 

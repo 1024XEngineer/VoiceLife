@@ -13,10 +13,10 @@ namespace voicelife::linx {
 
 /** 保存 Linx WebSocket 连接所需的非敏感配置引用。 */
 struct LinxConnectionConfig {
-    // Linx uses this value to choose its downstream send strategy. Keep it in
-    // the same latency budget as the board playback queue rather than deriving
-    // an unbounded duration from the negotiated packet size.
-    static constexpr uint32_t kDefaultPlaybackBufferDurationMs = 200;
+    // Linx uses this value to choose its downstream send strategy. The
+    // WebSocket contract documents 1000 ms as the PCM default; keeping the
+    // negotiated value aligned avoids a server-side strategy mismatch.
+    static constexpr uint32_t kDefaultPlaybackBufferDurationMs = 1000;
 
     std::string websocket_url;
     // A reference such as secret://linx/device-token. The resolved token is
@@ -26,6 +26,11 @@ struct LinxConnectionConfig {
     std::string client_id;
     std::optional<std::string> agent_id;
     uint32_t playback_buffer_duration_ms = kDefaultPlaybackBufferDurationMs;
+    // Physical audio remains PCM at the board boundary. When set, this is the
+    // wire format advertised in hello and handled by the Linx provider codec.
+    // Keeping the two formats separate lets the local wake detector and serial
+    // PCM fixture continue to operate without exposing encoded frames to them.
+    std::optional<voice::AudioFormat> preferred_audio;
 
     /**
      * @brief 校验连接配置是否完整。
@@ -33,7 +38,7 @@ struct LinxConnectionConfig {
      */
     [[nodiscard]] bool valid() const {
         return !websocket_url.empty() && !token_ref.empty() && !device_id.empty() && !client_id.empty() &&
-               playback_buffer_duration_ms > 0;
+               playback_buffer_duration_ms > 0 && (!preferred_audio.has_value() || preferred_audio->valid());
     }
 };
 

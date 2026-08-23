@@ -70,6 +70,8 @@ Status Esp32s3PcmAudioPorts::Impl::InputPort::StartCapture(voice::VoiceMode mode
 
 Status Esp32s3PcmAudioPorts::Impl::InputPort::StopCapture() { return owner_.StopCapture(); }
 
+Status Esp32s3PcmAudioPorts::Impl::InputPort::DiscardPendingInput() { return owner_.DiscardPendingInput(); }
+
 void Esp32s3PcmAudioPorts::Impl::InputPort::Close() { (void)owner_.CloseInput(); }
 
 Status Esp32s3PcmAudioPorts::Impl::OutputPort::Open(const voice::AudioFormat& format) {
@@ -533,6 +535,19 @@ Status Esp32s3PcmAudioPorts::Impl::StopCapture() {
     if (assembler_) {
         assembler_->Reset();
     }
+    return Status::Ok();
+#endif
+}
+
+Status Esp32s3PcmAudioPorts::Impl::DiscardPendingInput() {
+#ifndef ESP_PLATFORM
+    return detail::Unavailable("ESP32-S3 PCM Audio Port 只能在 ESP-IDF 目标运行");
+#else
+    std::lock_guard<std::mutex> lock(mutex_);
+    const std::size_t queued = input_queue_.size();
+    input_queue_.clear();
+    if (assembler_) assembler_->Reset();
+    ESP_LOGI(detail::kAudioRuntimeTag, "INPUT_BOUNDARY_RESET queued=%u", static_cast<unsigned>(queued));
     return Status::Ok();
 #endif
 }

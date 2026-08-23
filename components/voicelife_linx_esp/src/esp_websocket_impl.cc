@@ -184,8 +184,8 @@ Status EspWebSocketTransport::Impl::SendText(std::string_view message) {
     if (is_listen_stop) {
         media_tx_open_ = false;
     }
-    const TickType_t wait_ticks = is_listen_stop ? pdMS_TO_TICKS(options_.tx_timeout_ms)
-                               : (is_control ? 0 : pdMS_TO_TICKS(150));
+    const TickType_t wait_ticks =
+        is_listen_stop ? pdMS_TO_TICKS(options_.tx_timeout_ms) : (is_control ? 0 : pdMS_TO_TICKS(150));
     if (xQueueSend(target, &item, wait_ticks) != pdTRUE) {
         if (!is_listen_stop) {
             ReleaseTxItem(item);
@@ -193,6 +193,12 @@ Status EspWebSocketTransport::Impl::SendText(std::string_view message) {
         }
         ReleaseTxItem(item);
         return Status::Error(ErrorCode::kUnavailable, "ESP Linx 音频 TX 队列等待 stop 超时");
+    }
+    if (is_listen_stop) {
+        ESP_LOGI(detail::kTag, "LINX_TX_STOP_QUEUE enqueued_audio=%llu dropped_audio=%llu queued_media=%u",
+                 static_cast<unsigned long long>(tx_audio_enqueued_.load(std::memory_order_relaxed)),
+                 static_cast<unsigned long long>(tx_audio_dropped_.load(std::memory_order_relaxed)),
+                 static_cast<unsigned>(uxQueueMessagesWaiting(tx_queue_)));
     }
     if (is_listen_stop || is_abort) {
         media_tx_open_ = false;
@@ -205,7 +211,11 @@ Status EspWebSocketTransport::Impl::SendText(std::string_view message) {
                             : message.find("\"state\":\"start\"") != std::string_view::npos ? "start"
                             : message.find("\"state\":\"stop\"") != std::string_view::npos  ? "stop"
                                                                                             : "?";
-        ESP_LOGI(detail::kTag, "LINX_SEND listen state=%s", state);
+        const char* mode = message.find("\"mode\":\"auto\"") != std::string_view::npos       ? "auto"
+                           : message.find("\"mode\":\"manual\"") != std::string_view::npos   ? "manual"
+                           : message.find("\"mode\":\"realtime\"") != std::string_view::npos ? "realtime"
+                                                                                             : "-";
+        ESP_LOGI(detail::kTag, "LINX_SEND listen state=%s mode=%s", state, mode);
     } else if (is_abort) {
         ESP_LOGI(detail::kTag, "LINX_SEND abort");
     }
@@ -234,18 +244,19 @@ Status EspWebSocketTransport::Impl::SendAudio(voice::AudioFrame frame) {
     item->generation = frame.generation;
     item->sequence = frame.sequence;
     item->payload = std::move(frame.payload);
-    if (xQueueSend(tx_queue_, &item, 0) != pdTRUE) {
-        // Capture is a real-time producer. Preserve the newest audio instead
-        // of retaining stale speech that makes the interaction feel delayed.
-        detail::LinxTxItem* stale = nullptr;
-        if (xQueueReceive(tx_queue_, &stale, 0) == pdTRUE) {
-            ReleaseTxItem(stale);
-        }
-        if (xQueueSend(tx_queue_, &item, 0) != pdTRUE) {
-            ReleaseTxItem(item);
-            return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 队列已满");
-        }
+    // PCM is an ordered stream. Waiting briefly for the writer preserves the
+    // sequence instead of evicting an older frame and making STT observe a
+    // discontinuity. The capture producer is already decoupled by the audio
+    // handoff queue, so this bounded wait cannot block the I2S read task.
+    if (xQueueSend(tx_queue_, &item, pdMS_TO_TICKS(50)) != pdTRUE) {
+        tx_audio_dropped_.fetch_add(1, std::memory_order_relaxed);
+        ESP_LOGW(detail::kTag, "LINX_TX_AUDIO_DROP sequence=%llu queue_depth=%u",
+                 static_cast<unsigned long long>(frame.sequence),
+                 static_cast<unsigned>(uxQueueMessagesWaiting(tx_queue_)));
+        ReleaseTxItem(item);
+        return Status::Error(ErrorCode::kUnavailable, "ESP Linx TX 音频队列等待超时");
     }
+    tx_audio_enqueued_.fetch_add(1, std::memory_order_relaxed);
     return Status::Ok();
 }
 
@@ -437,8 +448,8 @@ bool EspWebSocketTransport::Impl::PrepareWorker() {
         return false;
     }
     // 统一 TX 队列：文本/音频/barrier 由唯一 TxTask 顺序发送。
-    // 16 x 20 ms 约 320 ms；发送闸门负责丢弃 stop 边界之后的迟到 PCM。
-    constexpr int kTxQueueDepth = 16;
+    // 32 x 20 ms 约 640 ms；音频满载时由 SendAudio 有界等待，不淘汰旧 PCM。
+    constexpr int kTxQueueDepth = 32;
 #if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
     tx_queue_ = xQueueCreateWithCaps(kTxQueueDepth, sizeof(detail::LinxTxItem*), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     tx_queue_uses_caps_ = tx_queue_ != nullptr;

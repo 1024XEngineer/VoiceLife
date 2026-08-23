@@ -364,6 +364,8 @@ class Runtime final {
         voice::VoiceSessionConfig config;
         config.session_id = "voicelife-linx-session";
         config.provider_id = "xrobot-websocket";
+        // A/B probe: keep the current transport and wake sequencing unchanged
+        // while measuring the historical realtime mode on the same SparkBot.
         config.mode = voice::VoiceMode::kRealtime;
         config.audio.codec = voice::AudioCodec::kPcmS16Le;
         config.audio.sample_rate_hz = 16000;
@@ -1195,12 +1197,23 @@ class Runtime final {
                 RestoreStandbyFromWakeTask();
                 continue;
             }
-            // SparkBot 目前没有 AEC。确认播报完成后才会由 kTtsStopped 进入
-            // kOpeningCapture，避免把“收到！”录回云端，也避免假“聆听中”。
-            const Status acknowledge = session_->NotifyLocalWakeWord(request.wake_word, "收到！");
+            // SparkBot 没有 AEC。普通唤醒只发送 Linx listen.detect，随后
+            // 立即进入 listen.start(auto)；不要把“收到！”作为远端确认 TTS
+            // 绑定到同一轮，否则 tts.stop 尚未到达时首轮 PCM 会与确认音交错，
+            // Linx 会将这条非法时序连接直接重置。屏幕确认仍由本地状态快照提供。
+            const Status acknowledge = session_->NotifyLocalWakeWord(request.wake_word);
             if (!acknowledge.ok()) {
                 ESP_LOGW(kTag, "唤醒确认请求失败: %s", acknowledge.message.c_str());
-                // 确认请求失败：回待机，不显示"出错了/牛牛走了"。
+                (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
+                continue;
+            }
+            // Linx requires detect -> listen.start in one ordered control
+            // sequence. Keep the physical input gated until the greeting TTS
+            // ends; VoiceSession will reuse this Provider lease when the
+            // interaction event loop later requests BeginCapture().
+            const Status provider_capture = session_->BeginProviderCapture();
+            if (!provider_capture.ok()) {
+                ESP_LOGW(kTag, "唤醒后 Provider 监听启动失败: %s", provider_capture.message.c_str());
                 (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
             }
         }
@@ -1532,8 +1545,13 @@ class Runtime final {
                 wake_ack_tts_started_at_us_ = esp_timer_get_time();
                 ESP_LOGI(kTag, "WAKE_ACK_LATENCY stage=tts_started ms=%lld", static_cast<long long>(wake_latency_ms));
             }
-        } else if (evidence.event == "tts_first_audio" && wake_ack_tts_started_at_us_ > 0) {
+        } else if (evidence.event == "tts_first_audio" && wake_ack_requested_at_us_ > 0) {
+            // Binary PCM can be delivered to the session before the event-loop
+            // item for tts.start is processed. The first actual audio is still
+            // the strongest proof that the greeting stream is alive, so it must
+            // cancel the bounded wake-greeting timer in either ordering.
             CancelListenTimer();
+            if (wake_ack_tts_started_at_us_ == 0) wake_ack_tts_started_at_us_ = esp_timer_get_time();
             const int64_t audio_latency_ms = (esp_timer_get_time() - wake_ack_requested_at_us_) / 1000;
             ESP_LOGI(kTag, "WAKE_ACK_LATENCY stage=first_audio ms=%lld", static_cast<long long>(audio_latency_ms));
         } else if (evidence.event == "tts_stopped" && wake_ack_tts_started_at_us_ > 0) {
@@ -1613,6 +1631,13 @@ class Runtime final {
             // 听到声音。首段 PCM 到达前保留 deadline，防止下行缓冲把首轮卡住。
             if (wake_ack_requested_at_us_ == 0) CancelListenTimer();
             (void)EnqueueEvent(voice::VoiceInteractionEvent::kTtsStarted);
+        } else if (evidence.event == "local_wake_detect_requested") {
+            // detect 已进入 TX FIFO。Linx 可能随后发送本地唤醒问候 TTS；
+            // 先确认协议顺序，再等待 tts.stop，超时才开启干净的用户采集。
+            ESP_LOGI(kTag, "LOCAL_WAKE_PROTOCOL_ACCEPTED action=await_greeting mode=%s",
+                     session_ != nullptr && session_->config().mode == voice::VoiceMode::kAuto ? "auto" : "realtime");
+            (void)EnqueueEvent(voice::VoiceInteractionEvent::kWakeDetectionAccepted);
+            StartListenTimer(kWakeAckFirstAudioTimeoutMs);
         } else if (evidence.event == "local_wake_ack_requested" || evidence.event == "interrupt_ack_requested") {
             // 本地唤醒/打断确认已提交给 Provider。直到首段 PCM 到达前保留
             // deadline；超时后直接开始采集，不能无限等待远端音频。
@@ -1632,7 +1657,7 @@ class Runtime final {
             }
             // 服务端可能先送文本字幕，数秒后才送 PCM。确认阶段只有实际
             // tts_first_audio 才能解除 deadline，不能把字幕当成已播放。
-            if (wake_ack_tts_started_at_us_ == 0) CancelListenTimer();
+            if (wake_ack_requested_at_us_ == 0) CancelListenTimer();
             if (!evidence.detail.empty()) {
                 // 事件化：文本经事件循环应用（唯一写者），门控仍在事件循环校验。
                 stt_display_text_ = evidence.detail;
@@ -2238,10 +2263,18 @@ class Runtime final {
                 continue;
             }
             if (item.listen_timeout) {
-                if (interaction_.state() == voice::VoiceInteractionState::kAcknowledging ||
-                    (interaction_.state() == voice::VoiceInteractionState::kSpeaking && wake_ack_requested_at_us_ > 0 &&
-                     wake_ack_tts_started_at_us_ > 0)) {
-                    ESP_LOGW(kTag, "ACK_FIRST_AUDIO_TIMEOUT transition=acknowledging_or_speaking->opening_capture");
+                if (interaction_.state() == voice::VoiceInteractionState::kAcknowledging) {
+                    // The Provider listen.start was already sent immediately
+                    // after detect. Timeout only opens the physical input; an
+                    // abort/restart here would create a second protocol turn.
+                    ESP_LOGW(kTag, "ACK_FIRST_AUDIO_TIMEOUT transition=acknowledging->opening_capture");
+                    wake_ack_requested_at_us_ = 0;
+                    wake_ack_tts_started_at_us_ = 0;
+                    wake_ack_until_us_ = 0;
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kAcknowledgementTimedOut);
+                } else if (interaction_.state() == voice::VoiceInteractionState::kSpeaking &&
+                           wake_ack_requested_at_us_ > 0) {
+                    ESP_LOGW(kTag, "ACK_FIRST_AUDIO_TIMEOUT transition=speaking->opening_capture");
                     if (session_) (void)session_->Interrupt();
                     // Interrupt 使旧确认流失效，迟到的 tts.stop 会由会话层
                     // 丢弃；这里必须立即清除归因，避免下一轮正常回复被误算
@@ -2291,6 +2324,13 @@ class Runtime final {
                 wake_ack_requested_at_us_ = now;
                 wake_ack_tts_started_at_us_ = 0;
                 wake_ack_until_us_ = now + kWakeAckDisplayUs;
+            }
+            if (item.event == voice::VoiceInteractionEvent::kWakeDetectionAccepted) {
+                // Keep the wake-greeting timing lease alive. A detect has been
+                // accepted by TX, but the microphone remains closed until the
+                // optional server greeting finishes or the bounded timer fires.
+                ESP_LOGI(kTag, "LOCAL_WAKE_GREETING_WAIT state=%d timeout_ms=%u",
+                         static_cast<int>(interaction_.state()), static_cast<unsigned>(kWakeAckFirstAudioTimeoutMs));
             }
             const Status wake_status = HandleInteractionEvent(item.event, item.wake_word);
             if (item.event != voice::VoiceInteractionEvent::kWakeDetected && !wake_status.ok()) {

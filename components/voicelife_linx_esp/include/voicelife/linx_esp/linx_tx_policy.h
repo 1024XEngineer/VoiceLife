@@ -18,9 +18,8 @@ enum class LinxTextTxLane { kControl, kMediaOrdered };
  */
 [[nodiscard]] inline LinxTextTxLane SelectLinxTextTxLane(std::string_view message) {
     const bool is_listen = message.find("\"type\":\"listen\"") != std::string_view::npos;
-    const bool is_listen_boundary =
-        is_listen && (message.find("\"state\":\"start\"") != std::string_view::npos ||
-                      message.find("\"state\":\"stop\"") != std::string_view::npos);
+    const bool is_listen_boundary = is_listen && (message.find("\"state\":\"start\"") != std::string_view::npos ||
+                                                  message.find("\"state\":\"stop\"") != std::string_view::npos);
     return is_listen_boundary ? LinxTextTxLane::kMediaOrdered : LinxTextTxLane::kControl;
 }
 

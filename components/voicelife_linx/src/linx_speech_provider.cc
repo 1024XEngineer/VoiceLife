@@ -1,5 +1,6 @@
 #include "voicelife/linx/linx_speech_provider.h"
 
+#include <algorithm>
 #include <chrono>
 #include <utility>
 
@@ -29,6 +30,41 @@ bool SameFormat(const voice::AudioFormat& left, const voice::AudioFormat& right)
 bool SameAudioFormats(const voice::VoiceAudioFormats& left, const voice::VoiceAudioFormats& right) {
     return SameFormat(left.capture, right.capture) && SameFormat(left.playback, right.playback);
 }
+
+#ifdef ESP_PLATFORM
+const char* MessageKindName(LinxMessageKind kind) {
+    switch (kind) {
+        case LinxMessageKind::kHello:
+            return "hello";
+        case LinxMessageKind::kStt:
+            return "stt";
+        case LinxMessageKind::kTts:
+            return "tts";
+        case LinxMessageKind::kMcp:
+            return "mcp";
+        case LinxMessageKind::kError:
+            return "error";
+        case LinxMessageKind::kGoodbye:
+            return "goodbye";
+        case LinxMessageKind::kLlm:
+            return "llm";
+    }
+    return "unknown";
+}
+
+const char* TtsStateName(const std::optional<LinxTtsState>& state) {
+    if (!state.has_value()) return "-";
+    switch (*state) {
+        case LinxTtsState::kStart:
+            return "start";
+        case LinxTtsState::kSentenceStart:
+            return "sentence_start";
+        case LinxTtsState::kStop:
+            return "stop";
+    }
+    return "unknown";
+}
+#endif
 
 }  // namespace
 
@@ -232,10 +268,12 @@ void LinxSpeechProviderAdapter::OnTransportConnected() {
         hello_status_ = Status::Ok();
     }
 #ifdef ESP_PLATFORM
-    ESP_LOGI("voicelife_linx", "LINX_HELLO_REQUEST format=%d sample_rate=%u channels=%u bits=%u frame_ms=%u",
+    ESP_LOGI("voicelife_linx",
+             "LINX_HELLO_REQUEST format=%d sample_rate=%u channels=%u bits=%u frame_ms=%u play_buffer_ms=%u",
              static_cast<int>(config_.audio.codec), static_cast<unsigned>(config_.audio.sample_rate_hz),
              static_cast<unsigned>(config_.audio.channels), static_cast<unsigned>(config_.audio.bits_per_sample),
-             static_cast<unsigned>(config_.audio.frame_duration_ms));
+             static_cast<unsigned>(config_.audio.frame_duration_ms),
+             static_cast<unsigned>(connection_.playback_buffer_duration_ms));
 #endif
     const Status status = Send(codec_.EncodeHello(config_, connection_));
     if (!status.ok()) {
@@ -306,6 +344,16 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
         return;
     }
     const LinxInboundMessage& inbound = *decoded.value;
+#ifdef ESP_PLATFORM
+    // Record the server's control sequence without exposing credentials. STT
+    // and TTS text are intentionally visible on the authorized hardware log so
+    // a reset can be correlated with the last protocol event.
+    const std::string_view text = inbound.text;
+    ESP_LOGI("voicelife_linx", "LINX_RX kind=%s tts_state=%s session_present=%d session_len=%u text=%.*s",
+             MessageKindName(inbound.kind), TtsStateName(inbound.tts_state), inbound.session_id.has_value() ? 1 : 0,
+             inbound.session_id.has_value() ? static_cast<unsigned>(inbound.session_id->size()) : 0U,
+             static_cast<int>(std::min<std::size_t>(text.size(), 160U)), text.data());
+#endif
     // Linx assigns session_id in its hello response. Only that first hello
     // can establish the remote ID; all later messages must match it.
     if (inbound.kind != LinxMessageKind::kHello) {
@@ -341,7 +389,8 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
                 const LinxAudioParams& negotiated = *inbound.audio_params;
 #ifdef ESP_PLATFORM
                 ESP_LOGI("voicelife_linx",
-                         "LINX_HELLO_RESPONSE format=%d sample_rate=%u channels=%u bits=%u frame_ms=%u session_present=%d session_len=%u",
+                         "LINX_HELLO_RESPONSE format=%d sample_rate=%u channels=%u bits=%u frame_ms=%u "
+                         "session_present=%d session_len=%u",
                          static_cast<int>(negotiated.codec), static_cast<unsigned>(negotiated.sample_rate_hz),
                          static_cast<unsigned>(negotiated.channels), static_cast<unsigned>(negotiated.bits_per_sample),
                          static_cast<unsigned>(negotiated.frame_duration_ms), inbound.session_id.has_value() ? 1 : 0,

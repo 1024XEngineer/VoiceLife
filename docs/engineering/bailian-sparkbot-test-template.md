@@ -86,9 +86,20 @@ SERIAL_VOICE_EVIDENCE event=standby_ready
 WAKE_DETECTED word=你好牛牛
 SERIAL_VOICE_EVIDENCE event=local_wake_ack_requested
 SERIAL_VOICE_EVIDENCE event=tts_started
-SERIAL_VOICE_EVIDENCE event=tts_first_audio
+SERIAL_VOICE_EVIDENCE event=tts_stopped
+LINX_SEND listen state=start mode=auto
 SERIAL_VOICE_EVIDENCE event=capture_started
 ```
+
+小智 SparkBot 的参考实现关闭 AEC 时使用 `auto`，并且在
+`CONFIG_SEND_WAKE_WORD_DATA=y` 时先发送 `listen.detect`；它只有开启设备或
+服务端 AEC 才切换 `realtime`。Linx 文档虽然推荐 `realtime`，但 VoiceLife
+当前使用 `auto`，因为 SparkBot 没有 AEC、VoiceLife 也没有经过验证的本地
+回采打断能力。SparkBot 的本地 MultiNet 没有唤醒词 Opus 缓存，
+但 Linx 仍要求先发送 `listen.detect` 建立会话；本链路只携带唤醒词，并请求
+一次短确认音。确认音结束后才发送 `listen.start(auto)`，屏幕再进入“聆听中”。
+这样避免服务端欢迎音频与首轮 PCM 交错，降低 Linx 会话边界断连。
+“别说了”打断和定时提醒仍可以单独使用正式的远端 TTS。
 
 唤醒脚本用 `WAKE_BEGIN` 的请求/响应确认测试任务和待机状态，不把只在固件启动时打印一次的
 `SERIAL_VOICE_TEST_READY=1` 当作每次串口连接的就绪信号。因此设备已经运行、重新打开串口时也可以重复执行；

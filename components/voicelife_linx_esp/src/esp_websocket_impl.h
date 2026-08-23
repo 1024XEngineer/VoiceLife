@@ -25,8 +25,10 @@ namespace detail {
 
 constexpr char kTag[] = "voicelife_linx_esp";
 constexpr size_t kMaxEventChunkBytes = 4096;
-// 16 media + 16 control + one in-flight writer + one replacement/stop item.
-constexpr size_t kTxItemPoolCapacity = 34;
+// 32 media + 16 control + one in-flight writer + one stop item.
+// Audio items hold pooled PCM leases, so this remains bounded while allowing
+// short TLS stalls without silently evicting an earlier speech frame.
+constexpr size_t kTxItemPoolCapacity = 50;
 constexpr EventBits_t kConnectedBit = BIT0;
 constexpr EventBits_t kFailedBit = BIT1;
 
@@ -110,6 +112,8 @@ class EspWebSocketTransport::Impl final {
     // capture frames are discarded instead of being sent after the stop frame.
     bool media_tx_open_ = false;
     uint64_t tx_audio_sent_ = 0;
+    std::atomic<uint64_t> tx_audio_enqueued_{0};
+    std::atomic<uint64_t> tx_audio_dropped_{0};
     TaskHandle_t tx_task_ = nullptr;
     // linx_ws_tx 任务栈常驻 PSRAM、TCB 在内部 RAM（一次性分配、跨连接复用，随
     // Transport 生命周期）：交互（采集+音频流）期间内部 RAM 最大连续块常 <16KB，

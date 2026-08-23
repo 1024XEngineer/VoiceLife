@@ -20,6 +20,8 @@ enum class VoiceInteractionEvent {
     /** 触摸松开：结束手动聆听。 */
     kPressUp,
     kWakeDetected,
+    /** 普通本地唤醒 detect 已入队；等待可选服务端问候 TTS 或超时。 */
+    kWakeDetectionAccepted,
     /** 打断确认已成功提交给 Provider：kInterrupting → kListening。 */
     kInterruptAcknowledged,
     kCaptureStarted,

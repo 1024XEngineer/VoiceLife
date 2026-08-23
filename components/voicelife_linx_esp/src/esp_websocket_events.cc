@@ -66,10 +66,9 @@ void EspWebSocketTransport::Impl::Enqueue(int32_t event_id, const esp_websocket_
         const int socket_errno = diagnostics_valid ? event_data->error_handle.esp_transport_sock_errno : 0;
         const bool handshake_failed = handshake_status != 0;
         const bool tls_failed = tls_last_error != 0 || tls_stack_error != 0 || tls_cert_flags != 0;
-        const bool ordered_close =
-            error_type == WEBSOCKET_ERROR_TYPE_SERVER_CLOSE ||
-            (tcp_transport_error && event_data != nullptr &&
-             event_data->error_handle.esp_tls_last_esp_err == ESP_ERR_ESP_TLS_TCP_CLOSED_FIN);
+        const bool ordered_close = error_type == WEBSOCKET_ERROR_TYPE_SERVER_CLOSE ||
+                                   (tcp_transport_error && event_data != nullptr &&
+                                    event_data->error_handle.esp_tls_last_esp_err == ESP_ERR_ESP_TLS_TCP_CLOSED_FIN);
         // On ESP-IDF, a peer TCP RST can arrive as ERROR_TYPE_NONE with all
         // diagnostic fields zero. It is still a lost WebSocket connection and
         // must enter the reconnect path. Handshake/TLS failures retain the
@@ -83,10 +82,9 @@ void EspWebSocketTransport::Impl::Enqueue(int32_t event_id, const esp_websocket_
             ESP_LOGW(detail::kTag,
                      "LINX_WS_ERROR_EVENT event=ERROR classified=%s type=%u close=%d handshake=%d tls_valid=%d tls=%d "
                      "stack=%d cert_flags=%d errno=%d",
-                     retryable_transport_loss ? "disconnect" : "error",
-                     static_cast<unsigned>(error_type), event_data->close_status_code,
-                     handshake_status, diagnostics_valid ? 1 : 0, tls_last_error, tls_stack_error, tls_cert_flags,
-                     socket_errno);
+                     retryable_transport_loss ? "disconnect" : "error", static_cast<unsigned>(error_type),
+                     event_data->close_status_code, handshake_status, diagnostics_valid ? 1 : 0, tls_last_error,
+                     tls_stack_error, tls_cert_flags, socket_errno);
         } else {
             ESP_LOGW(detail::kTag, "LINX_WS_ERROR_EVENT event=ERROR classified=error type=%u close=0 event_data=null",
                      static_cast<unsigned>(error_type));
@@ -165,6 +163,9 @@ void EspWebSocketTransport::Impl::TxEntry(void* argument) {
 void EspWebSocketTransport::Impl::TxLoop() {
     // 唯一 TX 任务：按队列顺序发送文本/音频，TLS 只在本任务运行。
     // 独立的短 TX 超时避免写阻塞拖垮采集；网络接收仍使用其正常预算。
+    uint64_t last_audio_generation = 0;
+    uint64_t last_audio_sequence = 0;
+    bool have_audio_sequence = false;
     while (running_.load()) {
         detail::LinxTxItem* item = nullptr;
         // 控制命令优先；作为音频结束边界的 listen.stop 已进入媒体 FIFO，
@@ -194,6 +195,7 @@ void EspWebSocketTransport::Impl::TxLoop() {
         });
         const size_t want = item->payload.size();
         const auto kind = item->kind;
+        const uint64_t generation = item->generation;
         const uint64_t sequence = item->sequence;
         ReleaseTxItem(item);
         item = nullptr;
@@ -219,6 +221,17 @@ void EspWebSocketTransport::Impl::TxLoop() {
             continue;
         }
         if (kind == detail::LinxTxItem::Kind::kAudio) {
+            // sequence restarts at zero for every listen.start media round. A
+            // new round is a boundary, not a missing frame in the previous one.
+            const bool new_media_round = sequence == 0 || generation != last_audio_generation;
+            if (have_audio_sequence && !new_media_round && sequence != last_audio_sequence + 1) {
+                ESP_LOGW(detail::kTag, "LINX_TX_AUDIO_GAP previous=%llu current=%llu generation=%llu",
+                         static_cast<unsigned long long>(last_audio_sequence),
+                         static_cast<unsigned long long>(sequence), static_cast<unsigned long long>(generation));
+            }
+            last_audio_generation = generation;
+            last_audio_sequence = sequence;
+            have_audio_sequence = true;
             ++tx_audio_sent_;
             if (tx_audio_sent_ <= 3 || tx_audio_sent_ % 20 == 0) {
                 ESP_LOGI(detail::kTag, "LINX_TX_AUDIO_SENT count=%llu sequence=%llu bytes=%u",

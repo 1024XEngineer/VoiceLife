@@ -102,6 +102,7 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
     }
     Status StartCapture(voicelife::voice::VoiceMode) override {
         ++starts;
+        calls.push_back("listen.start");
         return start_result;
     }
     Status StopCapture() override {
@@ -124,6 +125,7 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
     }
     Status NotifyLocalWakeWord(std::string_view wake_word, std::string_view text_response = {}) override {
         ++wake_notifications;
+        calls.push_back("listen.detect");
         last_wake_word = std::string(wake_word);
         last_wake_response = std::string(text_response);
         return wake_notification_result;
@@ -169,6 +171,7 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
     int speaks = 0;
     int wake_notifications = 0;
     int disconnects = 0;
+    std::vector<std::string> calls;
     std::string last_wake_word;
     std::string last_wake_response;
 };
@@ -237,19 +240,19 @@ int main() {
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady, "启动后应进入 ready");
     Check(session.NotifyLocalWakeWord("你好牛牛", "收到！").ok() && provider.wake_notifications == 1 &&
               provider.last_wake_word == "你好牛牛" && provider.last_wake_response == "收到！",
-          "本地唤醒确认必须只通过 Provider 请求受控 TTS");
+          "普通本地唤醒必须通过 Provider 请求受控确认 TTS");
     provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
                                                .generation = session.generation(),
                                                .text = {},
                                                .aborted = false});
     Check(session.state() == voicelife::voice::VoiceSessionState::kSpeaking,
-          "本地唤醒确认的真实 TTS start 才能进入 speaking");
+          "唤醒确认的真实 TTS start 才能进入 speaking");
     provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStopped,
                                                .generation = session.generation(),
                                                .text = {},
                                                .aborted = false});
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady,
-          "本地唤醒确认 TTS 结束后会话必须允许开始真实聆听");
+          "唤醒确认 TTS 结束后会话必须允许开始真实聆听");
     session.ReportToolCallStarted();
     session.ReportToolResult("event=创建会议", true);
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady && provider.audio_frames == 0 &&
@@ -394,6 +397,44 @@ int main() {
     Check(input.EmitCapture(Frame(0, 0)).code == ErrorCode::kUnavailable,
           "停止会话应清理输入回调，避免资源关闭后的迟到帧");
     Check(evidence_count >= 4, "会话生命周期应产出可关联的证据事件");
+
+    FakeInput wake_input;
+    FakeOutput wake_output;
+    FakeProvider wake_provider;
+    std::vector<voicelife::voice::VoiceEvidence> wake_evidence;
+    voicelife::voice::VoiceSession wake_session(wake_input, wake_output, wake_provider,
+                                                [&wake_evidence](const auto& item) { wake_evidence.push_back(item); });
+    auto wake_config = Config();
+    wake_config.mode = voicelife::voice::VoiceMode::kAuto;
+    Check(wake_session.Start(wake_config).ok() && wake_session.NotifyLocalWakeWord("你好牛牛").ok(),
+          "普通唤醒应先提交 detect");
+    Check(wake_provider.calls == std::vector<std::string>{"listen.detect"} && wake_provider.starts == 0 &&
+              wake_input.starts == 0,
+          "detect 后尚未进入协议监听时不得打开物理输入");
+    Check(wake_session.BeginProviderCapture().ok() &&
+              wake_provider.calls == std::vector<std::string>{"listen.detect", "listen.start"} &&
+              wake_provider.starts == 1 && wake_input.starts == 0,
+          "普通唤醒必须按 detect -> listen.start 顺序发送且暂不打开物理输入");
+    const uint64_t wake_generation = wake_session.generation();
+    Check(wake_input.EmitCapture(Frame(wake_generation, 0)).code == ErrorCode::kUnavailable,
+          "问候 TTS 阶段的物理 PCM 不得进入 Provider");
+    wake_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kAsrText,
+                                                    .generation = wake_generation,
+                                                    .text = "你好牛牛",
+                                                    .aborted = false});
+    Check(!wake_evidence.empty() && wake_evidence.back().event == "wake_echo_suppressed",
+          "服务端回传唤醒词必须只抑制一次，不得武装错误回复");
+    wake_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
+                                                    .generation = wake_generation,
+                                                    .text = {},
+                                                    .aborted = false});
+    wake_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStopped,
+                                                    .generation = wake_generation,
+                                                    .text = {},
+                                                    .aborted = false});
+    Check(wake_session.BeginCapture().ok() && wake_provider.starts == 1 && wake_input.starts == 1,
+          "问候结束后应只开启物理采集，不重复发送 listen.start");
+    Check(wake_session.EndCapture().ok(), "普通唤醒后的真实采集应可正常结束");
 
     FakeInput acknowledged_wake_input;
     FakeOutput acknowledged_wake_output;

@@ -87,6 +87,20 @@ class SerialLog:
                     raise TimeoutError(marker)
                 self._condition.wait(timeout=remaining)
 
+    def wait_for_any(self, markers: tuple[str, ...], after: int, timeout: float) -> tuple[int, str]:
+        """Wait for the first event in a protocol alternative set."""
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while True:
+                for index in range(after, len(self._items)):
+                    line = self._items[index][1]
+                    if any(marker in line for marker in markers):
+                        return index + 1, line
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(" or ".join(markers))
+                self._condition.wait(timeout=remaining)
+
     def lines_since(self, after: int) -> list[str]:
         with self._condition:
             return [line for _, line in self._items[after:]]
