@@ -1197,11 +1197,11 @@ class Runtime final {
                 RestoreStandbyFromWakeTask();
                 continue;
             }
-            // SparkBot 没有 AEC。普通唤醒只发送 Linx listen.detect，随后
-            // 立即进入 listen.start(auto)；不要把“收到！”作为远端确认 TTS
-            // 绑定到同一轮，否则 tts.stop 尚未到达时首轮 PCM 会与确认音交错，
-            // Linx 会将这条非法时序连接直接重置。屏幕确认仍由本地状态快照提供。
-            const Status acknowledge = session_->NotifyLocalWakeWord(request.wake_word);
+            // SparkBot 没有 AEC。普通唤醒先请求一次明确的“收到！”确认音，
+            // 再按 detect -> listen.start 顺序进入同一 Linx 会话；VoiceSession
+            // 会等确认 TTS 的 stop 或有界超时后才打开物理麦克风，避免自我介绍
+            // 或确认音被采进首轮用户语音。
+            const Status acknowledge = session_->NotifyLocalWakeWord(request.wake_word, "收到！");
             if (!acknowledge.ok()) {
                 ESP_LOGW(kTag, "唤醒确认请求失败: %s", acknowledge.message.c_str());
                 (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
