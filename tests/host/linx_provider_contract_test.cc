@@ -101,7 +101,8 @@ voicelife::linx::LinxConnectionConfig Connection() {
             .token_ref = "secret://linx/device-token",
             .device_id = "device-test",
             .client_id = "client-test",
-            .agent_id = std::string("agent-test")};
+            .agent_id = std::string("agent-test"),
+            .preferred_audio = std::nullopt};
 }
 
 }  // namespace
