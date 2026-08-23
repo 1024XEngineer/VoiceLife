@@ -473,6 +473,8 @@ void TestToolListing() {
     yyjson_val* level = yyjson_obj_get(properties, "level");
     yyjson_val* label = yyjson_obj_get(properties, "label");
     Check(yyjson_equals_str(yyjson_obj_get(configure, "name"), "self.device.configure") &&
+              yyjson_is_int(yyjson_obj_get(configure, "type")) &&
+              yyjson_get_sint(yyjson_obj_get(configure, "type")) == 0 &&
               yyjson_equals_str(yyjson_obj_get(level, "type"), "integer") &&
               yyjson_get_sint(yyjson_obj_get(level, "minimum")) == 0 &&
               yyjson_get_sint(yyjson_obj_get(level, "maximum")) == 100,

@@ -217,7 +217,7 @@ bool AppendInputField(yyjson_mut_doc* document, yyjson_mut_val* object, std::str
 bool AppendTool(yyjson_mut_doc* document, yyjson_mut_val* tools, const ToolDefinition& definition) {
     yyjson_mut_val* tool = yyjson_mut_obj(document);
     if (tool == nullptr || !AddString(document, tool, "name", definition.name) ||
-        !AddString(document, tool, "description", definition.description)) {
+        !AddString(document, tool, "description", definition.description) || !AddInteger(document, tool, "type", 0)) {
         return false;
     }
 

@@ -21,6 +21,12 @@ namespace voicelife::runtime {
 namespace {
 
 constexpr char kTag[] = "SerialVoiceTest";
+// Serial PCM arrives from a host-side real-time fixture. Unlike the I2S
+// capture task, this dedicated test task may briefly wait for the bounded
+// transport backlog to drain, preserving the exact source utterance instead
+// of manufacturing a lost-frame failure during a TLS stall.
+constexpr uint32_t kPayloadAcquireTimeoutMs = 2000;
+constexpr uint32_t kPayloadAcquirePollMs = 5;
 Status Unavailable(const char* message) { return Status::Error(ErrorCode::kUnavailable, message); }
 
 }  // namespace
@@ -110,6 +116,17 @@ class SerialVoiceTest::Impl final {
         }
     }
 
+    voice::AudioPayload AcquirePcmPayload() {
+        const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(kPayloadAcquireTimeoutMs);
+        while (!stopping_.load()) {
+            voice::AudioPayload payload = payload_pool_->TryAcquire();
+            if (payload.pooled()) return payload;
+            if (xTaskGetTickCount() >= deadline) break;
+            vTaskDelay(pdMS_TO_TICKS(kPayloadAcquirePollMs));
+        }
+        return {};
+    }
+
     void Run() {
         ESP_LOGI(kTag, "SERIAL_VOICE_TEST_READY=1 protocol=VLVT-v1 pcm=s16le-16000-mono-20ms payload_bytes=%u",
                  static_cast<unsigned>(detail::kSerialVoicePcmBytes));
@@ -162,9 +179,10 @@ class SerialVoiceTest::Impl final {
                             .channels = 1,
                             .bits_per_sample = 16,
                             .frame_duration_ms = 20};
-            frame.payload = payload_pool_->TryAcquire();
+            frame.payload = AcquirePcmPayload();
             if (!frame.payload.pooled()) {
-                ESP_LOGW(kTag, "SERIAL_VOICE_PCM=reject code=%d", static_cast<int>(ErrorCode::kUnavailable));
+                ESP_LOGW(kTag, "SERIAL_VOICE_PCM=reject code=%d reason=payload_backpressure_timeout",
+                         static_cast<int>(ErrorCode::kUnavailable));
                 continue;
             }
             std::memcpy(frame.payload.data(), payload.data(), payload.size());
