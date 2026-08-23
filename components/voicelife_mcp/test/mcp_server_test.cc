@@ -463,6 +463,8 @@ void TestToolListing() {
     Check(document != nullptr, "tools/list 应序列化为合法 JSON");
     yyjson_val* tools = yyjson_obj_get(yyjson_doc_get_root(document), "tools");
     Check(yyjson_is_arr(tools) && yyjson_arr_size(tools) == 3, "tools/list JSON 应包含全部工具");
+    Check(yyjson_is_null(yyjson_obj_get(yyjson_doc_get_root(document), "nextCursor")),
+          "tools/list JSON 应包含空的 nextCursor 分页字段");
 
     yyjson_val* configure = yyjson_arr_get(tools, 0);
     yyjson_val* configure_schema = yyjson_obj_get(configure, "inputSchema");

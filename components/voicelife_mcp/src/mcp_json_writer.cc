@@ -272,6 +272,14 @@ std::string SerializeListToolsResult(const ListToolsResult& result) {
         }
     }
 
+    // Linx treats tools/list as a paginated response even when all tools fit
+    // in one page. An explicit nullable cursor is required to complete the
+    // discovery exchange; omitting it causes the platform to reset the
+    // WebSocket before it can issue tools/call.
+    if (!yyjson_mut_obj_add(root, MakeString(document.get(), "nextCursor"), yyjson_mut_null(document.get()))) {
+        return "{}";
+    }
+
     return WriteDocument(document.get());
 }
 
