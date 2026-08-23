@@ -316,14 +316,40 @@ def run_turn(
         # utterance drains. Scale the endpoint window with the injected frame
         # count, but cap it so a genuinely stuck turn still fails promptly.
         turn_end_timeout = min(60.0, max(15.0, 10.0 + len(prepared.frames) * 0.1))
+        # Auto mode may let Linx's server VAD finish the turn before the USB
+        # fixture's explicit END packet reaches the state machine. In that
+        # ordering STT is the authoritative endpoint and is already followed
+        # by the same TTS state flow; waiting for a later local stop would
+        # skip the valid ASR line and manufacture a timeout.
         cursor, endpoint_marker = log.wait_for_any(
-            ("SERIAL_VOICE_TURN_END", "SERIAL_VOICE_EVIDENCE event=capture_stopped "),
+            (
+                "SERIAL_VOICE_TURN_END",
+                "SERIAL_VOICE_EVIDENCE event=capture_stopped ",
+                "SERIAL_VOICE_EVIDENCE event=stt_text_received ",
+            ),
             turn_cursor,
             turn_end_timeout,
         )
+        asr_line: str | None = None
+        if "event=stt_text_received" in endpoint_marker:
+            asr_line = endpoint_marker
         if "SERIAL_VOICE_TURN_END" in endpoint_marker:
             if "=ok" not in endpoint_marker and not result.input_endpoint_truncated:
                 raise RuntimeError(f"turn_end_failed:{endpoint_marker}")
+            cursor, endpoint_followup = log.wait_for_any(
+                (
+                    "SERIAL_VOICE_EVIDENCE event=capture_stopped ",
+                    "SERIAL_VOICE_EVIDENCE event=stt_text_received ",
+                ),
+                cursor,
+                response_timeout,
+            )
+            if "event=stt_text_received" in endpoint_followup:
+                asr_line = endpoint_followup
+                capture_stopped_seen = False
+            else:
+                capture_stopped_seen = True
+        elif asr_line is not None:
             capture_stopped_seen = False
         else:
             # Local VAD is a valid endpoint even when the USB fixture's END
@@ -332,10 +358,11 @@ def run_turn(
         # Local VAD can stop capture before the explicit host end packet. The
         # packet still terminates injection, but the real state transition is
         # valid from any point after this turn began.
-        if not capture_stopped_seen:
-            cursor, _ = wait_evidence(log, "capture_stopped", cursor, 12)
-        cursor, asr = wait_evidence(log, "stt_text_received", cursor, response_timeout)
-        result.asr_text = evidence_text(asr)
+        if asr_line is None:
+            if not capture_stopped_seen:
+                cursor, _ = wait_evidence(log, "capture_stopped", cursor, 12)
+            cursor, asr_line = wait_evidence(log, "stt_text_received", cursor, response_timeout)
+        result.asr_text = evidence_text(asr_line)
         result.asr_matches_input = normalize_transcript(result.asr_text) == normalize_transcript(result.input_text)
         cursor, _ = wait_evidence(log, "tts_started", cursor, response_timeout)
         # Linx may announce the first display sentence before its first PCM
