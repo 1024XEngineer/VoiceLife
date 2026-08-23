@@ -312,10 +312,11 @@ def run_turn(
             time.sleep(0.02)
         device.write(packet(END))
         device.flush()
-        # The serial task may wait for a pooled PCM payload while the Linx TX
-        # queue drains. Give the explicit host endpoint a bounded window that
-        # covers that backpressure without masking a genuinely stuck turn.
-        cursor, end_result = log.wait_for("SERIAL_VOICE_TURN_END", turn_cursor, 15)
+        # The serial task may wait for pooled PCM payloads while a long Linx
+        # utterance drains. Scale the endpoint window with the injected frame
+        # count, but cap it so a genuinely stuck turn still fails promptly.
+        turn_end_timeout = min(60.0, max(15.0, 10.0 + len(prepared.frames) * 0.1))
+        cursor, end_result = log.wait_for("SERIAL_VOICE_TURN_END", turn_cursor, turn_end_timeout)
         if "=ok" not in end_result and not result.input_endpoint_truncated:
             raise RuntimeError(f"turn_end_failed:{end_result}")
         # Local VAD can stop capture before the explicit host end packet. The
