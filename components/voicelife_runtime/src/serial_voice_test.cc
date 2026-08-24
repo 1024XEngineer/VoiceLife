@@ -12,8 +12,10 @@
 
 #ifdef ESP_PLATFORM
 #include "driver/usb_serial_jtag.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #endif
 
@@ -60,7 +62,10 @@ class SerialVoiceTest::Impl final {
         }
         stopping_.store(false);
         TaskHandle_t created_task = nullptr;
-        if (xTaskCreate(&TaskEntry, "serial_voice_test", 4096, this, 3, &created_task) != pdPASS) {
+        // The harness starts after the production voice stack is ready, when TLS/MCP/audio startup may
+        // have fragmented internal RAM. It performs no cache-disabled work, so keep its stack in PSRAM.
+        if (xTaskCreateWithCaps(&TaskEntry, "serial_voice_test", 4096, this, 3, &created_task,
+                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
             task_.store(nullptr);
             return Unavailable("创建串口语音测试任务失败");
         }
@@ -84,7 +89,7 @@ class SerialVoiceTest::Impl final {
 #ifdef ESP_PLATFORM
     static void TaskEntry(void* context) {
         static_cast<Impl*>(context)->Run();
-        vTaskDelete(nullptr);
+        vTaskDeleteWithCaps(nullptr);
     }
 
     bool ReadByte(uint8_t* destination) { return usb_serial_jtag_read_bytes(destination, 1, pdMS_TO_TICKS(100)) == 1; }

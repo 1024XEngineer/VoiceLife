@@ -396,8 +396,11 @@ class Runtime final {
         if (wake_queue_ == nullptr) {
             wake_queue_ = xQueueCreate(4, sizeof(BoardRequest));
             if (wake_queue_ == nullptr) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒队列失败"));
-            const BaseType_t task_status =
-                xTaskCreate(&Runtime::WakeTaskEntry, "voicelife_wake", 4096, this, 5, &wake_task_);
+            // VoiceSession::Start may receive the Linx initialize/tools/list burst before returning.
+            // Keep this long-lived control stack in PSRAM so startup does not depend on the remaining
+            // largest internal heap block after TLS, MCP schema serialization and codec initialization.
+            const BaseType_t task_status = xTaskCreateWithCaps(&Runtime::WakeTaskEntry, "voicelife_wake", 4096, this, 5,
+                                                               &wake_task_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (task_status != pdPASS) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒控制任务失败"));
         }
         EnqueueEvent(voice::VoiceInteractionEvent::kBootCompleted);
@@ -693,7 +696,10 @@ class Runtime final {
         bool expected = false;
         if (!im_action_worker_running_.compare_exchange_strong(expected, true)) return;
         im_action_worker_stopped_.store(false);
-        if (xTaskCreate(&Runtime::ReminderActionTaskEntry, "voicelife_im_actions", 8192, this, 3, nullptr) != pdPASS) {
+        // This task is created at reminder time, when TLS/audio allocations can leave no contiguous
+        // 8KB internal block. Its HTTPS/SSE work does not require an internal-memory stack.
+        if (xTaskCreateWithCaps(&Runtime::ReminderActionTaskEntry, "voicelife_im_actions", 8192, this, 3, nullptr,
+                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
             im_action_worker_running_.store(false);
             im_action_worker_stopped_.store(true);
             ESP_LOGW(kTag, "IM_ACTION_TASK_FAILED=1");
@@ -787,7 +793,7 @@ class Runtime final {
         // im_action_worker_stopped_ is set immediately before self-deletion. No
         // Runtime-owned dependency is accessed after this call, so teardown may
         // safely release the channel and executor after observing the flag.
-        vTaskDelete(nullptr);
+        vTaskDeleteWithCaps(nullptr);
     }
 
     bool StopReminderActionWorker() {
