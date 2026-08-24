@@ -8,8 +8,16 @@
 #include "voicelife/contracts/im/im_contracts.h"
 #include "voicelife/im/im_reporting_channel.h"
 
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
+
 namespace voicelife::runtime {
 namespace {
+
+#ifdef ESP_PLATFORM
+constexpr char kLogTag[] = "VoiceLifeReminderIm";
+#endif
 
 std::string FormatIso(schedule::DateTime value) {
     const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(value.time_since_epoch()).count();
@@ -78,13 +86,30 @@ Status ImScheduleReminderNotification::SendScheduleReminder(const schedule::Sche
     intent.occurredAt = FormatIso(task.triggered_at.value_or(task.trigger_at));
 
     const im::ReportResult result = reporting->SubmitNotification(intent);
+#ifdef ESP_PLATFORM
+    ESP_LOGI(kLogTag, "IM_REMINDER_SUBMIT_RESULT status=%d response_bytes=%u correlation_id=%s reminder_trigger_id=%s",
+             static_cast<int>(result.status), static_cast<unsigned>(result.response_body.size()),
+             intent.correlationId.c_str(), intent.reminderTriggerId.c_str());
+#endif
     if (result.status == im::ReportStatus::kSubmitted) {
+        auto window = im::ExtractActionWindow(result.response_body);
+#ifdef ESP_PLATFORM
+        if (window.has_value()) {
+            ESP_LOGI(kLogTag, "IM_ACTION_WINDOW_ACCEPTED=1 reminder_trigger_id=%s expires_at=%s",
+                     window->reminderTriggerId.c_str(), window->expiresAt.c_str());
+        } else {
+            ESP_LOGW(kLogTag, "IM_ACTION_WINDOW_ACCEPTED=0 reminder_trigger_id=%s", intent.reminderTriggerId.c_str());
+        }
+#endif
         if (action_window_sink_) {
-            auto window = im::ExtractActionWindow(result.response_body);
             if (window.has_value()) action_window_sink_(std::move(*window));
         }
         return Status::Ok();
     }
+#ifdef ESP_PLATFORM
+    ESP_LOGW(kLogTag, "IM_REMINDER_SUBMIT_FAILED=1 status=%d correlation_id=%s reminder_trigger_id=%s",
+             static_cast<int>(result.status), intent.correlationId.c_str(), intent.reminderTriggerId.c_str());
+#endif
     const ErrorCode code =
         result.status == im::ReportStatus::kRetryable ? ErrorCode::kUnavailable : ErrorCode::kInternal;
     return Status::Error(code, result.message.empty() ? "IM 提醒通知提交失败" : result.message);

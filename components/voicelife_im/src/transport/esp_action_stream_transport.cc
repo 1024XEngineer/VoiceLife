@@ -86,6 +86,8 @@ bool EspActionStreamTransport::Open(const std::string& last_event_id) {
     decoder_.Reset();
     pending_.clear();
     open_ = true;
+    ESP_LOGI(kTag, "IM_ACTION_STREAM_OPENED=1 reminder_trigger_id=%s resumed=%d", reminder_trigger_id_.c_str(),
+             last_event_id.empty() ? 0 : 1);
     return true;
 }
 
@@ -121,6 +123,10 @@ StreamRead EspActionStreamTransport::Next() {
                 CloseConnection();
                 return {StreamReadStatus::kProtocolError, {}};
             }
+            ESP_LOGI(kTag,
+                     "IM_ACTION_COMMAND_RECEIVED=1 command_id=%s operation_id=%s reminder_trigger_id=%s action=%s",
+                     command.commandId.c_str(), command.operationId.c_str(), command.reminderTriggerId.c_str(),
+                     command.action.c_str());
             return {StreamReadStatus::kCommand, command};
         }
         char buffer[kSseReadBufferSize];

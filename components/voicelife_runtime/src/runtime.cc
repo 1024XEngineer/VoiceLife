@@ -698,6 +698,8 @@ class Runtime final {
 
     void EnqueueReminderActionWindow(im::ActionWindow window) {
 #if CONFIG_VOICELIFE_IM_GATEWAY
+        ESP_LOGI(kTag, "IM_ACTION_WINDOW_ENQUEUED=1 reminder_trigger_id=%s expires_at=%s",
+                 window.reminderTriggerId.c_str(), window.expiresAt.c_str());
         {
             std::lock_guard<std::mutex> lock(im_action_mutex_);
             im_action_windows_.push_back(std::move(window));
@@ -753,6 +755,10 @@ class Runtime final {
             }
             im::EspActionStreamTransport stream(im_gateway_origin_, im_config_, window.reminderTriggerId);
             const im::ActionRunResult result = im_action_channel_->Run(stream, window);
+            ESP_LOGI(kTag,
+                     "IM_ACTION_STREAM_RESULT status=%d executed=%d confirmed=%d dropped=%d reminder_trigger_id=%s",
+                     static_cast<int>(result.status), result.executed, result.confirmed, result.dropped,
+                     window.reminderTriggerId.c_str());
             if (result.status == im::ActionRunStatus::kDisconnected) {
                 {
                     std::lock_guard<std::mutex> lock(im_action_mutex_);
@@ -793,6 +799,10 @@ class Runtime final {
                 }
                 im::EspActionStreamTransport stream(im_gateway_origin_, im_config_, window.reminderTriggerId);
                 const im::ActionRunResult result = im_action_channel_->Run(stream, window);
+                ESP_LOGI(kTag,
+                         "IM_ACTION_STREAM_RESULT status=%d executed=%d confirmed=%d dropped=%d reminder_trigger_id=%s",
+                         static_cast<int>(result.status), result.executed, result.confirmed, result.dropped,
+                         window.reminderTriggerId.c_str());
                 if (result.status == im::ActionRunStatus::kDisconnected) {
                     {
                         std::lock_guard<std::mutex> lock(im_action_mutex_);
