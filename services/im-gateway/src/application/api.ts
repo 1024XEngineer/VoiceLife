@@ -17,6 +17,7 @@ import type {
     ReminderActionCommand,
     ReminderActionKind,
     ReminderActionResult,
+    VoiceReminderActionStatus,
     ScheduleReceiptIntent,
     ScheduleQueryResultIntent,
 } from '../contracts/device-gateway.js';
@@ -336,6 +337,12 @@ export interface ActionApplication {
      * @returns 归并结果后的动作记录。
      */
     recordResult(commandId: ActionId, deviceId: DeviceId, result: ReminderActionResult): Promise<ImAction>;
+    /**
+     * 归并设备语音直接消费的动作状态，并关闭同一提醒的其他待处理动作。
+     * @param status 已校验的设备语音动作状态。
+     * @returns 归并结果后的动作记录。
+     */
+    recordVoiceStatus(status: VoiceReminderActionStatus): Promise<readonly ImAction[]>;
     /**
      * 关闭所有超过截止时间的未完成动作。
      * @returns 本次过期的动作数量。

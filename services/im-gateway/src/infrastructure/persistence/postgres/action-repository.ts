@@ -45,6 +45,16 @@ export class PostgresActionRepository implements ActionRepository {
         return row === undefined ? undefined : mapAction(row);
     }
 
+    /** {@inheritDoc ActionRepository.findByResultOperationId} */
+    public async findByResultOperationId(operationId: OperationId): Promise<ImAction | undefined> {
+        const row = await queryOne(
+            this.executor,
+            "SELECT * FROM im_actions WHERE result->>'operationId' = $1 LIMIT 1",
+            [operationId],
+        );
+        return row === undefined ? undefined : mapAction(row);
+    }
+
     /** {@inheritDoc ActionRepository.findByActionKeyHash} */
     public async findByActionKeyHash(actionKeyHash: string): Promise<ImAction | undefined> {
         const row = await queryOne(this.executor, 'SELECT * FROM im_actions WHERE action_key_hash = $1 LIMIT 1', [

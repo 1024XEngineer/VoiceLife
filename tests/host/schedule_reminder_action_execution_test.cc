@@ -93,6 +93,13 @@ void CheckActionValidationAndConflicts() {
     Check(
         replayed.ok() && replayed.value->replayed && replayed.value->next_trigger_at == snoozed.value->next_trigger_at,
         "相同动作应重放持久化结果");
+    const auto pending_reports = fixture.reminder.PendingVoiceActionReports();
+    Check(pending_reports.ok() && pending_reports.value->size() == 1 &&
+              pending_reports.value->front().operation_id == "operation-1",
+          "本地动作完成后应保留待上报事实");
+    Check(fixture.reminder.MarkVoiceActionReported("operation-1").ok() &&
+              !fixture.reminder.HasPendingVoiceActionReports(),
+          "Gateway 接受后应将待上报事实标记为已完成");
     Check(
         fixture.reminder.ExecuteReminderAction(Action("operation-2", "trigger-1", ScheduleReminderActionKind::kSnooze))
                 .status.code == ErrorCode::kAlreadyExists,

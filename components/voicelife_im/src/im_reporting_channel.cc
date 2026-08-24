@@ -14,6 +14,7 @@ constexpr const char* kNotificationPath = "/v1/im/notifications";
 constexpr const char* kReminderActionResultPrefix = "/v1/devices/";
 constexpr const char* kReminderActionResultSuffix = "/reminder-actions/";
 constexpr const char* kReminderActionResultResultSuffix = "/result";
+constexpr const char* kVoiceReminderActionStatusPath = "/v1/im/reminder-action-statuses";
 
 /// 发送前契约校验：序列化结果必须能通过网关契约解析，否则本地拒绝。
 bool ValidatesAsScheduleReceipt(const std::string& body) {
@@ -44,6 +45,12 @@ bool ValidatesAsActionResult(const std::string& body) {
     voicelife::JsonValue root;
     contracts::im::ReminderActionResult validated;
     return voicelife::ParseJson(body, root).ok() && contracts::im::ParseReminderActionResult(root, validated).ok();
+}
+
+bool ValidatesAsVoiceStatus(const std::string& body) {
+    voicelife::JsonValue root;
+    contracts::im::VoiceReminderActionStatus validated;
+    return voicelife::ParseJson(body, root).ok() && contracts::im::ParseVoiceReminderActionStatus(root, validated).ok();
 }
 
 }  // namespace
@@ -83,6 +90,13 @@ ReportResult ImReportingChannel::SubmitReminderActionResult(const contracts::im:
     const std::string path = kReminderActionResultPrefix + EncodePathSegment(device_id) + kReminderActionResultSuffix +
                              EncodePathSegment(command_id) + kReminderActionResultResultSuffix;
     return Submit(path, result.operationId, device_id, body);
+}
+
+ReportResult ImReportingChannel::SubmitVoiceReminderActionStatus(
+    const contracts::im::VoiceReminderActionStatus& status) {
+    const std::string body = SerializeVoiceReminderActionStatus(status);
+    if (!ValidatesAsVoiceStatus(body)) return {ReportStatus::kRejected, "发送前契约校验失败", ""};
+    return Submit(kVoiceReminderActionStatusPath, status.eventId, status.deviceId, body);
 }
 
 ReportResult ImReportingChannel::Submit(const std::string& path, const std::string& idempotency_key,

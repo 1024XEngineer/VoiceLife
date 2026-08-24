@@ -50,6 +50,8 @@ struct ScheduleReminderTask {
     std::optional<ScheduleReminderActionKind> action_kind;
     std::optional<DateTime> action_occurred_at;
     std::optional<DateTime> action_next_trigger_at;
+    // 本地动作已完成，但语音事实尚未被 Gateway 接受时保留为 durable outbox。
+    bool action_reported = false;
     DateTime created_at;
     DateTime updated_at;
 };

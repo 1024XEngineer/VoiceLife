@@ -281,13 +281,24 @@ class Runtime final {
         schedule_reminder_service_ = std::make_unique<schedule::ScheduleReminderService>(
             storage_.GetScheduleRepository(), storage_.GetScheduleReminderTaskRepository(), schedule_service_,
             schedule_rule_service_, *timing_runtime_, *reminder_speech_, reminder_notification_.get());
+        voice_action_reporter_ =
+            std::make_unique<ImVoiceReminderActionReporter>(im_runtime_, *schedule_reminder_service_);
         reminder_action_executor_ = std::make_unique<ImScheduleReminderActionExecutor>(*schedule_reminder_service_);
         // 先注册 MCP 工具契约，再启动提醒任务。工具注册会建立参数 Schema 和
         // handler 闭包，属于一次性启动分配；提醒运行时随后启动，避免两者在
         // 内部堆上同时竞争初始化峰值。回调只有在 MCP worker 启动后才会执行。
         if (!schedule_mcp_registered_) {
-            init_status_ = mcp::RegisterScheduleMcpTools(mcp_server_, schedule_service_, schedule_rule_service_,
-                                                         schedule_operation_service_, schedule_reminder_service_.get());
+            init_status_ = mcp::RegisterScheduleMcpTools(
+                mcp_server_, schedule_service_, schedule_rule_service_, schedule_operation_service_,
+                schedule_reminder_service_.get(),
+                {.runtime = &im_runtime_, .voice_action_reporter = [this](const auto& result) {
+                     if (voice_action_reporter_ == nullptr) {
+                         return Status::Error(ErrorCode::kUnavailable, "语音动作上报器未初始化");
+                     }
+                     const Status reported = voice_action_reporter_->Report(result);
+                     if (!reported.ok()) DrainReminderActionWindows();
+                     return reported;
+                 }});
             if (!init_status_.ok()) return fail_startup(init_status_);
             schedule_mcp_registered_ = true;
             // MCP worker 只产生绑定结果；轮询与 OLED/TTS 均由各自受控任务处理。
@@ -453,6 +464,7 @@ class Runtime final {
         }
         im_action_channel_.reset();
         reminder_action_executor_.reset();
+        voice_action_reporter_.reset();
         schedule_reminder_service_.reset();
         reminder_notification_.reset();
         reminder_speech_.reset();
@@ -694,7 +706,9 @@ class Runtime final {
 
     void DrainReminderActionWindows() {
 #if CONFIG_VOICELIFE_IM_GATEWAY
-        if (im_action_stop_.load() || !reminder_action_executor_ || !im_runtime_.reporting_channel()) return;
+        if (im_action_stop_.load() || !reminder_action_executor_ || !voice_action_reporter_ ||
+            !im_runtime_.reporting_channel())
+            return;
         bool expected = false;
         if (!im_action_worker_running_.compare_exchange_strong(expected, true)) return;
         im_action_worker_stopped_.store(false);
@@ -718,10 +732,19 @@ class Runtime final {
                 *im_runtime_.reporting_channel(), im_config_, *reminder_action_executor_, reminder_action_clock_);
         }
         while (!im_action_stop_.load()) {
+            const Status retry_status = voice_action_reporter_->RetryPending();
+            if (!retry_status.ok()) {
+                ESP_LOGW(kTag, "VOICE_ACTION_REPORT_RETRY_FAILED code=%d msg=%s", static_cast<int>(retry_status.code),
+                         retry_status.message.c_str());
+            }
             im::ActionWindow window;
             {
                 std::lock_guard<std::mutex> lock(im_action_mutex_);
-                if (im_action_windows_.empty()) break;
+                if (im_action_windows_.empty() && !schedule_reminder_service_->HasPendingVoiceActionReports()) break;
+                if (im_action_windows_.empty()) {
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    continue;
+                }
                 window = std::move(im_action_windows_.front());
                 im_action_windows_.pop_front();
             }
@@ -1933,6 +1956,7 @@ class Runtime final {
     std::unique_ptr<timing_esp::EspTimingTaskRuntime> timing_runtime_;
     std::unique_ptr<ReminderSpeech> reminder_speech_;
     std::unique_ptr<ImScheduleReminderNotification> reminder_notification_;
+    std::unique_ptr<ImVoiceReminderActionReporter> voice_action_reporter_;
     std::unique_ptr<schedule::ScheduleReminderService> schedule_reminder_service_;
     std::unique_ptr<ImScheduleReminderActionExecutor> reminder_action_executor_;
     EspScheduleReminderClock reminder_action_clock_;

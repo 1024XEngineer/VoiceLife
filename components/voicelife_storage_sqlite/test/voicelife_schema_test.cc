@@ -83,7 +83,7 @@ void CheckVersionOneSchema(const std::filesystem::path& path) {
           "版本一应创建日程实例表");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule')") == 10,
           "当前日程实例表应包含十个字段且不保存提醒执行状态");
-    Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule_reminder_task')") == 15,
+    Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule_reminder_task')") == 16,
           "当前提醒任务表应包含持久化动作结果字段");
     Check(ScalarInt64(database,
                       "SELECT COUNT(*) FROM pragma_table_info('schedule') "
@@ -268,7 +268,7 @@ void CheckSchemaCollisionRejected(const std::filesystem::path& path) {
 }
 
 /**
- * @brief 验证真实 v005 数据升级到当前 v007 时提醒任务和日程表均正确迁移。
+ * @brief 验证真实 v005 数据升级到当前版本时提醒任务和日程表均正确迁移。
  * @param path 临时数据库路径。
  * @return 无。
  */
@@ -295,7 +295,7 @@ void CheckVersionFiveToSevenMigration(const std::filesystem::path& path) {
               .ok(),
           "v005 应能保存无提醒日程");
 
-    Check(VoiceLifeSchema::Initialize(database).ok(), "v005 到 v007 升级应成功");
+    Check(VoiceLifeSchema::Initialize(database).ok(), "v005 到当前版本升级应成功");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule") == 2, "升级后应保留全部日程");
     Check(
         ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule') WHERE name='reminder_task_id'") == 0,
@@ -311,12 +311,14 @@ void CheckVersionFiveToSevenMigration(const std::filesystem::path& path) {
     Check(ScalarInt64(database,
                       "SELECT COUNT(*) FROM pragma_table_info('schedule_reminder_task') "
                       "WHERE name IN ('action_operation_id', 'action_kind', 'action_occurred_at', "
-                      "'action_next_trigger_at')") == 4,
-          "升级后提醒任务表应包含四个动作结果字段");
+                      "'action_next_trigger_at', 'action_reported')") == 5,
+          "升级后提醒任务表应包含动作结果和上报状态字段");
+    Check(ScalarInt64(database, "SELECT action_reported FROM schedule_reminder_task WHERE chain_id=77") == 0,
+          "历史提醒迁移后动作上报状态应保持 pending");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule_reminder_task WHERE action_operation_id IS NULL") == 1,
           "历史提醒迁移后动作结果应保持为空");
-    Check(VoiceLifeSchema::Initialize(database).ok(), "v007 重复初始化应保持幂等");
-    Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule_reminder_task") == 1, "v007 重复初始化不应重复迁移提醒");
+    Check(VoiceLifeSchema::Initialize(database).ok(), "重复初始化应保持幂等");
+    Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule_reminder_task") == 1, "重复初始化不应重复迁移提醒");
 }
 
 /**

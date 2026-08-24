@@ -6,6 +6,7 @@ import {
     type NotificationSubmission,
     type ReminderActionCommand,
     type ReminderActionResult,
+    type VoiceReminderActionStatus,
     type ScheduleReceiptIntent,
     type ScheduleQueryResultIntent,
 } from '../contracts/device-gateway.js';
@@ -931,6 +932,135 @@ export class DefaultActionApplication implements ActionApplication {
     /** {@inheritDoc ActionApplication.recordResult} */
     public recordResult(commandId: ActionId, deviceId: DeviceId, result: ReminderActionResult): Promise<ImAction> {
         return this.recordResultAndClose(commandId, deviceId, result);
+    }
+
+    /**
+     * 归并设备本地语音事实；设备事实优先于尚未完成的 H5 Action。
+     * @param status 已校验的设备语音动作状态。
+     * @returns 归并结果后的动作记录。
+     */
+    public async recordVoiceStatus(status: VoiceReminderActionStatus): Promise<readonly ImAction[]> {
+        const updated = await this.unitOfWork.transaction(async (tx) => {
+            const existing =
+                (await tx.actions.findByOperationId(status.operationId)) ??
+                (await tx.actions.findByResultOperationId(status.operationId));
+            if (existing !== undefined) {
+                if (
+                    existing.deviceId !== status.deviceId ||
+                    existing.reminderTriggerId !== status.reminderTriggerId ||
+                    existing.actionType !== status.action
+                ) {
+                    throw new ImGatewayError('invalid_transition', 'Voice status does not match operation scope');
+                }
+                return [existing];
+            }
+            const pending = await tx.actions.findPendingByDeviceAndTrigger(
+                status.deviceId,
+                status.reminderTriggerId,
+                this.clock.now(),
+            );
+            const result: ReminderActionResult = {
+                schemaVersion: DEVICE_CONTRACT_VERSION,
+                operationId: status.operationId,
+                reminderTriggerId: status.reminderTriggerId,
+                status: status.status,
+                details: { source: status.source, correlationId: status.correlationId },
+                ...(status.nextTriggerAt === undefined ? {} : { nextTriggerAt: status.nextTriggerAt }),
+                occurredAt: status.occurredAt,
+            };
+            if (pending.length === 0) {
+                const delivery = await tx.deliveries.findActiveActionWindow(
+                    status.deviceId,
+                    status.reminderTriggerId,
+                    this.clock.now(),
+                );
+                const metadata =
+                    delivery === undefined ? undefined : readStrongReminderMetadata(delivery.semanticPayload);
+                const binding = delivery === undefined ? undefined : await tx.bindings.findById(delivery.bindingId);
+                const option = metadata?.options.find((candidate) => candidate.type === status.action);
+                if (
+                    delivery === undefined ||
+                    delivery.expiresAt === undefined ||
+                    metadata === undefined ||
+                    metadata.deviceId !== status.deviceId ||
+                    metadata.reminderTriggerId !== status.reminderTriggerId ||
+                    binding === undefined ||
+                    binding.status !== 'active' ||
+                    option === undefined ||
+                    !hasApprovedActionOption(metadata.options, status.action, option.params)
+                ) {
+                    throw new ImGatewayError(
+                        'action_not_found',
+                        'No active strong-reminder action window for voice status',
+                    );
+                }
+                const action: ImAction = {
+                    id: this.ids.actionIdForDelivery(delivery.id),
+                    operationId: status.operationId,
+                    correlationId: delivery.correlationId,
+                    deliveryId: delivery.id,
+                    actorBindingId: binding.id,
+                    deviceId: metadata.deviceId,
+                    reminderTriggerId: metadata.reminderTriggerId,
+                    actionType: status.action,
+                    ...(option?.params === undefined ? {} : { actionParams: option.params }),
+                    actionKeyHash: `voice:${status.operationId}`,
+                    expectedIdentityId: binding.externalIdentityId,
+                    actualIdentityId: binding.externalIdentityId,
+                    status: status.status,
+                    result,
+                    expiresAt: delivery.expiresAt,
+                    createdAt: this.clock.now(),
+                    updatedAt: this.clock.now(),
+                };
+                const created = await tx.actions.createIfAbsent(action);
+                if (!created.created && created.action.operationId !== status.operationId) {
+                    throw new ImGatewayError(
+                        'invalid_transition',
+                        'Voice status conflicts with an existing delivery action',
+                    );
+                }
+                return [created.action];
+            }
+            const changed: ImAction[] = [];
+            let applied = false;
+            for (const action of pending) {
+                const isWinner = !applied && action.actionType === status.action;
+                const next: ImAction = isWinner
+                    ? { ...action, status: status.status, result, updatedAt: this.clock.now() }
+                    : {
+                          ...action,
+                          status: 'failed',
+                          result: {
+                              schemaVersion: DEVICE_CONTRACT_VERSION,
+                              operationId: action.operationId,
+                              reminderTriggerId: action.reminderTriggerId,
+                              status: 'failed',
+                              errorCode: 'superseded_by_voice',
+                              details: {
+                                  source: status.source,
+                                  correlationId: status.correlationId,
+                                  operationId: status.operationId,
+                              },
+                              occurredAt: status.occurredAt,
+                          },
+                          updatedAt: this.clock.now(),
+                      };
+                await tx.actions.save(next);
+                changed.push(next);
+                if (isWinner) applied = true;
+            }
+            if (!applied) throw new ImGatewayError('invalid_transition', 'Voice action does not match pending options');
+            return changed;
+        });
+        for (const action of updated) {
+            await this.stream.close(action.id, {
+                deviceId: action.deviceId,
+                reminderTriggerId: action.reminderTriggerId,
+                expiresAt: action.expiresAt,
+            });
+        }
+        return updated;
     }
 
     private async recordResultAndClose(

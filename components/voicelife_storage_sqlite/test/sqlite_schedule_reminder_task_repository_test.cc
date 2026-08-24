@@ -89,6 +89,7 @@ void CheckRepository(const std::filesystem::path& path) {
     triggered.action_kind = ScheduleReminderActionKind::kSnooze;
     triggered.action_occurred_at = At(2'101);
     triggered.action_next_trigger_at = At(2'700);
+    triggered.action_reported = true;
     Check(repository.Update(triggered).ok(), "SQLite 提醒仓储应保存延迟动作结果");
 
     auto exhausted = *second.value;
@@ -178,7 +179,8 @@ void CheckRepository(const std::filesystem::path& path) {
               persisted.value->business_status == ScheduleReminderBusinessStatus::kSnoozed &&
               persisted.value->action_operation_id == "sqlite-operation-1" &&
               persisted.value->action_kind == ScheduleReminderActionKind::kSnooze &&
-              persisted.value->action_occurred_at == At(2'101) && persisted.value->action_next_trigger_at == At(2'700),
+              persisted.value->action_occurred_at == At(2'101) &&
+              persisted.value->action_next_trigger_at == At(2'700) && persisted.value->action_reported,
           "SQLite 重启后应保留触发状态和完整动作结果");
 }
 

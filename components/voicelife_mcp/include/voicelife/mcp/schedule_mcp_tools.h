@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -19,6 +20,7 @@ class ScheduleRuleService;
 class ScheduleOperationService;
 /// 提供日程提醒同步能力。
 class ScheduleReminderService;
+struct ReminderActionResult;
 }  // namespace voicelife::schedule
 
 namespace voicelife::mcp {
@@ -26,6 +28,7 @@ namespace voicelife::mcp {
 /// schedule.query 将完整结果转发到 IM 时使用的设备上下文。
 struct ScheduleQueryReportingContext {
     voicelife::im::ImRuntime* runtime = nullptr;
+    std::function<Status(const schedule::ReminderActionResult&)> voice_action_reporter;
 };
 
 /// 用于注册日程 MCP 工具的 MCP Server 前向声明。

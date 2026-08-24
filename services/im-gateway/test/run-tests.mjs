@@ -9,6 +9,7 @@ import {
     parseReminderActionResult,
     parseScheduleReceiptIntent,
     parseScheduleQueryResultIntent,
+    parseVoiceReminderActionStatus,
     runMockNotificationScenario,
 } from '../dist/index.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
@@ -84,6 +85,7 @@ async function runContractFixtureTests() {
     const weak = await readFixture('notification-weak.json');
     const conflict = await readFixture('notification-conflict.json');
     const actionResult = await readFixture('reminder-action-result.json');
+    const voiceStatus = await readFixture('voice-reminder-action-status.json');
 
     assert(
         parseCreatePairingSessionRequest(pairingRequest).expiresInMinutes === 5,
@@ -192,6 +194,21 @@ async function runContractFixtureTests() {
             `${name} was accepted by the runtime parser`,
         );
     }
+
+    const parsedVoiceStatus = parseVoiceReminderActionStatus(voiceStatus);
+    assert(
+        parsedVoiceStatus.action === 'snooze' &&
+            parsedVoiceStatus.status === 'succeeded' &&
+            parsedVoiceStatus.operationId === 'voice-operation-fixture' &&
+            parsedVoiceStatus.nextTriggerAt === '2026-08-03T00:11:00.000Z',
+        'VoiceReminderActionStatus fixture did not preserve the voice action fact',
+    );
+    await expectGatewayError(
+        async () =>
+            parseVoiceReminderActionStatus(await readFixture('voice-reminder-action-status-invalid-source.json')),
+        'invalid_contract',
+        'VoiceReminderActionStatus accepted a non-voice source',
+    );
 
     await expectGatewayError(
         () =>

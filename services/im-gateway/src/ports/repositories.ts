@@ -390,6 +390,12 @@ export interface ActionRepository {
      */
     findByOperationId(operationId: OperationId): Promise<ImAction | undefined>;
     /**
+     * 按设备结果中的操作标识查询已记录动作。
+     * @param operationId 设备上报结果的操作标识。
+     * @returns 已记录该结果的动作，不存在时返回 undefined。
+     */
+    findByResultOperationId(operationId: OperationId): Promise<ImAction | undefined>;
+    /**
      * 按动作幂等键查询动作。
      * @param actionKeyHash 动作幂等键散列。
      * @returns 动作，不存在时返回 undefined。

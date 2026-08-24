@@ -10,6 +10,7 @@
 #include "voicelife/contracts/im/reminder_action_result.h"
 #include "voicelife/contracts/im/schedule_query_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
+#include "voicelife/contracts/im/voice_reminder_action_status.h"
 #include "voicelife/contracts/json.h"
 
 using voicelife::ErrorCode;
@@ -30,10 +31,12 @@ using voicelife::contracts::im::ParseReminderActionCommand;
 using voicelife::contracts::im::ParseReminderActionResult;
 using voicelife::contracts::im::ParseScheduleQueryResultIntent;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
+using voicelife::contracts::im::ParseVoiceReminderActionStatus;
 using voicelife::contracts::im::ReminderActionCommand;
 using voicelife::contracts::im::ReminderActionResult;
 using voicelife::contracts::im::ScheduleQueryResultIntent;
 using voicelife::contracts::im::ScheduleReceiptIntent;
+using voicelife::contracts::im::VoiceReminderActionStatus;
 using voicelife::test::Check;
 
 namespace {
@@ -85,6 +88,14 @@ Status ParseActionResultFixture(const char* name, ReminderActionResult& out) {
     return ParseReminderActionResult(root, out);
 }
 
+Status ParseVoiceStatusFixture(const char* name, VoiceReminderActionStatus& out) {
+    JsonValue root;
+    if (Status json_status = voicelife::ParseJson(ReadFixture(name), root); !json_status.ok()) {
+        return json_status;
+    }
+    return ParseVoiceReminderActionStatus(root, out);
+}
+
 void RequireRejected(const char* name, const char* message) {
     NotificationIntent intent;
     const Status status = ParseFixture(name, intent);
@@ -107,6 +118,12 @@ void RequireActionResultRejected(const char* name, const char* message) {
     ReminderActionResult intent;
     const Status status = ParseActionResultFixture(name, intent);
     Check(!status.ok() && status.code == ErrorCode::kInvalidArgument, message);
+}
+
+void RequireVoiceStatusRejected(const char* name, const char* message) {
+    VoiceReminderActionStatus status;
+    const Status parsed = ParseVoiceStatusFixture(name, status);
+    Check(!parsed.ok() && parsed.code == ErrorCode::kInvalidArgument, message);
 }
 
 Status ParseCommandFixture(const char* name, ReminderActionCommand& out) {
@@ -367,6 +384,19 @@ int main() {
     // 非法动作结果 fixture：与 TS 一致的拒绝语义
     RequireActionResultRejected("reminder-action-result-invalid-status.json", "非法状态动作结果必须被 C++ 拒绝");
     RequireActionResultRejected("reminder-action-result-invalid-time.json", "非法时间动作结果必须被 C++ 拒绝");
+
+    // 设备本地语音状态：字段、snooze 时间与来源必须与 TS 一致
+    VoiceReminderActionStatus voice_status;
+    Check(ParseVoiceStatusFixture("voice-reminder-action-status.json", voice_status).ok(),
+          "共享语音状态 fixture 必须被 C++ 解析");
+    Check(voice_status.schemaVersion == kDeviceContractVersion && voice_status.eventId == "voice-event-fixture" &&
+              voice_status.deviceId == "device-fixture" && voice_status.reminderTriggerId == "trigger-fixture" &&
+              voice_status.operationId == "voice-operation-fixture" && voice_status.action == "snooze" &&
+              voice_status.status == "succeeded" && voice_status.source == "voice",
+          "语音状态字段必须被完整保留");
+    Check(voice_status.nextTriggerAt.has_value() && *voice_status.nextTriggerAt == "2026-08-03T00:11:00.000Z",
+          "成功 snooze 的 nextTriggerAt 必须被保留");
+    RequireVoiceStatusRejected("voice-reminder-action-status-invalid-source.json", "非法语音状态来源必须被 C++ 拒绝");
 
     // 动作命令：字段与 TS ReminderActionCommand 一致
     ReminderActionCommand command;

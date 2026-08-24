@@ -117,6 +117,44 @@ contracts::im::ReminderActionResult ImScheduleReminderActionExecutor::Execute(
     return ActionResult(command, "failed", "reminder_action_rejected", occurred_at);
 }
 
+Status ImVoiceReminderActionReporter::Report(const schedule::ReminderActionResult& result) {
+    if (result.operation_id.empty() || result.reminder_trigger_id.empty()) {
+        return Status::Error(ErrorCode::kInvalidArgument, "语音动作结果缺少幂等标识");
+    }
+    im::ImReportingChannel* reporting = runtime_.reporting_channel();
+    if (reporting == nullptr || runtime_.state() != im::ImRuntimeState::kReady) {
+        return Status::Error(ErrorCode::kUnavailable, "IM Runtime 尚未就绪");
+    }
+    contracts::im::VoiceReminderActionStatus status;
+    status.schemaVersion = contracts::im::kDeviceContractVersion;
+    status.eventId = "voice-reminder-action-" + result.operation_id;
+    status.correlationId = status.eventId;
+    status.deviceId = runtime_.device_id();
+    status.reminderTriggerId = result.reminder_trigger_id;
+    status.operationId = result.operation_id;
+    status.action = result.action == schedule::ScheduleReminderActionKind::kSnooze ? "snooze" : "acknowledge";
+    status.status = "succeeded";
+    status.occurredAt = FormatIso(result.occurred_at);
+    if (result.next_trigger_at.has_value()) status.nextTriggerAt = FormatIso(*result.next_trigger_at);
+    status.source = "voice";
+    const im::ReportResult submitted = reporting->SubmitVoiceReminderActionStatus(status);
+    if (submitted.status == im::ReportStatus::kSubmitted) return service_.MarkVoiceActionReported(result.operation_id);
+    const ErrorCode code =
+        submitted.status == im::ReportStatus::kRetryable ? ErrorCode::kUnavailable : ErrorCode::kInternal;
+    return Status::Error(code, submitted.message.empty() ? "语音动作状态上报失败" : submitted.message);
+}
+
+Status ImVoiceReminderActionReporter::RetryPending() {
+    const auto pending = service_.PendingVoiceActionReports();
+    if (!pending.ok()) return pending.status;
+    Status first_failure = Status::Ok();
+    for (const auto& result : *pending.value) {
+        const Status reported = Report(result);
+        if (!reported.ok() && first_failure.ok()) first_failure = reported;
+    }
+    return first_failure;
+}
+
 std::string EspScheduleReminderClock::NowIso() {
     const std::time_t timestamp = std::time(nullptr);
     std::tm utc{};

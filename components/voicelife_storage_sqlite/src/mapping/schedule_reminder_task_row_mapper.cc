@@ -55,6 +55,7 @@ Status BindScheduleReminderTask(SqliteStatement& statement, const schedule::Sche
                        : statement.BindNull(index++))
              .ok())
         return status;
+    if (!(status = statement.BindInt(index++, task.action_reported ? 1 : 0)).ok()) return status;
     if (!(status = statement.BindInt64(index++, task.created_at.time_since_epoch().count())).ok()) return status;
     return statement.BindInt64(index, task.updated_at.time_since_epoch().count());
 }
@@ -86,8 +87,9 @@ Result<schedule::ScheduleReminderTask> ReadScheduleReminderTask(const SqliteStat
     }
     if (!statement.IsNull(11)) task.action_occurred_at = ReadTime(statement, 11);
     if (!statement.IsNull(12)) task.action_next_trigger_at = ReadTime(statement, 12);
-    task.created_at = ReadTime(statement, 13);
-    task.updated_at = ReadTime(statement, 14);
+    task.action_reported = statement.ColumnInt(13) != 0;
+    task.created_at = ReadTime(statement, 14);
+    task.updated_at = ReadTime(statement, 15);
     return Result<schedule::ScheduleReminderTask>::Success(std::move(task));
 }
 }  // namespace voicelife::storage_sqlite::mapping

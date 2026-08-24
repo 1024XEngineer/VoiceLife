@@ -771,10 +771,17 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
         "schedule.reminder_acknowledge",
         "确认提醒。查找最近 10 分钟内已触发的所有提醒，取消各提醒后续尚未触发的定时任务，"
         "并将对应日程标记为已完成。多个提醒会一次性全部确认。本工具不需要参数。",
-        PropertyList{}, [reminder_service](const PropertyList&) {
+        PropertyList{}, [reminder_service, reporting_context](const PropertyList&) {
             if (reminder_service == nullptr) return FailureOutput("当前运行时未启用提醒能力");
-            const auto result = reminder_service->AcknowledgeRecentReminders();
+            const auto result =
+                reporting_context.voice_action_reporter
+                    ? reminder_service->ExecuteLatestVoiceAction(schedule::ScheduleReminderActionKind::kAcknowledge)
+                    : reminder_service->AcknowledgeRecentReminders();
             if (!result.ok()) return FailureOutput(result.status.message);
+            if (reporting_context.voice_action_reporter && !result.value->operation_id.empty()) {
+                const Status reported = reporting_context.voice_action_reporter(*result.value);
+                if (!reported.ok()) return FailureOutput("本地已确认提醒，但状态上报失败：" + reported.message);
+            }
             return Output({
                 MakeToolOutput("status", ToolOutputValue::String("success")),
                 MakeToolOutput("message", ToolOutputValue::String("已确认提醒")),
@@ -787,10 +794,17 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
         "schedule.reminder_snooze",
         "稍后提醒用户。首次提醒后系统已自动注册 10 分钟后的下一次提醒，因此本工具不会重复注册定时器。"
         "调用成功后直接返回‘已延迟提醒’。本工具不需要参数。",
-        PropertyList{}, [reminder_service](const PropertyList&) {
+        PropertyList{}, [reminder_service, reporting_context](const PropertyList&) {
             if (reminder_service == nullptr) return FailureOutput("当前运行时未启用提醒能力");
-            const auto result = reminder_service->SnoozeRecentReminders();
+            const auto result =
+                reporting_context.voice_action_reporter
+                    ? reminder_service->ExecuteLatestVoiceAction(schedule::ScheduleReminderActionKind::kSnooze)
+                    : reminder_service->SnoozeRecentReminders();
             if (!result.ok()) return FailureOutput(result.status.message);
+            if (reporting_context.voice_action_reporter && !result.value->operation_id.empty()) {
+                const Status reported = reporting_context.voice_action_reporter(*result.value);
+                if (!reported.ok()) return FailureOutput("本地已延迟提醒，但状态上报失败：" + reported.message);
+            }
             return Output({
                 MakeToolOutput("status", ToolOutputValue::String("success")),
                 MakeToolOutput("message", ToolOutputValue::String("已延迟提醒")),

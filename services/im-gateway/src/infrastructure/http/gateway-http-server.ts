@@ -208,6 +208,18 @@ async function routeRequest(
         notifyDeliveryWorker(submission.deliveries, options);
         return;
     }
+    if (url.pathname === '/v1/im/reminder-action-statuses' && method === 'POST') {
+        context.route = 'device.voice-action-status.create';
+        const body = await readJson(request);
+        const actions = await options.runtime.deviceApi.postVoiceReminderActionStatus({
+            authorization: authorization(request),
+            idempotencyKey: requiredHeader(request, 'idempotency-key'),
+            body,
+        });
+        context.correlationId = correlationId(body);
+        writeJson(response, 200, { status: 'accepted', actions });
+        return;
+    }
     const actionResultMatch = ACTION_RESULT_PATH.exec(url.pathname);
     if (actionResultMatch !== null && method === 'POST') {
         context.route = 'device.action-result.create';

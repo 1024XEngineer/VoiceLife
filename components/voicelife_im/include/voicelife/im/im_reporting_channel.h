@@ -6,6 +6,7 @@
 #include "voicelife/contracts/im/reminder_action_result.h"
 #include "voicelife/contracts/im/schedule_query_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
+#include "voicelife/contracts/im/voice_reminder_action_status.h"
 #include "voicelife/im/im_credentials.h"
 #include "voicelife/im/im_transport.h"
 
@@ -72,6 +73,8 @@ class ImReportingChannel {
      */
     ReportResult SubmitReminderActionResult(const contracts::im::ReminderActionResult& result,
                                             const std::string& device_id, const std::string& command_id);
+    /** @brief 提交设备语音直接消费后的提醒状态事实。 */
+    ReportResult SubmitVoiceReminderActionStatus(const contracts::im::VoiceReminderActionStatus& status);
 
    private:
     /// 统一提交入口：装配请求头并映射传输结果。

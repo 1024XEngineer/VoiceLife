@@ -8,6 +8,7 @@ import {
     type ReminderActionIntent,
     type ReminderActionExecutionStatus,
     type ReminderActionResult,
+    type VoiceReminderActionStatus,
     type ScheduleOperationType,
     type ScheduleReceiptIntent,
     type ScheduleQueryResultIntent,
@@ -209,6 +210,37 @@ export function parseReminderActionResult(input: unknown): ReminderActionResult 
         ...(errorCode === undefined ? {} : { errorCode }),
         ...(details === undefined ? {} : { details }),
         occurredAt: isoDateTimeAt(value.occurredAt, 'body.occurredAt'),
+    };
+}
+
+/**
+ * 解析设备本地语音动作状态事实。
+ * @param input 未信任的设备请求体。
+ * @returns 已校验的语音动作状态。
+ */
+export function parseVoiceReminderActionStatus(input: unknown): VoiceReminderActionStatus {
+    const value = objectAt(input, 'body');
+    const action = enumAt(value.action, ['acknowledge', 'snooze'] as const, 'body.action');
+    const status = enumAt(value.status, ['succeeded', 'failed'] as const, 'body.status');
+    const nextTriggerAt = optionalIsoDateTime(value, 'nextTriggerAt', 'body.nextTriggerAt');
+    if (action === 'snooze' && status === 'succeeded' && nextTriggerAt === undefined) {
+        invalid('body.nextTriggerAt', 'is required for a successful snooze');
+    }
+    if (action === 'acknowledge' && nextTriggerAt !== undefined) {
+        invalid('body.nextTriggerAt', 'must be omitted for acknowledge');
+    }
+    return {
+        schemaVersion: contractVersion(value),
+        eventId: requiredId<EventId>(value, 'eventId', 'body.eventId'),
+        correlationId: requiredId<CorrelationId>(value, 'correlationId', 'body.correlationId'),
+        deviceId: requiredId<DeviceId>(value, 'deviceId', 'body.deviceId'),
+        reminderTriggerId: requiredId<ReminderTriggerId>(value, 'reminderTriggerId', 'body.reminderTriggerId'),
+        operationId: requiredId<OperationId>(value, 'operationId', 'body.operationId'),
+        action,
+        status,
+        occurredAt: isoDateTimeAt(value.occurredAt, 'body.occurredAt'),
+        ...(nextTriggerAt === undefined ? {} : { nextTriggerAt }),
+        source: enumAt(value.source, ['voice'] as const, 'body.source'),
     };
 }
 

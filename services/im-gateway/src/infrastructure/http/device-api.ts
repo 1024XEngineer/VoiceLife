@@ -12,6 +12,7 @@ import {
     parseReminderActionResult,
     parseScheduleReceiptIntent,
     parseScheduleQueryResultIntent,
+    parseVoiceReminderActionStatus,
 } from '../../contracts/device-gateway-parser.js';
 import type { ActionApplication, NotificationApplication, PairingApplication } from '../../application/api.js';
 import type { ImAction, PairingSession } from '../../domain/models.js';
@@ -25,6 +26,7 @@ export const DEVICE_API_ROUTES = {
     scheduleReceipts: '/v1/im/schedule-receipts',
     scheduleQueryResults: '/v1/im/schedule-query-results',
     notifications: '/v1/im/notifications',
+    voiceReminderActionStatuses: '/v1/im/reminder-action-statuses',
     reminderActionResults: '/v1/devices/:deviceId/reminder-actions/:commandId/result',
     reminderActionStream: '/v1/devices/:deviceId/reminder-actions/stream',
 } as const;
@@ -44,6 +46,11 @@ export const DEVICE_API_ENDPOINTS = {
     notification: {
         method: 'POST',
         path: DEVICE_API_ROUTES.notifications,
+        transport: 'https',
+    },
+    voiceReminderActionStatus: {
+        method: 'POST',
+        path: '/v1/im/reminder-action-statuses',
         transport: 'https',
     },
     reminderActionCommand: {
@@ -185,6 +192,25 @@ export class DeviceIntentController {
             throw new ImGatewayError('invalid_transition', 'Device principal does not match the result path');
         }
         return this.actions.recordResult(input.commandId, input.deviceId, body);
+    }
+
+    /**
+     * 认证并接收设备语音直接消费后的状态事实。
+     * @param input 带设备授权和状态事实的请求。
+     * @returns 归并结果后的动作记录。
+     */
+    public async postVoiceReminderActionStatus(input: {
+        readonly authorization: string;
+        readonly idempotencyKey: string;
+        readonly body: unknown;
+    }): Promise<readonly ImAction[]> {
+        const body = parseVoiceReminderActionStatus(input.body);
+        const principal = await this.authentication.authenticate(input.authorization);
+        if (principal.deviceId !== body.deviceId) {
+            throw new ImGatewayError('invalid_transition', 'Device principal does not match the status body');
+        }
+        this.assertIdempotencyKey(input.idempotencyKey, body.eventId);
+        return this.actions.recordVoiceStatus(body);
     }
 
     private async authenticateDevice(

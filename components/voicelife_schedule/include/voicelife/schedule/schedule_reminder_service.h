@@ -118,6 +118,14 @@ class ScheduleReminderService final {
      * @return 动作结果或错误状态。
      */
     Result<ReminderActionResult> SnoozeRecentReminders();
+    /** @brief 为设备语音入口选择最近一条可操作提醒并按稳定 operationId 精确执行。 */
+    Result<ReminderActionResult> ExecuteLatestVoiceAction(ScheduleReminderActionKind action);
+    /** @brief 查询尚未被 Gateway 接受的本地语音动作事实。 */
+    Result<std::vector<ReminderActionResult>> PendingVoiceActionReports();
+    /** @brief 将指定 operationId 的语音动作事实标记为已上报。 */
+    Status MarkVoiceActionReported(std::string_view operation_id);
+    /** @brief 判断是否仍有待上报的本地语音动作事实。 */
+    bool HasPendingVoiceActionReports();
     /** @brief 按精确触发标识幂等执行提醒动作。
      * @param command 本地动作命令。
      * @return 首次提交或持久化重放的动作结果。

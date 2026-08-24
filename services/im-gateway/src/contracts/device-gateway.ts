@@ -91,6 +91,20 @@ export interface ScheduleQueryResultIntent {
 export type ReminderType = 'weak' | 'strong';
 /** 设备能够执行的提醒动作。 */
 export type ReminderActionKind = 'acknowledge' | 'snooze';
+/** 设备语音直接消费后的跨入口状态事实。 */
+export interface VoiceReminderActionStatus {
+    readonly schemaVersion: typeof DEVICE_CONTRACT_VERSION;
+    readonly eventId: EventId;
+    readonly correlationId: CorrelationId;
+    readonly deviceId: DeviceId;
+    readonly reminderTriggerId: ReminderTriggerId;
+    readonly operationId: OperationId;
+    readonly action: ReminderActionKind;
+    readonly status: 'succeeded' | 'failed';
+    readonly occurredAt: IsoDateTime;
+    readonly nextTriggerAt?: IsoDateTime;
+    readonly source: 'voice';
+}
 /** 所有可由通知入口触发的动作类型。 */
 export type ActionIntentKind = ReminderActionKind | 'bind_confirm' | 'bind_cancel' | 'open_url';
 

@@ -48,6 +48,7 @@ add_voicelife_library(contracts voicelife_contracts
     "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_query_result.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_result.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_command.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/voice_reminder_action_status.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_submission.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/pairing_session.cc")
 target_link_libraries(contracts PRIVATE yyjson)
@@ -134,6 +135,7 @@ add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v005_add_schedule_reminder_task_id.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v006_create_schedule_reminder_task.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v007_add_reminder_action_state.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v008_add_action_report_state.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/sqlite_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/voicelife_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/operation_sql.cc"

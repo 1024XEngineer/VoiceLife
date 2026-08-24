@@ -271,6 +271,73 @@ Result<ReminderActionResult> ScheduleReminderService::SnoozeRecentReminders() {
                                                   .replayed = false});
 }
 
+Result<ReminderActionResult> ScheduleReminderService::ExecuteLatestVoiceAction(ScheduleReminderActionKind action) {
+    const auto recent = reminder_repository_.FindTriggered(Now() - kRecentWindow, Now());
+    if (!recent.ok()) return Result<ReminderActionResult>::Failure(recent.status.code, recent.status.message);
+    const ScheduleReminderTask* selected = nullptr;
+    for (const auto& task : *recent.value) {
+        if (task.business_status != ScheduleReminderBusinessStatus::kWaitingAcknowledgement &&
+            task.business_status != ScheduleReminderBusinessStatus::kExhausted)
+            continue;
+        if (selected == nullptr ||
+            task.triggered_at.value_or(task.updated_at) > selected->triggered_at.value_or(selected->updated_at)) {
+            selected = &task;
+        }
+    }
+    if (selected == nullptr || !selected->timing_task_id.has_value()) {
+        return Result<ReminderActionResult>::Failure(ErrorCode::kNotFound, "最近没有可操作的提醒");
+    }
+    ReminderActionCommand command;
+    command.reminder_trigger_id = *selected->timing_task_id;
+    command.operation_id = "voice-" + command.reminder_trigger_id +
+                           (action == ScheduleReminderActionKind::kSnooze ? "-snooze" : "-acknowledge");
+    command.action = action;
+    if (action == ScheduleReminderActionKind::kSnooze)
+        command.snooze_minutes = static_cast<int>(kFollowUpDelay.count());
+    return ExecuteReminderAction(command);
+}
+
+Result<std::vector<ReminderActionResult>> ScheduleReminderService::PendingVoiceActionReports() {
+    const auto all = reminder_repository_.FindAll();
+    if (!all.ok()) return Result<std::vector<ReminderActionResult>>::Failure(all.status.code, all.status.message);
+    std::vector<ReminderActionResult> pending;
+    for (const auto& task : *all.value) {
+        if (!task.action_operation_id.has_value() || task.action_reported || !task.action_kind.has_value() ||
+            !task.action_occurred_at.has_value()) {
+            continue;
+        }
+        pending.push_back({.affected_count = 1,
+                           .operation_id = *task.action_operation_id,
+                           .reminder_trigger_id = task.timing_task_id.value_or(""),
+                           .action = *task.action_kind,
+                           .occurred_at = *task.action_occurred_at,
+                           .next_trigger_at = task.action_next_trigger_at,
+                           .replayed = true});
+    }
+    return Result<std::vector<ReminderActionResult>>::Success(std::move(pending));
+}
+
+Status ScheduleReminderService::MarkVoiceActionReported(std::string_view operation_id) {
+    if (operation_id.empty()) return Status::Error(ErrorCode::kInvalidArgument, "语音动作 operationId 不能为空");
+    std::lock_guard<std::mutex> action_lock(action_mutex_);
+    const auto all = reminder_repository_.FindAll();
+    if (!all.ok()) return all.status;
+    for (auto task : *all.value) {
+        if (task.action_operation_id.has_value() && *task.action_operation_id == operation_id) {
+            if (task.action_reported) return Status::Ok();
+            task.action_reported = true;
+            task.updated_at = Now();
+            return reminder_repository_.Update(task);
+        }
+    }
+    return Status::Error(ErrorCode::kNotFound, "语音动作事实不存在");
+}
+
+bool ScheduleReminderService::HasPendingVoiceActionReports() {
+    const auto pending = PendingVoiceActionReports();
+    return pending.ok() && !pending.value->empty();
+}
+
 Result<ReminderActionResult> ScheduleReminderService::ExecuteReminderAction(const ReminderActionCommand& command) {
     if (command.operation_id.empty() || command.reminder_trigger_id.empty()) {
         return Result<ReminderActionResult>::Failure(ErrorCode::kInvalidArgument, "提醒动作标识不能为空");
@@ -341,6 +408,7 @@ Result<ReminderActionResult> ScheduleReminderService::ExecuteReminderAction(cons
         target.action_kind = command.action;
         target.action_occurred_at = occurred_at;
         target.action_next_trigger_at = follow_up->trigger_at;
+        target.action_reported = false;
         target.updated_at = occurred_at;
         const Status updated = reminder_repository_.Update(target);
         if (!updated.ok()) return Result<ReminderActionResult>::Failure(updated.code, updated.message);
@@ -386,6 +454,7 @@ Result<ReminderActionResult> ScheduleReminderService::ExecuteReminderAction(cons
     target.action_kind = command.action;
     target.action_occurred_at = occurred_at;
     target.action_next_trigger_at = std::nullopt;
+    target.action_reported = false;
     target.updated_at = occurred_at;
     const Status updated = reminder_repository_.Update(target);
     if (!updated.ok()) return Result<ReminderActionResult>::Failure(updated.code, updated.message);

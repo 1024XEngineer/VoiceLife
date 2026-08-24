@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1",
+  "eventId": "voice-event-fixture",
+  "correlationId": "voice-correlation-fixture",
+  "deviceId": "device-fixture",
+  "reminderTriggerId": "trigger-fixture",
+  "operationId": "voice-operation-fixture",
+  "action": "snooze",
+  "status": "succeeded",
+  "occurredAt": "2026-08-03T00:01:00.000Z",
+  "nextTriggerAt": "2026-08-03T00:11:00.000Z",
+  "source": "voice"
+}

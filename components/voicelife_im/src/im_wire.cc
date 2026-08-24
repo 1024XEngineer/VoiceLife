@@ -336,4 +336,35 @@ std::string SerializeReminderActionResult(const ReminderActionResult& result) {
     return out;
 }
 
+std::string SerializeVoiceReminderActionStatus(const contracts::im::VoiceReminderActionStatus& status) {
+    std::string out;
+    out.reserve(384);
+    out += "{\"schemaVersion\":";
+    AppendJsonString(out, status.schemaVersion);
+    out += ",\"eventId\":";
+    AppendJsonString(out, status.eventId);
+    out += ",\"correlationId\":";
+    AppendJsonString(out, status.correlationId);
+    out += ",\"deviceId\":";
+    AppendJsonString(out, status.deviceId);
+    out += ",\"reminderTriggerId\":";
+    AppendJsonString(out, status.reminderTriggerId);
+    out += ",\"operationId\":";
+    AppendJsonString(out, status.operationId);
+    out += ",\"action\":";
+    AppendJsonString(out, status.action);
+    out += ",\"status\":";
+    AppendJsonString(out, status.status);
+    out += ",\"occurredAt\":";
+    AppendJsonString(out, status.occurredAt);
+    if (status.nextTriggerAt.has_value()) {
+        out += ",\"nextTriggerAt\":";
+        AppendJsonString(out, *status.nextTriggerAt);
+    }
+    out += ",\"source\":";
+    AppendJsonString(out, status.source);
+    out.push_back('}');
+    return out;
+}
+
 }  // namespace voicelife::im

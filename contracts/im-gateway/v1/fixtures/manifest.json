@@ -10,7 +10,8 @@
     "notification-submission",
     "pairing-created",
     "pairing-status",
-    "reminder-action-command"
+    "reminder-action-command",
+    "voice-reminder-action-status"
   ],
   "contracts": {
     "pairing-create-request": {
@@ -82,6 +83,14 @@
       "invalid": [
         "reminder-action-result-invalid-status.json",
         "reminder-action-result-invalid-time.json"
+      ]
+    },
+    "voice-reminder-action-status": {
+      "valid": [
+        "voice-reminder-action-status.json"
+      ],
+      "invalid": [
+        "voice-reminder-action-status-invalid-source.json"
       ]
     },
     "notification-submission": {

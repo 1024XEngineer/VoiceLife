@@ -598,6 +598,13 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         return Promise.resolve([...this.actionRows.values()].find((action) => action.operationId === operationId));
     }
 
+    /** {@inheritDoc ActionRepository.findByResultOperationId} */
+    public findByResultOperationId(operationId: OperationId): Promise<ImAction | undefined> {
+        return Promise.resolve(
+            [...this.actionRows.values()].find((action) => action.result?.operationId === operationId),
+        );
+    }
+
     /** {@inheritDoc ActionRepository.findByActionKeyHash} */
     public findByActionKeyHash(actionKeyHash: string): Promise<ImAction | undefined> {
         return Promise.resolve([...this.actionRows.values()].find((action) => action.actionKeyHash === actionKeyHash));
