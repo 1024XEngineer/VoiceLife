@@ -112,13 +112,16 @@ class ProfileValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(firmware.ProfileError, "持久化存储缺少"):
             firmware.validate_profile(profile, Path("missing-storage-flags.json"))
 
-    def test_sparkbot_serial_voice_profile_uses_persistent_storage_without_im_overhead(self) -> None:
+    def test_sparkbot_serial_voice_profile_uses_persistent_storage_and_im_gateway(self) -> None:
         profile_path = ROOT / "config" / "profiles" / "esp32s3-esp-sparkbot-serial-voice.json"
         profile = json.loads(profile_path.read_text(encoding="utf-8"))
 
-        self.assertEqual(profile["adapters"]["im"]["driver"], "disabled")
-        self.assertEqual(profile["adapters"]["im"]["capabilities"], [])
-        self.assertNotIn("CONFIG_VOICELIFE_IM_GATEWAY=y", profile["sdkconfig"])
+        self.assertEqual(profile["adapters"]["im"]["driver"], "voicelife-gateway")
+        self.assertEqual(profile["adapters"]["im"]["configRef"], "nvs://im")
+        self.assertIn("CONFIG_VOICELIFE_IM_GATEWAY=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_LWIP_DHCP_GET_NTP_SRV=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_LWIP_SNTP_MAX_SERVERS=2", profile["sdkconfig"])
+        self.assertIn("CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y", profile["sdkconfig"])
         self.assertEqual(profile["adapters"]["storage"]["driver"], "fatfs-sqlite")
         self.assertIn("persistent-sqlite", profile["adapters"]["storage"]["capabilities"])
         self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS=y", profile["sdkconfig"])
