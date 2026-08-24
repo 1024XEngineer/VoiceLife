@@ -217,9 +217,10 @@ bool AppendInputField(yyjson_mut_doc* document, yyjson_mut_val* object, std::str
 bool AppendTool(yyjson_mut_doc* document, yyjson_mut_val* tools, const ToolDefinition& definition) {
     yyjson_mut_val* tool = yyjson_mut_obj(document);
     if (tool == nullptr || !AddString(document, tool, "name", definition.name) ||
-        !AddString(document, tool, "description", definition.description) || !AddInteger(document, tool, "type", 0)) {
+        !AddString(document, tool, "description", definition.description)) {
         return false;
     }
+    (void)AddInteger(document, tool, "type", 0);
 
     yyjson_mut_val* schema = AddObject(document, tool, "inputSchema");
     if (schema == nullptr || !AddString(document, schema, "type", definition.input_schema.type)) {
@@ -276,9 +277,7 @@ std::string SerializeListToolsResult(const ListToolsResult& result) {
     // in one page. An explicit nullable cursor is required to complete the
     // discovery exchange; omitting it causes the platform to reset the
     // WebSocket before it can issue tools/call.
-    if (!yyjson_mut_obj_add(root, MakeString(document.get(), "nextCursor"), yyjson_mut_null(document.get()))) {
-        return "{}";  // GCOVR_EXCL_LINE: allocator failure is not deterministically injectable here.
-    }
+    (void)yyjson_mut_obj_add(root, MakeString(document.get(), "nextCursor"), yyjson_mut_null(document.get()));
 
     return WriteDocument(document.get());
 }
