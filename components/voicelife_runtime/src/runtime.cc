@@ -385,6 +385,18 @@ class Runtime final {
         config.session_id = "scaffold-session";
         config.provider_id = "scaffold";
 #endif
+#ifdef ESP_PLATFORM
+        if (wake_queue_ == nullptr) {
+            wake_queue_ = xQueueCreate(4, sizeof(BoardRequest));
+            if (wake_queue_ == nullptr) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒队列失败"));
+            // WakeTask loads the local wake model through esp_partition_mmap(), which disables the
+            // cache and therefore requires an internal-memory stack. Reserve it before VoiceSession
+            // starts TLS/MCP/audio initialization and fragments the remaining internal heap.
+            const BaseType_t task_status =
+                xTaskCreate(&Runtime::WakeTaskEntry, "voicelife_wake", 4096, this, 5, &wake_task_);
+            if (task_status != pdPASS) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒控制任务失败"));
+        }
+#endif
         const Status session_status = session_->Start(config);
         if (!session_status.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=session_start code=%d", static_cast<int>(session_status.code));
@@ -393,16 +405,6 @@ class Runtime final {
         }
 
 #ifdef ESP_PLATFORM
-        if (wake_queue_ == nullptr) {
-            wake_queue_ = xQueueCreate(4, sizeof(BoardRequest));
-            if (wake_queue_ == nullptr) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒队列失败"));
-            // VoiceSession::Start may receive the Linx initialize/tools/list burst before returning.
-            // Keep this long-lived control stack in PSRAM so startup does not depend on the remaining
-            // largest internal heap block after TLS, MCP schema serialization and codec initialization.
-            const BaseType_t task_status = xTaskCreateWithCaps(&Runtime::WakeTaskEntry, "voicelife_wake", 4096, this, 5,
-                                                               &wake_task_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (task_status != pdPASS) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒控制任务失败"));
-        }
         EnqueueEvent(voice::VoiceInteractionEvent::kBootCompleted);
         const Status input_status =
             assembly_->StartBoardInput([this](BoardInputAction action) { (void)EnqueueBoardInput(action); });
