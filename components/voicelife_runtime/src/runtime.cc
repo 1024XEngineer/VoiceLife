@@ -224,6 +224,10 @@ class Runtime final {
         assembly_ = &assembly;
         const auto fail_startup = [this](Status status) {
 #ifdef ESP_PLATFORM
+            if (assembly_ != nullptr) {
+                assembly_->wake_gate().Close();
+                assembly_->audio_output().Close();
+            }
             StopMcpWorker();
             StopEventLoop();
             StopScheduleReminderRuntime();
@@ -232,6 +236,23 @@ class Runtime final {
         };
         auto& registry = voice::SpeechProviderRegistry::Instance();
         if (!init_status_.ok()) return init_status_;
+        voice::VoiceSessionConfig config;
+#ifdef ESP_PLATFORM
+        config.session_id = "voicelife-linx-session";
+        config.provider_id = "xrobot-websocket";
+        // SparkBot has no playback reference channel or AEC. Match the
+        // Xiaozhi SparkBot default: server VAD closes an auto-stop turn after
+        // playback drains, while realtime is reserved for AEC-capable boards.
+        config.mode = voice::VoiceMode::kAuto;
+        config.audio.codec = voice::AudioCodec::kPcmS16Le;
+        config.audio.sample_rate_hz = 16000;
+        config.audio.channels = 1;
+        config.audio.bits_per_sample = 16;
+        config.audio.frame_duration_ms = 20;
+#else
+        config.session_id = "scaffold-session";
+        config.provider_id = "scaffold";
+#endif
         // NVS 加密初始化会创建 AES-XTS 中断处理器。必须在日程/MCP Schema
         // 和任务创建前完成，避免启动分配峰值让底层中断分配器收到损坏状态。
         {
@@ -319,6 +340,29 @@ class Runtime final {
         if (const Status mcp_worker = StartMcpWorker(); !mcp_worker.ok()) {
             return fail_startup(mcp_worker);
         }
+#ifdef ESP_PLATFORM
+        if (wake_queue_ == nullptr) {
+            wake_queue_ = xQueueCreate(4, sizeof(BoardRequest));
+            if (wake_queue_ == nullptr) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒队列失败"));
+            // WakeTask loads the local wake model through esp_partition_mmap(), which disables the
+            // cache and therefore requires an internal-memory stack. Reserve it before audio and
+            // network initialization fragment the remaining internal heap.
+            const BaseType_t task_status =
+                xTaskCreate(&Runtime::WakeTaskEntry, "voicelife_wake", 4096, this, 5, &wake_task_);
+            if (task_status != pdPASS) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒控制任务失败"));
+        }
+        // I2S DMA buffers require contiguous internal memory. Open the fixed PCM
+        // ports before Wi-Fi/TLS startup; VoiceSession repeats Open after hello
+        // to validate that the negotiated format matches this prepared device.
+        assembly_->SetOutputVolume(static_cast<uint8_t>(volume_));
+        if (const Status input_status = assembly_->wake_gate().Open(config.audio); !input_status.ok()) {
+            return fail_startup(input_status);
+        }
+        if (const Status output_status = assembly_->audio_output().Open(config.audio); !output_status.ok()) {
+            return fail_startup(output_status);
+        }
+        ESP_LOGI(kTag, "AUDIO_PREPARED=1");
+#endif
         ShowDisplay(voice::VoiceMood::kConnecting, "联网", "");
         if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=secret_store code=%d", static_cast<int>(secret_store.code));
@@ -346,8 +390,6 @@ class Runtime final {
         }
         ShowDisplay(voice::VoiceMood::kConnecting, "连接", "");
         linx_config_ = std::move(*connection.value);
-        // IM 的 SNTP、Gateway 探针和退避全部在独立任务中完成，语音启动路径不等待网络。
-        StartImRuntime();
         auto result = registry.Create("xrobot-websocket", {});
 #else
         auto result = registry.Create("scaffold", {});
@@ -360,42 +402,14 @@ class Runtime final {
 
 #ifdef ESP_PLATFORM
         // 音频端口由 Assembly 注入（业务 PCM 语义，不暴露 I2S/Codec）。
-        assembly_->SetOutputVolume(static_cast<uint8_t>(volume_));
         if (assembly_->uses_local_wake_detector()) {
             assembly_->wake_gate().SetWakeSink([this](std::string_view wake_word) { QueueWakeWord(wake_word); });
         }
         session_ = std::make_unique<voice::VoiceSession>(
             assembly_->wake_gate(), assembly_->audio_output(), *provider_,
             [this](const voice::VoiceEvidence& evidence) { LogVoiceEvidence(evidence); });
-        voice::VoiceSessionConfig config;
-        config.session_id = "voicelife-linx-session";
-        config.provider_id = "xrobot-websocket";
-        // SparkBot has no playback reference channel or AEC. Match the
-        // Xiaozhi SparkBot default: server VAD closes an auto-stop turn after
-        // playback drains, while realtime is reserved for AEC-capable boards.
-        config.mode = voice::VoiceMode::kAuto;
-        config.audio.codec = voice::AudioCodec::kPcmS16Le;
-        config.audio.sample_rate_hz = 16000;
-        config.audio.channels = 1;
-        config.audio.bits_per_sample = 16;
-        config.audio.frame_duration_ms = 20;
 #else
         session_ = std::make_unique<voice::VoiceSession>(audio_input_, audio_output_, *provider_);
-        voice::VoiceSessionConfig config;
-        config.session_id = "scaffold-session";
-        config.provider_id = "scaffold";
-#endif
-#ifdef ESP_PLATFORM
-        if (wake_queue_ == nullptr) {
-            wake_queue_ = xQueueCreate(4, sizeof(BoardRequest));
-            if (wake_queue_ == nullptr) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒队列失败"));
-            // WakeTask loads the local wake model through esp_partition_mmap(), which disables the
-            // cache and therefore requires an internal-memory stack. Reserve it before VoiceSession
-            // starts TLS/MCP/audio initialization and fragments the remaining internal heap.
-            const BaseType_t task_status =
-                xTaskCreate(&Runtime::WakeTaskEntry, "voicelife_wake", 4096, this, 5, &wake_task_);
-            if (task_status != pdPASS) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒控制任务失败"));
-        }
 #endif
         const Status session_status = session_->Start(config);
         if (!session_status.ok()) {
@@ -405,6 +419,8 @@ class Runtime final {
         }
 
 #ifdef ESP_PLATFORM
+        // IM 的 SNTP、Gateway 探针和退避全部在独立任务中完成，语音启动路径不等待网络。
+        StartImRuntime();
         EnqueueEvent(voice::VoiceInteractionEvent::kBootCompleted);
         const Status input_status =
             assembly_->StartBoardInput([this](BoardInputAction action) { (void)EnqueueBoardInput(action); });
