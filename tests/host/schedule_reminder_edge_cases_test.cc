@@ -7,11 +7,18 @@ namespace {
 /** @brief 验证默认时间提供者和重复停止操作的公共行为。 @return 无。 */
 void CheckDefaultClockAndIdempotentStop() {
     ScriptedFixture fixture({MakeSchedule(1, "默认时钟", std::nullopt, std::nullopt)});
-    auto persisted = *fixture.repository.FindById(1).value;
-    persisted.reminder_task_id = 77;
-    Check(fixture.repository.Update(persisted).ok(), "应设置持久化提醒任务");
-    ScheduleReminderService reminder(fixture.repository, fixture.schedule_service, fixture.rule_service, fixture.timing,
-                                     fixture.speech);
+    const auto persisted = fixture.reminder_repository.Insert({
+        .schedule_id = 1,
+        .chain_id = 1,
+        .attempt = 1,
+        .timing_task_id = "default-clock-reminder",
+        .trigger_at = At(4'000'000'000),
+        .created_at = At(900),
+        .updated_at = At(900),
+    });
+    Check(persisted.ok(), "应设置持久化提醒任务");
+    ScheduleReminderService reminder(fixture.repository, fixture.reminder_repository, fixture.schedule_service,
+                                     fixture.rule_service, fixture.timing, fixture.speech);
     Check(reminder.Start().ok(), "默认时间提供者应允许服务启动");
     reminder.Stop();
     reminder.Stop();

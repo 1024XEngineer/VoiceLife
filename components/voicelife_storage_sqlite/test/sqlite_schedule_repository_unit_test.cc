@@ -68,7 +68,6 @@ Schedule CompleteSchedule() {
         .location = "会议室 C",
         .notes = "完整字段往返",
         .rule_id = 88,
-        .reminder_task_id = 900'001,
         .status = ScheduleStatus::kCancelled,
         .created_at = At(2'000'000'000),
         .updated_at = At(2'000'000'100),
@@ -120,7 +119,6 @@ void CheckInsertAndRoundTrip(const std::filesystem::path& path) {
         .location = std::nullopt,
         .notes = std::nullopt,
         .rule_id = std::nullopt,
-        .reminder_task_id = std::nullopt,
         .status = ScheduleStatus::kActive,
         .created_at = {},
         .updated_at = {},
@@ -141,14 +139,12 @@ void CheckInsertAndRoundTrip(const std::filesystem::path& path) {
     Check(complete_row.event == complete_input.event && complete_row.start_time == complete_input.start_time &&
               complete_row.end_time == complete_input.end_time && complete_row.location == complete_input.location &&
               complete_row.notes == complete_input.notes && complete_row.rule_id == complete_input.rule_id &&
-              complete_row.reminder_task_id == complete_input.reminder_task_id &&
               complete_row.status == complete_input.status && complete_row.created_at == complete_input.created_at &&
               complete_row.updated_at == complete_input.updated_at,
           "完整日程的所有字段都应往返一致");
     const Schedule& minimal_row = stored.value->back();
     Check(!minimal_row.start_time.has_value() && !minimal_row.end_time.has_value() &&
-              !minimal_row.location.has_value() && !minimal_row.notes.has_value() && !minimal_row.rule_id.has_value() &&
-              !minimal_row.reminder_task_id.has_value(),
+              !minimal_row.location.has_value() && !minimal_row.notes.has_value() && !minimal_row.rule_id.has_value(),
           "最小日程的可空字段应保持为空");
 }
 
@@ -182,12 +178,11 @@ void CheckMapperValidation(const std::filesystem::path& path) {
     Check(start_error.code == ErrorCode::kInternal && start_error.message.find("start_time") != std::string::npos,
           "Mapper 应为开始时间绑定错误补充字段名");
 
-    auto six_parameters = database.Prepare("SELECT ?, ?, ?, ?, ?, ?");
-    Check(six_parameters.ok(), "应创建六参数语句");
-    const auto reminder_error = mapping::BindSchedule(*six_parameters.value, CompleteSchedule());
-    Check(reminder_error.code == ErrorCode::kInternal &&
-              reminder_error.message.find("reminder_task_id") != std::string::npos,
-          "Mapper 应为提醒任务标识绑定错误补充字段名");
+    auto eight_parameters = database.Prepare("SELECT ?, ?, ?, ?, ?, ?, ?, ?");
+    Check(eight_parameters.ok(), "应创建八参数语句");
+    const auto reminder_error = mapping::BindSchedule(*eight_parameters.value, CompleteSchedule());
+    Check(reminder_error.code == ErrorCode::kInternal && reminder_error.message.find("updated_at") != std::string::npos,
+          "Mapper 应为更新时间绑定错误补充字段名");
 }
 
 /**

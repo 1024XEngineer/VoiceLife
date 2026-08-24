@@ -39,8 +39,6 @@ struct Schedule {
     std::optional<std::string> notes;
     /// 周期规则来源标识；当前数据库不建立外键。
     std::optional<ScheduleId> rule_id;
-    /// 当前已注册的一次性提醒任务标识；仅由 ScheduleReminderService 维护。
-    std::optional<int64_t> reminder_task_id;
     ScheduleStatus status = ScheduleStatus::kActive;
     DateTime created_at;
     DateTime updated_at;

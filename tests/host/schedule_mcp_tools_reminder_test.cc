@@ -17,6 +17,7 @@
 #include "voicelife/schedule/schedule_rule_repository.h"
 #include "voicelife/schedule/schedule_rule_service.h"
 #include "voicelife/schedule/schedule_service.h"
+#include "voicelife/storage_memory/memory_schedule_reminder_task_repository.h"
 #include "voicelife/timing/timing_task.h"
 
 using voicelife::ErrorCode;
@@ -49,6 +50,8 @@ using voicelife::timing::TriggerAt;
 namespace {
 
 TriggerAt Trigger(int64_t seconds) { return TriggerAt{std::chrono::seconds{seconds}}; }
+
+DateTime CurrentTime() { return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()); }
 
 class FakeSpeech final : public ScheduleReminderSpeechPort {
    public:
@@ -242,6 +245,16 @@ std::string OutputString(const ToolResult& result, const std::string& key) {
     return {};
 }
 
+std::optional<int64_t> OutputInteger(const ToolResult& result, const std::string& key) {
+    if (!result.output.IsObject()) return std::nullopt;
+    for (const auto& field : *result.output.object) {
+        if (field.first == key && field.second->kind == voicelife::ToolOutputValue::Kind::kInteger) {
+            return field.second->integer;
+        }
+    }
+    return std::nullopt;
+}
+
 JsonValue DailyRepeat(const std::string& start_date = "2099-01-01") {
     return JsonValue::Object({
         {"freq_type", JsonValue::String("daily")},
@@ -259,7 +272,8 @@ void CheckOneShotReminderLifecycle() {
     ScheduleOperationService operation_service(schedules);
     InMemoryTimingTaskRunner timing;
     FakeSpeech speech;
-    ScheduleReminderService reminder(schedules, service, rule_service, timing, speech);
+    voicelife::storage_memory::MemoryScheduleReminderTaskRepository reminder_tasks;
+    ScheduleReminderService reminder(schedules, reminder_tasks, service, rule_service, timing, speech);
     McpServer server;
     Check(reminder.Start().ok(), "提醒服务应能启动");
     Check(voicelife::mcp::RegisterScheduleMcpTools(server, service, rule_service, operation_service, &reminder).ok(),
@@ -273,9 +287,10 @@ void CheckOneShotReminderLifecycle() {
     Check(created.status.ok() && OutputString(created, "status") == "success", "创建一次性提醒日程应成功");
     timing.ProcessPendingCommands(Trigger(0));
     const auto created_schedule = schedules.FindById(1);
-    Check(created_schedule.ok() && created_schedule.value->reminder_task_id.has_value(),
-          "创建未来日程应持久化 reminder_task_id");
-    const int64_t first_task_id = *created_schedule.value->reminder_task_id;
+    const auto created_tasks = reminder_tasks.FindBySchedule(1);
+    Check(created_schedule.ok() && created_tasks.ok() && created_tasks.value->size() == 1,
+          "创建未来日程应持久化独立提醒任务");
+    const std::string first_task_id = *created_tasks.value->front().timing_task_id;
 
     const auto updated = server.call({
         .request_id = "update-reminder",
@@ -287,9 +302,11 @@ void CheckOneShotReminderLifecycle() {
     Check(updated.status.ok() && OutputString(updated, "status") == "success", "修改提醒日程应成功");
     timing.ProcessPendingCommands(Trigger(1));
     const auto updated_schedule = schedules.FindById(1);
-    Check(updated_schedule.ok() && updated_schedule.value->reminder_task_id.has_value() &&
-              *updated_schedule.value->reminder_task_id != first_task_id,
-          "修改后应分配新的 reminder_task_id");
+    const auto updated_tasks = reminder_tasks.FindBySchedule(1);
+    Check(updated_schedule.ok() && updated_tasks.ok() && updated_tasks.value->size() == 2 &&
+              updated_tasks.value->back().timing_task_id.has_value() &&
+              *updated_tasks.value->back().timing_task_id != first_task_id,
+          "修改后应创建新的独立提醒链");
 
     const auto old_fire = timing.RunDueTasks(Trigger(1'893'459'600));
     Check(old_fire.processed_count == 0 && speech.texts.empty(), "旧提醒任务取消后不应触发");
@@ -301,9 +318,11 @@ void CheckOneShotReminderLifecycle() {
     });
     Check(deleted.status.ok() && OutputString(deleted, "status") == "success", "删除提醒日程应成功");
     const auto deleted_schedule = schedules.FindById(1);
-    Check(deleted_schedule.ok() && deleted_schedule.value->status == ScheduleStatus::kCancelled &&
-              !deleted_schedule.value->reminder_task_id.has_value(),
-          "删除后应取消状态并清空 reminder_task_id");
+    const auto deleted_tasks = reminder_tasks.FindBySchedule(1);
+    Check(deleted_schedule.ok() && deleted_schedule.value->status == ScheduleStatus::kCancelled && deleted_tasks.ok() &&
+              !deleted_tasks.value->empty() &&
+              deleted_tasks.value->back().timer_status == voicelife::schedule::ScheduleReminderTimerStatus::kCancelled,
+          "删除后应取消日程并保留已取消的提醒任务记录");
     Check(timing.RunDueTasks(Trigger(1'893'546'000)).processed_count == 0 && speech.texts.empty(),
           "删除后的新提醒任务也不应触发");
 }
@@ -314,7 +333,7 @@ struct ReminderToolFixture {
           rule_service(rules, exceptions, schedules),
           service(schedules),
           operation_service(schedules),
-          reminder(schedules, service, rule_service, timing, speech) {}
+          reminder(schedules, reminder_tasks, service, rule_service, timing, speech) {}
 
     InMemoryScheduleRepository schedules;
     FakeExceptionRepository exceptions;
@@ -322,6 +341,7 @@ struct ReminderToolFixture {
     ScheduleRuleService rule_service;
     ScheduleService service;
     ScheduleOperationService operation_service;
+    voicelife::storage_memory::MemoryScheduleReminderTaskRepository reminder_tasks;
     ScriptedTimingService timing;
     FakeSpeech speech;
     ScheduleReminderService reminder;
@@ -525,6 +545,82 @@ void CheckRuleReminderSyncFailurePaths() {
           "规则删除前撤销旧提醒不可用时应返回失败");
 }
 
+void CheckReminderActionTools() {
+    ReminderToolFixture fixture;
+    Check(fixture.reminder.Start().ok(), "提醒动作工具测试应启动服务");
+    Check(voicelife::mcp::RegisterScheduleMcpTools(fixture.server, fixture.service, fixture.rule_service,
+                                                   fixture.operation_service, &fixture.reminder)
+              .ok(),
+          "提醒动作工具应注册成功");
+
+    const DateTime now = CurrentTime();
+    const auto schedule = fixture.schedules.Insert({
+        .event = "动作提醒",
+        .start_time = now - std::chrono::minutes{1},
+        .created_at = now - std::chrono::minutes{2},
+        .updated_at = now - std::chrono::minutes{2},
+    });
+    Check(schedule.ok(), "应准备动作提醒日程");
+    const auto triggered = fixture.reminder_tasks.Insert({
+        .schedule_id = schedule.value->id,
+        .chain_id = 100,
+        .attempt = 1,
+        .timing_task_id = "triggered-action-reminder",
+        .trigger_at = now - std::chrono::minutes{1},
+        .business_status = voicelife::schedule::ScheduleReminderBusinessStatus::kWaitingAcknowledgement,
+        .timer_status = voicelife::schedule::ScheduleReminderTimerStatus::kTriggered,
+        .triggered_at = now - std::chrono::minutes{1},
+        .created_at = now - std::chrono::minutes{2},
+        .updated_at = now - std::chrono::minutes{1},
+    });
+    const auto pending = fixture.reminder_tasks.Insert({
+        .schedule_id = schedule.value->id,
+        .chain_id = 100,
+        .attempt = 2,
+        .timing_task_id = "pending-action-reminder",
+        .trigger_at = now + std::chrono::minutes{9},
+        .created_at = now - std::chrono::minutes{1},
+        .updated_at = now - std::chrono::minutes{1},
+    });
+    Check(triggered.ok() && pending.ok(), "应准备已触发提醒和默认后续提醒");
+
+    const auto snoozed = fixture.server.call({
+        .request_id = "snooze-reminder",
+        .name = "schedule.reminder_snooze",
+        .arguments = {},
+    });
+    Check(snoozed.status.ok(), "延迟工具调用边界应成功");
+    Check(OutputString(snoozed, "status") == "success", "延迟工具业务状态应成功");
+    Check(OutputString(snoozed, "message") == "已延迟提醒", "延迟工具应返回固定文案");
+    Check(OutputInteger(snoozed, "affected_count") == 1, "延迟工具应影响一条提醒链");
+    Check(fixture.timing.register_calls == 0 && fixture.timing.cancel_calls == 0,
+          "延迟工具必须复用默认后续提醒且不注册或取消定时器");
+
+    const auto acknowledged = fixture.server.call({
+        .request_id = "acknowledge-reminder",
+        .name = "schedule.reminder_acknowledge",
+        .arguments = {},
+    });
+    const auto completed_schedule = fixture.schedules.FindById(schedule.value->id);
+    const auto tasks = fixture.reminder_tasks.FindBySchedule(schedule.value->id);
+    Check(acknowledged.status.ok() && OutputString(acknowledged, "status") == "success" &&
+              OutputString(acknowledged, "message") == "已确认提醒" &&
+              OutputInteger(acknowledged, "affected_count") == 1 && fixture.timing.cancel_calls == 1 &&
+              completed_schedule.ok() && completed_schedule.value->status == ScheduleStatus::kCompleted && tasks.ok() &&
+              tasks.value->size() == 2 &&
+              tasks.value->front().business_status ==
+                  voicelife::schedule::ScheduleReminderBusinessStatus::kAcknowledged &&
+              tasks.value->back().timer_status == voicelife::schedule::ScheduleReminderTimerStatus::kCancelled,
+          "确认工具必须取消后续提醒、确认整条链并完成日程");
+
+    const auto repeated = fixture.server.call({
+        .request_id = "acknowledge-reminder-again",
+        .name = "schedule.reminder_acknowledge",
+        .arguments = {},
+    });
+    Check(repeated.status.ok() && OutputString(repeated, "status") == "failure", "已确认终态不能被重复动作复活");
+}
+
 }  // namespace
 
 int main() {
@@ -534,5 +630,6 @@ int main() {
     CheckRuleReminderSuccessPaths();
     CheckRuleReminderRollbackSyncPaths();
     CheckRuleReminderSyncFailurePaths();
+    CheckReminderActionTools();
     return 0;
 }
