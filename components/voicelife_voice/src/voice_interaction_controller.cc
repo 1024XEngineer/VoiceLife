@@ -127,6 +127,7 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
         case VoiceInteractionEvent::kTerminalResponseCompleted:
             // 告别、绑定码等终结型回复播报完成：不进入 follow-up，直接恢复待机。
             if (state_ != VoiceInteractionState::kSpeaking) return InvalidTransition(state_, event);
+            system_speech_pending_ = false;
             state_ = VoiceInteractionState::kStandby;
             transition.action = VoiceInteractionAction::kRestoreStandby;
             break;
@@ -139,6 +140,7 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
                 state_ != VoiceInteractionState::kSpeaking) {
                 return InvalidTransition(state_, event);
             }
+            system_speech_pending_ = true;
             state_ = VoiceInteractionState::kThinking;
             break;
         case VoiceInteractionEvent::kIntentReceived:
@@ -157,6 +159,12 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             break;
         case VoiceInteractionEvent::kTtsStopped:
             if (state_ != VoiceInteractionState::kSpeaking) return InvalidTransition(state_, event);
+            if (system_speech_pending_) {
+                system_speech_pending_ = false;
+                state_ = VoiceInteractionState::kStandby;
+                transition.action = VoiceInteractionAction::kRestoreStandby;
+                break;
+            }
             // 播报结束后的输入也必须等待 BeginCapture 实际成功；不能先把
             // UI 标成“聆听中”，否则硬件启动失败会形成假状态。
             state_ = VoiceInteractionState::kOpeningCapture;
@@ -192,6 +200,7 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
                 state_ != VoiceInteractionState::kOpeningCapture) {
                 return InvalidTransition(state_, event);
             }
+            system_speech_pending_ = false;
             state_ = VoiceInteractionState::kStandby;
             break;
         case VoiceInteractionEvent::kTransportDisconnected:
@@ -222,6 +231,7 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
         case VoiceInteractionEvent::kFailure:
             if (state_ == VoiceInteractionState::kBooting) return InvalidTransition(state_, event);
             if (state_ == VoiceInteractionState::kError) break;
+            system_speech_pending_ = false;
             state_ = VoiceInteractionState::kError;
             transition.action = VoiceInteractionAction::kInterruptSession;
             break;

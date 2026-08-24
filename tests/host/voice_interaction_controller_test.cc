@@ -46,14 +46,8 @@ int main() {
                     VoiceInteractionAction::kNone, "待机中的定时提醒必须先进入可播报状态");
     CheckTransition(controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
                     VoiceInteractionAction::kNone, "系统提醒的 TTS 开始后应进入播报状态");
-    CheckTransition(controller, VoiceInteractionEvent::kTtsStopped, VoiceInteractionState::kOpeningCapture,
-                    VoiceInteractionAction::kStartCapture, "系统提醒播报完成后应事务式恢复聆听");
-    CheckTransition(controller, VoiceInteractionEvent::kCaptureStarted, VoiceInteractionState::kListening,
-                    VoiceInteractionAction::kNone, "系统提醒后的采集成功确认才进入聆听");
-    CheckTransition(controller, VoiceInteractionEvent::kPressUp, VoiceInteractionState::kFinalizing,
-                    VoiceInteractionAction::kStopVoiceTurn, "提醒后的聆听应能正常结束语音轮次");
-    CheckTransition(controller, VoiceInteractionEvent::kFinalizationTimedOut, VoiceInteractionState::kStandby,
-                    VoiceInteractionAction::kRestoreStandby, "提醒后的语音轮次超时应恢复待机");
+    CheckTransition(controller, VoiceInteractionEvent::kTtsStopped, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "系统提醒播报完成后应直接恢复待机");
 
     VoiceInteractionController acknowledgement_timeout_controller;
     CheckTransition(acknowledgement_timeout_controller, VoiceInteractionEvent::kBootCompleted,
