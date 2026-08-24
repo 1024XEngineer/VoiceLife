@@ -197,12 +197,20 @@ Result<ReminderActionResult> ScheduleReminderService::AcknowledgeRecentReminders
     if (!recent.ok()) return Result<ReminderActionResult>::Failure(recent.status.code, recent.status.message);
     std::unordered_set<int64_t> chains;
     std::unordered_set<ScheduleId> schedules;
+    std::vector<std::string> events;
+    std::unordered_set<std::string> event_set;
     for (const auto& task : *recent.value) {
         if (task.business_status != ScheduleReminderBusinessStatus::kWaitingAcknowledgement &&
             task.business_status != ScheduleReminderBusinessStatus::kExhausted)
             continue;
         chains.insert(task.chain_id);
         schedules.insert(task.schedule_id);
+        std::string event = task.event;
+        if (event.empty()) {
+            const auto loaded = repository_.FindById(task.schedule_id);
+            if (loaded.ok()) event = loaded.value->event;
+        }
+        if (!event.empty() && event_set.insert(event).second) events.push_back(std::move(event));
     }
     if (chains.empty())
         return Result<ReminderActionResult>::Failure(ErrorCode::kNotFound, "最近 10 分钟内没有已触发的提醒");
@@ -233,7 +241,8 @@ Result<ReminderActionResult> ScheduleReminderService::AcknowledgeRecentReminders
             if (!completed.ok()) return Result<ReminderActionResult>::Failure(completed.code, completed.message);
         }
     }
-    return Result<ReminderActionResult>::Success({.affected_count = static_cast<int>(chains.size())});
+    return Result<ReminderActionResult>::Success(
+        {.affected_count = static_cast<int>(chains.size()), .events = std::move(events)});
 }
 
 Result<ReminderActionResult> ScheduleReminderService::SnoozeRecentReminders() {
@@ -281,8 +290,11 @@ std::string ScheduleReminderService::AllocateTaskId(std::string_view prefix) {
 
 Status ScheduleReminderService::RegisterReminder(ScheduleId schedule_id, int64_t chain_id, int attempt,
                                                  DateTime trigger_at) {
+    const auto loaded = repository_.FindById(schedule_id);
+    if (!loaded.ok()) return loaded.status;
     const DateTime now = Now();
     ScheduleReminderTask task{.schedule_id = schedule_id,
+                              .event = loaded.value->event,
                               .chain_id = chain_id,
                               .attempt = attempt,
                               .timing_task_id = AllocateTaskId("schedule-reminder"),
