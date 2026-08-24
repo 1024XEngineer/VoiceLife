@@ -12,6 +12,7 @@ if(CONFIG_VOICELIFE_STORAGE_SQLITE)
         "src/schema/migrations/v004_create_operation_record.cc"
         "src/schema/migrations/v005_add_schedule_reminder_task_id.cc"
         "src/schema/migrations/v006_create_schedule_reminder_task.cc"
+        "src/schema/migrations/v007_add_reminder_action_state.cc"
         "src/schema/sqlite_schema.cc"
         "src/schema/voicelife_schema.cc"
         "src/sql/operation_sql.cc"

@@ -24,6 +24,12 @@ class MemoryScheduleReminderTaskRepository final : public schedule::ScheduleRemi
      * @return 查询结果。
      */
     [[nodiscard]] Result<schedule::ScheduleReminderTask> FindById(int64_t id) const override;
+    /** @brief 按 Timing task 标识查询任务。
+     * @param timing_task_id Timing 层不透明任务标识。
+     * @return 查询结果。
+     */
+    [[nodiscard]] Result<schedule::ScheduleReminderTask> FindByTimingTaskId(
+        std::string_view timing_task_id) const override;
     /** @brief 查询日程的提醒任务。
      * @param schedule_id 日程标识。
      * @return 查询结果。

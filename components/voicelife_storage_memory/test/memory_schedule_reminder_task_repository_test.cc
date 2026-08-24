@@ -45,6 +45,8 @@ int main() {
     Check(second.ok() && third.ok(), "仓储必须保存多个日程和尝试次数");
     Check(repository.FindById(first.value->id).ok() && !repository.FindById(999).ok(),
           "按标识查询必须区分存在和不存在记录");
+    Check(repository.FindByTimingTaskId("timing-1").ok() && !repository.FindByTimingTaskId("missing").ok(),
+          "仓储必须支持按 Timing task 标识精确查询");
     Check(repository.FindBySchedule(1).value->size() == 2 && repository.FindBySchedule(999).value->empty() &&
               repository.FindAll().value->size() == 3,
           "仓储必须支持按日程和全量查询");
@@ -58,26 +60,48 @@ int main() {
     const auto recent = repository.FindTriggered(At(1'190), At(1'200));
     Check(recent.ok() && recent.value->size() == 1 && recent.value->front().id == triggered.id,
           "触发查询必须包含窗口边界内等待确认的任务");
+    triggered.business_status = ScheduleReminderBusinessStatus::kSnoozed;
+    triggered.action_operation_id = "operation-1";
+    triggered.action_kind = ScheduleReminderActionKind::kSnooze;
+    triggered.action_occurred_at = At(1'201);
+    triggered.action_next_trigger_at = At(1'800);
+    Check(repository.Update(triggered).ok(), "仓储必须保存已提交的延迟动作结果");
+    const auto persisted_action = repository.FindByTimingTaskId("timing-1");
+    Check(persisted_action.ok() && persisted_action.value->action_operation_id == "operation-1" &&
+              persisted_action.value->action_next_trigger_at == At(1'800),
+          "仓储必须完整返回动作幂等键和下一次触发时间");
 
     auto exhausted = *second.value;
     exhausted.business_status = ScheduleReminderBusinessStatus::kExhausted;
     exhausted.timer_status = ScheduleReminderTimerStatus::kTriggered;
     exhausted.triggered_at = At(1'190);
     Check(repository.Update(exhausted).ok(), "仓储必须保存耗尽终态");
-    Check(repository.FindTriggered(At(1'190), At(1'200)).value->size() == 2, "触发查询必须同时返回等待确认和耗尽任务");
+    Check(repository.FindTriggered(At(1'190), At(1'200)).value->size() == 1,
+          "触发查询必须返回耗尽任务并排除已延迟终态");
 
     exhausted.business_status = ScheduleReminderBusinessStatus::kAcknowledged;
     Check(repository.Update(exhausted).ok(), "仓储必须保存确认终态");
-    Check(repository.FindTriggered(At(1'190), At(1'200)).value->size() == 1, "触发查询必须排除已确认终态");
-
-    auto cancelled = triggered;
-    cancelled.business_status = ScheduleReminderBusinessStatus::kCancelled;
-    Check(repository.Update(cancelled).ok(), "仓储必须保存取消终态");
-    Check(repository.FindTriggered(At(1'190), At(1'200)).value->empty(), "触发查询必须排除已取消终态");
+    Check(repository.FindTriggered(At(1'190), At(1'200)).value->empty(), "触发查询必须排除已确认终态");
 
     Check(!repository.Insert(MakeTask(1, 10, 1, "timing-duplicate-attempt")).ok(),
           "同一提醒链不能重复保存相同尝试次数");
     Check(!repository.Insert(MakeTask(3, 30, 1, "timing-2")).ok(), "Timing task 标识必须唯一");
+    auto duplicate_operation = MakeTask(3, 30, 1, "timing-operation-duplicate");
+    duplicate_operation.business_status = ScheduleReminderBusinessStatus::kAcknowledged;
+    duplicate_operation.action_operation_id = "operation-1";
+    duplicate_operation.action_kind = ScheduleReminderActionKind::kAcknowledge;
+    duplicate_operation.action_occurred_at = At(1'300);
+    Check(!repository.Insert(duplicate_operation).ok(), "动作 operationId 必须唯一");
+
+    auto cancelled = triggered;
+    cancelled.business_status = ScheduleReminderBusinessStatus::kCancelled;
+    cancelled.action_operation_id = std::nullopt;
+    cancelled.action_kind = std::nullopt;
+    cancelled.action_occurred_at = std::nullopt;
+    cancelled.action_next_trigger_at = std::nullopt;
+    Check(repository.Update(cancelled).ok(), "仓储必须保存取消终态");
+    Check(repository.FindTriggered(At(1'190), At(1'200)).value->empty(), "触发查询必须排除已取消终态");
+
     Check(!repository.Insert(MakeTask(0, 30, 1, "invalid-schedule")).ok() &&
               !repository.Insert(MakeTask(3, 0, 1, "invalid-chain")).ok() &&
               !repository.Insert(MakeTask(3, 30, 0, "invalid-attempt-zero")).ok() &&

@@ -10,7 +10,7 @@ schedule::DateTime ReadTime(const SqliteStatement& statement, int column) {
 
 bool ValidBusinessStatus(int value) {
     return value >= static_cast<int>(schedule::ScheduleReminderBusinessStatus::kScheduled) &&
-           value <= static_cast<int>(schedule::ScheduleReminderBusinessStatus::kCancelled);
+           value <= static_cast<int>(schedule::ScheduleReminderBusinessStatus::kSnoozed);
 }
 
 bool ValidTimerStatus(int value) {
@@ -37,6 +37,24 @@ Status BindScheduleReminderTask(SqliteStatement& statement, const schedule::Sche
                        : statement.BindNull(index++))
              .ok())
         return status;
+    if (!(status = task.action_operation_id.has_value() ? statement.BindText(index++, *task.action_operation_id)
+                                                        : statement.BindNull(index++))
+             .ok())
+        return status;
+    if (!(status = task.action_kind.has_value() ? statement.BindInt(index++, static_cast<int>(*task.action_kind))
+                                                : statement.BindNull(index++))
+             .ok())
+        return status;
+    if (!(status = task.action_occurred_at.has_value()
+                       ? statement.BindInt64(index++, task.action_occurred_at->time_since_epoch().count())
+                       : statement.BindNull(index++))
+             .ok())
+        return status;
+    if (!(status = task.action_next_trigger_at.has_value()
+                       ? statement.BindInt64(index++, task.action_next_trigger_at->time_since_epoch().count())
+                       : statement.BindNull(index++))
+             .ok())
+        return status;
     if (!(status = statement.BindInt64(index++, task.created_at.time_since_epoch().count())).ok()) return status;
     return statement.BindInt64(index, task.updated_at.time_since_epoch().count());
 }
@@ -57,8 +75,19 @@ Result<schedule::ScheduleReminderTask> ReadScheduleReminderTask(const SqliteStat
     task.business_status = static_cast<schedule::ScheduleReminderBusinessStatus>(business_status);
     task.timer_status = static_cast<schedule::ScheduleReminderTimerStatus>(timer_status);
     if (!statement.IsNull(8)) task.triggered_at = ReadTime(statement, 8);
-    task.created_at = ReadTime(statement, 9);
-    task.updated_at = ReadTime(statement, 10);
+    if (!statement.IsNull(9)) task.action_operation_id = statement.ColumnText(9);
+    if (!statement.IsNull(10)) {
+        const int action_kind = statement.ColumnInt(10);
+        if (action_kind < static_cast<int>(schedule::ScheduleReminderActionKind::kAcknowledge) ||
+            action_kind > static_cast<int>(schedule::ScheduleReminderActionKind::kSnooze)) {
+            return Result<schedule::ScheduleReminderTask>::Failure(ErrorCode::kInternal, "提醒动作类型值非法");
+        }
+        task.action_kind = static_cast<schedule::ScheduleReminderActionKind>(action_kind);
+    }
+    if (!statement.IsNull(11)) task.action_occurred_at = ReadTime(statement, 11);
+    if (!statement.IsNull(12)) task.action_next_trigger_at = ReadTime(statement, 12);
+    task.created_at = ReadTime(statement, 13);
+    task.updated_at = ReadTime(statement, 14);
     return Result<schedule::ScheduleReminderTask>::Success(std::move(task));
 }
 }  // namespace voicelife::storage_sqlite::mapping

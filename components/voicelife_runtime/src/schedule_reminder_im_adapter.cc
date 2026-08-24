@@ -30,12 +30,14 @@ std::string FormatIso(schedule::DateTime value) {
 std::string DecimalId(int64_t value) { return std::to_string(value); }
 
 contracts::im::ReminderActionResult ActionResult(const contracts::im::ReminderActionCommand& command,
-                                                 std::string status, std::string error_code, std::string occurred_at) {
+                                                 std::string status, std::string error_code, std::string occurred_at,
+                                                 std::optional<std::string> next_trigger_at = std::nullopt) {
     contracts::im::ReminderActionResult result;
     result.schemaVersion = contracts::im::kDeviceContractVersion;
     result.operationId = command.operationId;
     result.reminderTriggerId = command.reminderTriggerId;
     result.status = std::move(status);
+    result.nextTriggerAt = std::move(next_trigger_at);
     if (!error_code.empty()) result.errorCode = std::move(error_code);
     result.occurredAt = std::move(occurred_at);
     return result;
@@ -90,16 +92,25 @@ Status ImScheduleReminderNotification::SendScheduleReminder(const schedule::Sche
 
 contracts::im::ReminderActionResult ImScheduleReminderActionExecutor::Execute(
     const contracts::im::ReminderActionCommand& command) {
-    const std::string occurred_at = EspScheduleReminderClock{}.NowIso();
-    Result<schedule::ReminderActionResult> result;
+    schedule::ReminderActionCommand local;
+    local.operation_id = command.operationId;
+    local.reminder_trigger_id = command.reminderTriggerId;
     if (command.action == "acknowledge") {
-        result = service_.AcknowledgeRecentReminders();
+        local.action = schedule::ScheduleReminderActionKind::kAcknowledge;
     } else if (command.action == "snooze") {
-        result = service_.SnoozeRecentReminders();
+        local.action = schedule::ScheduleReminderActionKind::kSnooze;
+        local.snooze_minutes = command.minutes;
     } else {
-        return ActionResult(command, "failed", "unsupported_action", occurred_at);
+        return ActionResult(command, "failed", "unsupported_action", EspScheduleReminderClock{}.NowIso());
     }
-    if (result.ok()) return ActionResult(command, "succeeded", {}, occurred_at);
+    const auto result = service_.ExecuteReminderAction(local);
+    if (result.ok()) {
+        return ActionResult(command, "succeeded", {}, FormatIso(result.value->occurred_at),
+                            result.value->next_trigger_at.has_value()
+                                ? std::optional<std::string>{FormatIso(*result.value->next_trigger_at)}
+                                : std::nullopt);
+    }
+    const std::string occurred_at = EspScheduleReminderClock{}.NowIso();
     if (result.status.code == ErrorCode::kUnavailable) {
         return ActionResult(command, "retryable_failed", "unavailable", occurred_at);
     }

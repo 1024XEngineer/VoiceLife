@@ -191,6 +191,7 @@ Status ScheduleReminderService::SynchronizeRule(ScheduleRuleId rule_id) {
 }
 
 Result<ReminderActionResult> ScheduleReminderService::AcknowledgeRecentReminders() {
+    std::lock_guard<std::mutex> action_lock(action_mutex_);
     const auto recent = reminder_repository_.FindTriggered(Now() - kRecentWindow, Now());
     if (!recent.ok()) return Result<ReminderActionResult>::Failure(recent.status.code, recent.status.message);
     std::unordered_set<int64_t> chains;
@@ -231,10 +232,17 @@ Result<ReminderActionResult> ScheduleReminderService::AcknowledgeRecentReminders
             if (!completed.ok()) return Result<ReminderActionResult>::Failure(completed.code, completed.message);
         }
     }
-    return Result<ReminderActionResult>::Success({.affected_count = static_cast<int>(chains.size())});
+    return Result<ReminderActionResult>::Success({.affected_count = static_cast<int>(chains.size()),
+                                                  .operation_id = {},
+                                                  .reminder_trigger_id = {},
+                                                  .action = ScheduleReminderActionKind::kAcknowledge,
+                                                  .occurred_at = {},
+                                                  .next_trigger_at = std::nullopt,
+                                                  .replayed = false});
 }
 
 Result<ReminderActionResult> ScheduleReminderService::SnoozeRecentReminders() {
+    std::lock_guard<std::mutex> action_lock(action_mutex_);
     const auto recent = reminder_repository_.FindTriggered(Now() - kRecentWindow, Now());
     if (!recent.ok()) return Result<ReminderActionResult>::Failure(recent.status.code, recent.status.message);
     std::unordered_set<int64_t> chains;
@@ -254,7 +262,140 @@ Result<ReminderActionResult> ScheduleReminderService::SnoozeRecentReminders() {
     }
     if (chains.empty())
         return Result<ReminderActionResult>::Failure(ErrorCode::kNotFound, "最近 10 分钟内没有可延迟的提醒");
-    return Result<ReminderActionResult>::Success({.affected_count = static_cast<int>(chains.size())});
+    return Result<ReminderActionResult>::Success({.affected_count = static_cast<int>(chains.size()),
+                                                  .operation_id = {},
+                                                  .reminder_trigger_id = {},
+                                                  .action = ScheduleReminderActionKind::kSnooze,
+                                                  .occurred_at = {},
+                                                  .next_trigger_at = std::nullopt,
+                                                  .replayed = false});
+}
+
+Result<ReminderActionResult> ScheduleReminderService::ExecuteReminderAction(const ReminderActionCommand& command) {
+    if (command.operation_id.empty() || command.reminder_trigger_id.empty()) {
+        return Result<ReminderActionResult>::Failure(ErrorCode::kInvalidArgument, "提醒动作标识不能为空");
+    }
+    if (command.action != ScheduleReminderActionKind::kAcknowledge &&
+        command.action != ScheduleReminderActionKind::kSnooze) {
+        return Result<ReminderActionResult>::Failure(ErrorCode::kInvalidArgument, "提醒动作类型无效");
+    }
+    const bool acknowledge = command.action == ScheduleReminderActionKind::kAcknowledge;
+    if ((acknowledge && command.snooze_minutes.has_value()) ||
+        (!acknowledge && command.snooze_minutes != static_cast<int>(kFollowUpDelay.count()))) {
+        return Result<ReminderActionResult>::Failure(ErrorCode::kInvalidArgument, "提醒动作参数无效");
+    }
+
+    std::lock_guard<std::mutex> action_lock(action_mutex_);
+    auto target_result = reminder_repository_.FindByTimingTaskId(command.reminder_trigger_id);
+    if (!target_result.ok()) {
+        return Result<ReminderActionResult>::Failure(target_result.status.code, target_result.status.message);
+    }
+    ScheduleReminderTask target = *target_result.value;
+    if (target.action_operation_id.has_value()) {
+        if (*target.action_operation_id != command.operation_id || target.action_kind != command.action ||
+            !target.action_occurred_at.has_value()) {
+            return Result<ReminderActionResult>::Failure(ErrorCode::kAlreadyExists,
+                                                         "提醒已由其他 operationId 或动作处理");
+        }
+        return Result<ReminderActionResult>::Success({.affected_count = 1,
+                                                      .operation_id = *target.action_operation_id,
+                                                      .reminder_trigger_id = command.reminder_trigger_id,
+                                                      .action = *target.action_kind,
+                                                      .occurred_at = *target.action_occurred_at,
+                                                      .next_trigger_at = target.action_next_trigger_at,
+                                                      .replayed = true});
+    }
+    if (target.business_status != ScheduleReminderBusinessStatus::kWaitingAcknowledgement &&
+        target.business_status != ScheduleReminderBusinessStatus::kExhausted) {
+        return Result<ReminderActionResult>::Failure(ErrorCode::kAlreadyExists, "提醒已经进入不可操作终态");
+    }
+
+    const auto all_tasks = reminder_repository_.FindAll();
+    if (!all_tasks.ok()) {
+        return Result<ReminderActionResult>::Failure(all_tasks.status.code, all_tasks.status.message);
+    }
+    const auto conflicting_operation =
+        std::find_if(all_tasks.value->begin(), all_tasks.value->end(),
+                     [&command](const auto& task) { return task.action_operation_id == command.operation_id; });
+    if (conflicting_operation != all_tasks.value->end()) {
+        return Result<ReminderActionResult>::Failure(ErrorCode::kAlreadyExists, "operationId 已用于其他提醒动作");
+    }
+
+    const auto schedule_tasks = reminder_repository_.FindBySchedule(target.schedule_id);
+    if (!schedule_tasks.ok()) {
+        return Result<ReminderActionResult>::Failure(schedule_tasks.status.code, schedule_tasks.status.message);
+    }
+    const DateTime occurred_at = Now();
+    if (!acknowledge) {
+        const auto follow_up =
+            std::find_if(schedule_tasks.value->begin(), schedule_tasks.value->end(), [&target](const auto& task) {
+                return task.chain_id == target.chain_id && task.attempt > target.attempt &&
+                       task.business_status == ScheduleReminderBusinessStatus::kScheduled &&
+                       task.timer_status == ScheduleReminderTimerStatus::kPending;
+            });
+        if (follow_up == schedule_tasks.value->end()) {
+            return Result<ReminderActionResult>::Failure(ErrorCode::kNotFound, "提醒没有可用的后续触发时间");
+        }
+        target.business_status = ScheduleReminderBusinessStatus::kSnoozed;
+        target.action_operation_id = command.operation_id;
+        target.action_kind = command.action;
+        target.action_occurred_at = occurred_at;
+        target.action_next_trigger_at = follow_up->trigger_at;
+        target.updated_at = occurred_at;
+        const Status updated = reminder_repository_.Update(target);
+        if (!updated.ok()) return Result<ReminderActionResult>::Failure(updated.code, updated.message);
+        return Result<ReminderActionResult>::Success({.affected_count = 1,
+                                                      .operation_id = command.operation_id,
+                                                      .reminder_trigger_id = command.reminder_trigger_id,
+                                                      .action = command.action,
+                                                      .occurred_at = occurred_at,
+                                                      .next_trigger_at = follow_up->trigger_at,
+                                                      .replayed = false});
+    }
+
+    for (const auto& task : *schedule_tasks.value) {
+        if (task.chain_id != target.chain_id || !Pending(task) || !task.timing_task_id.has_value()) continue;
+        const auto task_id = timing::TaskId::Create(*task.timing_task_id);
+        if (task_id && timing_service_->CancelTask({.task_id = *task_id, .on_result = {}}) ==
+                           timing::CommandAcceptance::kUnavailable) {
+            return Result<ReminderActionResult>::Failure(ErrorCode::kUnavailable, "后续提醒取消命令未被接收");
+        }
+    }
+    for (auto task : *schedule_tasks.value) {
+        if (task.chain_id != target.chain_id || task.id == target.id) continue;
+        if (Pending(task)) task.timer_status = ScheduleReminderTimerStatus::kCancelled;
+        if (task.business_status == ScheduleReminderBusinessStatus::kScheduled ||
+            task.business_status == ScheduleReminderBusinessStatus::kWaitingAcknowledgement ||
+            task.business_status == ScheduleReminderBusinessStatus::kExhausted) {
+            task.business_status = ScheduleReminderBusinessStatus::kAcknowledged;
+        }
+        task.updated_at = occurred_at;
+        const Status updated = reminder_repository_.Update(task);
+        if (!updated.ok()) return Result<ReminderActionResult>::Failure(updated.code, updated.message);
+    }
+    const auto schedule = repository_.FindById(target.schedule_id);
+    if (!schedule.ok()) return Result<ReminderActionResult>::Failure(schedule.status.code, schedule.status.message);
+    if (schedule.value->status == ScheduleStatus::kActive) {
+        const Status completed = schedule_service_.complete_schedule(target.schedule_id);
+        if (!completed.ok()) return Result<ReminderActionResult>::Failure(completed.code, completed.message);
+    } else if (schedule.value->status != ScheduleStatus::kCompleted) {
+        return Result<ReminderActionResult>::Failure(ErrorCode::kAlreadyExists, "提醒关联日程不可完成");
+    }
+    target.business_status = ScheduleReminderBusinessStatus::kAcknowledged;
+    target.action_operation_id = command.operation_id;
+    target.action_kind = command.action;
+    target.action_occurred_at = occurred_at;
+    target.action_next_trigger_at = std::nullopt;
+    target.updated_at = occurred_at;
+    const Status updated = reminder_repository_.Update(target);
+    if (!updated.ok()) return Result<ReminderActionResult>::Failure(updated.code, updated.message);
+    return Result<ReminderActionResult>::Success({.affected_count = 1,
+                                                  .operation_id = command.operation_id,
+                                                  .reminder_trigger_id = command.reminder_trigger_id,
+                                                  .action = command.action,
+                                                  .occurred_at = occurred_at,
+                                                  .next_trigger_at = std::nullopt,
+                                                  .replayed = false});
 }
 
 DateTime ScheduleReminderService::Now() const { return now_provider_(); }
@@ -288,6 +429,10 @@ Status ScheduleReminderService::RegisterReminder(ScheduleId schedule_id, int64_t
                               .business_status = ScheduleReminderBusinessStatus::kScheduled,
                               .timer_status = ScheduleReminderTimerStatus::kPending,
                               .triggered_at = std::nullopt,
+                              .action_operation_id = std::nullopt,
+                              .action_kind = std::nullopt,
+                              .action_occurred_at = std::nullopt,
+                              .action_next_trigger_at = std::nullopt,
                               .created_at = now,
                               .updated_at = now};
     const auto inserted = reminder_repository_.Insert(task);

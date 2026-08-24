@@ -69,6 +69,8 @@ void CheckClosedDatabaseFailures() {
     Check(repository.Insert(task).status.code == ErrorCode::kUnavailable, "关闭数据库不应接受提醒写入");
     Check(repository.Update(task).code == ErrorCode::kUnavailable, "关闭数据库不应接受提醒更新");
     Check(repository.FindById(1).status.code == ErrorCode::kUnavailable, "关闭数据库不应执行标识查询");
+    Check(repository.FindByTimingTaskId("timing").status.code == ErrorCode::kUnavailable,
+          "关闭数据库不应执行 Timing task 标识查询");
     Check(repository.FindBySchedule(1).status.code == ErrorCode::kUnavailable, "关闭数据库不应执行日程查询");
     Check(repository.FindAll().status.code == ErrorCode::kUnavailable, "关闭数据库不应执行全量查询");
     Check(repository.FindTriggered(DateTime{}, DateTime{}).status.code == ErrorCode::kUnavailable,
@@ -89,6 +91,7 @@ void CheckMissingSchemaFailures() {
     Check(!repository.Insert(task).ok(), "缺少提醒表时插入应返回 SQL 准备错误");
     Check(!repository.Update(task).ok(), "缺少提醒表时更新应返回 SQL 准备错误");
     Check(!repository.FindById(1).ok(), "缺少提醒表时标识查询应返回 SQL 准备错误");
+    Check(!repository.FindByTimingTaskId("timing").ok(), "缺少提醒表时 Timing task 标识查询应返回 SQL 准备错误");
     Check(!repository.FindBySchedule(1).ok(), "缺少提醒表时日程查询应返回 SQL 准备错误");
     Check(!repository.FindAll().ok(), "缺少提醒表时全量查询应返回 SQL 准备错误");
     Check(!repository.FindTriggered(DateTime{}, DateTime{}).ok(), "缺少提醒表时触发查询应返回 SQL 准备错误");
