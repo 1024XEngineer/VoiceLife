@@ -66,7 +66,10 @@ Status ImScheduleReminderNotification::SendScheduleReminder(const schedule::Sche
     intent.instanceId = DecimalId(schedule.id);
     intent.reminderTriggerId = task.timing_task_id.value_or("schedule-reminder-task-" + DecimalId(task.id));
     intent.reminderType = "strong";
-    intent.content = {.title = "日程提醒", .body = schedule.event};
+    intent.content = {.title = "日程提醒",
+                      .body = schedule.event + (task.attempt >= 3
+                                                     ? "\n这是最后一次提醒；之后不再创建新的推迟提醒。"
+                                                     : "")};
     intent.actions = {
         {.kind = "command", .type = "acknowledge", .label = "知道了", .minutes = std::nullopt},
         {.kind = "command", .type = "snooze", .label = "推迟 10 分钟", .minutes = 10},

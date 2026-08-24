@@ -4,6 +4,7 @@
 #include <chrono>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -16,6 +17,7 @@ using namespace std::chrono_literals;
 constexpr int kMaximumAttempts = 3;
 constexpr auto kFollowUpDelay = 10min;
 constexpr auto kRecentWindow = 10min;
+constexpr std::string_view kFinalSnoozeReminderNotice = "这是最后一次提醒；之后不再创建新的推迟提醒。";
 DateTime SystemNow() { return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()); }
 timing::TriggerAt ToTriggerAt(DateTime value) { return std::chrono::time_point_cast<std::chrono::microseconds>(value); }
 std::chrono::minutes RetryDelay(int failures) { return failures <= 1 ? 1min : failures == 2 ? 5min : 15min; }
@@ -343,7 +345,9 @@ void ScheduleReminderService::HandleReminder(int64_t reminder_task_id, std::stri
     task.triggered_at = Now();
     task.updated_at = Now();
     if (!reminder_repository_.Update(task).ok()) return;
-    const std::string text = "提醒：现在是「" + loaded_schedule.value->event + "」时间了";
+    const std::string text =
+        "提醒：现在是「" + loaded_schedule.value->event + "」时间了" +
+        (task.attempt >= kMaximumAttempts ? " " + std::string(kFinalSnoozeReminderNotice) : "");
     (void)speech_.SpeakScheduleReminder(text);
     if (notification_) (void)notification_->SendScheduleReminder(*loaded_schedule.value, task);
     if (task.attempt < kMaximumAttempts) {

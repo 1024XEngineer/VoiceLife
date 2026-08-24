@@ -157,6 +157,14 @@ int main() {
     Check(notification.SendScheduleReminder(schedule, task).ok(), "提醒通知应提交到 IM 公共接口");
     Check(action_window.has_value() && action_window->reminderTriggerId == "timing-1", "强提醒响应应发布动作窗口");
 
+    auto final_task = task;
+    final_task.attempt = 3;
+    transport_ptr->response_body =
+        R"({"businessEventId":"schedule-reminder-task-10-final","status":"accepted","deliveries":[],"actionStream":{"reminderTriggerId":"timing-1","expiresAt":"2026-08-03T00:10:00.000Z"}})";
+    Check(notification.SendScheduleReminder(schedule, final_task).ok(), "第三次提醒通知应提交到 IM 公共接口");
+    Check(transport_ptr->requests.back().body.find("这是最后一次提醒；之后不再创建新的推迟提醒。") != std::string::npos,
+          "第三次 IM 提醒正文应追加最后一次稍后提醒说明");
+
     InMemoryScheduleRepository schedules({schedule});
     voicelife::storage_memory::MemoryScheduleReminderTaskRepository reminders;
     Check(reminders.Insert(task).ok(), "动作测试应保存已触发任务");
