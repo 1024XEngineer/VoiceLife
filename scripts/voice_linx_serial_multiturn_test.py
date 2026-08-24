@@ -295,9 +295,13 @@ def run_turn(
         # is already Listening, so no duplicate PressDown is generated.
         device.write(packet(BEGIN))
         device.flush()
-        cursor, _ = log.wait_for("SERIAL_VOICE_TURN_BEGIN=ok", cursor, 5)
+        turn_origin = cursor
+        begin_cursor, _ = log.wait_for("SERIAL_VOICE_TURN_BEGIN=ok", turn_origin, 5)
         if first_turn:
-            cursor, _ = log.wait_for("SERIAL_VOICE_CAPTURE_READY", cursor, 12)
+            capture_cursor, _ = log.wait_for("SERIAL_VOICE_CAPTURE_READY", turn_origin, 12)
+            cursor = max(begin_cursor, capture_cursor)
+        else:
+            cursor = begin_cursor
         turn_cursor = cursor
         for frame in prepared.frames:
             # A device-side endpoint closes capture asynchronously. Stop the
