@@ -310,6 +310,7 @@ Result<ReminderActionResult> ScheduleReminderService::ExecuteReminderAction(cons
                                                          "提醒已由其他 operationId 或动作处理");
         }
         return Result<ReminderActionResult>::Success({.affected_count = 1,
+                                                      .events = {},
                                                       .operation_id = *target.action_operation_id,
                                                       .reminder_trigger_id = command.reminder_trigger_id,
                                                       .action = *target.action_kind,
@@ -357,6 +358,7 @@ Result<ReminderActionResult> ScheduleReminderService::ExecuteReminderAction(cons
         const Status updated = reminder_repository_.Update(target);
         if (!updated.ok()) return Result<ReminderActionResult>::Failure(updated.code, updated.message);
         return Result<ReminderActionResult>::Success({.affected_count = 1,
+                                                      .events = {},
                                                       .operation_id = command.operation_id,
                                                       .reminder_trigger_id = command.reminder_trigger_id,
                                                       .action = command.action,
@@ -402,6 +404,7 @@ Result<ReminderActionResult> ScheduleReminderService::ExecuteReminderAction(cons
     const Status updated = reminder_repository_.Update(target);
     if (!updated.ok()) return Result<ReminderActionResult>::Failure(updated.code, updated.message);
     return Result<ReminderActionResult>::Success({.affected_count = 1,
+                                                  .events = {},
                                                   .operation_id = command.operation_id,
                                                   .reminder_trigger_id = command.reminder_trigger_id,
                                                   .action = command.action,
