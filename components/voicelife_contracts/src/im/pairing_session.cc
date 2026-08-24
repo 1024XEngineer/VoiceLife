@@ -23,7 +23,7 @@ constexpr int kMinimumPairingMinutes = 1;
 constexpr int kMaximumPairingMinutes = 10;
 
 bool IsAllowedPlatform(std::string_view platform) {
-    return platform == "wechat_official" || platform == "wecom_aibot" || platform == "feishu" || platform == "dingtalk";
+    return platform == "wechat_official" || platform == "feishu" || platform == "dingtalk";
 }
 
 Status ParseOptionalPlatforms(const JsonValue& root, std::optional<std::vector<std::string>>& out) {
