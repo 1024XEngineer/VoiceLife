@@ -265,7 +265,7 @@ Result<ReminderActionResult> ScheduleReminderService::SnoozeRecentReminders() {
     }
     if (chains.empty())
         return Result<ReminderActionResult>::Failure(ErrorCode::kNotFound, "最近 10 分钟内没有可延迟的提醒");
-    return Result<ReminderActionResult>::Success({.affected_count = static_cast<int>(chains.size())});
+    return Result<ReminderActionResult>::Success({.affected_count = static_cast<int>(chains.size()), .events = {}});
 }
 
 DateTime ScheduleReminderService::Now() const { return now_provider_(); }
