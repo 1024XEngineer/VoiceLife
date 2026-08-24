@@ -769,7 +769,8 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
 
     status = server.add_tool(
         "schedule.reminder_acknowledge",
-        "当用户明确确认已获知提醒内容（如‘我知道了’、‘好的’、‘收到’等）时调用。批量处理最近 10 分钟内所有已触发但未确认的提醒，关闭后续重复提醒，并将对应日程标记为已完成。一次性全部处理。",
+        "当用户明确确认已获知提醒内容（如‘我知道了’、‘好的’、‘收到’等）时调用。批量处理最近 10 "
+        "分钟内所有已触发但未确认的提醒，关闭后续重复提醒，并将对应日程标记为已完成。一次性全部处理。",
         PropertyList{}, [reminder_service](const PropertyList&) {
             if (reminder_service == nullptr) return FailureOutput("当前运行时未启用提醒能力");
             const auto result = reminder_service->AcknowledgeRecentReminders();
@@ -790,7 +791,8 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
 
     return server.add_tool(
         "schedule.reminder_snooze",
-        "当用户在语音交互中表达延迟提醒的意图（如‘稍后提醒’、‘过会儿再说’、‘等会儿提醒我’等）时调用。为当前已触发提醒单独注册一次新的稍后提醒。",
+        "当用户在语音交互中表达延迟提醒的意图（如‘稍后提醒’、‘过会儿再说’、‘等会儿提醒我’等）时调用。为当前已触发提醒单"
+        "独注册一次新的稍后提醒。",
         PropertyList{}, [reminder_service](const PropertyList&) {
             if (reminder_service == nullptr) return FailureOutput("当前运行时未启用提醒能力");
             const auto result = reminder_service->SnoozeRecentReminders();

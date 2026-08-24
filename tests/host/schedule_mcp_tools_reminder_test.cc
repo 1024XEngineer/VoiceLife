@@ -618,8 +618,8 @@ void CheckReminderActionTools() {
               OutputString(acknowledged, "message") == "已确认提醒" &&
               OutputInteger(acknowledged, "affected_count") == 1 &&
               OutputStringArray(acknowledged, "events") == std::vector<std::string>{schedule.value->event} &&
-              fixture.timing.cancel_calls == 1 &&
-              completed_schedule.ok() && completed_schedule.value->status == ScheduleStatus::kCompleted && tasks.ok() &&
+              fixture.timing.cancel_calls == 1 && completed_schedule.ok() &&
+              completed_schedule.value->status == ScheduleStatus::kCompleted && tasks.ok() &&
               tasks.value->size() == 2 &&
               tasks.value->front().business_status ==
                   voicelife::schedule::ScheduleReminderBusinessStatus::kAcknowledged &&

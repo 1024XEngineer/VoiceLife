@@ -357,9 +357,8 @@ void ScheduleReminderService::HandleReminder(int64_t reminder_task_id, std::stri
     task.triggered_at = Now();
     task.updated_at = Now();
     if (!reminder_repository_.Update(task).ok()) return;
-    const std::string text =
-        "提醒：现在是「" + loaded_schedule.value->event + "」时间了" +
-        (task.attempt >= kMaximumAttempts ? " " + std::string(kFinalSnoozeReminderNotice) : "");
+    const std::string text = "提醒：现在是「" + loaded_schedule.value->event + "」时间了" +
+                             (task.attempt >= kMaximumAttempts ? " " + std::string(kFinalSnoozeReminderNotice) : "");
     (void)speech_.SpeakScheduleReminder(text);
     if (notification_) (void)notification_->SendScheduleReminder(*loaded_schedule.value, task);
     if (task.attempt < kMaximumAttempts) {
