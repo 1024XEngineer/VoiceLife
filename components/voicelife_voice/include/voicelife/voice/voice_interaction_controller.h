@@ -88,7 +88,6 @@ class VoiceInteractionController {
    private:
     mutable std::mutex mutex_;
     VoiceInteractionState state_ = VoiceInteractionState::kBooting;
-    bool system_speech_pending_ = false;
 };
 
 }  // namespace voicelife::voice
