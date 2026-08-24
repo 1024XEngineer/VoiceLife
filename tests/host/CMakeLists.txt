@@ -345,6 +345,10 @@ add_voicelife_test(schedule_reminder_recovery_action_test "unit;schedule;timing;
     schedule_reminder_recovery_action_test.cc)
 target_link_libraries(schedule_reminder_recovery_action_test PRIVATE schedule timing storage_memory)
 
+add_voicelife_test(schedule_reminder_action_execution_test "unit;schedule;timing;reminder"
+    schedule_reminder_action_execution_test.cc)
+target_link_libraries(schedule_reminder_action_execution_test PRIVATE schedule timing storage_memory)
+
 add_voicelife_test(schedule_reminder_terminal_sync_test "unit;schedule;timing;reminder"
     schedule_reminder_terminal_sync_test.cc)
 target_link_libraries(schedule_reminder_terminal_sync_test PRIVATE schedule timing storage_memory)

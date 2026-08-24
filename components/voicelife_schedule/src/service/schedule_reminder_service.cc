@@ -488,12 +488,13 @@ void ScheduleReminderService::HandleReminder(int64_t reminder_task_id, std::stri
     task.triggered_at = Now();
     task.updated_at = Now();
     if (!reminder_repository_.Update(task).ok()) return;
+    Status follow_up_status = Status::Ok();
+    if (task.attempt < kMaximumAttempts) {
+        follow_up_status = RegisterReminder(task.schedule_id, task.chain_id, task.attempt + 1, Now() + kFollowUpDelay);
+    }
     const std::string text = "提醒：现在是「" + loaded_schedule.value->event + "」时间了";
     (void)speech_.SpeakScheduleReminder(text);
-    if (notification_) (void)notification_->SendScheduleReminder(*loaded_schedule.value, task);
-    if (task.attempt < kMaximumAttempts) {
-        (void)RegisterReminder(task.schedule_id, task.chain_id, task.attempt + 1, Now() + kFollowUpDelay);
-    }
+    if (notification_ && follow_up_status.ok()) (void)notification_->SendScheduleReminder(*loaded_schedule.value, task);
     if (task.attempt == 1 && loaded_schedule.value->rule_id) GenerateNextInstance(*loaded_schedule.value->rule_id, 0);
 }
 
