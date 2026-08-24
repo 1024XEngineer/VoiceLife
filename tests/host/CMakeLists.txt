@@ -344,6 +344,10 @@ add_voicelife_test(schedule_reminder_recovery_action_test "unit;schedule;timing;
     schedule_reminder_recovery_action_test.cc)
 target_link_libraries(schedule_reminder_recovery_action_test PRIVATE schedule timing storage_memory)
 
+add_voicelife_test(schedule_reminder_terminal_sync_test "unit;schedule;timing;reminder"
+    schedule_reminder_terminal_sync_test.cc)
+target_link_libraries(schedule_reminder_terminal_sync_test PRIVATE schedule timing storage_memory)
+
 add_voicelife_test(schedule_rule_service_test "unit;schedule" schedule_rule_service_test.cc)
 target_link_libraries(schedule_rule_service_test PRIVATE schedule)
 
@@ -585,6 +589,12 @@ add_voicelife_test(sqlite_schedule_reminder_task_failure_test "unit;storage;sqli
 target_include_directories(sqlite_schedule_reminder_task_failure_test PRIVATE
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
 target_link_libraries(sqlite_schedule_reminder_task_failure_test PRIVATE storage_sqlite schedule)
+
+add_voicelife_test(sqlite_schedule_reminder_mapper_branch_test "unit;storage;sqlite;reminder;mapping"
+    sqlite_schedule_reminder_mapper_branch_test.cc)
+target_include_directories(sqlite_schedule_reminder_mapper_branch_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
+target_link_libraries(sqlite_schedule_reminder_mapper_branch_test PRIVATE storage_sqlite schedule)
 
 add_voicelife_test(sqlite_schedule_rule_repository_test "integration;storage;sqlite;schedule"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_rule_repository_test.cc")
