@@ -2,6 +2,8 @@
 #include "schedule_reminder_service_test.cc"
 #undef main
 
+#include <algorithm>
+
 namespace {
 
 /**
@@ -69,6 +71,8 @@ void CheckStartupTriggersExpiredPersistedTask() {
               stored.value->business_status == ScheduleReminderBusinessStatus::kExhausted,
           "第三次到期提醒应直接进入耗尽状态");
     Check(fixture.speech.texts.size() == 1, "恢复到期提醒应播报一次语音");
+    Check(fixture.speech.texts.front() == "提醒：现在是「过期提醒」时间了 这是最后一次提醒；之后不再创建新的推迟提醒。",
+          "第三次提醒语音应追加最后一次稍后提醒说明");
     Check(fixture.timing.register_commands.empty(), "第三次提醒不应创建后续定时任务");
 }
 
@@ -123,11 +127,60 @@ void CheckActionFilteringAndCancellationFailure() {
           "取消失败时应保留待执行的后续提醒");
 }
 
+/**
+ * @brief 验证确认结果返回保存的事件名称，并对旧任务执行回查与去重。
+ * @return 无。
+ */
+void CheckAcknowledgementEvents() {
+    ScriptedFixture fixture({MakeSchedule(1, "确认日程", At(900)), MakeSchedule(2, "另一个日程", At(900))});
+    const auto first = fixture.reminder_repository.Insert({
+        .schedule_id = 1,
+        .event = "确认日程",
+        .chain_id = 41,
+        .attempt = 1,
+        .timing_task_id = "acknowledge-first",
+        .trigger_at = At(990),
+        .business_status = ScheduleReminderBusinessStatus::kWaitingAcknowledgement,
+        .timer_status = ScheduleReminderTimerStatus::kTriggered,
+        .triggered_at = At(995),
+        .created_at = At(900),
+        .updated_at = At(995),
+    });
+    const auto duplicate = fixture.reminder_repository.Insert({
+        .schedule_id = 2,
+        .event = "确认日程",
+        .chain_id = 42,
+        .attempt = 1,
+        .timing_task_id = "acknowledge-duplicate",
+        .trigger_at = At(990),
+        .business_status = ScheduleReminderBusinessStatus::kExhausted,
+        .timer_status = ScheduleReminderTimerStatus::kTriggered,
+        .triggered_at = At(995),
+        .created_at = At(900),
+        .updated_at = At(995),
+    });
+    Check(first.ok() && duplicate.ok(), "应准备带事件名称的确认提醒");
+
+    auto legacy = *first.value;
+    legacy.id = 0;
+    legacy.schedule_id = 1;
+    legacy.event.clear();
+    legacy.chain_id = 43;
+    legacy.timing_task_id = "acknowledge-legacy";
+    Check(fixture.reminder_repository.Insert(legacy).ok(), "应准备没有事件快照的旧提醒");
+
+    const auto acknowledged = fixture.reminder.AcknowledgeRecentReminders();
+    Check(acknowledged.ok() && acknowledged.value->affected_count == 3 &&
+              acknowledged.value->events == std::vector<std::string>{"确认日程"},
+          "确认结果应回查旧任务并按日程名称去重");
+}
+
 }  // namespace
 
 int main() {
     CheckStartupCancelsOrphanedAndInactiveTasks();
     CheckStartupTriggersExpiredPersistedTask();
     CheckActionFilteringAndCancellationFailure();
+    CheckAcknowledgementEvents();
     return 0;
 }

@@ -245,6 +245,17 @@ std::string OutputString(const ToolResult& result, const std::string& key) {
     return {};
 }
 
+std::vector<std::string> OutputStringArray(const ToolResult& result, const std::string& key) {
+    std::vector<std::string> output;
+    if (!result.output.IsObject()) return output;
+    for (const auto& field : *result.output.object) {
+        if (field.first != key || !field.second->IsArray()) continue;
+        for (const auto& item : *field.second->array)
+            if (item->IsString()) output.push_back(item->string);
+    }
+    return output;
+}
+
 std::optional<int64_t> OutputInteger(const ToolResult& result, const std::string& key) {
     if (!result.output.IsObject()) return std::nullopt;
     for (const auto& field : *result.output.object) {
@@ -605,8 +616,10 @@ void CheckReminderActionTools() {
     const auto tasks = fixture.reminder_tasks.FindBySchedule(schedule.value->id);
     Check(acknowledged.status.ok() && OutputString(acknowledged, "status") == "success" &&
               OutputString(acknowledged, "message") == "已确认提醒" &&
-              OutputInteger(acknowledged, "affected_count") == 1 && fixture.timing.cancel_calls == 1 &&
-              completed_schedule.ok() && completed_schedule.value->status == ScheduleStatus::kCompleted && tasks.ok() &&
+              OutputInteger(acknowledged, "affected_count") == 1 &&
+              OutputStringArray(acknowledged, "events") == std::vector<std::string>{schedule.value->event} &&
+              fixture.timing.cancel_calls == 1 && completed_schedule.ok() &&
+              completed_schedule.value->status == ScheduleStatus::kCompleted && tasks.ok() &&
               tasks.value->size() == 2 &&
               tasks.value->front().business_status ==
                   voicelife::schedule::ScheduleReminderBusinessStatus::kAcknowledged &&

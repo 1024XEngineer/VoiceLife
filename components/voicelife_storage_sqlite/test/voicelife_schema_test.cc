@@ -83,8 +83,8 @@ void CheckVersionOneSchema(const std::filesystem::path& path) {
           "版本一应创建日程实例表");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule')") == 10,
           "当前日程实例表应包含十个字段且不保存提醒执行状态");
-    Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule_reminder_task')") == 15,
-          "当前提醒任务表应包含持久化动作结果字段");
+    Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule_reminder_task')") == 16,
+          "当前提醒任务表应包含事件快照和持久化动作结果字段");
     Check(ScalarInt64(database,
                       "SELECT COUNT(*) FROM pragma_table_info('schedule') "
                       "WHERE name='reminder_task_id'") == 0,
@@ -268,13 +268,13 @@ void CheckSchemaCollisionRejected(const std::filesystem::path& path) {
 }
 
 /**
- * @brief 验证真实 v005 数据升级到当前 v007 时提醒任务和日程表均正确迁移。
+ * @brief 验证真实 v005 数据升级到当前 v008 时提醒任务和日程表均正确迁移。
  * @param path 临时数据库路径。
  * @return 无。
  */
-void CheckVersionFiveToSevenMigration(const std::filesystem::path& path) {
+void CheckVersionFiveToEightMigration(const std::filesystem::path& path) {
     SqliteDatabase database(path.string());
-    Check(database.Open().ok(), "v005 到 v007 测试应打开数据库");
+    Check(database.Open().ok(), "v005 到 v008 测试应打开数据库");
 
     const SqliteMigration migrations[] = {
         {.version = 1, .apply = &ApplyV001CreateSchedule},
@@ -295,7 +295,7 @@ void CheckVersionFiveToSevenMigration(const std::filesystem::path& path) {
               .ok(),
           "v005 应能保存无提醒日程");
 
-    Check(VoiceLifeSchema::Initialize(database).ok(), "v005 到 v007 升级应成功");
+    Check(VoiceLifeSchema::Initialize(database).ok(), "v005 到 v008 升级应成功");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule") == 2, "升级后应保留全部日程");
     Check(
         ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule') WHERE name='reminder_task_id'") == 0,
@@ -309,14 +309,17 @@ void CheckVersionFiveToSevenMigration(const std::filesystem::path& path) {
     Check(ScalarInt64(database, "SELECT timer_status FROM schedule_reminder_task WHERE chain_id=77") == 1,
           "迁移提醒初始计时状态应为 pending");
     Check(ScalarInt64(database,
+                      "SELECT COUNT(*) FROM schedule_reminder_task WHERE chain_id=77 AND event='待迁移提醒'") == 1,
+          "迁移提醒应保留日程事件快照");
+    Check(ScalarInt64(database,
                       "SELECT COUNT(*) FROM pragma_table_info('schedule_reminder_task') "
                       "WHERE name IN ('action_operation_id', 'action_kind', 'action_occurred_at', "
                       "'action_next_trigger_at')") == 4,
           "升级后提醒任务表应包含四个动作结果字段");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule_reminder_task WHERE action_operation_id IS NULL") == 1,
           "历史提醒迁移后动作结果应保持为空");
-    Check(VoiceLifeSchema::Initialize(database).ok(), "v007 重复初始化应保持幂等");
-    Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule_reminder_task") == 1, "v007 重复初始化不应重复迁移提醒");
+    Check(VoiceLifeSchema::Initialize(database).ok(), "v008 重复初始化应保持幂等");
+    Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule_reminder_task") == 1, "v008 重复初始化不应重复迁移提醒");
 }
 
 /**
@@ -364,7 +367,7 @@ int RunTests() {
     const TemporaryDatabaseFile version_four = MakeTemporaryDatabaseFile();
     CheckVersionFourSchema(version_four.path);
     const TemporaryDatabaseFile migration = MakeTemporaryDatabaseFile();
-    CheckVersionFiveToSevenMigration(migration.path);
+    CheckVersionFiveToEightMigration(migration.path);
     const TemporaryDatabaseFile rollback = MakeTemporaryDatabaseFile();
     CheckVersionFiveToCurrentRollback(rollback.path);
     const TemporaryDatabaseFile collision = MakeTemporaryDatabaseFile();

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -16,6 +17,7 @@ using namespace std::chrono_literals;
 constexpr int kMaximumAttempts = 3;
 constexpr auto kFollowUpDelay = 10min;
 constexpr auto kRecentWindow = 10min;
+constexpr std::string_view kFinalSnoozeReminderNotice = "这是最后一次提醒；之后不再创建新的推迟提醒。";
 DateTime SystemNow() { return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()); }
 timing::TriggerAt ToTriggerAt(DateTime value) { return std::chrono::time_point_cast<std::chrono::microseconds>(value); }
 std::chrono::minutes RetryDelay(int failures) { return failures <= 1 ? 1min : failures == 2 ? 5min : 15min; }
@@ -196,12 +198,20 @@ Result<ReminderActionResult> ScheduleReminderService::AcknowledgeRecentReminders
     if (!recent.ok()) return Result<ReminderActionResult>::Failure(recent.status.code, recent.status.message);
     std::unordered_set<int64_t> chains;
     std::unordered_set<ScheduleId> schedules;
+    std::vector<std::string> events;
+    std::unordered_set<std::string> event_set;
     for (const auto& task : *recent.value) {
         if (task.business_status != ScheduleReminderBusinessStatus::kWaitingAcknowledgement &&
             task.business_status != ScheduleReminderBusinessStatus::kExhausted)
             continue;
         chains.insert(task.chain_id);
         schedules.insert(task.schedule_id);
+        std::string event = task.event;
+        if (event.empty()) {
+            const auto loaded = repository_.FindById(task.schedule_id);
+            if (loaded.ok()) event = loaded.value->event;
+        }
+        if (!event.empty() && event_set.insert(event).second) events.push_back(std::move(event));
     }
     if (chains.empty())
         return Result<ReminderActionResult>::Failure(ErrorCode::kNotFound, "最近 10 分钟内没有已触发的提醒");
@@ -233,6 +243,7 @@ Result<ReminderActionResult> ScheduleReminderService::AcknowledgeRecentReminders
         }
     }
     return Result<ReminderActionResult>::Success({.affected_count = static_cast<int>(chains.size()),
+                                                  .events = std::move(events),
                                                   .operation_id = {},
                                                   .reminder_trigger_id = {},
                                                   .action = ScheduleReminderActionKind::kAcknowledge,
@@ -263,6 +274,7 @@ Result<ReminderActionResult> ScheduleReminderService::SnoozeRecentReminders() {
     if (chains.empty())
         return Result<ReminderActionResult>::Failure(ErrorCode::kNotFound, "最近 10 分钟内没有可延迟的提醒");
     return Result<ReminderActionResult>::Success({.affected_count = static_cast<int>(chains.size()),
+                                                  .events = {},
                                                   .operation_id = {},
                                                   .reminder_trigger_id = {},
                                                   .action = ScheduleReminderActionKind::kSnooze,
@@ -420,8 +432,11 @@ std::string ScheduleReminderService::AllocateTaskId(std::string_view prefix) {
 
 Status ScheduleReminderService::RegisterReminder(ScheduleId schedule_id, int64_t chain_id, int attempt,
                                                  DateTime trigger_at) {
+    const auto loaded = repository_.FindById(schedule_id);
+    if (!loaded.ok()) return loaded.status;
     const DateTime now = Now();
     ScheduleReminderTask task{.schedule_id = schedule_id,
+                              .event = loaded.value->event,
                               .chain_id = chain_id,
                               .attempt = attempt,
                               .timing_task_id = AllocateTaskId("schedule-reminder"),
@@ -492,7 +507,8 @@ void ScheduleReminderService::HandleReminder(int64_t reminder_task_id, std::stri
     if (task.attempt < kMaximumAttempts) {
         follow_up_status = RegisterReminder(task.schedule_id, task.chain_id, task.attempt + 1, Now() + kFollowUpDelay);
     }
-    const std::string text = "提醒：现在是「" + loaded_schedule.value->event + "」时间了";
+    const std::string text = "提醒：现在是「" + loaded_schedule.value->event + "」时间了" +
+                             (task.attempt >= kMaximumAttempts ? " " + std::string(kFinalSnoozeReminderNotice) : "");
     (void)speech_.SpeakScheduleReminder(text);
     if (notification_ && follow_up_status.ok()) (void)notification_->SendScheduleReminder(*loaded_schedule.value, task);
     if (task.attempt == 1 && loaded_schedule.value->rule_id) GenerateNextInstance(*loaded_schedule.value->rule_id, 0);

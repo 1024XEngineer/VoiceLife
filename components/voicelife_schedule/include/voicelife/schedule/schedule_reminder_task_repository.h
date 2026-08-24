@@ -39,6 +39,7 @@ enum class ScheduleReminderTimerStatus {
 struct ScheduleReminderTask {
     int64_t id = 0;
     ScheduleId schedule_id = 0;
+    std::string event;
     int64_t chain_id = 0;
     int attempt = 1;
     std::optional<std::string> timing_task_id;

@@ -91,7 +91,7 @@ Status SqliteScheduleReminderTaskRepository::Update(const ScheduleReminderTask& 
     auto statement = std::move(*prepared.value);
     auto status = mapping::BindScheduleReminderTask(statement, task);
     if (!status.ok()) return status;
-    if (!(status = statement.BindInt64(15, task.id)).ok()) return status;
+    if (!(status = statement.BindInt64(16, task.id)).ok()) return status;
     auto step = statement.Step();
     if (!step.ok()) return step.status;
     return statement.Changes() == 1 ? Status::Ok() : Status::Error(ErrorCode::kNotFound, "提醒任务不存在");

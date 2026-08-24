@@ -369,12 +369,9 @@ class Runtime final {
             ShowDisplay(voice::VoiceMood::kSad, "错误", "");
             return fail_startup(secret_store);
         }
-#if CONFIG_VOICELIFE_IM_GATEWAY
-        // USB IM provisioning 不依赖 Wi-Fi；即使网络配置缺失并进入 SoftAP，也必须开放物理恢复窗口。
-        if (!StartImProvisioningTask()) {
-            ESP_LOGW(kTag, "IM_PROVISION_TASK_FAILED=1");
-        }
-#endif
+        // USB IM provisioning shares the USB-Serial/JTAG input with the Linx Wi-Fi
+        // recovery protocol. Start it only after the Wi-Fi bootstrap has finished;
+        // otherwise both tasks can consume different halves of the same VLW1 frame.
         auto connection = BootstrapLinxOtaConfig(assembly_->board_identity(),
                                                  [this](std::string_view title, std::string_view detail) {
                                                      ShowDisplay(voice::VoiceMood::kConnecting, title, detail);
@@ -390,6 +387,12 @@ class Runtime final {
         }
         ShowDisplay(voice::VoiceMood::kConnecting, "连接", "");
         linx_config_ = std::move(*connection.value);
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        // Start IM provisioning after Linx has released the shared USB console.
+        if (!StartImProvisioningTask()) {
+            ESP_LOGW(kTag, "IM_PROVISION_TASK_FAILED=1");
+        }
+#endif
         auto result = registry.Create("xrobot-websocket", {});
 #else
         auto result = registry.Create("scaffold", {});
