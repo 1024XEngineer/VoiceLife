@@ -244,7 +244,8 @@ def server_register_script(
         lines.append(
             "user_id=$(docker compose exec -T postgres sh -lc "
             '\'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc '
-            "\"SELECT user_id FROM im_devices WHERE status='active' ORDER BY created_at DESC LIMIT 1\"' </dev/null)"
+            '"SELECT user_id FROM im_devices WHERE status=\\$\\$active\\$\\$ '
+            "ORDER BY created_at DESC LIMIT 1\"' </dev/null)"
         )
         lines.append('if [ -z "$user_id" ]; then echo "no active device to inherit userId" >&2; exit 3; fi')
     create = 'docker compose exec -T gateway pnpm --silent device -- create --user-id "$user_id"'

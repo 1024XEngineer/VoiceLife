@@ -232,6 +232,12 @@ class CommandConstructionTest(unittest.TestCase):
         self.assertIn("pnpm --silent device -- create --user-id", script)
         self.assertIn("user-test", script)
 
+    def test_server_register_script_safely_inherits_active_user(self) -> None:
+        script = provision_device.server_register_script("/root/XE6-15", None)
+        self.assertIn(r"status=\$\$active\$\$", script)
+        self.assertNotIn("status='active'", script)
+        self.assertIn('if [ -z "$user_id" ]', script)
+
     def test_hil_registration_uses_explicit_run_device_and_records_gateway_commit(self) -> None:
         script = provision_device.server_register_script(
             "/root/XE6-15", "user-test", device_id="e2e-" + "a" * 32, include_commit=True
