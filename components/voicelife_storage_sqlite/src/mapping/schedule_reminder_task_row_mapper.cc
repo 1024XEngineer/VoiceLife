@@ -23,6 +23,7 @@ Status BindScheduleReminderTask(SqliteStatement& statement, const schedule::Sche
     int index = 1;
     Status status = statement.BindInt64(index++, task.schedule_id);
     if (!status.ok()) return status;
+    if (!(status = statement.BindText(index++, task.event)).ok()) return status;
     if (!(status = statement.BindInt64(index++, task.chain_id)).ok()) return status;
     if (!(status = statement.BindInt(index++, task.attempt)).ok()) return status;
     if (!(status = task.timing_task_id.has_value() ? statement.BindText(index++, *task.timing_task_id)
@@ -42,23 +43,24 @@ Status BindScheduleReminderTask(SqliteStatement& statement, const schedule::Sche
 }
 
 Result<schedule::ScheduleReminderTask> ReadScheduleReminderTask(const SqliteStatement& statement) {
-    const int business_status = statement.ColumnInt(6);
-    const int timer_status = statement.ColumnInt(7);
+    const int business_status = statement.ColumnInt(7);
+    const int timer_status = statement.ColumnInt(8);
     if (!ValidBusinessStatus(business_status) || !ValidTimerStatus(timer_status)) {
         return Result<schedule::ScheduleReminderTask>::Failure(ErrorCode::kInternal, "提醒任务状态值非法");
     }
     schedule::ScheduleReminderTask task;
     task.id = statement.ColumnInt64(0);
     task.schedule_id = statement.ColumnInt64(1);
-    task.chain_id = statement.ColumnInt64(2);
-    task.attempt = statement.ColumnInt(3);
-    if (!statement.IsNull(4)) task.timing_task_id = statement.ColumnText(4);
-    task.trigger_at = ReadTime(statement, 5);
+    task.event = statement.ColumnText(2);
+    task.chain_id = statement.ColumnInt64(3);
+    task.attempt = statement.ColumnInt(4);
+    if (!statement.IsNull(5)) task.timing_task_id = statement.ColumnText(5);
+    task.trigger_at = ReadTime(statement, 6);
     task.business_status = static_cast<schedule::ScheduleReminderBusinessStatus>(business_status);
     task.timer_status = static_cast<schedule::ScheduleReminderTimerStatus>(timer_status);
-    if (!statement.IsNull(8)) task.triggered_at = ReadTime(statement, 8);
-    task.created_at = ReadTime(statement, 9);
-    task.updated_at = ReadTime(statement, 10);
+    if (!statement.IsNull(9)) task.triggered_at = ReadTime(statement, 9);
+    task.created_at = ReadTime(statement, 10);
+    task.updated_at = ReadTime(statement, 11);
     return Result<schedule::ScheduleReminderTask>::Success(std::move(task));
 }
 }  // namespace voicelife::storage_sqlite::mapping

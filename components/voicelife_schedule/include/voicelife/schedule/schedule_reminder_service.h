@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include "voicelife/contracts/status.h"
 #include "voicelife/schedule/schedule_reminder_task_repository.h"
@@ -48,6 +49,7 @@ class ScheduleReminderNotificationPort {
 /** @brief 提醒动作的执行结果。 */
 struct ReminderActionResult {
     int affected_count = 0;
+    std::vector<std::string> events;
 };
 
 /** @brief 协调持久化提醒记录、一次性 Timing 任务、语音和通知。 */
