@@ -340,6 +340,10 @@ add_voicelife_test(schedule_reminder_edge_cases_test "unit;schedule;timing;remin
     schedule_reminder_edge_cases_test.cc)
 target_link_libraries(schedule_reminder_edge_cases_test PRIVATE schedule timing storage_memory)
 
+add_voicelife_test(schedule_reminder_recovery_action_test "unit;schedule;timing;reminder"
+    schedule_reminder_recovery_action_test.cc)
+target_link_libraries(schedule_reminder_recovery_action_test PRIVATE schedule timing storage_memory)
+
 add_voicelife_test(schedule_rule_service_test "unit;schedule" schedule_rule_service_test.cc)
 target_link_libraries(schedule_rule_service_test PRIVATE schedule)
 
@@ -529,6 +533,13 @@ target_include_directories(schedule_reminder_im_adapter_test PRIVATE
     "${ROOT_DIR}/components/voicelife_runtime/src")
 target_link_libraries(schedule_reminder_im_adapter_test PRIVATE im schedule timing storage_memory contracts)
 
+add_voicelife_test(schedule_reminder_im_adapter_failure_test "unit;im;schedule;reminder;runtime"
+    schedule_reminder_im_adapter_failure_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime/src/schedule_reminder_im_adapter.cc")
+target_include_directories(schedule_reminder_im_adapter_failure_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_runtime/src")
+target_link_libraries(schedule_reminder_im_adapter_failure_test PRIVATE im schedule timing storage_memory contracts)
+
 add_voicelife_test(runtime_smoke_test "integration;runtime" runtime_smoke_test.cc)
 target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
 
@@ -568,6 +579,12 @@ target_link_libraries(sqlite_schedule_repository_unit_test PRIVATE storage_sqlit
 add_voicelife_test(sqlite_schedule_reminder_task_repository_test "unit;storage;sqlite;reminder;repository"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_reminder_task_repository_test.cc")
 target_link_libraries(sqlite_schedule_reminder_task_repository_test PRIVATE storage_sqlite schedule)
+
+add_voicelife_test(sqlite_schedule_reminder_task_failure_test "unit;storage;sqlite;reminder;repository"
+    sqlite_schedule_reminder_task_failure_test.cc)
+target_include_directories(sqlite_schedule_reminder_task_failure_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src")
+target_link_libraries(sqlite_schedule_reminder_task_failure_test PRIVATE storage_sqlite schedule)
 
 add_voicelife_test(sqlite_schedule_rule_repository_test "integration;storage;sqlite;schedule"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/test/sqlite_schedule_rule_repository_test.cc")
