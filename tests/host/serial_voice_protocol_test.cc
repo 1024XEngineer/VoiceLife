@@ -9,6 +9,8 @@ using voicelife::runtime::detail::kSerialVoiceBegin;
 using voicelife::runtime::detail::kSerialVoicePcm;
 using voicelife::runtime::detail::kSerialVoicePcmBytes;
 using voicelife::runtime::detail::kSerialVoiceProtocolVersion;
+using voicelife::runtime::detail::kSerialVoiceWakeBegin;
+using voicelife::runtime::detail::kSerialVoiceWakeEnd;
 using voicelife::runtime::detail::SerialVoiceFrameHeader;
 using voicelife::runtime::detail::SerialVoiceMagicMatcher;
 using voicelife::test::Check;
@@ -39,5 +41,11 @@ int main() {
           "超出固定 PCM 容量的声明长度必须在读取 payload 前拒绝");
     Check(!IsValidSerialVoiceHeader({.version = kSerialVoiceProtocolVersion, .kind = 99, .payload_bytes = 0}),
           "未知 kind 不能作为合法空帧进入状态机");
+    Check(IsValidSerialVoiceHeader(
+              {.version = kSerialVoiceProtocolVersion, .kind = kSerialVoiceWakeBegin, .payload_bytes = 0}),
+          "wake_begin 帧必须是合法空帧");
+    Check(IsValidSerialVoiceHeader(
+              {.version = kSerialVoiceProtocolVersion, .kind = kSerialVoiceWakeEnd, .payload_bytes = 0}),
+          "wake_end 帧必须是合法空帧");
     return 0;
 }

@@ -25,8 +25,10 @@ namespace detail {
 
 constexpr char kTag[] = "voicelife_linx_esp";
 constexpr size_t kMaxEventChunkBytes = 4096;
-// 8 media + 16 control + one in-flight writer + one replacement/stop item.
-constexpr size_t kTxItemPoolCapacity = 26;
+// 64 media + 16 control + one in-flight writer + one stop item. Audio items
+// hold pooled PCM leases, so this remains bounded while absorbing the measured
+// sub-second TLS stalls without silently evicting an earlier speech frame.
+constexpr size_t kTxItemPoolCapacity = 82;
 constexpr EventBits_t kConnectedBit = BIT0;
 constexpr EventBits_t kFailedBit = BIT1;
 
@@ -38,6 +40,7 @@ struct LinxTxItem {
     Kind kind = Kind::kText;
     voice::AudioPayload payload;
     uint64_t generation = 0;
+    uint64_t sequence = 0;
 };
 
 struct EventEnvelope {
@@ -53,6 +56,7 @@ struct EventEnvelope {
     int tls_cert_flags = 0;
     int handshake_status = 0;
     int socket_errno = 0;
+    int close_status_code = 0;
     std::array<uint8_t, kMaxEventChunkBytes> data{};
 };
 
@@ -104,6 +108,12 @@ class EspWebSocketTransport::Impl final {
     std::array<bool, detail::kTxItemPoolCapacity> tx_item_in_use_{};
     std::mutex tx_item_mutex_;
     bool tx_queue_uses_caps_ = false;
+    // listen.stop closes the media lane for the current generation. Late
+    // capture frames are discarded instead of being sent after the stop frame.
+    bool media_tx_open_ = false;
+    uint64_t tx_audio_sent_ = 0;
+    std::atomic<uint64_t> tx_audio_enqueued_{0};
+    std::atomic<uint64_t> tx_audio_dropped_{0};
     TaskHandle_t tx_task_ = nullptr;
     // linx_ws_tx 任务栈常驻 PSRAM、TCB 在内部 RAM（一次性分配、跨连接复用，随
     // Transport 生命周期）：交互（采集+音频流）期间内部 RAM 最大连续块常 <16KB，

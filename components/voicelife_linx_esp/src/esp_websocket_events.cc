@@ -53,20 +53,54 @@ void EspWebSocketTransport::Impl::Enqueue(int32_t event_id, const esp_websocket_
         // - TCP 有序 FIN（esp-tls 报 TCP_CLOSED_FIN）
         // 均映射为 kDisconnected（触发自动重连），其余才是真正故障（证书/握手/超时）。
         const auto error_type = event_data != nullptr ? event_data->error_handle.error_type : WEBSOCKET_ERROR_TYPE_NONE;
-        const bool ordered_close =
-            error_type == WEBSOCKET_ERROR_TYPE_SERVER_CLOSE ||
-            (event_data != nullptr && event_data->error_handle.esp_tls_last_esp_err == ESP_ERR_ESP_TLS_TCP_CLOSED_FIN);
-        if (ordered_close) {
+        const bool tcp_transport_error = error_type == WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT;
+        // ESP-IDF leaves error_handle diagnostic members unspecified for some
+        // ERROR_TYPE_NONE callbacks (notably peer TCP RST/SSL read failure).
+        // Never interpret those bytes as a TLS failure: doing so turns a
+        // recoverable disconnect into provider_error and an error screen.
+        const bool diagnostics_valid = event_data != nullptr && error_type != WEBSOCKET_ERROR_TYPE_NONE;
+        const int handshake_status = diagnostics_valid ? event_data->error_handle.esp_ws_handshake_status_code : 0;
+        const int tls_last_error = diagnostics_valid ? event_data->error_handle.esp_tls_last_esp_err : 0;
+        const int tls_stack_error = diagnostics_valid ? event_data->error_handle.esp_tls_stack_err : 0;
+        const int tls_cert_flags = diagnostics_valid ? event_data->error_handle.esp_tls_cert_verify_flags : 0;
+        const int socket_errno = diagnostics_valid ? event_data->error_handle.esp_transport_sock_errno : 0;
+        const bool handshake_failed = handshake_status != 0;
+        const bool tls_failed = tls_last_error != 0 || tls_stack_error != 0 || tls_cert_flags != 0;
+        const bool ordered_close = error_type == WEBSOCKET_ERROR_TYPE_SERVER_CLOSE ||
+                                   (tcp_transport_error && event_data != nullptr &&
+                                    event_data->error_handle.esp_tls_last_esp_err == ESP_ERR_ESP_TLS_TCP_CLOSED_FIN);
+        // On ESP-IDF, a peer TCP RST can arrive as ERROR_TYPE_NONE with all
+        // diagnostic fields zero. It is still a lost WebSocket connection and
+        // must enter the reconnect path. Handshake/TLS failures retain the
+        // error path so invalid credentials and certificates are not retried
+        // as if the session had been cleanly disconnected.
+        const bool retryable_transport_loss =
+            ordered_close ||
+            (event_data != nullptr && !handshake_failed && !tls_failed &&
+             (tcp_transport_error || error_type == WEBSOCKET_ERROR_TYPE_NONE) && event_data->close_status_code == 0);
+        if (event_data != nullptr) {
+            ESP_LOGW(detail::kTag,
+                     "LINX_WS_ERROR_EVENT event=ERROR classified=%s type=%u close=%d handshake=%d tls_valid=%d tls=%d "
+                     "stack=%d cert_flags=%d errno=%d",
+                     retryable_transport_loss ? "disconnect" : "error", static_cast<unsigned>(error_type),
+                     event_data->close_status_code, handshake_status, diagnostics_valid ? 1 : 0, tls_last_error,
+                     tls_stack_error, tls_cert_flags, socket_errno);
+        } else {
+            ESP_LOGW(detail::kTag, "LINX_WS_ERROR_EVENT event=ERROR classified=error type=%u close=0 event_data=null",
+                     static_cast<unsigned>(error_type));
+        }
+        if (retryable_transport_loss) {
             envelope.kind = detail::EventKind::kDisconnected;
             envelope.opcode = static_cast<uint8_t>(error_type);
         } else {
             envelope.kind = detail::EventKind::kError;
             if (event_data != nullptr) {
-                envelope.tls_last_error = event_data->error_handle.esp_tls_last_esp_err;
-                envelope.tls_stack_error = event_data->error_handle.esp_tls_stack_err;
-                envelope.tls_cert_flags = event_data->error_handle.esp_tls_cert_verify_flags;
-                envelope.handshake_status = event_data->error_handle.esp_ws_handshake_status_code;
-                envelope.socket_errno = event_data->error_handle.esp_transport_sock_errno;
+                envelope.handshake_status = handshake_status;
+                envelope.close_status_code = event_data->close_status_code;
+                envelope.tls_last_error = tls_last_error;
+                envelope.tls_stack_error = tls_stack_error;
+                envelope.tls_cert_flags = tls_cert_flags;
+                envelope.socket_errno = socket_errno;
                 envelope.opcode = static_cast<uint8_t>(error_type);
             }
         }
@@ -129,6 +163,9 @@ void EspWebSocketTransport::Impl::TxEntry(void* argument) {
 void EspWebSocketTransport::Impl::TxLoop() {
     // 唯一 TX 任务：按队列顺序发送文本/音频，TLS 只在本任务运行。
     // 独立的短 TX 超时避免写阻塞拖垮采集；网络接收仍使用其正常预算。
+    uint64_t last_audio_generation = 0;
+    uint64_t last_audio_sequence = 0;
+    bool have_audio_sequence = false;
     while (running_.load()) {
         detail::LinxTxItem* item = nullptr;
         // 控制命令优先；作为音频结束边界的 listen.stop 已进入媒体 FIFO，
@@ -157,24 +194,19 @@ void EspWebSocketTransport::Impl::TxLoop() {
                                                        pdMS_TO_TICKS(options_.tx_timeout_ms));
         });
         const size_t want = item->payload.size();
+        const auto kind = item->kind;
+        const uint64_t generation = item->generation;
+        const uint64_t sequence = item->sequence;
         ReleaseTxItem(item);
         item = nullptr;
         if (!sent_current) {
             continue;
         }
         if (sent < 0 || static_cast<size_t>(sent) != want) {
-            // 发送失败（写阻塞/短写/连接已断）：不能直接 esp_websocket_client_stop
-            // ——stop 会停止客户端，ESP 内建自动重连（disable_auto_reconnect=false）
-            // 随之失效，Session 永久卡在非 Ready（无法二次唤醒/说话）。
-            // 正确做法：停止后立即重启 client，让内建自动重连继续负责重连
-            // （单一重连执行者），随后断开事件会走 transport_disconnected 恢复。
-            ESP_LOGW(detail::kTag, "LINX_TX_SEND_FAIL sent=%d want=%u, restart client for reconnect", sent,
+            // 发送失败时交给 ESP-IDF 客户端自己的自动重连状态机。TX 任务不能
+            // 并发 stop/start，否则会与客户端重连任务竞争并丢失后续唤醒。
+            ESP_LOGW(detail::kTag, "LINX_TX_SEND_FAIL sent=%d want=%u, await client auto-reconnect", sent,
                      static_cast<unsigned>(want));
-            if (client_ != nullptr && !closing_.load()) {
-                (void)esp_websocket_client_stop(client_);
-                // 重启以恢复内建自动重连；start 会重新进入连接流程并自动重连。
-                (void)esp_websocket_client_start(client_);
-            }
             // 本次连接的媒体和控制命令都不能穿过重连边界。仅清理 PCM
             // 会让失效的 listen.start/abort 在新连接上被错误发送。
             detail::LinxTxItem* remaining = nullptr;
@@ -187,6 +219,27 @@ void EspWebSocketTransport::Impl::TxLoop() {
                 remaining = nullptr;
             }
             continue;
+        }
+        if (kind == detail::LinxTxItem::Kind::kAudio) {
+            // sequence restarts at zero for every listen.start media round. A
+            // new round is a boundary, not a missing frame in the previous one.
+            const bool new_media_round = sequence == 0 || generation != last_audio_generation;
+            if (have_audio_sequence && !new_media_round && sequence != last_audio_sequence + 1) {
+                ESP_LOGW(detail::kTag, "LINX_TX_AUDIO_GAP previous=%llu current=%llu generation=%llu",
+                         static_cast<unsigned long long>(last_audio_sequence),
+                         static_cast<unsigned long long>(sequence), static_cast<unsigned long long>(generation));
+            }
+            last_audio_generation = generation;
+            last_audio_sequence = sequence;
+            have_audio_sequence = true;
+            ++tx_audio_sent_;
+            if (tx_audio_sent_ <= 3 || tx_audio_sent_ % 20 == 0) {
+                ESP_LOGI(detail::kTag, "LINX_TX_AUDIO_SENT count=%llu sequence=%llu bytes=%u",
+                         static_cast<unsigned long long>(tx_audio_sent_), static_cast<unsigned long long>(sequence),
+                         static_cast<unsigned>(want));
+            }
+        } else {
+            ESP_LOGI(detail::kTag, "LINX_TX_TEXT_SENT bytes=%u", static_cast<unsigned>(want));
         }
     }
     if (tx_stopped_ != nullptr) {
@@ -217,9 +270,11 @@ void EspWebSocketTransport::Impl::HandleEnvelope(const detail::EventEnvelope& en
             }
             return;
         case detail::EventKind::kError: {
-            ESP_LOGW(detail::kTag, "LINX_WS_ERROR type=%u tls=%d stack=%d cert_flags=%d handshake=%d errno=%d",
-                     static_cast<unsigned>(envelope.opcode), envelope.tls_last_error, envelope.tls_stack_error,
-                     envelope.tls_cert_flags, envelope.handshake_status, envelope.socket_errno);
+            ESP_LOGW(detail::kTag,
+                     "LINX_WS_ERROR event=worker type=%u close=%d tls=%d stack=%d cert_flags=%d handshake=%d errno=%d",
+                     static_cast<unsigned>(envelope.opcode), envelope.close_status_code, envelope.tls_last_error,
+                     envelope.tls_stack_error, envelope.tls_cert_flags, envelope.handshake_status,
+                     envelope.socket_errno);
             std::lock_guard<std::mutex> status_lock(status_mutex_);
             error_status_ = Status::Error(ErrorCode::kUnavailable, "ESP Linx WebSocket 收到错误事件");
         }

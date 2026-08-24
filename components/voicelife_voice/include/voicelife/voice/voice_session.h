@@ -29,6 +29,14 @@ class VoiceSession {
     Status Start(const VoiceSessionConfig& config);
     /** @brief 开始采集音频。 @return 开始结果。 */
     Status BeginCapture();
+    /**
+     * @brief 仅发送 Provider 侧的 listen.start，不启动物理输入。
+     *
+     * 本地唤醒后的 Linx 顺序要求 detect 后立即 start；SparkBot 无 AEC，
+     * 因此真实麦克风必须等问候 TTS 结束或超时后再打开。
+     * @return Provider 监听启动结果。
+     */
+    Status BeginProviderCapture();
     /** @brief 结束采集音频。 @return 结束结果。 */
     Status EndCapture();
     /**
@@ -112,9 +120,17 @@ class VoiceSession {
     VoiceAudioFormats audio_formats_;
     VoiceSessionState state_ = VoiceSessionState::kStopped;
     bool audio_ready_ = false;
+    // Provider 已发送 listen.start、但物理输入尚未开启时为 true；用于
+    // 将本地唤醒的协议监听阶段与无 AEC 板的物理采集阶段分开。
+    bool provider_capture_active_ = false;
     // 本轮是否已收到有效输入（STT/工具调用），仅在其为 true 时接受服务端 TTS，
     // 避免空闲态误收上一轮残留回复。
     bool response_armed_ = false;
+    // 普通本地唤醒的 listen.detect 可能触发服务端问候 TTS，即使本地没有
+    // text_response。该租约只在 detect 发出后有效，直到 tts.start/stop 或超时
+    // 由 Interrupt() 失效，不能把问候误判为残留回复。
+    bool pending_local_wake_tts_ = false;
+    bool local_wake_tts_active_ = false;
     // 每段远端 TTS 仅上报一次首个成功入播放队列的音频帧，供 Runtime
     // 记录唤醒确认的端到端时延；不携带 PCM 或文本。
     bool first_tts_audio_pending_ = false;

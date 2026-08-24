@@ -1,7 +1,14 @@
 #include "voicelife/linx/linx_speech_provider.h"
 
+#include <algorithm>
 #include <chrono>
 #include <utility>
+
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "esp_pthread.h"
+#endif
 
 namespace voicelife::linx {
 namespace {
@@ -23,6 +30,41 @@ bool SameFormat(const voice::AudioFormat& left, const voice::AudioFormat& right)
 bool SameAudioFormats(const voice::VoiceAudioFormats& left, const voice::VoiceAudioFormats& right) {
     return SameFormat(left.capture, right.capture) && SameFormat(left.playback, right.playback);
 }
+
+#ifdef ESP_PLATFORM
+const char* MessageKindName(LinxMessageKind kind) {
+    switch (kind) {
+        case LinxMessageKind::kHello:
+            return "hello";
+        case LinxMessageKind::kStt:
+            return "stt";
+        case LinxMessageKind::kTts:
+            return "tts";
+        case LinxMessageKind::kMcp:
+            return "mcp";
+        case LinxMessageKind::kError:
+            return "error";
+        case LinxMessageKind::kGoodbye:
+            return "goodbye";
+        case LinxMessageKind::kLlm:
+            return "llm";
+    }
+    return "unknown";
+}
+
+const char* TtsStateName(const std::optional<LinxTtsState>& state) {
+    if (!state.has_value()) return "-";
+    switch (*state) {
+        case LinxTtsState::kStart:
+            return "start";
+        case LinxTtsState::kSentenceStart:
+            return "sentence_start";
+        case LinxTtsState::kStop:
+            return "stop";
+    }
+    return "unknown";
+}
+#endif
 
 }  // namespace
 
@@ -225,6 +267,14 @@ void LinxSpeechProviderAdapter::OnTransportConnected() {
         remote_session_id_.reset();
         hello_status_ = Status::Ok();
     }
+#ifdef ESP_PLATFORM
+    ESP_LOGI("voicelife_linx",
+             "LINX_HELLO_REQUEST format=%d sample_rate=%u channels=%u bits=%u frame_ms=%u play_buffer_ms=%u",
+             static_cast<int>(config_.audio.codec), static_cast<unsigned>(config_.audio.sample_rate_hz),
+             static_cast<unsigned>(config_.audio.channels), static_cast<unsigned>(config_.audio.bits_per_sample),
+             static_cast<unsigned>(config_.audio.frame_duration_ms),
+             static_cast<unsigned>(connection_.playback_buffer_duration_ms));
+#endif
     const Status status = Send(codec_.EncodeHello(config_, connection_));
     if (!status.ok()) {
         {
@@ -294,6 +344,16 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
         return;
     }
     const LinxInboundMessage& inbound = *decoded.value;
+#ifdef ESP_PLATFORM
+    // Record the server's control sequence without exposing credentials. STT
+    // and TTS text are intentionally visible on the authorized hardware log so
+    // a reset can be correlated with the last protocol event.
+    const std::string_view text = inbound.text;
+    ESP_LOGI("voicelife_linx", "LINX_RX kind=%s tts_state=%s session_present=%d session_len=%u text=%.*s",
+             MessageKindName(inbound.kind), TtsStateName(inbound.tts_state), inbound.session_id.has_value() ? 1 : 0,
+             inbound.session_id.has_value() ? static_cast<unsigned>(inbound.session_id->size()) : 0U,
+             static_cast<int>(std::min<std::size_t>(text.size(), 160U)), text.data());
+#endif
     // Linx assigns session_id in its hello response. Only that first hello
     // can establish the remote ID; all later messages must match it.
     if (inbound.kind != LinxMessageKind::kHello) {
@@ -327,6 +387,15 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
             }
             {
                 const LinxAudioParams& negotiated = *inbound.audio_params;
+#ifdef ESP_PLATFORM
+                ESP_LOGI("voicelife_linx",
+                         "LINX_HELLO_RESPONSE format=%d sample_rate=%u channels=%u bits=%u frame_ms=%u "
+                         "session_present=%d session_len=%u",
+                         static_cast<int>(negotiated.codec), static_cast<unsigned>(negotiated.sample_rate_hz),
+                         static_cast<unsigned>(negotiated.channels), static_cast<unsigned>(negotiated.bits_per_sample),
+                         static_cast<unsigned>(negotiated.frame_duration_ms), inbound.session_id.has_value() ? 1 : 0,
+                         inbound.session_id.has_value() ? static_cast<unsigned>(inbound.session_id->size()) : 0U);
+#endif
                 if (negotiated.codec != config_.audio.codec) {
                     Emit(Event(voice::VoiceEventKind::kError, "Linx hello 改变音频编码，但当前未配置转码策略"));
                     {
@@ -442,6 +511,25 @@ void LinxSpeechProviderAdapter::StartMcpWorker() {
     std::lock_guard<std::mutex> lock(mcp_mutex_);
     if (mcp_worker_.joinable()) return;
     mcp_stop_ = false;
+#ifdef ESP_PLATFORM
+    // MCP handlers wait on the Runtime worker and may carry a large JSON-RPC
+    // response through std::function/condition_variable frames. The ESP-IDF
+    // pthread default is only 3072 bytes and is allocated from internal RAM;
+    // that is insufficient for the first initialize/tools/list exchange and
+    // canaries report it later as a "task pthread" overflow. Give this one
+    // worker a bounded PSRAM stack without changing other pthread users.
+    esp_pthread_cfg_t pthread_config = esp_pthread_get_default_config();
+    pthread_config.stack_size = 16 * 1024;
+    pthread_config.stack_alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    pthread_config.thread_name = "voicelife_linx_mcp";
+    pthread_config.inherit_cfg = false;
+    if (esp_pthread_set_cfg(&pthread_config) != ESP_OK) {
+        ESP_LOGW("voicelife_linx", "LINX_MCP_PTHREAD_CONFIG_FAILED=1");
+    } else {
+        ESP_LOGI("voicelife_linx", "LINX_MCP_PTHREAD_CONFIG stack_bytes=%u caps=spiram",
+                 static_cast<unsigned>(pthread_config.stack_size));
+    }
+#endif
     mcp_worker_ = std::thread([this]() { McpWorkerLoop(); });
 }
 

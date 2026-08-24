@@ -5,6 +5,8 @@
 namespace voicelife::voice {
 namespace {
 
+constexpr std::size_t kCaptureBoundaryFrames = 4;
+
 Status Unavailable(std::string message) { return Status::Error(ErrorCode::kUnavailable, std::move(message)); }
 
 }  // namespace
@@ -82,20 +84,46 @@ void WakeGateAudioInput::SuppressLocalWakeFor(uint32_t duration_ms) {
 }
 
 Status WakeGateAudioInput::StartCapture(VoiceMode mode) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!opened_) return Unavailable("云端采集前必须先打开输入端口");
-    if (forwarding_) return Status::Ok();
-    const Status stop_status = StopDetectorLocked();
-    if (!stop_status.ok()) return stop_status;
-    if (!physical_running_) {
-        const Status status = physical_input_.StartCapture(mode);
-        if (!status.ok()) {
-            (void)StartDetectorLocked();
-            return status;
-        }
-        physical_running_ = true;
+    bool clear_physical_queue = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!opened_) return Unavailable("云端采集前必须先打开输入端口");
+        if (forwarding_) return Status::Ok();
+        const Status stop_status = StopDetectorLocked();
+        if (!stop_status.ok()) return stop_status;
+        clear_physical_queue = physical_running_;
+        // A physical delivery callback may already be in flight. Keep this
+        // guard set until the queue and assembler have been cleared.
+        capture_transitioning_ = clear_physical_queue;
+        capture_boundary_frames_to_drop_ = clear_physical_queue ? kCaptureBoundaryFrames : 0;
     }
-    forwarding_ = true;
+
+    if (clear_physical_queue) {
+        const Status clear_status = physical_input_.DiscardPendingInput();
+        if (!clear_status.ok()) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            capture_transitioning_ = false;
+            (void)StartDetectorLocked();
+            return clear_status;
+        }
+    }
+
+    if (!clear_physical_queue) {
+        const Status start_status = physical_input_.StartCapture(mode);
+        if (!start_status.ok()) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            capture_transitioning_ = false;
+            (void)StartDetectorLocked();
+            return start_status;
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        capture_transitioning_ = false;
+        physical_running_ = true;
+        forwarding_ = true;
+    }
     return Status::Ok();
 }
 
@@ -143,7 +171,14 @@ void WakeGateAudioInput::HandlePhysicalFrame(AudioFrame frame) {
     LocalWakeDetectorPort* detector = nullptr;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (capture_transitioning_) {
+            return;
+        }
         if (forwarding_) {
+            if (capture_boundary_frames_to_drop_ != 0) {
+                --capture_boundary_frames_to_drop_;
+                return;
+            }
             audio_sink = audio_sink_;
         } else if (detector_running_ && std::chrono::steady_clock::now() >= wake_suppressed_until_) {
             detector = &detector_;

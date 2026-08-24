@@ -7,4 +7,5 @@ idf_component_register(
         "../../third_party/cjson/cJSON.c"
     INCLUDE_DIRS "include" "../../third_party/cjson"
     REQUIRES voicelife_contracts voicelife_voice
+    PRIV_REQUIRES pthread
 )

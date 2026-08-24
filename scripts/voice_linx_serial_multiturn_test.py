@@ -87,6 +87,20 @@ class SerialLog:
                     raise TimeoutError(marker)
                 self._condition.wait(timeout=remaining)
 
+    def wait_for_any(self, markers: tuple[str, ...], after: int, timeout: float) -> tuple[int, str]:
+        """Wait for the first event in a protocol alternative set."""
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while True:
+                for index in range(after, len(self._items)):
+                    line = self._items[index][1]
+                    if any(marker in line for marker in markers):
+                        return index + 1, line
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(" or ".join(markers))
+                self._condition.wait(timeout=remaining)
+
     def lines_since(self, after: int) -> list[str]:
         with self._condition:
             return [line for _, line in self._items[after:]]
@@ -119,6 +133,36 @@ def packet(kind: int, payload: bytes = b"") -> bytes:
     if len(payload) > 0xFFFF:
         raise ValueError("serial payload is too large")
     return MAGIC + bytes((VERSION, kind)) + len(payload).to_bytes(2, "little") + payload
+
+
+def open_serial(port: str, baud: int) -> serial.Serial:
+    """Open USB UART without toggling SparkBot reset lines by default."""
+    device = serial.Serial()
+    device.port = port
+    device.baudrate = baud
+    device.timeout = 0.2
+    device.write_timeout = 5
+    # SparkBot maps RTS to EN. Keep both modem-control lines inactive while
+    # pyserial opens the USB-JTAG endpoint; enabling flow control here can
+    # suppress the later reset pulse or reset the board during open().
+    device.dsrdtr = False
+    device.rtscts = False
+    device.dtr = False
+    device.rts = False
+    device.open()
+    return device
+
+
+def reset_usb_serial_jtag(device: serial.Serial) -> None:
+    """Reset SparkBot's application through the USB-Serial/JTAG EN line."""
+    # SparkBot exposes EN on RTS and has no boot-button automation. Keep DTR
+    # deasserted so the pulse cannot select the ROM downloader.
+    device.rts = False
+    device.dtr = False
+    device.rts = True
+    time.sleep(0.15)
+    device.rts = False
+    time.sleep(0.2)
 
 
 def synthesize(text: str, model: str, voice: str) -> bytes:
@@ -268,15 +312,57 @@ def run_turn(
             time.sleep(0.02)
         device.write(packet(END))
         device.flush()
-        cursor, end_result = log.wait_for("SERIAL_VOICE_TURN_END", turn_cursor, 5)
-        if "=ok" not in end_result and not result.input_endpoint_truncated:
-            raise RuntimeError(f"turn_end_failed:{end_result}")
+        # The serial task may wait for pooled PCM payloads while a long Linx
+        # utterance drains. Scale the endpoint window with the injected frame
+        # count, but cap it so a genuinely stuck turn still fails promptly.
+        turn_end_timeout = min(60.0, max(15.0, 10.0 + len(prepared.frames) * 0.1))
+        # Auto mode may let Linx's server VAD finish the turn before the USB
+        # fixture's explicit END packet reaches the state machine. In that
+        # ordering STT is the authoritative endpoint and is already followed
+        # by the same TTS state flow; waiting for a later local stop would
+        # skip the valid ASR line and manufacture a timeout.
+        cursor, endpoint_marker = log.wait_for_any(
+            (
+                "SERIAL_VOICE_TURN_END",
+                "SERIAL_VOICE_EVIDENCE event=capture_stopped ",
+                "SERIAL_VOICE_EVIDENCE event=stt_text_received ",
+            ),
+            turn_cursor,
+            turn_end_timeout,
+        )
+        asr_line: str | None = None
+        if "event=stt_text_received" in endpoint_marker:
+            asr_line = endpoint_marker
+        if "SERIAL_VOICE_TURN_END" in endpoint_marker:
+            if "=ok" not in endpoint_marker and not result.input_endpoint_truncated:
+                raise RuntimeError(f"turn_end_failed:{endpoint_marker}")
+            cursor, endpoint_followup = log.wait_for_any(
+                (
+                    "SERIAL_VOICE_EVIDENCE event=capture_stopped ",
+                    "SERIAL_VOICE_EVIDENCE event=stt_text_received ",
+                ),
+                cursor,
+                response_timeout,
+            )
+            if "event=stt_text_received" in endpoint_followup:
+                asr_line = endpoint_followup
+                capture_stopped_seen = False
+            else:
+                capture_stopped_seen = True
+        elif asr_line is not None:
+            capture_stopped_seen = False
+        else:
+            # Local VAD is a valid endpoint even when the USB fixture's END
+            # packet is consumed after the capture callback has already run.
+            capture_stopped_seen = True
         # Local VAD can stop capture before the explicit host end packet. The
         # packet still terminates injection, but the real state transition is
         # valid from any point after this turn began.
-        cursor, _ = wait_evidence(log, "capture_stopped", turn_cursor, 12)
-        cursor, asr = wait_evidence(log, "stt_text_received", cursor, response_timeout)
-        result.asr_text = evidence_text(asr)
+        if asr_line is None:
+            if not capture_stopped_seen:
+                cursor, _ = wait_evidence(log, "capture_stopped", cursor, 12)
+            cursor, asr_line = wait_evidence(log, "stt_text_received", cursor, response_timeout)
+        result.asr_text = evidence_text(asr_line)
         result.asr_matches_input = normalize_transcript(result.asr_text) == normalize_transcript(result.input_text)
         cursor, _ = wait_evidence(log, "tts_started", cursor, response_timeout)
         # Linx may announce the first display sentence before its first PCM
@@ -391,15 +477,8 @@ def main() -> int:
     except (RuntimeError, subprocess.SubprocessError, TimeoutError) as error:
         print(f"input_preparation_failed:{error}", file=sys.stderr)
         return 2
-    device = serial.Serial()
-    device.port = args.port
-    device.baudrate = args.baud
-    device.timeout = 0.2
-    device.write_timeout = 5
-    device.dtr = False
-    device.rts = False
     try:
-        device.open()
+        device = open_serial(args.port, args.baud)
     except serial.SerialException as error:
         print(f"cannot open serial port: {type(error).__name__}", file=sys.stderr)
         return 2
@@ -408,11 +487,7 @@ def main() -> int:
     results: list[TurnResult] = []
     try:
         if args.reset_before_run:
-            # USB-Serial/JTAG maps RTS to EN. Keeping DTR deasserted avoids
-            # entering the bootloader; this is an explicit test-only reset.
-            device.rts = True
-            time.sleep(0.12)
-            device.rts = False
+            reset_usb_serial_jtag(device)
         log.wait_for("SERIAL_VOICE_TEST_READY=1", 0, 20)
         # READY means the serial endpoint and I2S port exist, not that the
         # asynchronous local wake-model bootstrap has returned the controller
