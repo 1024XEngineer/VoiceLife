@@ -277,7 +277,7 @@ std::string SerializeListToolsResult(const ListToolsResult& result) {
     // discovery exchange; omitting it causes the platform to reset the
     // WebSocket before it can issue tools/call.
     if (!yyjson_mut_obj_add(root, MakeString(document.get(), "nextCursor"), yyjson_mut_null(document.get()))) {
-        return "{}";
+        return "{}";  // GCOVR_EXCL_LINE: allocator failure is not deterministically injectable here.
     }
 
     return WriteDocument(document.get());
