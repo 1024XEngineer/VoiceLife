@@ -11,6 +11,10 @@ inline constexpr uint8_t kSerialVoiceProtocolVersion = 1;
 inline constexpr uint8_t kSerialVoiceBegin = 1;
 inline constexpr uint8_t kSerialVoicePcm = 2;
 inline constexpr uint8_t kSerialVoiceEnd = 3;
+// Test-only frames for feeding the local wake detector while the board stays
+// in standby. They must never be interpreted as interaction press events.
+inline constexpr uint8_t kSerialVoiceWakeBegin = 4;
+inline constexpr uint8_t kSerialVoiceWakeEnd = 5;
 inline constexpr std::size_t kSerialVoicePcmBytes = 16000U * 20U / 1000U * sizeof(int16_t);
 
 struct SerialVoiceFrameHeader {
@@ -49,7 +53,9 @@ class SerialVoiceMagicMatcher final {
     if (header.kind == kSerialVoicePcm) {
         return header.payload_bytes == kSerialVoicePcmBytes;
     }
-    return (header.kind == kSerialVoiceBegin || header.kind == kSerialVoiceEnd) && header.payload_bytes == 0;
+    return (header.kind == kSerialVoiceBegin || header.kind == kSerialVoiceEnd ||
+            header.kind == kSerialVoiceWakeBegin || header.kind == kSerialVoiceWakeEnd) &&
+           header.payload_bytes == 0;
 }
 
 }  // namespace voicelife::runtime::detail

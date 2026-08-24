@@ -13,13 +13,17 @@ struct SerialVoiceTestCallbacks {
     std::function<Status()> begin_turn;
     std::function<Status(voice::AudioFrame)> submit_pcm;
     std::function<Status()> end_turn;
+    std::function<Status()> begin_wake;
+    std::function<Status()> end_wake;
 };
 
 /**
  * Test-only USB serial PCM reader.
  *
  * Protocol: `VLVT`, version 1, kind, little-endian payload length. Kinds are
- * begin=1 (empty), pcm=2 (exactly one 20 ms PCM frame), and end=3 (empty).
+ * begin=1 (empty), pcm=2 (exactly one 20 ms PCM frame), end=3 (empty),
+ * wake_begin=4 (empty), and wake_end=5 (empty). Wake frames inject audio
+ * into the local detector without changing the interaction state.
  */
 class SerialVoiceTest final {
    public:

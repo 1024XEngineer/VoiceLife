@@ -370,7 +370,10 @@ class Runtime final {
         voice::VoiceSessionConfig config;
         config.session_id = "voicelife-linx-session";
         config.provider_id = "xrobot-websocket";
-        config.mode = voice::VoiceMode::kRealtime;
+        // SparkBot has no playback reference channel or AEC. Match the
+        // Xiaozhi SparkBot default: server VAD closes an auto-stop turn after
+        // playback drains, while realtime is reserved for AEC-capable boards.
+        config.mode = voice::VoiceMode::kAuto;
         config.audio.codec = voice::AudioCodec::kPcmS16Le;
         config.audio.sample_rate_hz = 16000;
         config.audio.channels = 1;
@@ -570,7 +573,28 @@ class Runtime final {
         return method != nullptr && method->IsString() && method->string == "tools/call";
     }
 
+    static std::string McpMethod(std::string_view payload) {
+        JsonValue request;
+        if (!ParseJson(payload, request).ok() || !request.IsObject()) return "invalid";
+        const JsonValue* method = request.Get("method");
+        return method != nullptr && method->IsString() ? method->string : "missing";
+    }
+
+    static std::string McpRequestId(std::string_view payload) {
+        JsonValue request;
+        if (!ParseJson(payload, request).ok() || !request.IsObject()) return "invalid";
+        const JsonValue* id = request.Get("id");
+        if (id == nullptr) return "notification";
+        if (id->IsString()) return id->string;
+        if (id->kind == JsonValue::Kind::kNumber) return std::to_string(static_cast<int64_t>(id->number));
+        return "non_scalar";
+    }
+
     Result<std::string> HandleMcpRequest(std::string_view payload, std::string_view session_id) {
+        const std::string method = McpMethod(payload);
+        const std::string request_id = McpRequestId(payload);
+        ESP_LOGI(kTag, "MCP_RX method=%s id=%s bytes=%u session_len=%u", method.c_str(), request_id.c_str(),
+                 static_cast<unsigned>(payload.size()), static_cast<unsigned>(session_id.size()));
         auto request = std::make_shared<McpRequest>();
         request->payload.assign(payload);
         request->session_id.assign(session_id);
@@ -582,7 +606,8 @@ class Runtime final {
             }
             mcp_queue_.push_back(request);
         }
-        ESP_LOGI(kTag, "MCP_REQUEST_QUEUED bytes=%u", static_cast<unsigned>(payload.size()));
+        ESP_LOGI(kTag, "MCP_REQUEST_QUEUED method=%s id=%s bytes=%u", method.c_str(), request_id.c_str(),
+                 static_cast<unsigned>(payload.size()));
         mcp_cv_.notify_one();
 
         std::unique_lock<std::mutex> lock(request->mutex);
@@ -618,6 +643,10 @@ class Runtime final {
                 const LinxMcpToolOutcome outcome = InspectLinxMcpToolOutcome(request->payload, response);
                 session_->ReportToolResult(TruncateUtf8(outcome.summary, 96), outcome.success);
             }
+            ESP_LOGI(kTag, "MCP_TX method=%s id=%s bytes=%u result=%d", McpMethod(request->payload).c_str(),
+                     McpRequestId(request->payload).c_str(),
+                     response.ok() && response.value.has_value() ? static_cast<unsigned>(response.value->size()) : 0U,
+                     response.ok() ? 1 : 0);
             ESP_LOGI(kTag, "MCP_TOOL_EXECUTED tool_call=%d result=%d", tool_call ? 1 : 0, response.ok() ? 1 : 0);
             {
                 std::lock_guard<std::mutex> lock(request->mutex);
@@ -904,9 +933,26 @@ class Runtime final {
                                         : Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
         };
         callbacks.end_turn = [this]() {
+            auto* injection = assembly_ != nullptr ? assembly_->test_audio_injection() : nullptr;
+            if (injection == nullptr) return Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
+            const Status disabled = injection->SetTestInputEnabled(false);
+            if (!disabled.ok()) return disabled;
             return EnqueueBoardInput(BoardInputAction::kPressUp)
                        ? Status::Ok()
                        : Status::Error(ErrorCode::kUnavailable, "语音测试结束事件未进入状态机队列");
+        };
+        callbacks.begin_wake = [this]() {
+            auto* injection = assembly_ != nullptr ? assembly_->test_audio_injection() : nullptr;
+            if (injection == nullptr) return Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
+            if (!assembly_->wake_gate().standby()) {
+                return Status::Error(ErrorCode::kConflict, "本地唤醒注入要求设备处于待机");
+            }
+            return injection->SetTestInputEnabled(true);
+        };
+        callbacks.end_wake = [this]() {
+            auto* injection = assembly_ != nullptr ? assembly_->test_audio_injection() : nullptr;
+            return injection != nullptr ? injection->SetTestInputEnabled(false)
+                                        : Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
         };
         serial_voice_test_ = std::make_unique<SerialVoiceTest>(std::move(callbacks));
         return serial_voice_test_->Start();
@@ -1316,12 +1362,23 @@ class Runtime final {
                 RestoreStandbyFromWakeTask();
                 continue;
             }
-            // SparkBot 目前没有 AEC。确认播报完成后才会由 kTtsStopped 进入
-            // kOpeningCapture，避免把“收到！”录回云端，也避免假“聆听中”。
+            // SparkBot 没有 AEC。普通唤醒先请求一次明确的“收到！”确认音，
+            // 再按 detect -> listen.start 顺序进入同一 Linx 会话；VoiceSession
+            // 会等确认 TTS 的 stop 或有界超时后才打开物理麦克风，避免自我介绍
+            // 或确认音被采进首轮用户语音。
             const Status acknowledge = session_->NotifyLocalWakeWord(request.wake_word, "收到！");
             if (!acknowledge.ok()) {
                 ESP_LOGW(kTag, "唤醒确认请求失败: %s", acknowledge.message.c_str());
-                // 确认请求失败：回待机，不显示"出错了/牛牛走了"。
+                (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
+                continue;
+            }
+            // Linx requires detect -> listen.start in one ordered control
+            // sequence. Keep the physical input gated until the greeting TTS
+            // ends; VoiceSession will reuse this Provider lease when the
+            // interaction event loop later requests BeginCapture().
+            const Status provider_capture = session_->BeginProviderCapture();
+            if (!provider_capture.ok()) {
+                ESP_LOGW(kTag, "唤醒后 Provider 监听启动失败: %s", provider_capture.message.c_str());
                 (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
             }
         }
@@ -1653,8 +1710,13 @@ class Runtime final {
                 wake_ack_tts_started_at_us_ = esp_timer_get_time();
                 ESP_LOGI(kTag, "WAKE_ACK_LATENCY stage=tts_started ms=%lld", static_cast<long long>(wake_latency_ms));
             }
-        } else if (evidence.event == "tts_first_audio" && wake_ack_tts_started_at_us_ > 0) {
+        } else if (evidence.event == "tts_first_audio" && wake_ack_requested_at_us_ > 0) {
+            // Binary PCM can be delivered to the session before the event-loop
+            // item for tts.start is processed. The first actual audio is still
+            // the strongest proof that the greeting stream is alive, so it must
+            // cancel the bounded wake-greeting timer in either ordering.
             CancelListenTimer();
+            if (wake_ack_tts_started_at_us_ == 0) wake_ack_tts_started_at_us_ = esp_timer_get_time();
             const int64_t audio_latency_ms = (esp_timer_get_time() - wake_ack_requested_at_us_) / 1000;
             ESP_LOGI(kTag, "WAKE_ACK_LATENCY stage=first_audio ms=%lld", static_cast<long long>(audio_latency_ms));
         } else if (evidence.event == "tts_stopped" && wake_ack_tts_started_at_us_ > 0) {
@@ -1734,6 +1796,19 @@ class Runtime final {
             // 听到声音。首段 PCM 到达前保留 deadline，防止下行缓冲把首轮卡住。
             if (wake_ack_requested_at_us_ == 0) CancelListenTimer();
             (void)EnqueueEvent(voice::VoiceInteractionEvent::kTtsStarted);
+        } else if (evidence.event == "local_wake_detect_requested") {
+            // detect 已进入 TX FIFO。Linx 可能随后发送本地唤醒问候 TTS；
+            // 先确认协议顺序，再等待 tts.stop，超时才开启干净的用户采集。
+            const auto mode = session_ != nullptr ? session_->config().mode : voice::VoiceMode::kManual;
+            const char* mode_name = "manual";
+            if (mode == voice::VoiceMode::kAuto) {
+                mode_name = "auto";
+            } else if (mode == voice::VoiceMode::kRealtime) {
+                mode_name = "realtime";
+            }
+            ESP_LOGI(kTag, "LOCAL_WAKE_PROTOCOL_ACCEPTED action=await_greeting mode=%s", mode_name);
+            (void)EnqueueEvent(voice::VoiceInteractionEvent::kWakeDetectionAccepted);
+            StartListenTimer(kWakeAckFirstAudioTimeoutMs);
         } else if (evidence.event == "local_wake_ack_requested" || evidence.event == "interrupt_ack_requested") {
             // 本地唤醒/打断确认已提交给 Provider。直到首段 PCM 到达前保留
             // deadline；超时后直接开始采集，不能无限等待远端音频。
@@ -1753,7 +1828,7 @@ class Runtime final {
             }
             // 服务端可能先送文本字幕，数秒后才送 PCM。确认阶段只有实际
             // tts_first_audio 才能解除 deadline，不能把字幕当成已播放。
-            if (wake_ack_tts_started_at_us_ == 0) CancelListenTimer();
+            if (wake_ack_requested_at_us_ == 0) CancelListenTimer();
             if (!evidence.detail.empty()) {
                 // 事件化：文本经事件循环应用（唯一写者），门控仍在事件循环校验。
                 stt_display_text_ = evidence.detail;
@@ -2369,10 +2444,18 @@ class Runtime final {
                 continue;
             }
             if (item.listen_timeout) {
-                if (interaction_.state() == voice::VoiceInteractionState::kAcknowledging ||
-                    (interaction_.state() == voice::VoiceInteractionState::kSpeaking && wake_ack_requested_at_us_ > 0 &&
-                     wake_ack_tts_started_at_us_ > 0)) {
-                    ESP_LOGW(kTag, "ACK_FIRST_AUDIO_TIMEOUT transition=acknowledging_or_speaking->opening_capture");
+                if (interaction_.state() == voice::VoiceInteractionState::kAcknowledging) {
+                    // The Provider listen.start was already sent immediately
+                    // after detect. Timeout only opens the physical input; an
+                    // abort/restart here would create a second protocol turn.
+                    ESP_LOGW(kTag, "ACK_FIRST_AUDIO_TIMEOUT transition=acknowledging->opening_capture");
+                    wake_ack_requested_at_us_ = 0;
+                    wake_ack_tts_started_at_us_ = 0;
+                    wake_ack_until_us_ = 0;
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kAcknowledgementTimedOut);
+                } else if (interaction_.state() == voice::VoiceInteractionState::kSpeaking &&
+                           wake_ack_requested_at_us_ > 0) {
+                    ESP_LOGW(kTag, "ACK_FIRST_AUDIO_TIMEOUT transition=speaking->opening_capture");
                     if (session_) (void)session_->Interrupt();
                     // Interrupt 使旧确认流失效，迟到的 tts.stop 会由会话层
                     // 丢弃；这里必须立即清除归因，避免下一轮正常回复被误算
@@ -2422,6 +2505,13 @@ class Runtime final {
                 wake_ack_requested_at_us_ = now;
                 wake_ack_tts_started_at_us_ = 0;
                 wake_ack_until_us_ = now + kWakeAckDisplayUs;
+            }
+            if (item.event == voice::VoiceInteractionEvent::kWakeDetectionAccepted) {
+                // Keep the wake-greeting timing lease alive. A detect has been
+                // accepted by TX, but the microphone remains closed until the
+                // optional server greeting finishes or the bounded timer fires.
+                ESP_LOGI(kTag, "LOCAL_WAKE_GREETING_WAIT state=%d timeout_ms=%u",
+                         static_cast<int>(interaction_.state()), static_cast<unsigned>(kWakeAckFirstAudioTimeoutMs));
             }
             const Status wake_status = HandleInteractionEvent(item.event, item.wake_word);
             if (item.event != voice::VoiceInteractionEvent::kWakeDetected && !wake_status.ok()) {

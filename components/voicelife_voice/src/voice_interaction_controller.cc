@@ -79,6 +79,14 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
                 return InvalidTransition(state_, event);
             }
             break;
+        case VoiceInteractionEvent::kWakeDetectionAccepted:
+            // Linx 可能在 detect 后主动发送一段唤醒问候 TTS。这里只确认
+            // detect 已进入发送序列，不提前开麦；tts.stop 或有界超时负责开麦。
+            if (state_ != VoiceInteractionState::kAcknowledging && state_ != VoiceInteractionState::kSpeaking &&
+                state_ != VoiceInteractionState::kOpeningCapture && state_ != VoiceInteractionState::kListening) {
+                return InvalidTransition(state_, event);
+            }
+            break;
         case VoiceInteractionEvent::kCaptureStarted:
             // 事务式启动确认：kOpeningCapture → kListening（采集真正开始）；
             // 从打断重启采集也必须等待同一确认；kListening 幂等。

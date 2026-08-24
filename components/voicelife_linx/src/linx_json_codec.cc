@@ -117,6 +117,10 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
     if (!config.audio.valid() || !connection.valid()) {
         return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx hello 音频参数无效");
     }
+    const voice::AudioFormat wire_audio = connection.preferred_audio.value_or(config.audio);
+    if (!wire_audio.valid()) {
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "Linx hello 线上音频参数无效");
+    }
     JsonPtr root(cJSON_CreateObject());
     cJSON_AddStringToObject(root.get(), "type", "hello");
     cJSON_AddNumberToObject(root.get(), "version", 1);
@@ -125,15 +129,15 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
     cJSON_AddStringToObject(root.get(), "transport", "websocket");
 
     cJSON* audio = cJSON_AddObjectToObject(root.get(), "audio_params");
-    cJSON_AddStringToObject(audio, "format", CodecName(config.audio.codec));
-    cJSON_AddNumberToObject(audio, "sample_rate", config.audio.sample_rate_hz);
-    cJSON_AddNumberToObject(audio, "channels", config.audio.channels);
-    cJSON_AddNumberToObject(audio, "bit_depth", config.audio.bits_per_sample);
-    cJSON_AddStringToObject(audio, "endianness", "little");
-    cJSON_AddNumberToObject(audio, "frame_duration", config.audio.frame_duration_ms);
+    cJSON_AddStringToObject(audio, "format", CodecName(wire_audio.codec));
+    cJSON_AddNumberToObject(audio, "sample_rate", wire_audio.sample_rate_hz);
+    cJSON_AddNumberToObject(audio, "channels", wire_audio.channels);
+    cJSON_AddNumberToObject(audio, "frame_duration", wire_audio.frame_duration_ms);
 
-    if (config.audio.codec == voice::AudioCodec::kPcmS16Le) {
-        const uint32_t frame_size = config.audio.sample_rate_hz * config.audio.frame_duration_ms / 1000U;
+    if (wire_audio.codec == voice::AudioCodec::kPcmS16Le) {
+        cJSON_AddNumberToObject(audio, "bit_depth", wire_audio.bits_per_sample);
+        cJSON_AddStringToObject(audio, "endianness", "little");
+        const uint32_t frame_size = wire_audio.sample_rate_hz * wire_audio.frame_duration_ms / 1000U;
         cJSON_AddNumberToObject(audio, "frame_size", frame_size);
         cJSON_AddStringToObject(audio, "sample_format", "signed_int16");
         cJSON_AddNumberToObject(audio, "play_buffer_duration", connection.playback_buffer_duration_ms);
@@ -165,7 +169,8 @@ Result<std::string> LinxJsonCodec::EncodeListenStop(const voice::VoiceSessionCon
     JsonPtr root(cJSON_CreateObject());
     cJSON_AddStringToObject(root.get(), "type", "listen");
     cJSON_AddStringToObject(root.get(), "state", "stop");
-    cJSON_AddStringToObject(root.get(), "mode", ModeName(config.mode));
+    // Linx defines mode on listen.start only. Keep stop to the documented
+    // shape used by the reference SparkBot client.
     if (!config.session_id.empty()) {
         cJSON_AddStringToObject(root.get(), "session_id", config.session_id.c_str());
     }
