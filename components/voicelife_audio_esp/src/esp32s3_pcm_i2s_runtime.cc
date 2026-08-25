@@ -216,7 +216,7 @@ void Esp32s3PcmAudioPorts::Impl::DeliveryTaskEntry(void* arg) {
 void Esp32s3PcmAudioPorts::Impl::OutputTaskEntry(void* arg) {
     auto* self = static_cast<Impl*>(arg);
     self->OutputLoop();
-    vTaskDelete(nullptr);
+    vTaskDeleteWithCaps(nullptr);
 }
 
 void Esp32s3PcmAudioPorts::Impl::MarkTaskDone(TaskHandle_t* task) {

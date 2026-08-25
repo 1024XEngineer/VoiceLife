@@ -224,6 +224,10 @@ class Runtime final {
         assembly_ = &assembly;
         const auto fail_startup = [this](Status status) {
 #ifdef ESP_PLATFORM
+            if (assembly_ != nullptr) {
+                assembly_->wake_gate().Close();
+                assembly_->audio_output().Close();
+            }
             StopMcpWorker();
             StopEventLoop();
             StopScheduleReminderRuntime();
@@ -232,6 +236,23 @@ class Runtime final {
         };
         auto& registry = voice::SpeechProviderRegistry::Instance();
         if (!init_status_.ok()) return init_status_;
+        voice::VoiceSessionConfig config;
+#ifdef ESP_PLATFORM
+        config.session_id = "voicelife-linx-session";
+        config.provider_id = "xrobot-websocket";
+        // SparkBot has no playback reference channel or AEC. Match the
+        // Xiaozhi SparkBot default: server VAD closes an auto-stop turn after
+        // playback drains, while realtime is reserved for AEC-capable boards.
+        config.mode = voice::VoiceMode::kAuto;
+        config.audio.codec = voice::AudioCodec::kPcmS16Le;
+        config.audio.sample_rate_hz = 16000;
+        config.audio.channels = 1;
+        config.audio.bits_per_sample = 16;
+        config.audio.frame_duration_ms = 20;
+#else
+        config.session_id = "scaffold-session";
+        config.provider_id = "scaffold";
+#endif
         // NVS 加密初始化会创建 AES-XTS 中断处理器。必须在日程/MCP Schema
         // 和任务创建前完成，避免启动分配峰值让底层中断分配器收到损坏状态。
         {
@@ -319,6 +340,25 @@ class Runtime final {
         if (const Status mcp_worker = StartMcpWorker(); !mcp_worker.ok()) {
             return fail_startup(mcp_worker);
         }
+#ifdef ESP_PLATFORM
+        if (wake_queue_ == nullptr) {
+            wake_queue_ = xQueueCreate(4, sizeof(BoardRequest));
+            if (wake_queue_ == nullptr) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒队列失败"));
+            // WakeTask maps the local model with cache disabled and therefore requires an internal stack.
+            const BaseType_t task_status =
+                xTaskCreate(&Runtime::WakeTaskEntry, "voicelife_wake", 4096, this, 5, &wake_task_);
+            if (task_status != pdPASS) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒控制任务失败"));
+        }
+        // I2S DMA needs contiguous internal memory. Reserve the duplex ports before Wi-Fi, TLS and IM allocations.
+        assembly_->SetOutputVolume(static_cast<uint8_t>(volume_));
+        if (const Status input_status = assembly_->wake_gate().Open(config.audio); !input_status.ok()) {
+            return fail_startup(input_status);
+        }
+        if (const Status output_status = assembly_->audio_output().Open(config.audio); !output_status.ok()) {
+            return fail_startup(output_status);
+        }
+        ESP_LOGI(kTag, "AUDIO_PREPARED=1");
+#endif
         ShowDisplay(voice::VoiceMood::kConnecting, "联网", "");
         if (const Status secret_store = InitializeLinxSecretStore(); !secret_store.ok()) {
             ESP_LOGW(kTag, "STARTUP_ERROR stage=secret_store code=%d", static_cast<int>(secret_store.code));
@@ -349,8 +389,6 @@ class Runtime final {
             ESP_LOGW(kTag, "IM_PROVISION_TASK_FAILED=1");
         }
 #endif
-        // IM 的 SNTP、Gateway 探针和退避全部在独立任务中完成，语音启动路径不等待网络。
-        StartImRuntime();
         auto result = registry.Create("xrobot-websocket", {});
 #else
         auto result = registry.Create("scaffold", {});
@@ -363,30 +401,14 @@ class Runtime final {
 
 #ifdef ESP_PLATFORM
         // 音频端口由 Assembly 注入（业务 PCM 语义，不暴露 I2S/Codec）。
-        assembly_->SetOutputVolume(static_cast<uint8_t>(volume_));
         if (assembly_->uses_local_wake_detector()) {
             assembly_->wake_gate().SetWakeSink([this](std::string_view wake_word) { QueueWakeWord(wake_word); });
         }
         session_ = std::make_unique<voice::VoiceSession>(
             assembly_->wake_gate(), assembly_->audio_output(), *provider_,
             [this](const voice::VoiceEvidence& evidence) { LogVoiceEvidence(evidence); });
-        voice::VoiceSessionConfig config;
-        config.session_id = "voicelife-linx-session";
-        config.provider_id = "xrobot-websocket";
-        // SparkBot has no playback reference channel or AEC. Match the
-        // Xiaozhi SparkBot default: server VAD closes an auto-stop turn after
-        // playback drains, while realtime is reserved for AEC-capable boards.
-        config.mode = voice::VoiceMode::kAuto;
-        config.audio.codec = voice::AudioCodec::kPcmS16Le;
-        config.audio.sample_rate_hz = 16000;
-        config.audio.channels = 1;
-        config.audio.bits_per_sample = 16;
-        config.audio.frame_duration_ms = 20;
 #else
         session_ = std::make_unique<voice::VoiceSession>(audio_input_, audio_output_, *provider_);
-        voice::VoiceSessionConfig config;
-        config.session_id = "scaffold-session";
-        config.provider_id = "scaffold";
 #endif
         const Status session_status = session_->Start(config);
         if (!session_status.ok()) {
@@ -396,13 +418,8 @@ class Runtime final {
         }
 
 #ifdef ESP_PLATFORM
-        if (wake_queue_ == nullptr) {
-            wake_queue_ = xQueueCreate(4, sizeof(BoardRequest));
-            if (wake_queue_ == nullptr) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒队列失败"));
-            const BaseType_t task_status =
-                xTaskCreate(&Runtime::WakeTaskEntry, "voicelife_wake", 4096, this, 5, &wake_task_);
-            if (task_status != pdPASS) return fail_startup(Status::Error(ErrorCode::kInternal, "创建唤醒控制任务失败"));
-        }
+        // IM does not block the voice startup path; start its network work only after I2S is prepared.
+        StartImRuntime();
         EnqueueEvent(voice::VoiceInteractionEvent::kBootCompleted);
         const Status input_status =
             assembly_->StartBoardInput([this](BoardInputAction action) { (void)EnqueueBoardInput(action); });
@@ -649,7 +666,7 @@ class Runtime final {
             if (tool_call && session_) session_->ReportToolCallStarted();
             LinxMcpToolOutcome outcome;
             auto response = HandleLinxMcpPayload(request->payload, mcp_server_, request->session_id,
-                                                  tool_call ? &outcome : nullptr);
+                                                 tool_call ? &outcome : nullptr);
             if (!response.ok()) {
                 response = BuildLinxMcpUnavailableResponse(request->payload, "设备 MCP 执行失败", request->session_id);
                 outcome = InspectLinxMcpToolOutcome(request->payload, response);
@@ -683,6 +700,8 @@ class Runtime final {
 #if CONFIG_VOICELIFE_IM_GATEWAY
         bool expected = false;
         if (!im_lifecycle_started_.compare_exchange_strong(expected, true)) return;
+        // This task loads IM configuration from encrypted NVS. NVS can disable
+        // flash cache, so ESP-IDF requires the caller's stack to be in DRAM.
         if (xTaskCreate(&Runtime::ImLifecycleTaskEntry, "voicelife_im_lifecycle", 8192, this, 3, &im_lifecycle_task_) !=
             pdPASS) {
             im_lifecycle_started_.store(false);
@@ -711,7 +730,10 @@ class Runtime final {
         bool expected = false;
         if (!im_action_worker_running_.compare_exchange_strong(expected, true)) return;
         im_action_worker_stopped_.store(false);
-        if (xTaskCreate(&Runtime::ReminderActionTaskEntry, "voicelife_im_actions", 8192, this, 3, nullptr) != pdPASS) {
+        // This task is created at reminder time, when TLS/audio allocations can leave no contiguous
+        // 8KB internal block. Its HTTPS/SSE work does not require an internal-memory stack.
+        if (xTaskCreateWithCaps(&Runtime::ReminderActionTaskEntry, "voicelife_im_actions", 8192, this, 3, nullptr,
+                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
             im_action_worker_running_.store(false);
             im_action_worker_stopped_.store(true);
             ESP_LOGW(kTag, "IM_ACTION_TASK_FAILED=1");
@@ -805,7 +827,11 @@ class Runtime final {
         // im_action_worker_stopped_ is set immediately before self-deletion. No
         // Runtime-owned dependency is accessed after this call, so teardown may
         // safely release the channel and executor after observing the flag.
+#if CONFIG_SPIRAM && (configSUPPORT_STATIC_ALLOCATION == 1)
+        vTaskDeleteWithCaps(nullptr);
+#else
         vTaskDelete(nullptr);
+#endif
     }
 
     bool StopReminderActionWorker() {

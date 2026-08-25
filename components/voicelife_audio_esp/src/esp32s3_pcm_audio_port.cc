@@ -396,7 +396,8 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
         amplifier_callback_(true);  // 播放打开：经板级仲裁请求功放。
         amplifier_enabled_ = true;
     }
-    if (xTaskCreate(&OutputTaskEntry, "voice_audio_out", 4096, this, 4, &output_task_) != pdPASS) {
+    if (xTaskCreateWithCaps(&OutputTaskEntry, "voice_audio_out", 4096, this, 4, &output_task_,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         if (amplifier_callback_) {
             amplifier_callback_(false);
             amplifier_enabled_ = false;

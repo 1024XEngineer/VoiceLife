@@ -556,6 +556,11 @@ target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
 add_voicelife_test(serial_voice_protocol_test "unit;runtime;voice" serial_voice_protocol_test.cc)
 target_include_directories(serial_voice_protocol_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
 
+add_voicelife_test(usb_serial_frame_router_test "unit;runtime;voice;im" usb_serial_frame_router_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime/src/usb_serial_frame_router.cc")
+target_include_directories(usb_serial_frame_router_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_link_libraries(usb_serial_frame_router_test PRIVATE im contracts)
+
 add_voicelife_test(wifi_provisioning_test "unit;runtime;wifi;provisioning"
     wifi_provisioning_test.cc
     "${ROOT_DIR}/components/voicelife_runtime/src/wifi_provisioning.cc")
