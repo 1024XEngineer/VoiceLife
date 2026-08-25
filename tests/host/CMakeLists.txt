@@ -99,6 +99,7 @@ target_link_libraries(timing_esp PUBLIC timing contracts)
 add_voicelife_library(mcp voicelife_mcp
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_server.cc"
     "${ROOT_DIR}/components/voicelife_mcp/src/mcp_json_writer.cc"
+    "${ROOT_DIR}/components/voicelife_mcp/src/tools/audio_mcp_tools.cc"
     "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools_input.cc")
 target_include_directories(mcp PRIVATE "${ROOT_DIR}/components/voicelife_mcp/src/tools")
 target_link_libraries(mcp PUBLIC contracts schedule)

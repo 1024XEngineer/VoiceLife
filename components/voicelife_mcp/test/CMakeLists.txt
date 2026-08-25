@@ -22,7 +22,8 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
 endif()
 
 add_library(mcp STATIC "${ROOT_DIR}/components/voicelife_mcp/src/mcp_server.cc"
-                       "${ROOT_DIR}/components/voicelife_mcp/src/mcp_json_writer.cc")
+                       "${ROOT_DIR}/components/voicelife_mcp/src/mcp_json_writer.cc"
+                       "${ROOT_DIR}/components/voicelife_mcp/src/tools/audio_mcp_tools.cc")
 target_include_directories(mcp PUBLIC "${ROOT_DIR}/components/voicelife_mcp/include")
 target_link_libraries(mcp PUBLIC contracts)
 target_link_libraries(mcp PRIVATE yyjson)

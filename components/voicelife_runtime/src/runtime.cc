@@ -59,6 +59,7 @@
 #include "schedule_reminder_im_adapter.h"
 #include "serial_voice_test.h"
 #include "voicelife/application/interaction_orchestrator.h"
+#include "voicelife/mcp/audio_mcp_tools.h"
 #include "voicelife/mcp/schedule_mcp_tools.h"
 #include "voicelife/runtime_esp/esp_interaction_task_host.h"
 #include "voicelife/voice/display_snapshot.h"
@@ -289,12 +290,18 @@ class Runtime final {
             init_status_ = mcp::RegisterScheduleMcpTools(mcp_server_, schedule_service_, schedule_rule_service_,
                                                          schedule_operation_service_, schedule_reminder_service_.get());
             if (!init_status_.ok()) return fail_startup(init_status_);
+            init_status_ = mcp::RegisterAudioMcpTools(mcp_server_, [this](int volume) {
+                SetVolume(volume);
+                ESP_LOGI(kTag, "MCP_VOLUME_SET value=%d", volume_);
+            });
+            if (!init_status_.ok()) return fail_startup(init_status_);
             schedule_mcp_registered_ = true;
             // MCP worker 只产生绑定结果；轮询与 OLED/TTS 均由各自受控任务处理。
             ESP_LOGI(
                 kTag,
-                "MCP_TOOLS_READY count=8 names=schedule.create,schedule.query,schedule.update,schedule.delete,"
-                "schedule.operation_query,schedule.reminder_acknowledge,schedule.reminder_snooze,im.binding.start");
+                "MCP_TOOLS_READY count=9 names=schedule.create,schedule.query,schedule.update,schedule.delete,"
+                "schedule.operation_query,schedule.reminder_acknowledge,schedule.reminder_snooze,im.binding.start,"
+                "self.audio_speaker.set_volume");
         }
         const Status reminder_status = schedule_reminder_service_->Start();
         if (!reminder_status.ok()) {
@@ -1444,6 +1451,23 @@ class Runtime final {
         return voice::VoiceMood::kSad;
     }
 
+    /** @brief 将 Linx 文档中的常用情感/动作键映射为产品表情语义。 */
+    static voice::VoiceMood MoodForLinxEmotion(std::string_view emotion) {
+        if (emotion == "happy" || emotion == "loving" || emotion == "laughing" || emotion == "funny" ||
+            emotion == "delicious" || emotion == "kissy" || emotion == "confident" || emotion == "cool" ||
+            emotion == "winking" || emotion == "silly") {
+            return voice::VoiceMood::kHappy;
+        }
+        if (emotion == "sad" || emotion == "crying" || emotion == "shocked" || emotion == "embarrassed") {
+            return voice::VoiceMood::kSad;
+        }
+        if (emotion == "thinking" || emotion == "confused") return voice::VoiceMood::kThinking;
+        if (emotion == "surprised") return voice::VoiceMood::kSurprised;
+        if (emotion == "angry") return voice::VoiceMood::kAngry;
+        if (emotion == "sleepy" || emotion == "relaxed") return voice::VoiceMood::kIdle;
+        return voice::VoiceMood::kNeutral;
+    }
+
     static std::string CurrentStandbyStatusText() {
         const time_t now = time(nullptr);
         if (now <= 1600000000) return "空闲";  // 2020-09-13 之前视为尚未同步时钟。
@@ -1757,6 +1781,10 @@ class Runtime final {
             // MCP 工具调用（服务端发现/工具执行）不是用户语音意图：
             // 仅取消聆听超时，不武装回复、不触发 kIntentReceived。
             CancelListenTimer();
+        } else if (evidence.event == "llm_emotion") {
+            // Linx 的 llm emotion 是显示提示，不是新的用户意图；只更新
+            // 当前快照的 mood，保留状态栏和正在展示的字幕。
+            EnqueueDisplayMood(MoodForLinxEmotion(evidence.detail));
         } else if (evidence.event == "mcp_tool_started") {
             // MCP worker 只经 VoiceSession evidence 投递；状态机决定是否允许
             // 从当前交互态进入“处理中”，不得由 worker 自己写快照。
@@ -1775,25 +1803,10 @@ class Runtime final {
                 ESP_LOGI(kTag, "IM_BINDING_TOOL_OVERLAY_SUPPRESSED=1");
                 return;
             }
-            // evidence.detail 不是可信的用户文本。仅接受 MCP worker 产生的
-            // 固定业务短句；任何原始 JSON-RPC/MCP 内容都降级为通用文案。
-            std::string_view summary = success ? "操作已完成" : "操作失败";
-            std::string_view status = success ? "操作结果" : "操作错误";
-            if (success && evidence.detail == "日程已创建") {
-                summary = "日程已创建";
-                status = "日程结果";
-            } else if (success && evidence.detail == "日程查询完成") {
-                summary = "日程查询完成";
-                status = "日程结果";
-            } else if (!success && evidence.detail == "日程创建失败") {
-                summary = "日程创建失败";
-                status = "日程错误";
-            } else if (!success && evidence.detail == "日程查询失败") {
-                summary = "日程查询失败";
-                status = "日程错误";
-            }
-            ShowOverlay(success ? voice::VoiceMood::kHappy : voice::VoiceMood::kSad, status, summary);
-            StartOverlayTimer(2500);
+            // MCP 机器结果只留在 Linx JSON-RPC 回包、TTS 和诊断日志中。
+            // 不把“操作已完成/查询成功”等内部摘要画到用户屏幕上，避免
+            // 工具协议泄漏为产品文案；模型的自然语言回复仍走 TTS 字幕链。
+            ESP_LOGI(kTag, "MCP_RESULT_DISPLAY_SUPPRESSED success=%d", success ? 1 : 0);
         } else if (evidence.event == "tts_started") {
             // 确认 TTS 的 started 只说明服务端接收了请求，不能证明用户已经
             // 听到声音。首段 PCM 到达前保留 deadline，防止下行缓冲把首轮卡住。
@@ -1963,6 +1976,9 @@ class Runtime final {
         bool display_update = false;
         /** 是否为临时 overlay（音量/告别）。 */
         bool display_overlay = false;
+        /** 只更新表情，不覆盖状态栏或正文。 */
+        bool mood_update = false;
+        voice::VoiceMood mood = voice::VoiceMood::kIdle;
         voice::VoiceMood display_mood = voice::VoiceMood::kIdle;
         std::string display_status;
         std::string display_content;
@@ -2030,7 +2046,7 @@ class Runtime final {
     std::atomic_bool mcp_stopped_{true};
 
     [[nodiscard]] static bool IsBestEffortEvent(const InteractionEventItem& item) {
-        if (item.display_only || item.network_update || item.display_update) return true;
+        if (item.display_only || item.network_update || item.display_update || item.mood_update) return true;
         if (!item.voice_evidence) return false;
         // These evidence events only update observability or the current
         // display. Lifecycle and state-machine evidence remains control work.
@@ -2170,6 +2186,13 @@ class Runtime final {
         item.display_mood = mood;
         item.display_status = std::string(status);
         item.display_content = std::string(content);
+        EnqueueInteractionItem(item);
+    }
+
+    void EnqueueDisplayMood(voice::VoiceMood mood) {
+        InteractionEventItem item{};
+        item.mood_update = true;
+        item.mood = mood;
         EnqueueInteractionItem(item);
     }
 
@@ -2498,6 +2521,12 @@ class Runtime final {
                          item.display_overlay ? 1 : 0, static_cast<int>(snapshot_.mood),
                          static_cast<unsigned long long>(snapshot_.generation),
                          static_cast<unsigned long long>(snapshot_.revision));
+                continue;
+            }
+            if (item.mood_update) {
+                snapshot_.mood = item.mood;
+                ++snapshot_.revision;
+                CommitSnapshot();
                 continue;
             }
             if (item.event == voice::VoiceInteractionEvent::kWakeDetected ||

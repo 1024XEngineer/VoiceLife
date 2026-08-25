@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -14,17 +15,18 @@ namespace voicelife::display_sparkbot {
  * @brief 当前 SparkBot 外壳观察用的产品布局参数。
  *
  * 这些参数只约束产品 UI 的安全视口，不改变 ST7789/LVGL 的 240x240
- * 控制器坐标。当前 viewport_y=0 用于先观察上半区；实物边界确认后，
+ * 控制器坐标。当前 viewport_y=10 为软件侧的下移安全边距；实物边界确认后，
  * 后续只需调整 viewport_y 或尺寸，不必重写面板初始化。
  */
 struct SparkBotDisplayLayout {
     /** @brief 正文栏的滚动策略。 */
     enum class ContentScrollMode : uint8_t {
-        kHorizontalCircular,
+        /** 单向横向滚动，避免 circular 模式把整句重复绘制。 */
+        kHorizontal,
     };
 
     // SparkBot 外壳会遮挡物理屏最上沿，产品视口整体下移少量保留安全边距。
-    uint16_t viewport_y = 6;
+    uint16_t viewport_y = 10;
     uint16_t viewport_height = 120;
     uint16_t horizontal_inset = 12;
     uint16_t top_bar_height = 16;
@@ -42,7 +44,7 @@ struct SparkBotDisplayLayout {
     uint16_t emoji_scale = 181;
     uint32_t screen_saver_idle_timeout_ms = 30000;
     uint32_t content_scroll_duration_ms = 6000;
-    ContentScrollMode content_scroll_mode = ContentScrollMode::kHorizontalCircular;
+    ContentScrollMode content_scroll_mode = ContentScrollMode::kHorizontal;
 };
 
 /**
@@ -50,6 +52,35 @@ struct SparkBotDisplayLayout {
  * @return 当前半高观察布局参数。
  */
 [[nodiscard]] constexpr SparkBotDisplayLayout DefaultSparkBotDisplayLayout() { return {}; }
+
+/**
+ * @brief 根据实际溢出宽度计算稳定的单向滚动时长。
+ *
+ * 文本越长，动画越慢；短文本不启动滚动。上下限避免极短句闪动或长句
+ * 在屏幕上一闪而过。该纯函数供 host 契约测试使用。
+ */
+[[nodiscard]] constexpr uint32_t ScrollDurationForOverflow(uint32_t overflow_width) {
+    if (overflow_width == 0) return 0;
+    constexpr uint32_t kMinMs = 3000;
+    constexpr uint32_t kMaxMs = 12000;
+    const uint32_t scaled = overflow_width > kMaxMs / 35 ? kMaxMs : overflow_width * 35;
+    return scaled < kMinMs ? kMinMs : scaled;
+}
+
+/** @brief Linx 文档列出的常用情感/动作 key，固化在固件供本地渲染映射使用。 */
+inline constexpr std::array<std::string_view, 21> kCommonLinxEmojiKeys = {
+    "neutral", "loving", "happy", "embarrassed", "laughing", "surprised", "funny",
+    "shocked", "sad", "thinking", "angry", "winking", "crying", "cool", "relaxed",
+    "delicious", "kissy", "confident", "sleepy", "silly", "confused",
+};
+
+/** @brief 判断 Linx emotion 是否属于文档列出的常用集合。 */
+[[nodiscard]] constexpr bool IsCommonLinxEmojiKey(std::string_view key) {
+    for (const auto candidate : kCommonLinxEmojiKeys) {
+        if (candidate == key) return true;
+    }
+    return false;
+}
 
 /**
  * @brief 显示模型表情到官方 SparkBot emotion key 的映射。
@@ -153,6 +184,8 @@ class SparkBotLvglRenderer {
     [[maybe_unused]] bool standby_idle_tracking_ = false;
     /** @brief 是否已进入黑底动态眼睛屏保。 */
     [[maybe_unused]] bool screen_saver_active_ = false;
+    /** @brief 已提交给 LVGL 的正文，避免每次快照刷新重启动画。 */
+    [[maybe_unused]] std::string rendered_content_text_;
 
 #ifdef ESP_PLATFORM
     void EnterIdleScreenSaver();

@@ -313,6 +313,9 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
         Emit("stt_text_received", event.text);
     } else if (event.kind == VoiceEventKind::kToolCall) {
         Emit("tool_call_received", event.text);
+    } else if (event.kind == VoiceEventKind::kLlmEmotion) {
+        // 情感提示只影响显示，不改变采集、播报或回合状态。
+        Emit("llm_emotion", event.text);
     } else if (event.kind == VoiceEventKind::kTtsStarted) {
         if (stop_input_for_tts) {
             const Status status = input_.StopCapture();

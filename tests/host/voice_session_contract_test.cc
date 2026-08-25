@@ -258,8 +258,16 @@ int main() {
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady && provider.audio_frames == 0 &&
               output.pushes == 0,
           "MCP 语义证据不得伪造音频、改变会话状态或绕过 VoiceSession");
-    Check(evidence.size() >= 3 && evidence[evidence.size() - 2].event == "mcp_tool_started" &&
-              evidence.back().event == "mcp_tool_result" && evidence.back().detail == "event=创建会议",
+    provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kLlmEmotion,
+                                               .generation = session.generation(),
+                                               .text = "happy",
+                                               .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kReady && !evidence.empty() &&
+              evidence.back().event == "llm_emotion" && evidence.back().detail == "happy",
+          "Linx 情感事件只应进入显示证据链，不得改变语音会话状态");
+    Check(evidence.size() >= 4 && evidence[evidence.size() - 3].event == "mcp_tool_started" &&
+              evidence[evidence.size() - 2].event == "mcp_tool_result" &&
+              evidence[evidence.size() - 2].detail == "event=创建会议",
           "MCP worker 只能通过 VoiceSession 的受控 evidence 出口回注结果");
     const uint64_t generation = session.generation();
     // 空闲（kReady）收到服务端残留 TTS start 必须忽略，不进入播报。

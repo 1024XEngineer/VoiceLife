@@ -172,11 +172,14 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     }
     uint16_t kai_advance = 0;
     uint16_t xian_advance = 0;
+    uint16_t xi_advance = 0;
     const bool kai_ok = HasRenderableGlyph(text_font, 0x5F00, &kai_advance);    // 开
     const bool xian_ok = HasRenderableGlyph(text_font, 0x95F2, &xian_advance);  // 闲
-    ESP_LOGI(kTag, "SPARKBOT_TEXT_GLYPH_CHECK kai=%d kai_adv=%u xian=%d xian_adv=%u common_font=%d", kai_ok,
-             static_cast<unsigned>(kai_advance), xian_ok, static_cast<unsigned>(xian_advance),
-             common_text_font_ != nullptr);
+    const bool xi_ok = HasRenderableGlyph(text_font, 0x77D2, &xi_advance);      // 矽
+    ESP_LOGI(kTag,
+             "SPARKBOT_TEXT_GLYPH_CHECK kai=%d kai_adv=%u xian=%d xian_adv=%u xi=%d xi_adv=%u common_font=%d",
+             kai_ok, static_cast<unsigned>(kai_advance), xian_ok, static_cast<unsigned>(xian_advance), xi_ok,
+             static_cast<unsigned>(xi_advance), common_text_font_ != nullptr);
 
     auto* screen = lv_screen_active();
     lv_obj_set_style_text_font(screen, text_font, 0);
@@ -344,7 +347,7 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     auto* chat_message_label = lv_label_create(bottom_bar);
     lv_label_set_text(chat_message_label, "");
     lv_obj_set_width(chat_message_label, message_width);
-    lv_label_set_long_mode(chat_message_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_long_mode(chat_message_label, LV_LABEL_LONG_SCROLL);
     lv_obj_set_height(chat_message_label, layout.content_height);
     lv_obj_set_style_text_align(chat_message_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(chat_message_label, text_font, 0);
@@ -496,13 +499,21 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
     const lv_coord_t message_width = viewport_width - static_cast<lv_coord_t>(layout.content_inset * 2);
     const std::string display_text = FlattenSubtitleLine(snapshot.content_text);
     if (!snapshot.content_text.empty()) {
-        lv_label_set_text(chat_message_label, display_text.c_str());
+        // Render 会随着时钟和网络状态频繁刷新；只有正文真正变化时才
+        // 重设 label。否则 LVGL 会反复重启滚动动画，造成重复句和加速。
+        if (display_text != rendered_content_text_) {
+            lv_label_set_text(chat_message_label, display_text.c_str());
+            rendered_content_text_ = display_text;
+        }
         lv_obj_set_width(chat_message_label, message_width);
         lv_obj_set_height(chat_message_label, layout.content_height);
         lv_obj_align(chat_message_label, LV_ALIGN_CENTER, 0, 0);
         lv_obj_remove_flag(bottom_bar, LV_OBJ_FLAG_HIDDEN);
     } else {
-        lv_label_set_text(chat_message_label, "");
+        if (!rendered_content_text_.empty()) {
+            lv_label_set_text(chat_message_label, "");
+            rendered_content_text_.clear();
+        }
         lv_obj_add_flag(bottom_bar, LV_OBJ_FLAG_HIDDEN);
     }
 
@@ -521,6 +532,9 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
                      LV_COORD_MAX, LV_TEXT_FLAG_NONE);
     const lv_coord_t content_overflow_width =
         content_text_size.x > message_width ? content_text_size.x - message_width : 0;
+    if (display_text == rendered_content_text_) {
+        lv_obj_set_style_anim_duration(chat_message_label, ScrollDurationForOverflow(content_overflow_width), 0);
+    }
     ESP_LOGI(
         kTag,
         "SPARKBOT_TEXT_RENDER generation=%llu revision=%llu status_bytes=%u content_bytes=%u "
@@ -537,7 +551,7 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
         static_cast<int>(lv_area_get_width(&content_coords)), static_cast<int>(lv_area_get_height(&content_coords)),
         static_cast<int>(lv_area_get_height(&viewport_coords)), static_cast<int>(content_text_size.x),
         static_cast<int>(lv_area_get_height(&content_coords)), static_cast<int>(content_overflow_width),
-        static_cast<unsigned>(layout.content_scroll_duration_ms), common_text_font_ != nullptr,
+        static_cast<unsigned>(ScrollDurationForOverflow(content_overflow_width)), common_text_font_ != nullptr,
         static_cast<int>(snapshot.status_text.size()), snapshot.status_text.c_str(),
         static_cast<int>(snapshot.content_text.size()), snapshot.content_text.c_str());
     return voicelife::Status::Ok();
