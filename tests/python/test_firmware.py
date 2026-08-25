@@ -142,6 +142,7 @@ class ProfileValidationTest(unittest.TestCase):
         self.assertIn("CONFIG_VOICELIFE_STORAGE_SQLITE=y", profile["sdkconfig"])
         self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_ADDRESS=0x700000", profile["sdkconfig"])
         self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_SIZE=0x900000", profile["sdkconfig"])
+        self.assertIn("CONFIG_VOICELIFE_MCP_TOOLS=y", profile["sdkconfig"])
 
     def test_sparkbot_partition_reserves_persistent_data_after_model(self) -> None:
         lines = (ROOT / "config" / "partitions" / "sparkbot.csv").read_text(encoding="utf-8").splitlines()
