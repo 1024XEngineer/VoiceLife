@@ -34,6 +34,9 @@ comment:
 ignore:
   - "tests/**"
   - "services/im-gateway/test/**"
+  # Executable entrypoints are covered by smoke and integration tests, not by
+  # the product source-coverage denominator.
+  - "services/im-gateway/scripts/**"
   - "main/**"
   - "components/voicelife_timing/src/timing_task_service_stubs.cc"
   # 语音模块仍在开发中,实板验证与 host 覆盖率补齐前暂缓计入 codecov。
