@@ -150,6 +150,14 @@ class ProfileValidationTest(unittest.TestCase):
         self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_SIZE=0x900000", profile["sdkconfig"])
         self.assertIn("CONFIG_VOICELIFE_MCP_TOOLS=y", profile["sdkconfig"])
 
+    def test_sparkbot_profiles_keep_websocket_rx_tx_locks_separate(self) -> None:
+        for profile_name in ("esp32s3-esp-sparkbot", "esp32s3-esp-sparkbot-serial-voice"):
+            profile_path = ROOT / "config" / "profiles" / f"{profile_name}.json"
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+            self.assertIn("CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK=y", profile["sdkconfig"])
+            self.assertIn("CONFIG_ESP_WS_CLIENT_TX_LOCK_TIMEOUT_MS=2000", profile["sdkconfig"])
+
     def test_sparkbot_partition_reserves_persistent_data_after_model(self) -> None:
         lines = (ROOT / "config" / "partitions" / "sparkbot.csv").read_text(encoding="utf-8").splitlines()
         data_line = next(line for line in lines if line.strip().startswith("voicelife,"))

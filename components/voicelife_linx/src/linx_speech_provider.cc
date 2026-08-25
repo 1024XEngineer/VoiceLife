@@ -639,6 +639,10 @@ void LinxSpeechProviderAdapter::OnBinary(std::vector<uint8_t> payload) {
         }
         auto decoded = codec_strategy_->Decode(frame);
         if (!decoded.ok() || !decoded.value.has_value()) {
+            // A bounded codec pool can reject a burst after all playable PCM
+            // slots are occupied. Treat that as a per-frame drop, like an
+            // output-queue conflict, rather than a provider lifecycle fault.
+            if (decoded.status.code == ErrorCode::kConflict) return;
             Emit(Event(voice::VoiceEventKind::kError, decoded.status.message));
             return;
         }

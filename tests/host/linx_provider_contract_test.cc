@@ -119,6 +119,9 @@ class FakeOpusCodecStrategy final : public voicelife::voice::CodecStrategy {
 
     voicelife::Result<voicelife::voice::AudioFrame> Decode(const voicelife::voice::AudioFrame& encoded) override {
         ++decode_calls;
+        if (!decode_status.ok()) {
+            return voicelife::Result<voicelife::voice::AudioFrame>::Failure(decode_status.code, decode_status.message);
+        }
         if (encoded.format.codec != voicelife::voice::AudioCodec::kOpus) {
             return voicelife::Result<voicelife::voice::AudioFrame>::Failure(ErrorCode::kInvalidArgument,
                                                                               "测试 Opus 格式错误");
@@ -132,6 +135,7 @@ class FakeOpusCodecStrategy final : public voicelife::voice::CodecStrategy {
     }
 
     Status configure_status = Status::Ok();
+    Status decode_status = Status::Ok();
     int configure_calls = 0;
     int encode_calls = 0;
     int decode_calls = 0;
@@ -371,10 +375,12 @@ int main() {
           "二进制下行音频应使用协商格式并携带 generation");
     const auto events_before_output_backpressure = events.size();
     reject_output = true;
-    transport.EmitBinary({5, 6, 7});
+    for (int frame = 0; frame < 120; ++frame) {
+        transport.EmitBinary({5, 6, 7});
+    }
     reject_output = false;
     Check(events.size() == events_before_output_backpressure,
-          "有界播放队列拒绝单帧应只计入端口指标，不能伪装成 Provider 失败");
+          "长 TTS 的连续播放队列拒绝只能计入端口指标，不能伪装成 Provider 失败或触发重连");
     transport.EmitDisconnected();
     Check(events.back().kind == voicelife::voice::VoiceEventKind::kDisconnected, "物理断线必须向会话上报生命周期事件");
     Check(provider.SendAudio({}).code == ErrorCode::kUnavailable, "断线后必须立即阻断音频上行");
@@ -413,12 +419,17 @@ int main() {
     voicelife::linx::LinxSpeechProviderAdapter opus_provider(
         opus_transport, codec, opus_connection, voicelife::linx::LinxSpeechProviderAdapter::DefaultCapabilities(), {},
         std::move(opus_strategy));
+    std::vector<voicelife::voice::VoiceEvent> opus_events;
     std::vector<voicelife::voice::AudioFrame> opus_received;
     opus_provider.SetAudioSink([&opus_received](voicelife::voice::AudioFrame frame) {
         opus_received.push_back(std::move(frame));
         return Status::Ok();
     });
-    Check(opus_provider.Connect(session_config, {}).ok() && opus_strategy_raw->configure_calls == 1,
+    Check(opus_provider
+                  .Connect(session_config,
+                           [&opus_events](const voicelife::voice::VoiceEvent& event) { opus_events.push_back(event); })
+                  .ok() &&
+              opus_strategy_raw->configure_calls == 1,
           "Opus 策略必须在发送 hello 前配置成功");
     Check(opus_transport.texts.front().find("\"format\":\"opus\"") != std::string::npos &&
               opus_transport.texts.front().find("\"play_buffer_duration\":1000") != std::string::npos,
@@ -442,6 +453,13 @@ int main() {
               opus_received.front().format.codec == voicelife::voice::AudioCodec::kPcmS16Le &&
               opus_received.front().payload.size() == 3,
           "WebSocket 下行 Opus 必须先解码为本地 PCM");
+    const auto opus_events_before_decode_backpressure = opus_events.size();
+    opus_strategy_raw->decode_status = Status::Error(ErrorCode::kConflict, "测试 Opus 下行池已满");
+    for (int frame = 0; frame < 120; ++frame) {
+        opus_transport.EmitBinary({0xF8, 0x02});
+    }
+    Check(opus_events.size() == opus_events_before_decode_backpressure,
+          "长 TTS 耗尽 Opus 下行池时只能丢帧，不能伪装成 Provider 错误或触发重连");
     Check(opus_provider.Disconnect().ok(), "Opus Provider 应正常清理传输");
 
     FakeTransport missing_strategy_transport;

@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "esp_opus_dec.h"
 #include "esp_opus_enc.h"
+#include "voicelife/audio_esp/sparkbot_audio_budget.h"
 
 namespace voicelife::audio_esp {
 namespace {
@@ -16,12 +17,11 @@ namespace {
 constexpr uint32_t kSampleRateHz = 16000;
 constexpr uint8_t kChannels = 1;
 constexpr uint8_t kBitsPerSample = 16;
-constexpr uint16_t kFrameDurationMs = 20;
-constexpr std::size_t kPcmFrameBytes = kSampleRateHz * kFrameDurationMs / 1000U * kChannels *
-                                       (kBitsPerSample / 8U);
+constexpr uint16_t kFrameDurationMs = kSparkBotOpusFrameDurationMs;
+constexpr std::size_t kPcmFrameBytes = kSampleRateHz * kFrameDurationMs / 1000U * kChannels * (kBitsPerSample / 8U);
 constexpr std::size_t kMaxOpusPacketBytes = 1275;
 constexpr std::size_t kEncodePoolSlots = 20;
-constexpr std::size_t kDecodePoolSlots = 12;
+constexpr std::size_t kDecodePoolLogStep = 8;
 constexpr char kTag[] = "voicelife_opus";
 
 bool SameFormat(const voice::AudioFormat& left, const voice::AudioFormat& right) {
@@ -104,7 +104,7 @@ class EspOpusCodecStrategy final : public voice::CodecStrategy {
         }
 
         encoded_pool_ = voice::AudioPayloadPool::Create(kEncodePoolSlots, kMaxOpusPacketBytes);
-        decoded_pool_ = voice::AudioPayloadPool::Create(kDecodePoolSlots, kPcmFrameBytes);
+        decoded_pool_ = voice::AudioPayloadPool::Create(kSparkBotOpusDecodePoolSlots, kPcmFrameBytes);
         if (encoded_pool_ == nullptr || decoded_pool_ == nullptr) {
             ResetLocked();
             return Status::Error(ErrorCode::kUnavailable, "创建 Opus 有界负载池失败");
@@ -113,7 +113,7 @@ class EspOpusCodecStrategy final : public voice::CodecStrategy {
         wire_ = wire;
         ESP_LOGI(kTag, "OPUS_READY sample_rate=%u frame_ms=%u bitrate=16000 cbr=1 tx_slots=%u rx_slots=%u",
                  static_cast<unsigned>(wire.sample_rate_hz), static_cast<unsigned>(wire.frame_duration_ms),
-                 static_cast<unsigned>(kEncodePoolSlots), static_cast<unsigned>(kDecodePoolSlots));
+                 static_cast<unsigned>(kEncodePoolSlots), static_cast<unsigned>(kSparkBotOpusDecodePoolSlots));
         return Status::Ok();
     }
 
@@ -156,13 +156,14 @@ class EspOpusCodecStrategy final : public voice::CodecStrategy {
         std::lock_guard<std::mutex> lock(mutex_);
         if (decoder_ == nullptr || decoded_pool_ == nullptr || !SameFormat(encoded.format, wire_) ||
             encoded.payload.empty() || encoded.payload.size() > kMaxOpusPacketBytes) {
-            return Result<voice::AudioFrame>::Failure(ErrorCode::kInvalidArgument,
-                                                      "Opus 解码输入不是已配置的线上帧");
+            return Result<voice::AudioFrame>::Failure(ErrorCode::kInvalidArgument, "Opus 解码输入不是已配置的线上帧");
         }
         voice::AudioPayload payload = decoded_pool_->TryAcquire();
         if (payload.empty()) {
-            return Result<voice::AudioFrame>::Failure(ErrorCode::kUnavailable, "Opus 下行负载池已满");
+            LogDecodePoolLocked("exhausted");
+            return Result<voice::AudioFrame>::Failure(ErrorCode::kConflict, "Opus 下行负载池已满");
         }
+        MaybeLogDecodePoolLocked();
         esp_audio_dec_in_raw_t input = {
             .buffer = const_cast<uint8_t*>(encoded.payload.data()),
             .len = static_cast<uint32_t>(encoded.payload.size()),
@@ -209,6 +210,23 @@ class EspOpusCodecStrategy final : public voice::CodecStrategy {
         }
         local_pcm_ = {};
         wire_ = {};
+        logged_decode_pool_high_watermark_ = 0;
+    }
+
+    void MaybeLogDecodePoolLocked() {
+        if (decoded_pool_ == nullptr) return;
+        const std::size_t high_watermark = decoded_pool_->high_watermark();
+        if (high_watermark < logged_decode_pool_high_watermark_ + kDecodePoolLogStep) return;
+        logged_decode_pool_high_watermark_ = high_watermark;
+        LogDecodePoolLocked("watermark");
+    }
+
+    void LogDecodePoolLocked(const char* event) const {
+        if (decoded_pool_ == nullptr) return;
+        ESP_LOGI(kTag, "OPUS_RX_POOL event=%s slots=%u in_use=%u high_watermark=%u acquisition_failures=%u", event,
+                 static_cast<unsigned>(decoded_pool_->slot_count()), static_cast<unsigned>(decoded_pool_->in_use()),
+                 static_cast<unsigned>(decoded_pool_->high_watermark()),
+                 static_cast<unsigned>(decoded_pool_->acquisition_failures()));
     }
 
     std::mutex mutex_;
@@ -218,12 +236,11 @@ class EspOpusCodecStrategy final : public voice::CodecStrategy {
     voice::AudioFormat wire_;
     std::shared_ptr<voice::AudioPayloadPool> encoded_pool_;
     std::shared_ptr<voice::AudioPayloadPool> decoded_pool_;
+    std::size_t logged_decode_pool_high_watermark_ = 0;
 };
 
 }  // namespace
 
-std::unique_ptr<voice::CodecStrategy> CreateEspOpusCodecStrategy() {
-    return std::make_unique<EspOpusCodecStrategy>();
-}
+std::unique_ptr<voice::CodecStrategy> CreateEspOpusCodecStrategy() { return std::make_unique<EspOpusCodecStrategy>(); }
 
 }  // namespace voicelife::audio_esp

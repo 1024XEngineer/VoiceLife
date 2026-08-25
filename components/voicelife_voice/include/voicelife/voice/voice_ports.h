@@ -228,7 +228,8 @@ class CodecStrategy {
 
     /** @brief 将压缩帧解码回 PCM。
      *  @param encoded 压缩帧。
-     *  @return 解码成功返回 PCM 帧。 */
+     *  @return 解码成功返回 PCM 帧；固定容量池的可恢复满载必须返回 kConflict，
+     *          由 Provider 丢弃该帧而不改变连接生命周期。 */
     virtual Result<AudioFrame> Decode(const AudioFrame& encoded) = 0;
 };
 
