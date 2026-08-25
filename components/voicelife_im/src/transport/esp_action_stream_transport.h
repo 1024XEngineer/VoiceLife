@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <deque>
 #include <string>
 #include <vector>
@@ -42,6 +43,7 @@ class EspActionStreamTransport : public ImActionCommandStream {
     SseDecoder decoder_;
     std::deque<SseFrame> pending_;
     bool received_action_event_ = false;
+    int64_t opened_at_us_ = 0;
     bool open_ = false;
 };
 

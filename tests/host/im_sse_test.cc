@@ -58,6 +58,7 @@ void TestFrameSplitAcrossFeeds() {
     std::vector<SseFrame> frames;
     decoder.Feed("id: command-1\nevent: rem", frames);
     Check(frames.empty(), "不完整帧不得产出事件");
+    Check(decoder.BufferedBytes() != 0, "不完整帧必须保留已读字节");
 
     decoder.Feed("inder.action\ndata: {}\n\n", frames);
     Check(frames.size() == 1, "跨多次喂入的帧必须完整产出");

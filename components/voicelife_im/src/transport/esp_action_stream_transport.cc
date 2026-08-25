@@ -1,5 +1,7 @@
 #include "esp_action_stream_transport.h"
 
+#include <chrono>
+#include <cstdint>
 #include <utility>
 
 #include "../im_wire.h"
@@ -14,7 +16,18 @@ namespace {
 constexpr char kTag[] = "voicelife_im_sse";
 // 单次读取超时必须大于网关心跳间隔（20 秒），否则空闲心跳期间的读取会超时。
 constexpr int kSseTimeoutMs = 30 * 1000;
-constexpr int kSseReadBufferSize = 256;
+// 心跳只能证明连接仍可读，不能证明动作已经送达；长时间未收到命令时主动
+// 重建连接，让网关按 processing 状态重放动作，避免单条 SSE 永久卡住窗口。
+constexpr int64_t kSseReconnectWithoutCommandUs = 25LL * 1000 * 1000;
+
+int64_t MonotonicNowUs() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+// esp_http_client_read() may wait until the requested size is available. Keep
+// this smaller than a typical trailing SSE fragment so a complete action frame
+// is delivered without waiting for another heartbeat.
+constexpr int kSseReadBufferSize = 64;
 constexpr const char* kActionStreamPrefix = "/v1/devices/";
 constexpr const char* kActionStreamSuffix = "/reminder-actions/stream";
 constexpr const char* kActionEventType = "reminder.action";
@@ -80,6 +93,7 @@ bool EspActionStreamTransport::Open(const std::string& last_event_id) {
     decoder_.Reset();
     pending_.clear();
     received_action_event_ = false;
+    opened_at_us_ = MonotonicNowUs();
     open_ = true;
     ESP_LOGI(kTag, "IM_ACTION_STREAM_OPENED=1 reminder_trigger_id=%s resumed=%d", reminder_trigger_id_.c_str(),
              last_event_id.empty() ? 0 : 1);
@@ -125,6 +139,12 @@ StreamRead EspActionStreamTransport::Next() {
                      command.action.c_str());
             return {StreamReadStatus::kCommand, command};
         }
+        if (!received_action_event_ && decoder_.BufferedBytes() == 0 && opened_at_us_ > 0 &&
+            MonotonicNowUs() - opened_at_us_ >= kSseReconnectWithoutCommandUs) {
+            ESP_LOGW(kTag, "动作流超过 25 秒未收到命令且没有未完成帧，主动重连");
+            CloseConnection();
+            return {StreamReadStatus::kNetworkError, {}};
+        }
         char buffer[kSseReadBufferSize];
         const int n = esp_http_client_read(client_, buffer, sizeof(buffer));
         if (n < 0) {
@@ -159,6 +179,9 @@ StreamRead EspActionStreamTransport::Next() {
         // 解码器输出固定为 vector；解码后整体移交 deque，保持待消费队列 O(1) 出队。
         std::vector<SseFrame> frames;
         decoder_.Feed(std::string_view(buffer, n), frames);
+        ESP_LOGI(kTag, "IM_ACTION_STREAM_READ bytes=%d frames=%u pending=%u buffered=%u", n,
+                 static_cast<unsigned>(frames.size()), static_cast<unsigned>(pending_.size()),
+                 static_cast<unsigned>(decoder_.BufferedBytes()));
         for (SseFrame& frame : frames) {
             pending_.push_back(std::move(frame));
         }
@@ -180,6 +203,7 @@ void EspActionStreamTransport::CloseConnection() {
         client_ = nullptr;
     }
     open_ = false;
+    opened_at_us_ = 0;
 }
 
 }  // namespace voicelife::im
