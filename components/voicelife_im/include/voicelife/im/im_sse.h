@@ -41,7 +41,10 @@ class SseDecoder {
      * @return true 表示已溢出且未复位；false 表示缓冲正常。
      */
     bool Overflowed() const { return overflow_; }
-    /** @brief 当前尚未组成完整帧的字节数。 */
+    /**
+     * @brief 当前尚未组成完整帧的字节数。
+     * @return 尚未组成完整帧的字节数。
+     */
     size_t BufferedBytes() const { return buffer_.size(); }
 
    private:
