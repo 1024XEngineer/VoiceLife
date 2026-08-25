@@ -14,7 +14,7 @@ namespace voicelife::storage_sqlite {
 class VoiceLifeSchema final {
    public:
     /** @brief 当前固件支持的 VoiceLife 数据库 Schema 版本。 */
-    static constexpr SchemaVersion kCurrentVersion = 7;
+    static constexpr SchemaVersion kCurrentVersion = 8;
 
     /**
      * @brief 将已打开的数据库升级到当前 VoiceLife Schema 并执行完整性检查。

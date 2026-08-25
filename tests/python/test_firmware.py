@@ -129,10 +129,11 @@ class ProfileValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(firmware.ProfileError, "持久化存储缺少"):
             firmware.validate_profile(profile, Path("missing-storage-flags.json"))
 
-    def test_sparkbot_serial_voice_profile_enables_persistent_storage_and_im_integration(self) -> None:
+    def test_sparkbot_serial_voice_profile_uses_persistent_storage_and_im_gateway(self) -> None:
         profile_path = ROOT / "config" / "profiles" / "esp32s3-esp-sparkbot-serial-voice.json"
         profile = json.loads(profile_path.read_text(encoding="utf-8"))
 
+        self.assertEqual(len(profile["sdkconfig"]), len(set(profile["sdkconfig"])))
         self.assertEqual(profile["adapters"]["im"]["driver"], "voicelife-gateway")
         self.assertEqual(profile["adapters"]["im"]["capabilities"], ["https", "secure-credentials"])
         self.assertEqual(profile["adapters"]["im"]["configRef"], "nvs://im")

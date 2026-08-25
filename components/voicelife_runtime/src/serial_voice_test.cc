@@ -53,6 +53,8 @@ class SerialVoiceTest::Impl final {
         if (const Status router_status = StartUsbSerialFrameRouter(); !router_status.ok()) return router_status;
         stopping_.store(false);
         TaskHandle_t created_task = nullptr;
+        // The harness starts after the production voice stack is ready, when TLS/MCP/audio startup may
+        // have fragmented internal RAM. It performs no cache-disabled work, so keep its stack in PSRAM.
         if (xTaskCreateWithCaps(&TaskEntry, "serial_voice_test", 4096, this, 3, &created_task,
                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
             task_.store(nullptr);

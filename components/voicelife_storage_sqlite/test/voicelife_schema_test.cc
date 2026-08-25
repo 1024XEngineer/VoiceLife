@@ -83,6 +83,8 @@ void CheckVersionOneSchema(const std::filesystem::path& path) {
           "版本一应创建日程实例表");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule')") == 10,
           "当前日程实例表应包含十个字段且不保存提醒执行状态");
+    Check(ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule_reminder_task')") == 16,
+          "当前提醒任务表应包含事件快照和持久化动作结果字段");
     Check(ScalarInt64(database,
                       "SELECT COUNT(*) FROM pragma_table_info('schedule') "
                       "WHERE name='reminder_task_id'") == 0,
@@ -266,13 +268,13 @@ void CheckSchemaCollisionRejected(const std::filesystem::path& path) {
 }
 
 /**
- * @brief 验证真实 v005 数据升级到 v006 时提醒任务和日程表均正确迁移。
+ * @brief 验证真实 v005 数据升级到当前 v008 时提醒任务和日程表均正确迁移。
  * @param path 临时数据库路径。
  * @return 无。
  */
-void CheckVersionFiveToSixMigration(const std::filesystem::path& path) {
+void CheckVersionFiveToEightMigration(const std::filesystem::path& path) {
     SqliteDatabase database(path.string());
-    Check(database.Open().ok(), "v005 到 v006 测试应打开数据库");
+    Check(database.Open().ok(), "v005 到 v008 测试应打开数据库");
 
     const SqliteMigration migrations[] = {
         {.version = 1, .apply = &ApplyV001CreateSchedule},
@@ -293,7 +295,7 @@ void CheckVersionFiveToSixMigration(const std::filesystem::path& path) {
               .ok(),
           "v005 应能保存无提醒日程");
 
-    Check(VoiceLifeSchema::Initialize(database).ok(), "v005 到 v006 升级应成功");
+    Check(VoiceLifeSchema::Initialize(database).ok(), "v005 到 v008 升级应成功");
     Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule") == 2, "升级后应保留全部日程");
     Check(
         ScalarInt64(database, "SELECT COUNT(*) FROM pragma_table_info('schedule') WHERE name='reminder_task_id'") == 0,
@@ -306,16 +308,26 @@ void CheckVersionFiveToSixMigration(const std::filesystem::path& path) {
           "迁移提醒应使用原日程开始时间作为触发时间");
     Check(ScalarInt64(database, "SELECT timer_status FROM schedule_reminder_task WHERE chain_id=77") == 1,
           "迁移提醒初始计时状态应为 pending");
-    Check(VoiceLifeSchema::Initialize(database).ok(), "v006 重复初始化应保持幂等");
-    Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule_reminder_task") == 1, "v006 重复初始化不应重复迁移提醒");
+    Check(ScalarInt64(database,
+                      "SELECT COUNT(*) FROM schedule_reminder_task WHERE chain_id=77 AND event='待迁移提醒'") == 1,
+          "迁移提醒应保留日程事件快照");
+    Check(ScalarInt64(database,
+                      "SELECT COUNT(*) FROM pragma_table_info('schedule_reminder_task') "
+                      "WHERE name IN ('action_operation_id', 'action_kind', 'action_occurred_at', "
+                      "'action_next_trigger_at')") == 4,
+          "升级后提醒任务表应包含四个动作结果字段");
+    Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule_reminder_task WHERE action_operation_id IS NULL") == 1,
+          "历史提醒迁移后动作结果应保持为空");
+    Check(VoiceLifeSchema::Initialize(database).ok(), "v008 重复初始化应保持幂等");
+    Check(ScalarInt64(database, "SELECT COUNT(*) FROM schedule_reminder_task") == 1, "v008 重复初始化不应重复迁移提醒");
 }
 
 /**
- * @brief 验证 v005 到 v006 迁移失败时事务回滚且版本号不前进。
+ * @brief 验证 v005 到当前版本迁移失败时事务回滚且版本号不前进。
  * @param path 临时数据库路径。
  * @return 无。
  */
-void CheckVersionFiveToSixRollback(const std::filesystem::path& path) {
+void CheckVersionFiveToCurrentRollback(const std::filesystem::path& path) {
     SqliteDatabase database(path.string());
     Check(database.Open().ok(), "迁移回滚测试应打开数据库");
     const SqliteMigration migrations[] = {
@@ -355,9 +367,9 @@ int RunTests() {
     const TemporaryDatabaseFile version_four = MakeTemporaryDatabaseFile();
     CheckVersionFourSchema(version_four.path);
     const TemporaryDatabaseFile migration = MakeTemporaryDatabaseFile();
-    CheckVersionFiveToSixMigration(migration.path);
+    CheckVersionFiveToEightMigration(migration.path);
     const TemporaryDatabaseFile rollback = MakeTemporaryDatabaseFile();
-    CheckVersionFiveToSixRollback(rollback.path);
+    CheckVersionFiveToCurrentRollback(rollback.path);
     const TemporaryDatabaseFile collision = MakeTemporaryDatabaseFile();
     CheckSchemaCollisionRejected(collision.path);
     return 0;

@@ -9,6 +9,7 @@
 #include "schema/migrations/v005_add_schedule_reminder_task_id.h"
 #include "schema/migrations/v006_create_schedule_reminder_task.h"
 #include "schema/migrations/v007_add_schedule_reminder_task_event.h"
+#include "schema/migrations/v008_add_reminder_action_state.h"
 
 namespace voicelife::storage_sqlite {
 namespace {
@@ -20,6 +21,7 @@ constexpr SqliteMigration kMigrations[] = {
     {.version = 5, .apply = &schema::migrations::ApplyV005AddScheduleReminderTaskId},
     {.version = 6, .apply = &schema::migrations::ApplyV006CreateScheduleReminderTask},
     {.version = 7, .apply = &schema::migrations::ApplyV007AddScheduleReminderTaskEvent},
+    {.version = 8, .apply = &schema::migrations::ApplyV008AddReminderActionState},
 };
 }
 Status VoiceLifeSchema::Initialize(SqliteDatabase& database) {

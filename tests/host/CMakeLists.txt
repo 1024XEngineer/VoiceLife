@@ -134,6 +134,7 @@ add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v005_add_schedule_reminder_task_id.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v006_create_schedule_reminder_task.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v007_add_schedule_reminder_task_event.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v008_add_reminder_action_state.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/sqlite_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/voicelife_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/operation_sql.cc"
@@ -349,6 +350,10 @@ target_link_libraries(schedule_reminder_edge_cases_test PRIVATE schedule timing 
 add_voicelife_test(schedule_reminder_recovery_action_test "unit;schedule;timing;reminder"
     schedule_reminder_recovery_action_test.cc)
 target_link_libraries(schedule_reminder_recovery_action_test PRIVATE schedule timing storage_memory)
+
+add_voicelife_test(schedule_reminder_action_execution_test "unit;schedule;timing;reminder"
+    schedule_reminder_action_execution_test.cc)
+target_link_libraries(schedule_reminder_action_execution_test PRIVATE schedule timing storage_memory)
 
 add_voicelife_test(schedule_reminder_terminal_sync_test "unit;schedule;timing;reminder"
     schedule_reminder_terminal_sync_test.cc)
