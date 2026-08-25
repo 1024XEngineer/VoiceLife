@@ -326,6 +326,35 @@ test('production entry reports trusted configuration errors without logging thei
     });
 });
 
+test('production entry classifies unexpected startup failures without exposing configuration values', async () => {
+    const secret = 'secret-value-that-must-not-be-logged';
+    const child = spawn(process.execPath, ['scripts/start-gateway.mjs'], {
+        cwd: new URL('..', import.meta.url),
+        env: {
+            ...process.env,
+            ...fixtureEnvironment({
+                DATABASE_URL: 'postgres://user:password@127.0.0.1:1/voicelife',
+                ACTION_TOKEN_SECRET: secret,
+            }),
+        },
+        stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+    });
+    const [exitCode] = await once(child, 'exit');
+
+    assert.equal(exitCode, 1);
+    assert.doesNotMatch(stderr, new RegExp(secret, 'u'));
+    assert.deepEqual(JSON.parse(stderr), {
+        level: 'error',
+        event: 'gateway.start.failed',
+        errorCode: 'startup_failed',
+    });
+});
+
 test('production server returns a Bearer challenge for rejected device credentials', async () => {
     const runtime = fakeRuntime([]);
     runtime.deviceApi.postNotification = async () => {
@@ -646,6 +675,60 @@ test('configured production process migrates Postgres, starts Koishi and closes 
 
     const restarted = await startConfiguredGatewayProcess(environment, { log: () => {} });
     await restarted.close();
+});
+
+test('production start script gracefully closes the gateway on SIGTERM', async (context) => {
+    const databaseUrl = process.env.DATABASE_URL ?? 'postgres://voicelife:voicelife@127.0.0.1:5432/voicelife';
+    const probe = new PostgresImUnitOfWork(databaseUrl);
+    try {
+        await probe.migrate();
+    } catch (error) {
+        await probe.close().catch(() => undefined);
+        context.skip(`PostgreSQL unavailable: ${error instanceof Error ? error.name : 'unknown'}`);
+        return;
+    }
+    await probe.close();
+
+    const child = spawn(process.execPath, ['scripts/start-gateway.mjs'], {
+        cwd: new URL('..', import.meta.url),
+        env: {
+            ...process.env,
+            ...fixtureEnvironment({
+                DATABASE_URL: databaseUrl,
+                GATEWAY_PORT: '0',
+                WECHAT_CHANNEL_ACCOUNT_ID: `wechat-script-${Date.now()}`,
+            }),
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+        stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+    });
+
+    try {
+        await waitFor(() => stdout.includes('"gateway.started"'), 'start script did not report a running gateway');
+        assert.equal(child.kill('SIGTERM'), true);
+        const [exitCode] = await once(child, 'exit');
+        assert.equal(exitCode, 0, stderr);
+        const events = stdout
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line).event);
+        assert.equal(events.includes('gateway.started'), true);
+        assert.equal(events.includes('gateway.stopped'), true);
+    } finally {
+        if (child.exitCode === null) {
+            child.kill('SIGTERM');
+            await once(child, 'exit');
+        }
+    }
 });
 
 test('configured production process registers and starts an optional WeCom AI Bot channel', async (context) => {
