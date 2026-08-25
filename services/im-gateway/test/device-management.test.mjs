@@ -20,6 +20,15 @@ const TOKENS = [
     'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
 ];
 
+function isPostgresUnavailable(error) {
+    return (
+        error !== null &&
+        typeof error === 'object' &&
+        'code' in error &&
+        ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(error.code)
+    );
+}
+
 function service(tokens = [...TOKENS]) {
     const unitOfWork = new InMemoryImUnitOfWork();
     const clock = new FixedClock();
@@ -254,8 +263,11 @@ test('device CLI performs create, list, rotate and revoke against PostgreSQL', a
         await probe.migrate();
     } catch (error) {
         await probe.close().catch(() => undefined);
-        context.skip(`PostgreSQL unavailable: ${error instanceof Error ? error.name : 'unknown'}`);
-        return;
+        if (isPostgresUnavailable(error)) {
+            context.skip(`PostgreSQL unavailable: ${error instanceof Error ? error.name : 'unknown'}`);
+            return;
+        }
+        throw error;
     }
     await probe.close();
 

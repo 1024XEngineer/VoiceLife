@@ -641,8 +641,11 @@ test('configured production process migrates Postgres, starts Koishi and closes 
         await probe.migrate();
     } catch (error) {
         await probe.close().catch(() => undefined);
-        context.skip(`PostgreSQL unavailable: ${error instanceof Error ? error.name : 'unknown'}`);
-        return;
+        if (isPostgresUnavailable(error)) {
+            context.skip(`PostgreSQL unavailable: ${error instanceof Error ? error.name : 'unknown'}`);
+            return;
+        }
+        throw error;
     }
     await probe.close();
 
@@ -714,8 +717,17 @@ test('production start script gracefully closes the gateway on SIGTERM', async (
 
     try {
         await waitFor(() => stdout.includes('"gateway.started"'), 'start script did not report a running gateway');
+        const childExited = once(child, 'exit').then(([exitCode]) => exitCode);
         assert.equal(child.kill('SIGTERM'), true);
-        const [exitCode] = await once(child, 'exit');
+        let timeout;
+        const exitCode = await Promise.race([
+            childExited,
+            new Promise((resolve) => {
+                timeout = globalThis.setTimeout(() => resolve(undefined), 2_000);
+            }),
+        ]);
+        globalThis.clearTimeout(timeout);
+        assert.notEqual(exitCode, undefined, 'start script did not exit promptly after SIGTERM');
         assert.equal(exitCode, 0, stderr);
         const events = stdout
             .trim()
@@ -724,8 +736,8 @@ test('production start script gracefully closes the gateway on SIGTERM', async (
         assert.equal(events.includes('gateway.started'), true);
         assert.equal(events.includes('gateway.stopped'), true);
     } finally {
-        if (child.exitCode === null) {
-            child.kill('SIGTERM');
+        if (child.exitCode === null && child.signalCode === null) {
+            child.kill('SIGKILL');
             await once(child, 'exit');
         }
     }
