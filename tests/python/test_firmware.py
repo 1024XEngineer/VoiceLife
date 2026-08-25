@@ -64,20 +64,18 @@ class ProfileValidationTest(unittest.TestCase):
             firmware.run(["idf.py", "build"])
 
     def test_prepares_generated_sqlite_component_when_missing(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            with mock.patch("firmware.run") as run:
-                firmware.ensure_sqlite_component(Path(directory))
+        with tempfile.TemporaryDirectory() as directory, mock.patch("firmware.run") as run:
+            firmware.ensure_sqlite_component(Path(directory))
 
         run.assert_called_once_with([sys.executable, str(ROOT / "scripts" / "prepare_sqlite.py")])
 
     def test_reuses_existing_generated_sqlite_component(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, mock.patch("firmware.run") as run:
             component = Path(directory)
             for name in ("sqlite3.c", "sqlite3.h", "CMakeLists.txt"):
                 (component / name).touch()
 
-            with mock.patch("firmware.run") as run:
-                firmware.ensure_sqlite_component(component)
+            firmware.ensure_sqlite_component(component)
 
         run.assert_not_called()
 
