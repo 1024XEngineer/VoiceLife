@@ -277,6 +277,29 @@ test('production configuration requires every secret without exposing its value'
     );
 });
 
+test('production configuration rejects unsafe transport and endpoint settings', () => {
+    for (const [overrides, message] of [
+        [{ GATEWAY_PORT: '65536' }, 'GATEWAY_PORT must be a valid TCP port'],
+        [{ WECHAT_WEBHOOK_MODE: 'encrypted' }, 'WECHAT_WEBHOOK_MODE must be plain for the current adapter'],
+        [
+            { WECHAT_EXPECTED_TO_USERNAME: 'wechat-production' },
+            'WECHAT_EXPECTED_TO_USERNAME must be the gh_ prefixed original account ID',
+        ],
+        [
+            { WECHAT_TEMPLATE_TITLE_FIELD: '1invalid' },
+            'WECHAT_TEMPLATE_TITLE_FIELD must be a valid WeChat template field name',
+        ],
+        [{ DATABASE_URL: 'https://database.example/voicelife' }, 'DATABASE_URL must be a PostgreSQL connection URL'],
+        [{ DATABASE_HOST: 'database host' }, 'DATABASE_HOST must be a valid hostname'],
+        [
+            { WECHAT_ACTION_UI_BASE_URL: 'http://gateway.example/voicelife/reminder-actions' },
+            'WECHAT_ACTION_UI_BASE_URL must be a public HTTPS Action UI base URL',
+        ],
+    ]) {
+        assert.throws(() => readGatewayConfiguration(fixtureEnvironment(overrides)), new RegExp(message, 'u'));
+    }
+});
+
 test('production configuration rejects current and historical public example secrets', async () => {
     for (const [name, value] of [
         ['ACTION_TOKEN_SECRET', 'replace-with-at-least-32-random-bytes'],
