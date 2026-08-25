@@ -26,5 +26,7 @@ int main() {
     SparkBotImu imu;
     Check(!imu.running(), "主机构建不能伪造 SparkBot BMI270 已运行");
     Check(imu.Start({}).code == ErrorCode::kUnavailable, "主机构建启动 IMU 必须明确返回不可用");
+    imu.Stop();
+    Check(!imu.running(), "主机构建停止不可用 IMU 后仍必须保持未运行");
     return 0;
 }
