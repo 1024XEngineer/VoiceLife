@@ -51,6 +51,8 @@ struct DisplaySnapshot {
     uint64_t generation = 0;
     VoiceInteractionState phase = VoiceInteractionState::kBooting;
     VoiceMood mood = VoiceMood::kNeutral;
+    /** @brief Linx 常用 emotion key；空值时由 renderer 根据 mood 选择回退表情。 */
+    std::string emotion_key;
     /** 当前网络是否已获得可用连接；由 Runtime 写入，Renderer 仅据此显示图标。 */
     bool network_connected = false;
     /** 上行状态栏文本（如“聆听中...”“处理中...”）。 */

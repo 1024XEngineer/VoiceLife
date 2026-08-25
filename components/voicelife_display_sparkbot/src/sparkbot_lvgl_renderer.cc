@@ -107,6 +107,11 @@ std::string_view EmotionKeyForMood(voicelife::voice::VoiceMood mood) {
     }
 }
 
+std::string_view EmotionKeyForSnapshot(const voicelife::voice::DisplaySnapshot& snapshot) {
+    return IsCommonLinxEmojiKey(snapshot.emotion_key) ? std::string_view(snapshot.emotion_key)
+                                                      : EmotionKeyForMood(snapshot.mood);
+}
+
 SparkBotLvglRenderer::~SparkBotLvglRenderer() {
 #ifdef ESP_PLATFORM
     if (screen_saver_timer_ != nullptr) {
@@ -416,7 +421,9 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
     // 官方 SetEmotion：优先 emoji GIF（assets 分区），失败回退字形。
     // 仅 emotion（mood 映射的 asset）变化时切换 GIF/字形；同状态下只更新
     // 文本，避免状态文本刷新反复重建并重启动画。
-    const std::string_view emotion = EmotionKeyForMood(snapshot.mood);
+    // Linx 的原始 key 优先于粗粒度 mood；未知 key 不进入显示层，回退到
+    // VoiceMood，避免服务端扩展值绕过本地受控 emoji 集合。
+    const std::string_view emotion = EmotionKeyForSnapshot(snapshot);
     const bool emotion_changed = emotion != current_emotion_;
     bool using_gif = false;
     if (emotion_changed && gif_controller_ != nullptr) {

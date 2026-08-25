@@ -6,6 +6,7 @@
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #include "voicelife/audio_esp/esp_multinet_wake_detector.h"
 #include "voicelife/board_esp/gpio46_power_arbiter.h"
+#include "voicelife/board_esp/sparkbot_imu.h"
 #include "voicelife/display_esp/ssd1306_presentation_adapter.h"
 #include "voicelife/display_sparkbot/sparkbot_presentation_adapter.h"
 #include "voicelife/runtime/platform_assembly.h"
@@ -147,6 +148,7 @@ class SparkBotAssembly : public PlatformAssembly {
     mutable std::mutex power_mutex_;
     ButtonSample boot_button_{};
     BoardInputSink board_input_sink_;
+    voicelife::board_esp::SparkBotImu imu_;
     std::unique_ptr<voicelife::audio_esp::EspMultiNetWakeDetector> wake_detector_;
     std::unique_ptr<voicelife::voice::WakeGateAudioInput> wake_gate_;
     bool wake_ready_ = false;

@@ -172,6 +172,7 @@ add_voicelife_library(audio_esp voicelife_audio_esp
 target_link_libraries(audio_esp PUBLIC contracts voice)
 add_voicelife_library(board_esp voicelife_board_esp
     "${ROOT_DIR}/components/voicelife_board_esp/src/sparkbot_profile.cc"
+    "${ROOT_DIR}/components/voicelife_board_esp/src/sparkbot_imu.cc"
     "${ROOT_DIR}/components/voicelife_board_esp/src/gpio46_power_arbiter.cc"
     "${ROOT_DIR}/components/voicelife_board_esp/src/esp32s3_board_probe.cc"
     )
@@ -439,6 +440,10 @@ target_link_libraries(audio_board_profile_contract_test PRIVATE audio_esp)
 add_voicelife_test(sparkbot_profile_contract_test "unit;board;esp;contract"
     sparkbot_profile_contract_test.cc)
 target_link_libraries(sparkbot_profile_contract_test PRIVATE board_esp)
+
+add_voicelife_test(sparkbot_imu_test "unit;board;imu;contract"
+    sparkbot_imu_test.cc)
+target_link_libraries(sparkbot_imu_test PRIVATE board_esp)
 
 add_voicelife_test(sparkbot_presentation_adapter_test "unit;display;sparkbot;board;contract"
     sparkbot_presentation_adapter_test.cc)

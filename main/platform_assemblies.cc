@@ -223,6 +223,15 @@ void SparkBotAssembly::BoardInputTaskEntry(void* context) { static_cast<SparkBot
 
 voicelife::Status SparkBotAssembly::StartBoardInput(BoardInputSink sink) {
     board_input_sink_ = std::move(sink);
+    const Status imu_status = imu_.Start([this]() {
+        if (board_input_sink_) board_input_sink_(BoardInputAction::kShakeDetected);
+    });
+#ifdef ESP_PLATFORM
+    if (!imu_status.ok()) {
+        ESP_LOGW(kPowerTag, "SPARKBOT_IMU_UNAVAILABLE code=%d msg=%s", static_cast<int>(imu_status.code),
+                 imu_status.message.c_str());
+    }
+#endif
 #ifdef ESP_PLATFORM
     // 官方 SparkBot 只将 BOOT GPIO0 作为用户输入；SPI/I2S 复用引脚不参与配置。
     const gpio_config_t config = {

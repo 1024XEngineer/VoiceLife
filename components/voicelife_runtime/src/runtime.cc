@@ -1573,6 +1573,7 @@ class Runtime final {
         // 会话阶段 → 显示模型快照：状态栏文本 + 表情由阶段派生。
         snapshot_.phase = interaction_.state();
         snapshot_.mood = PhaseMood(snapshot_.phase);
+        snapshot_.emotion_key.clear();
         if (snapshot_.phase != voice::VoiceInteractionState::kStandby && binding_terminal_display_active_) {
             CancelBindingTerminalDisplay();
         }
@@ -1783,8 +1784,8 @@ class Runtime final {
             CancelListenTimer();
         } else if (evidence.event == "llm_emotion") {
             // Linx 的 llm emotion 是显示提示，不是新的用户意图；只更新
-            // 当前快照的 mood，保留状态栏和正在展示的字幕。
-            EnqueueDisplayMood(MoodForLinxEmotion(evidence.detail));
+            // 当前快照的 mood 与原始 key，保留状态栏和正在展示的字幕。
+            EnqueueDisplayMood(MoodForLinxEmotion(evidence.detail), evidence.detail);
         } else if (evidence.event == "mcp_tool_started") {
             // MCP worker 只经 VoiceSession evidence 投递；状态机决定是否允许
             // 从当前交互态进入“处理中”，不得由 worker 自己写快照。
@@ -1979,6 +1980,7 @@ class Runtime final {
         /** 只更新表情，不覆盖状态栏或正文。 */
         bool mood_update = false;
         voice::VoiceMood mood = voice::VoiceMood::kIdle;
+        std::string emotion_key;
         voice::VoiceMood display_mood = voice::VoiceMood::kIdle;
         std::string display_status;
         std::string display_content;
@@ -2189,10 +2191,11 @@ class Runtime final {
         EnqueueInteractionItem(item);
     }
 
-    void EnqueueDisplayMood(voice::VoiceMood mood) {
+    void EnqueueDisplayMood(voice::VoiceMood mood, std::string_view emotion_key = {}) {
         InteractionEventItem item{};
         item.mood_update = true;
         item.mood = mood;
+        item.emotion_key = std::string(emotion_key);
         EnqueueInteractionItem(item);
     }
 
@@ -2428,6 +2431,9 @@ class Runtime final {
                     case BoardInputAction::kVolumeMute:
                         SetVolume(0);
                         break;
+                    case BoardInputAction::kShakeDetected:
+                        ESP_LOGI(kTag, "SPARKBOT_IMU_SHAKE detected=1");
+                        break;
                     case BoardInputAction::kStartWifiProvisioning: {
                         ShowDisplay(voice::VoiceMood::kConnecting, "配网", "正在开启热点");
                         const Status requested = RequestLinxWifiProvisioning();
@@ -2512,6 +2518,7 @@ class Runtime final {
                     overlay_active_ = false;
                 }
                 snapshot_.mood = item.display_mood;
+                snapshot_.emotion_key.clear();
                 snapshot_.status_text = std::move(item.display_status);
                 snapshot_.content_text = std::move(item.display_content);
                 snapshot_.role = voice::VoiceContentRole::kSystem;
@@ -2525,6 +2532,7 @@ class Runtime final {
             }
             if (item.mood_update) {
                 snapshot_.mood = item.mood;
+                snapshot_.emotion_key = std::move(item.emotion_key);
                 ++snapshot_.revision;
                 CommitSnapshot();
                 continue;

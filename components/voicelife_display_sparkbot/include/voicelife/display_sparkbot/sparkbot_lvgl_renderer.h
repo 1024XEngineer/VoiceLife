@@ -96,12 +96,20 @@ inline constexpr std::array<std::string_view, 21> kCommonLinxEmojiKeys = {
 [[nodiscard]] std::string_view EmotionKeyForMood(voicelife::voice::VoiceMood mood);
 
 /**
+ * @brief 选择快照的受控 emoji key。
+ *
+ * Linx 常用 key 优先保留原始表情；未知 key 回退到 VoiceMood 的官方资源，
+ * 防止服务端扩展值直接进入渲染器。
+ */
+[[nodiscard]] std::string_view EmotionKeyForSnapshot(const voicelife::voice::DisplaySnapshot& snapshot);
+
+/**
  * @brief SparkBot 官方简单模式 LVGL 渲染器（半高视口适配）。
  *
  * 移植来源：xiaozhi-esp32@37d1aee main/display/lcd_display.cc 的
  * SetupUI 简单模式（顶部状态栏、中央 emoji 舞台、底部消息栏）与官方
  * dark 主题颜色。控制器仍是 240x240；产品对象统一挂在可裁剪的半高
- * 视口下，消息栏使用单行横向循环滚动以节省垂直空间。
+ * 视口下，消息栏使用单行单向横向滚动以节省垂直空间。
  *
  * 本阶段 emoji 使用官方字形 fallback（xiaozhi-fonts 的 noto_emoji /
  * material_symbols）；assets 分区的 GIF 资源加载在后续阶段接入。

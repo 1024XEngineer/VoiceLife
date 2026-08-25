@@ -18,6 +18,8 @@ enum class BoardInputAction : uint8_t {
     kVolumeDown,
     kVolumeMaximum,
     kVolumeMute,
+    /** @brief 板载 IMU 检测到一次满足阈值的摇晃。 */
+    kShakeDetected,
     /** Physical long-press request: reboot into local SoftAP Wi-Fi provisioning. */
     kStartWifiProvisioning,
 };
