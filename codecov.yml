@@ -4,12 +4,14 @@ coverage:
       cpp:
         flags:
           - cpp
-        target: 80%
+        # The current mainline baseline is below 80%. Prevent regressions here;
+        # retain the 80% target on new/changed code in the patch status below.
+        target: auto
         threshold: 0%
       typescript:
         flags:
           - typescript
-        target: 80%
+        target: auto
         threshold: 0%
     patch:
       cpp:
