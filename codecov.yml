@@ -32,6 +32,8 @@ comment:
   require_changes: true
 
 ignore:
+  # 第三方源码由上游维护，不纳入项目覆盖率统计。
+  - "third_party/**"
   - "tests/**"
   # Component-local test sources are not production code and are not included
   # in the gcovr C++ report consistently across host targets.
