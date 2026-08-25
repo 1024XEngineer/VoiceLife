@@ -1,6 +1,5 @@
 #include "esp_action_stream_transport.h"
 
-#include <string_view>
 #include <utility>
 
 #include "../im_wire.h"
@@ -75,14 +74,9 @@ bool EspActionStreamTransport::Open(const std::string& last_event_id) {
         CloseConnection();
         return false;
     }
-    // 校验响应类型确为 SSE；网关误回 JSON 错误体时提前识别，避免把错误体当流解析。
-    char* content_type = nullptr;
-    if (esp_http_client_get_header(client_, "Content-Type", &content_type) != ESP_OK || content_type == nullptr ||
-        std::string_view(content_type).find(kSseContentType) == std::string_view::npos) {
-        ESP_LOGW(kTag, "动作流响应 Content-Type 非 %s", kSseContentType);
-        CloseConnection();
-        return false;
-    }
+    // esp_http_client_get_header() 读取的是请求头；响应头查询需要额外打开保存响应头的
+    // 配置，设备端不依赖它。HTTP 状态已确认为 2xx，交给 SSE 解码器判断实际字节流，
+    // 这样代理改写 Content-Type 时不会误关闭合法动作流，错误体也会按协议错误处理。
     decoder_.Reset();
     pending_.clear();
     open_ = true;
