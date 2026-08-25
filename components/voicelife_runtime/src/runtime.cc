@@ -1161,6 +1161,7 @@ class Runtime final {
     bool QueueCaptureStop() {
         BoardRequest request{};
         request.kind = BoardRequestKind::kStopCapture;
+        request.expected_state = interaction_.state();
         return EnqueueBoardRequest(request, "stop_capture");
     }
 
@@ -1374,18 +1375,27 @@ class Runtime final {
                 continue;
             }
             if (request.kind == BoardRequestKind::kStopCapture) {
+                const auto actual_state = interaction_.state();
+                if (actual_state != request.expected_state) {
+                    // 服务端 VAD/TTS 可能在 WakeTask 消费排队 stop 前完成本轮。
+                    // 不能让旧 stop 停掉新阶段，或把已开始的播报升级为失败。
+                    ESP_LOGI(kTag, "BOARD_REQUEST_STALE kind=stop_capture expected_state=%d actual_state=%d",
+                             static_cast<int>(request.expected_state), static_cast<int>(actual_state));
+                    continue;
+                }
                 const Status stop =
                     session_ ? session_->EndCapture() : Status::Error(ErrorCode::kUnavailable, "语音会话尚未启动");
                 if (!stop.ok()) {
+                    if (interaction_.state() != request.expected_state) {
+                        ESP_LOGI(kTag, "BOARD_REQUEST_STALE kind=stop_capture expected_state=%d actual_state=%d",
+                                 static_cast<int>(request.expected_state), static_cast<int>(interaction_.state()));
+                        continue;
+                    }
                     ESP_LOGW(kTag, "板级按键结束采集失败: %s", stop.message.c_str());
                     (void)EnqueueEvent(voice::VoiceInteractionEvent::kFailure);
-                } else {
-                    // 仅当已离开 kFinalizing（VAD 端点后等待最终 STT 中）才恢复待机：
-                    // kFinalizing 表示本轮还在等最终 STT/TTS，不能提前回待机。
-                    // 其余（聆听正常结束、超时、按键停止）恢复待机。
-                    if (interaction_.state() != voice::VoiceInteractionState::kFinalizing) {
-                        RestoreStandbyFromWakeTask();
-                    }
+                } else if (request.expected_state != voice::VoiceInteractionState::kFinalizing) {
+                    // kFinalizing 必须等待最终 STT/TTS；其它停止来源按原状态安全回待机。
+                    RestoreStandby(request);
                 }
                 continue;
             }

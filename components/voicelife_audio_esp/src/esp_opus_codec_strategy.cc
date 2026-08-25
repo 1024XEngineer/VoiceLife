@@ -72,7 +72,11 @@ class EspOpusCodecStrategy final : public voice::CodecStrategy {
             .bitrate = 16000,
             .frame_duration = ESP_OPUS_ENC_FRAME_DURATION_20_MS,
             .application_mode = ESP_OPUS_ENC_APPLICATION_VOIP,
-            .complexity = 10,
+            // Keep the real-time uplink encoder at the low-complexity setting
+            // used by the SparkBot reference. The synchronous encoder runs in
+            // the audio delivery task; complexity 10 can starve IDLE1 and
+            // trigger the ESP task watchdog during continuous speech.
+            .complexity = 0,
             .enable_fec = false,
             .enable_dtx = false,
             .enable_vbr = false,

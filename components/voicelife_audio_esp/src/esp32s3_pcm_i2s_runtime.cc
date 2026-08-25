@@ -479,6 +479,7 @@ void Esp32s3PcmAudioPorts::Impl::OutputLoop() {
             } else {
                 output_queue_duration_ms_ = 0;
             }
+            output_space_cv_.notify_one();
         }
         {
             std::lock_guard<std::mutex> lock(mutex_);

@@ -587,7 +587,7 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(voice::AudioFrame frame) {
     (void)frame;
     return detail::Unavailable("ESP32-S3 PCM Audio Port 只能在 ESP-IDF 目标运行");
 #else
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     if (!output_open_ || output_closing_ || !playback_format_.has_value()) {
         return detail::Unavailable("输出端口尚未打开");
     }
@@ -600,6 +600,17 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(voice::AudioFrame frame) {
     const uint64_t frame_duration_ms = detail::PcmDurationMs(frame);
     if (frame_duration_ms == 0) {
         return detail::Invalid("播放帧无法推导 PCM 时长");
+    }
+    // Linx may deliver Opus frames in a burst faster than the I2S clock. Keep
+    // the frame and apply backpressure until the bounded playback queue has
+    // room; dropping here would silently truncate otherwise valid TTS audio.
+    output_space_cv_.wait(lock, [this, frame_duration_ms]() {
+        const bool has_capacity = output_queue_.size() < options_.output_queue_depth &&
+                                  output_queue_duration_ms_ + frame_duration_ms <= options_.maximum_playback_latency_ms;
+        return has_capacity || !output_running_ || output_closing_ || !output_open_;
+    });
+    if (!output_open_ || output_closing_ || !output_running_) {
+        return detail::Unavailable("输出端口已停止");
     }
     if (output_queue_.size() >= options_.output_queue_depth) {
         ++rejected_output_frames_;
@@ -646,6 +657,7 @@ Status Esp32s3PcmAudioPorts::Impl::FlushOutput() {
     std::lock_guard<std::mutex> lock(mutex_);
     output_queue_.clear();
     output_queue_duration_ms_ = 0;
+    output_space_cv_.notify_all();
     if (output_writing_) {
         amplifier_disable_pending_ = true;
     } else if (amplifier_enabled_ && amplifier_callback_) {
@@ -692,6 +704,7 @@ Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
             output_queue_.clear();
             output_queue_duration_ms_ = 0;
             output_cv_.notify_all();
+            output_space_cv_.notify_all();
         }
     }
     std::unique_lock<std::mutex> lock(mutex_);
