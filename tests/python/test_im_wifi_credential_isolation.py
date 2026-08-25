@@ -53,9 +53,12 @@ class ImWifiCredentialIsolationTest(unittest.TestCase):
         ]
         self.assertIn('ESP_LOGI(kTag, "AUDIO_PREPARED=1")', startup)
         self.assertLess(startup.index('ESP_LOGI(kTag, "AUDIO_PREPARED=1")'), startup.index("BootstrapLinxOtaConfig("))
+        self.assertLess(startup.index("ReserveImRuntimeTask();"), startup.index("BootstrapLinxOtaConfig("))
         self.assertLess(startup.index("session_->Start(config)"), startup.index("StartImRuntime();"))
         self.assertIn("xTaskCreate(&Runtime::ImLifecycleTaskEntry", RUNTIME_SOURCE)
         self.assertNotIn("xTaskCreateWithCaps(&Runtime::ImLifecycleTaskEntry", RUNTIME_SOURCE)
+        self.assertIn("ulTaskNotifyTake(pdTRUE, portMAX_DELAY)", RUNTIME_SOURCE)
+        self.assertIn("xTaskNotifyGive(im_lifecycle_task_)", RUNTIME_SOURCE)
 
     def test_im_provisioning_writes_all_four_credentials_only_in_im_namespace(self):
         im_storage = IM_SOURCE[

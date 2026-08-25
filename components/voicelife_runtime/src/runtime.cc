@@ -267,6 +267,12 @@ class Runtime final {
             }
             ESP_LOGI(kTag, "NVS_READY=1");
         }
+#ifdef ESP_PLATFORM
+        // IM lifecycle reads encrypted NVS and must keep an internal stack. Reserve
+        // it before storage, MCP, Wi-Fi, TLS, and audio fragment the internal heap;
+        // the task remains blocked until the Linx startup path explicitly activates it.
+        ReserveImRuntimeTask();
+#endif
         const Status storage_status = storage_.Start();
         if (!storage_status.ok()) return storage_status;
 #ifdef ESP_PLATFORM
@@ -699,17 +705,31 @@ class Runtime final {
         vTaskDelete(nullptr);
     }
 
-    void StartImRuntime() {
+    void ReserveImRuntimeTask() {
 #if CONFIG_VOICELIFE_IM_GATEWAY
         bool expected = false;
-        if (!im_lifecycle_started_.compare_exchange_strong(expected, true)) return;
+        if (!im_lifecycle_reserved_.compare_exchange_strong(expected, true)) return;
         // This task loads IM configuration from encrypted NVS. NVS can disable
         // flash cache, so ESP-IDF requires the caller's stack to be in DRAM.
         if (xTaskCreate(&Runtime::ImLifecycleTaskEntry, "voicelife_im_lifecycle", 8192, this, 3, &im_lifecycle_task_) !=
             pdPASS) {
-            im_lifecycle_started_.store(false);
+            im_lifecycle_reserved_.store(false);
             ESP_LOGW(kTag, "IM_RUNTIME_TASK_FAILED=1");
+            return;
         }
+        ESP_LOGI(kTag, "IM_RUNTIME_TASK_RESERVED=1");
+#else
+        ESP_LOGI(kTag, "IM_RUNTIME_DISABLED=1");
+#endif
+    }
+
+    void StartImRuntime() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        ReserveImRuntimeTask();
+        if (im_lifecycle_task_ == nullptr) return;
+        bool expected = false;
+        if (!im_lifecycle_activated_.compare_exchange_strong(expected, true)) return;
+        xTaskNotifyGive(im_lifecycle_task_);
 #else
         ESP_LOGI(kTag, "IM_RUNTIME_DISABLED=1");
 #endif
@@ -827,7 +847,17 @@ class Runtime final {
 #endif
     }
 
-    static void ImLifecycleTaskEntry(void* context) { static_cast<Runtime*>(context)->ImLifecycleTask(); }
+    static void ImLifecycleTaskEntry(void* context) {
+        auto* runtime = static_cast<Runtime*>(context);
+        (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (!runtime->im_lifecycle_activated_.load()) {
+            runtime->im_lifecycle_task_ = nullptr;
+            runtime->im_lifecycle_reserved_.store(false);
+            vTaskDelete(nullptr);
+            return;
+        }
+        runtime->ImLifecycleTask();
+    }
 
     void ImLifecycleTask() {
         im::ImRetryPolicy retry_policy;
@@ -884,6 +914,7 @@ class Runtime final {
                      static_cast<unsigned>(*delay_ms));
             vTaskDelay(pdMS_TO_TICKS(*delay_ms));
         }
+        im_lifecycle_task_ = nullptr;
         vTaskDelete(nullptr);
     }
 
@@ -1920,7 +1951,8 @@ class Runtime final {
     std::string binding_content_text_;
     std::optional<BindingPresentation> deferred_binding_presentation_;
     std::string deferred_binding_speech_;
-    std::atomic_bool im_lifecycle_started_{false};
+    std::atomic_bool im_lifecycle_reserved_{false};
+    std::atomic_bool im_lifecycle_activated_{false};
     bool im_system_time_logged_ = false;
     TaskHandle_t im_lifecycle_task_ = nullptr;
     mcp::McpServer mcp_server_;
