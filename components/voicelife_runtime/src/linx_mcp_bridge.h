@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 
@@ -10,6 +11,9 @@ class McpServer;
 }
 
 namespace voicelife::runtime {
+
+/// 单个 Linx MCP 文本信封的保守上行安全上限。
+inline constexpr std::size_t kLinxMcpMaxResponseBytes = 3000;
 
 /** @brief 已解析的 MCP tools/call 用户可见语义结果。 */
 struct LinxMcpToolOutcome {

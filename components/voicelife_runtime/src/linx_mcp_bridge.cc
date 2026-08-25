@@ -1,6 +1,8 @@
 #include "linx_mcp_bridge.h"
 
+#include <cstddef>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -151,6 +153,52 @@ Result<std::string> ErrorResponse(const JsonValue& id, int code, std::string_vie
     return Result<std::string>::Success(Wrap(payload, session_id));
 }
 
+Result<std::size_t> ParseToolsListStart(const JsonValue& request) {
+    const JsonValue* params = Get(request, "params");
+    if (params == nullptr) return Result<std::size_t>::Success(0);
+    if (!params->IsObject()) {
+        return Result<std::size_t>::Failure(ErrorCode::kInvalidArgument, "tools/list params 无效");
+    }
+    const JsonValue* cursor = Get(*params, "cursor");
+    if (cursor == nullptr || !cursor->IsString() || cursor->string.empty()) {
+        return Result<std::size_t>::Failure(ErrorCode::kInvalidArgument, "tools/list cursor 无效");
+    }
+
+    std::size_t start = 0;
+    for (const unsigned char character : cursor->string) {
+        if (character < '0' || character > '9') {
+            return Result<std::size_t>::Failure(ErrorCode::kInvalidArgument, "tools/list cursor 无效");
+        }
+        const std::size_t digit = character - '0';
+        if (start > (std::numeric_limits<std::size_t>::max() - digit) / 10U) {
+            return Result<std::size_t>::Failure(ErrorCode::kInvalidArgument, "tools/list cursor 超出范围");
+        }
+        start = start * 10U + digit;
+    }
+    return Result<std::size_t>::Success(start);
+}
+
+Result<std::string> BuildToolsListResponse(const JsonValue& id, const mcp::McpServer& server,
+                                           std::string_view session_id, std::size_t start_index) {
+    const std::string json_rpc_prefix = "{\"jsonrpc\":\"2.0\",\"id\":" + Serialize(id) + ",\"result\":";
+    const std::string empty_result_envelope = Wrap(json_rpc_prefix + "}", session_id);
+    if (empty_result_envelope.size() >= kLinxMcpMaxResponseBytes) {
+        return Result<std::string>::Failure(ErrorCode::kUnavailable, "tools/list 响应超过安全上限");
+    }
+
+    const std::size_t result_budget = kLinxMcpMaxResponseBytes - empty_result_envelope.size();
+    const auto page = server.list_tools_page_json(start_index, result_budget);
+    if (!page.ok() || !page.value.has_value()) {
+        return Result<std::string>::Failure(page.status.code, page.status.message);
+    }
+
+    const std::string response = Wrap(json_rpc_prefix + *page.value + "}", session_id);
+    if (response.size() > kLinxMcpMaxResponseBytes) {
+        return Result<std::string>::Failure(ErrorCode::kInternal, "tools/list 响应超过安全上限");
+    }
+    return Result<std::string>::Success(response);
+}
+
 Result<ToolValue> ToolValueFromJson(const JsonValue& value) {
     if (value.kind == JsonValue::Kind::kString) return Result<ToolValue>::Success(value.string);
     if (value.kind == JsonValue::Kind::kBool) return Result<ToolValue>::Success(value.boolean);
@@ -202,9 +250,14 @@ Result<std::string> HandleLinxMcpPayload(std::string_view payload, const mcp::Mc
         return Result<std::string>::Success(Wrap(result, session_id));
     }
     if (method->string == "tools/list") {
-        return Result<std::string>::Success(
-            Wrap("{\"jsonrpc\":\"2.0\",\"id\":" + Serialize(*id) + ",\"result\":" + server.list_tools_json() + "}",
-                 session_id));
+        const auto start = ParseToolsListStart(request);
+        if (!start.ok() || !start.value.has_value()) {
+            return ErrorResponse(*id, -32602, start.status.message, session_id);
+        }
+        const auto response = BuildToolsListResponse(*id, server, session_id, *start.value);
+        if (response.ok()) return response;
+        const int error_code = response.status.code == ErrorCode::kInvalidArgument ? -32602 : -32603;
+        return ErrorResponse(*id, error_code, response.status.message, session_id);
     }
     if (method->string != "tools/call") return ErrorResponse(*id, -32601, "未知 MCP 方法", session_id);
 
