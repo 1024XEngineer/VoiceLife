@@ -132,6 +132,14 @@ StreamRead EspActionStreamTransport::Next() {
             return {StreamReadStatus::kNetworkError, {}};
         }
         if (n == 0) {
+            // SSE 使用 chunked 响应时，只有解析到完整的 0 长度 chunk 才是服务端
+            // 主动结束。代理或 Wi-Fi 提前 FIN 会同样返回 0，但必须按断线重连，
+            // 否则运行时会误把尚未完成的动作窗口标记为正常结束并丢弃它。
+            if (!esp_http_client_is_complete_data_received(client_)) {
+                ESP_LOGW(kTag, "动作流在响应完成前断开，准备重连");
+                CloseConnection();
+                return {StreamReadStatus::kNetworkError, {}};
+            }
             // 服务端正常关闭连接，流结束。
             ESP_LOGW(kTag, "动作流正常结束");
             CloseConnection();
