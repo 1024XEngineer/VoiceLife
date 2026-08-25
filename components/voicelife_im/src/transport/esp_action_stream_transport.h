@@ -41,6 +41,7 @@ class EspActionStreamTransport : public ImActionCommandStream {
     esp_http_client_handle_t client_ = nullptr;
     SseDecoder decoder_;
     std::deque<SseFrame> pending_;
+    bool received_action_event_ = false;
     bool open_ = false;
 };
 

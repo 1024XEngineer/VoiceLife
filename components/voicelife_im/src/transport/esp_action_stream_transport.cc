@@ -79,6 +79,7 @@ bool EspActionStreamTransport::Open(const std::string& last_event_id) {
     // 这样代理改写 Content-Type 时不会误关闭合法动作流，错误体也会按协议错误处理。
     decoder_.Reset();
     pending_.clear();
+    received_action_event_ = false;
     open_ = true;
     ESP_LOGI(kTag, "IM_ACTION_STREAM_OPENED=1 reminder_trigger_id=%s resumed=%d", reminder_trigger_id_.c_str(),
              last_event_id.empty() ? 0 : 1);
@@ -117,6 +118,7 @@ StreamRead EspActionStreamTransport::Next() {
                 CloseConnection();
                 return {StreamReadStatus::kProtocolError, {}};
             }
+            received_action_event_ = true;
             ESP_LOGI(kTag,
                      "IM_ACTION_COMMAND_RECEIVED=1 command_id=%s operation_id=%s reminder_trigger_id=%s action=%s",
                      command.commandId.c_str(), command.operationId.c_str(), command.reminderTriggerId.c_str(),
@@ -132,6 +134,15 @@ StreamRead EspActionStreamTransport::Next() {
             return {StreamReadStatus::kNetworkError, {}};
         }
         if (n == 0) {
+            // ESP-IDF 会在 chunked 响应收到 FIN 时调用 parser 的 message_complete，
+            // 即使连接并未收到完整的服务端结束帧，is_complete_data_received() 也可能为真。
+            // 在本次连接尚未收到任何动作命令前，EOF 一律按断线处理，保留窗口并重连，
+            // 避免动作发布与设备建流/读流的竞态丢失窗口。
+            if (!received_action_event_) {
+                ESP_LOGW(kTag, "动作流在收到命令前结束，准备重连");
+                CloseConnection();
+                return {StreamReadStatus::kNetworkError, {}};
+            }
             // SSE 使用 chunked 响应时，只有解析到完整的 0 长度 chunk 才是服务端
             // 主动结束。代理或 Wi-Fi 提前 FIN 会同样返回 0，但必须按断线重连，
             // 否则运行时会误把尚未完成的动作窗口标记为正常结束并丢弃它。
