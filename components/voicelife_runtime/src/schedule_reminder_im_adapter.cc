@@ -67,7 +67,10 @@ Status ImScheduleReminderNotification::SendScheduleReminder(const schedule::Sche
 
     contracts::im::NotificationIntent intent;
     intent.schemaVersion = contracts::im::kDeviceContractVersion;
-    intent.businessEventId = "schedule-reminder-task-" + DecimalId(task.id);
+    // Task IDs are local SQLite row IDs and can be reused after a database
+    // rebuild. Include the provisioned device identity in the global
+    // idempotency key while keeping it stable across retries.
+    intent.businessEventId = "schedule-reminder-device-" + device_id + "-task-" + DecimalId(task.id);
     intent.correlationId = "schedule-reminder-chain-" + DecimalId(task.chain_id);
     intent.kind = "reminder_due";
     intent.recipient = {.userId = user_id, .deviceId = device_id};

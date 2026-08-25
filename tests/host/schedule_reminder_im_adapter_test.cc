@@ -155,6 +155,8 @@ int main() {
                               .created_at = At(1'999'999'000),
                               .updated_at = At(2'000'000'001)};
     Check(notification.SendScheduleReminder(schedule, task).ok(), "提醒通知应提交到 IM 公共接口");
+    Check(transport_ptr->requests.back().body.find("schedule-reminder-device-device-1-task-10") != std::string::npos,
+          "提醒业务键应包含设备标识，避免不同设备的本地任务 ID 冲突");
     Check(action_window.has_value() && action_window->reminderTriggerId == "timing-1", "强提醒响应应发布动作窗口");
 
     auto final_task = task;
@@ -162,6 +164,8 @@ int main() {
     transport_ptr->response_body =
         R"({"businessEventId":"schedule-reminder-task-10-final","status":"accepted","deliveries":[],"actionStream":{"reminderTriggerId":"timing-1","expiresAt":"2026-08-03T00:10:00.000Z"}})";
     Check(notification.SendScheduleReminder(schedule, final_task).ok(), "第三次提醒通知应提交到 IM 公共接口");
+    Check(transport_ptr->requests.back().body.find("schedule-reminder-device-device-1-task-10") != std::string::npos,
+          "同一提醒任务重试应复用稳定的设备作用域业务键");
     Check(transport_ptr->requests.back().body.find("这是最后一次提醒；之后不再创建新的推迟提醒。") != std::string::npos,
           "第三次 IM 提醒正文应追加最后一次稍后提醒说明");
 
