@@ -212,6 +212,19 @@ std::optional<ToolResult> CancelReminder(schedule::ScheduleReminderService* remi
     return FailureOutput("日程已取消，但提醒取消失败：" + status.message);
 }
 
+std::optional<ToolResult> VerifyCancellationTarget(const schedule::Schedule& schedule, const PropertyList& properties) {
+    const auto expected_event = properties.value<std::string>("expected_event");
+    const auto expected_start_time = properties.value<std::string>("expected_start_time");
+    if (!expected_event.has_value() || !expected_start_time.has_value()) {
+        return FailureOutput("请先通过 schedule.query 确认目标，并回传 event 和 start_time");
+    }
+    if (!schedule.start_time.has_value() || schedule.event != *expected_event ||
+        schedule_tool_output::FormatDateTime(*schedule.start_time) != *expected_start_time) {
+        return FailureOutput("日程目标与确认内容不匹配，未执行取消");
+    }
+    return std::nullopt;
+}
+
 std::optional<ToolResult> SuspendRuleReminders(schedule::ScheduleReminderService* reminder_service,
                                                schedule::ScheduleRuleId rule_id) {
     if (reminder_service == nullptr) return std::nullopt;
@@ -486,6 +499,16 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                 if (status_text.has_value() && *status_text == "cancelled") {
                     schedule::CancelScheduleCommand command;
                     command.schedule_id = properties.value<int64_t>("schedule_id").value_or(0);
+                    schedule::QueryScheduleCommand query;
+                    query.schedule_id = command.schedule_id;
+                    query.status = schedule::ScheduleStatusFilter::kAll;
+                    query.limit = 1;
+                    query.offset = 0;
+                    const auto loaded = service.query_schedule(query);
+                    if (!loaded.result.ok() || loaded.result.value.empty()) return FailureOutput("日程不存在");
+                    const std::optional<ToolResult> confirmation =
+                        VerifyCancellationTarget(loaded.result.value.front(), properties);
+                    if (confirmation.has_value()) return *confirmation;
                     const auto result = service.cancel_schedule(command);
                     if (!result.result.ok()) return FailureOutput(result.result.status.message);
                     const std::optional<ToolResult> reminder_status =
@@ -645,8 +668,8 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
     if (!status.ok()) return status;
 
     status = server.add_tool(
-        "schedule.delete", "删除单次日程、未来周期单次或整条周期规则。", DeleteProperties(),
-        [&service, rule_service, reminder_service](const PropertyList& properties) {
+        "schedule.delete", "删除单次日程、未来周期单次或整条周期规则；按 schedule_id 删除前必须先查询并确认目标。",
+        DeleteProperties(), [&service, rule_service, reminder_service](const PropertyList& properties) {
             // delete 根据定位参数拆三条路径：schedule_id 删实例，rule_id 删规则，rule_id + original_start_time
             // 跳过未来单次。
             const bool has_schedule_id = properties.value<int64_t>("schedule_id").has_value();
@@ -665,6 +688,9 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                 query.offset = 0;
                 const auto loaded = service.query_schedule(query);
                 if (!loaded.result.ok() || loaded.result.value.empty()) return FailureOutput("日程不存在");
+                const std::optional<ToolResult> confirmation =
+                    VerifyCancellationTarget(loaded.result.value.front(), properties);
+                if (confirmation.has_value()) return *confirmation;
                 const auto result = service.cancel_schedule({.schedule_id = schedule_id});
                 if (!result.result.ok()) return FailureOutput(result.result.status.message);
                 const std::optional<ToolResult> reminder_status = CancelReminder(reminder_service, schedule_id);

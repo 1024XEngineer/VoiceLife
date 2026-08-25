@@ -73,7 +73,7 @@ Status EspWebSocketTransport::Impl::Connect(const linx::LinxConnectionConfig& co
     state_ = TransportState::kConnecting;
     closing_.store(false);
     {
-        std::lock_guard<std::mutex> callback_lock(callback_mutex_);
+        std::lock_guard<std::mutex> sink_lock(sink_mutex_);
         accepting_events_.store(true);
         sink_ = std::move(sink);
     }
@@ -319,7 +319,7 @@ Status EspWebSocketTransport::Impl::Close() {
     }
     assembler_.Reset();
     {
-        std::lock_guard<std::mutex> callback_lock(callback_mutex_);
+        std::lock_guard<std::mutex> sink_lock(sink_mutex_);
         sink_ = {};
     }
     headers_.assign(headers_.size(), '\0');

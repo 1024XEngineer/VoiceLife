@@ -8,8 +8,16 @@
 #include "voicelife/contracts/im/im_contracts.h"
 #include "voicelife/im/im_reporting_channel.h"
 
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
+
 namespace voicelife::runtime {
 namespace {
+
+#ifdef ESP_PLATFORM
+constexpr char kLogTag[] = "VoiceLifeReminderIm";
+#endif
 
 std::string FormatIso(schedule::DateTime value) {
     const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(value.time_since_epoch()).count();
@@ -30,12 +38,14 @@ std::string FormatIso(schedule::DateTime value) {
 std::string DecimalId(int64_t value) { return std::to_string(value); }
 
 contracts::im::ReminderActionResult ActionResult(const contracts::im::ReminderActionCommand& command,
-                                                 std::string status, std::string error_code, std::string occurred_at) {
+                                                 std::string status, std::string error_code, std::string occurred_at,
+                                                 std::optional<std::string> next_trigger_at = std::nullopt) {
     contracts::im::ReminderActionResult result;
     result.schemaVersion = contracts::im::kDeviceContractVersion;
     result.operationId = command.operationId;
     result.reminderTriggerId = command.reminderTriggerId;
     result.status = std::move(status);
+    result.nextTriggerAt = std::move(next_trigger_at);
     if (!error_code.empty()) result.errorCode = std::move(error_code);
     result.occurredAt = std::move(occurred_at);
     return result;
@@ -57,7 +67,10 @@ Status ImScheduleReminderNotification::SendScheduleReminder(const schedule::Sche
 
     contracts::im::NotificationIntent intent;
     intent.schemaVersion = contracts::im::kDeviceContractVersion;
-    intent.businessEventId = "schedule-reminder-task-" + DecimalId(task.id);
+    // Task IDs are local SQLite row IDs and can be reused after a database
+    // rebuild. Include the provisioned device identity in the global
+    // idempotency key while keeping it stable across retries.
+    intent.businessEventId = "schedule-reminder-device-" + device_id + "-task-" + DecimalId(task.id);
     intent.correlationId = "schedule-reminder-chain-" + DecimalId(task.chain_id);
     intent.kind = "reminder_due";
     intent.recipient = {.userId = user_id, .deviceId = device_id};
@@ -78,13 +91,30 @@ Status ImScheduleReminderNotification::SendScheduleReminder(const schedule::Sche
     intent.occurredAt = FormatIso(task.triggered_at.value_or(task.trigger_at));
 
     const im::ReportResult result = reporting->SubmitNotification(intent);
+#ifdef ESP_PLATFORM
+    ESP_LOGI(kLogTag, "IM_REMINDER_SUBMIT_RESULT status=%d response_bytes=%u correlation_id=%s reminder_trigger_id=%s",
+             static_cast<int>(result.status), static_cast<unsigned>(result.response_body.size()),
+             intent.correlationId.c_str(), intent.reminderTriggerId.c_str());
+#endif
     if (result.status == im::ReportStatus::kSubmitted) {
+        auto window = im::ExtractActionWindow(result.response_body);
+#ifdef ESP_PLATFORM
+        if (window.has_value()) {
+            ESP_LOGI(kLogTag, "IM_ACTION_WINDOW_ACCEPTED=1 reminder_trigger_id=%s expires_at=%s",
+                     window->reminderTriggerId.c_str(), window->expiresAt.c_str());
+        } else {
+            ESP_LOGW(kLogTag, "IM_ACTION_WINDOW_ACCEPTED=0 reminder_trigger_id=%s", intent.reminderTriggerId.c_str());
+        }
+#endif
         if (action_window_sink_) {
-            auto window = im::ExtractActionWindow(result.response_body);
             if (window.has_value()) action_window_sink_(std::move(*window));
         }
         return Status::Ok();
     }
+#ifdef ESP_PLATFORM
+    ESP_LOGW(kLogTag, "IM_REMINDER_SUBMIT_FAILED=1 status=%d correlation_id=%s reminder_trigger_id=%s",
+             static_cast<int>(result.status), intent.correlationId.c_str(), intent.reminderTriggerId.c_str());
+#endif
     const ErrorCode code =
         result.status == im::ReportStatus::kRetryable ? ErrorCode::kUnavailable : ErrorCode::kInternal;
     return Status::Error(code, result.message.empty() ? "IM 提醒通知提交失败" : result.message);
@@ -92,16 +122,25 @@ Status ImScheduleReminderNotification::SendScheduleReminder(const schedule::Sche
 
 contracts::im::ReminderActionResult ImScheduleReminderActionExecutor::Execute(
     const contracts::im::ReminderActionCommand& command) {
-    const std::string occurred_at = EspScheduleReminderClock{}.NowIso();
-    Result<schedule::ReminderActionResult> result;
+    schedule::ReminderActionCommand local;
+    local.operation_id = command.operationId;
+    local.reminder_trigger_id = command.reminderTriggerId;
     if (command.action == "acknowledge") {
-        result = service_.AcknowledgeRecentReminders();
+        local.action = schedule::ScheduleReminderActionKind::kAcknowledge;
     } else if (command.action == "snooze") {
-        result = service_.SnoozeRecentReminders();
+        local.action = schedule::ScheduleReminderActionKind::kSnooze;
+        local.snooze_minutes = command.minutes;
     } else {
-        return ActionResult(command, "failed", "unsupported_action", occurred_at);
+        return ActionResult(command, "failed", "unsupported_action", EspScheduleReminderClock{}.NowIso());
     }
-    if (result.ok()) return ActionResult(command, "succeeded", {}, occurred_at);
+    const auto result = service_.ExecuteReminderAction(local);
+    if (result.ok()) {
+        return ActionResult(command, "succeeded", {}, FormatIso(result.value->occurred_at),
+                            result.value->next_trigger_at.has_value()
+                                ? std::optional<std::string>{FormatIso(*result.value->next_trigger_at)}
+                                : std::nullopt);
+    }
+    const std::string occurred_at = EspScheduleReminderClock{}.NowIso();
     if (result.status.code == ErrorCode::kUnavailable) {
         return ActionResult(command, "retryable_failed", "unavailable", occurred_at);
     }

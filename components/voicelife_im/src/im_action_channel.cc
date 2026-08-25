@@ -216,6 +216,10 @@ ActionRunResult ImActionChannel::Run(ImActionCommandStream& stream, const Action
             break;
         }
         HandleCommand(read.command, window, result, has_unconfirmed);
+        // 回执未被网关受理时立即释放当前 SSE。网关会在下一次连接中按
+        // Last-Event-ID/operationId 重放未确认命令；继续等待当前流会与
+        // 网关的 processing 状态互相等待，直到动作窗口过期。
+        if (has_unconfirmed) break;
     }
     stream.Close();
 

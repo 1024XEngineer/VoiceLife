@@ -133,6 +133,7 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
     cJSON_AddNumberToObject(audio, "sample_rate", wire_audio.sample_rate_hz);
     cJSON_AddNumberToObject(audio, "channels", wire_audio.channels);
     cJSON_AddNumberToObject(audio, "frame_duration", wire_audio.frame_duration_ms);
+    cJSON_AddNumberToObject(audio, "play_buffer_duration", connection.playback_buffer_duration_ms);
 
     if (wire_audio.codec == voice::AudioCodec::kPcmS16Le) {
         cJSON_AddNumberToObject(audio, "bit_depth", wire_audio.bits_per_sample);
@@ -140,7 +141,6 @@ Result<std::string> LinxJsonCodec::EncodeHello(const voice::VoiceSessionConfig& 
         const uint32_t frame_size = wire_audio.sample_rate_hz * wire_audio.frame_duration_ms / 1000U;
         cJSON_AddNumberToObject(audio, "frame_size", frame_size);
         cJSON_AddStringToObject(audio, "sample_format", "signed_int16");
-        cJSON_AddNumberToObject(audio, "play_buffer_duration", connection.playback_buffer_duration_ms);
     }
 
     std::string result;
