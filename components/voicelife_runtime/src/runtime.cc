@@ -576,6 +576,14 @@ class Runtime final {
         return method != nullptr && method->IsString() && method->string == "tools/call";
     }
 
+    static std::string McpToolName(std::string_view payload) {
+        JsonValue request;
+        if (!ParseJson(payload, request).ok() || !request.IsObject()) return "invalid";
+        const JsonValue* params = request.Get("params");
+        const JsonValue* name = params != nullptr && params->IsObject() ? params->Get("name") : nullptr;
+        return name != nullptr && name->IsString() ? name->string : "missing";
+    }
+
     static std::string McpMethod(std::string_view payload) {
         JsonValue request;
         if (!ParseJson(payload, request).ok() || !request.IsObject()) return "invalid";
@@ -637,13 +645,16 @@ class Runtime final {
             }
             if (request->abandoned.load()) continue;
             const bool tool_call = IsMcpToolCall(request->payload);
+            const std::string tool_name = tool_call ? McpToolName(request->payload) : std::string{};
             if (tool_call && session_) session_->ReportToolCallStarted();
-            auto response = HandleLinxMcpPayload(request->payload, mcp_server_, request->session_id);
+            LinxMcpToolOutcome outcome;
+            auto response = HandleLinxMcpPayload(request->payload, mcp_server_, request->session_id,
+                                                  tool_call ? &outcome : nullptr);
             if (!response.ok()) {
                 response = BuildLinxMcpUnavailableResponse(request->payload, "设备 MCP 执行失败", request->session_id);
+                outcome = InspectLinxMcpToolOutcome(request->payload, response);
             }
             if (tool_call && !request->abandoned.load() && session_) {
-                const LinxMcpToolOutcome outcome = InspectLinxMcpToolOutcome(request->payload, response);
                 session_->ReportToolResult(TruncateUtf8(outcome.summary, 96), outcome.success);
             }
             ESP_LOGI(kTag, "MCP_TX method=%s id=%s bytes=%u result=%d", McpMethod(request->payload).c_str(),
@@ -651,6 +662,10 @@ class Runtime final {
                      response.ok() && response.value.has_value() ? static_cast<unsigned>(response.value->size()) : 0U,
                      response.ok() ? 1 : 0);
             ESP_LOGI(kTag, "MCP_TOOL_EXECUTED tool_call=%d result=%d", tool_call ? 1 : 0, response.ok() ? 1 : 0);
+            if (tool_call) {
+                ESP_LOGI(kTag, "MCP_TOOL_OUTCOME name=%s result_status=%s success=%d", tool_name.c_str(),
+                         outcome.result_status.c_str(), outcome.success ? 1 : 0);
+            }
             {
                 std::lock_guard<std::mutex> lock(request->mutex);
                 if (!request->abandoned.load()) {

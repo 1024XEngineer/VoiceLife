@@ -61,9 +61,10 @@ int main() {
               create_schema->Get("properties")->Get("start_time")->Get("default") == nullptr,
           "可选日程时间不得被伪造成带默认值的必填参数");
 
+    voicelife::runtime::LinxMcpToolOutcome call_outcome;
     const auto call = voicelife::runtime::HandleLinxMcpPayload(
         R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"创建会议","start_time":"2030-03-18 00:00:00"}},"id":3})",
-        server);
+        server, {}, &call_outcome);
     Check(call.ok(), "tools/call 应分发给日程工具并回传文本结果");
     const auto& called = ParseMcpEnvelope(*call.value);
     Check(called.Get("result")->Get("content")->array.size() == 1 &&
@@ -72,6 +73,8 @@ int main() {
                   std::string::npos,
           "tools/call 必须返回 MCP text content");
     Check(called.Get("result")->Get("isError")->boolean == false, "成功 tools/call 必须明确声明 isError=false");
+    Check(call_outcome.success && call_outcome.result_status == "success",
+          "直接执行路径必须保留受控的业务成功状态");
     const auto successful_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(
         R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"创建会议","start_time":1900000000}},"id":3})",
         call);
@@ -111,6 +114,13 @@ int main() {
         invalid_arguments);
     Check(!invalid_outcome.success && invalid_outcome.summary == "日程创建失败",
           "非法参数错误不得进入用户可见 MCP 摘要");
+
+    voicelife::runtime::LinxMcpToolOutcome conflict_outcome;
+    const auto conflict = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"冲突会议","start_time":"2030-03-18 00:00:00"}},"id":7})",
+        server, {}, &conflict_outcome);
+    Check(conflict.ok() && !conflict_outcome.success && conflict_outcome.result_status == "conflict",
+          "冲突是合法 MCP 回包，但运行时必须保留为非成功业务状态");
 
     const auto schedules_before_unavailable = service.query_schedule({
         .schedule_id = std::nullopt,
