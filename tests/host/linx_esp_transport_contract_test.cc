@@ -50,10 +50,10 @@ int main() {
     Check(defaults.tx_timeout_ms == 1000, "Linx 默认同步写超时必须限制在 1 秒，避免 generation 切换拖慢本地打断");
     Check(SelectLinxTextTxLane("{\"type\":\"listen\",\"state\":\"stop\"}") == LinxTextTxLane::kMediaOrdered,
           "listen.stop 必须排在已经入队的 PCM 之后，不能由控制队列越过尾音");
-    Check(SelectLinxTextTxLane("{\"type\":\"listen\",\"state\":\"start\"}") == LinxTextTxLane::kControl &&
+    Check(SelectLinxTextTxLane("{\"type\":\"listen\",\"state\":\"start\"}") == LinxTextTxLane::kMediaOrdered &&
               SelectLinxTextTxLane("{\"type\":\"listen\",\"state\":\"detect\"}") == LinxTextTxLane::kControl &&
               SelectLinxTextTxLane("{\"type\":\"abort\"}") == LinxTextTxLane::kControl,
-          "开始、检测和 abort 必须保留控制通道的低延迟抢占能力");
+          "start 必须与 PCM 有序，detect 和 abort 仍保留控制通道的低延迟抢占能力");
 
     LinxTxGenerationGate generation_gate;
     generation_gate.SetGeneration(1);

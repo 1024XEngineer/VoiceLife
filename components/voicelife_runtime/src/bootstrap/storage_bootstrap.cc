@@ -4,14 +4,17 @@
 #include <string>
 #include <utility>
 
-#include "voicelife/storage_memory/memory_schedule_repository.h"
 #if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_STORAGE_FATFS_RUNTIME
 #include "voicelife/storage_fatfs/fatfs_volume.h"
 #include "voicelife/storage_sqlite/sqlite_database.h"
+#include "voicelife/storage_sqlite/sqlite_schedule_reminder_task_repository.h"
 #include "voicelife/storage_sqlite/sqlite_schedule_repository.h"
 #include "voicelife/storage_sqlite/sqlite_schedule_rule_repository.h"
 #include "voicelife/storage_sqlite/sqlite_schema.h"
 #include "voicelife/storage_sqlite/voicelife_schema.h"
+#else
+#include "voicelife/storage_memory/memory_schedule_reminder_task_repository.h"
+#include "voicelife/storage_memory/memory_schedule_repository.h"
 #endif
 
 #ifdef ESP_PLATFORM
@@ -59,7 +62,8 @@ class StorageBootstrap::Impl final {
         : volume_(MakeVolumeConfig()),
           database_(DatabaseUri(volume_.config().base_path), "unix-none"),
           schedule_repository_(database_),
-          schedule_rule_repository_(database_)
+          schedule_rule_repository_(database_),
+          schedule_reminder_task_repository_(database_)
 #endif
     {
     }
@@ -186,6 +190,10 @@ class StorageBootstrap::Impl final {
     [[nodiscard]] schedule::ScheduleExceptionRepository& GetScheduleExceptionRepository() {
         return schedule_rule_repository_;
     }
+
+    [[nodiscard]] schedule::ScheduleReminderTaskRepository& GetScheduleReminderTaskRepository() {
+        return schedule_reminder_task_repository_;
+    }
 #endif
 
    private:
@@ -205,9 +213,11 @@ class StorageBootstrap::Impl final {
     storage_sqlite::SqliteDatabase database_;
     storage_sqlite::SqliteScheduleRepository schedule_repository_;
     storage_sqlite::SqliteScheduleRuleRepository schedule_rule_repository_;
+    storage_sqlite::SqliteScheduleReminderTaskRepository schedule_reminder_task_repository_;
 #else
     storage_memory::MemoryScheduleRepository schedule_repository_;
     storage_memory::MemoryScheduleRuleRepository schedule_rule_repository_{schedule_repository_};
+    storage_memory::MemoryScheduleReminderTaskRepository schedule_reminder_task_repository_;
 #endif
     bool ready_ = false;
 };
@@ -235,6 +245,10 @@ schedule::ScheduleRuleRepository& StorageBootstrap::GetScheduleRuleRepository() 
 
 schedule::ScheduleExceptionRepository& StorageBootstrap::GetScheduleExceptionRepository() {
     return impl_->GetScheduleExceptionRepository();
+}
+
+schedule::ScheduleReminderTaskRepository& StorageBootstrap::GetScheduleReminderTaskRepository() {
+    return impl_->GetScheduleReminderTaskRepository();
 }
 #endif
 

@@ -23,15 +23,15 @@
     "allow_arbitrary_bytes": false
   },
   "budget": {
-    "gif_bytes": 144722,
+    "gif_bytes": 147018,
     "common_text_font_bytes": 269580,
-    "total_bytes": 414302,
+    "total_bytes": 416598,
     "assets_partition_bytes": 1048576,
     "single_frame_rgb565_bytes": 18432,
     "psram_decode_peak_bytes": null,
     "psram_note": "GIF 解码峰值内存尚未测量；Renderer 移植时以真机 heap 证据补充。",
-    "assets_image_sha256": "aa6bd3960d0a0baa0463d6bdb3aab7875f1a9539778491df8026427dfb008e13",
-    "assets_image_bytes": 414866
+    "assets_image_sha256": "7bc16f4712b7750bbbb04ca60cea69947c2e00ae7898387c84ef7cbe1b4badcb",
+    "assets_image_bytes": 417162
   },
   "text_font": {
     "file": "font_noto_sans_common_14_1.bin",
@@ -103,10 +103,10 @@
       "file": "idle_eyes.gif",
       "width": 96,
       "height": 96,
-      "frame_count": 7,
-      "duration_ms": 4000,
-      "size_bytes": 2039,
-      "sha256": "2bc6bfdbc9ca8b11746f9c52f30d65d7cdffd91cd4664fe7ef2ec57845f9b500"
+      "frame_count": 14,
+      "duration_ms": 1120,
+      "size_bytes": 4335,
+      "sha256": "b0df5f6ea982b840515fe65f8ccd934161ce5f0b268cb5796a20c60ac5de95ac"
     },
     {
       "asset_id": "listening",

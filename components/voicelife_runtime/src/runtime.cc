@@ -21,6 +21,7 @@
 #include <optional>
 #include <string_view>
 
+#include "esp_action_stream_transport.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -31,6 +32,7 @@
 #include "nvs_flash.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/im/esp_http_transport_factory.h"
+#include "voicelife/im/im_action_channel.h"
 #include "voicelife/im/im_binding_use_case.h"
 #include "voicelife/im/im_config_store.h"
 #include "voicelife/im/im_retry_policy.h"
@@ -54,6 +56,7 @@
 #include "linx_mcp_bridge.h"
 #include "linx_ota_bootstrap.h"
 #include "mcp_worker_policy.h"
+#include "schedule_reminder_im_adapter.h"
 #include "serial_voice_test.h"
 #include "voicelife/application/interaction_orchestrator.h"
 #include "voicelife/mcp/schedule_mcp_tools.h"
@@ -273,22 +276,25 @@ class Runtime final {
             return QueueSystemSpeech(text) ? Status::Ok()
                                            : Status::Error(ErrorCode::kUnavailable, "系统提醒播报请求未进入板级队列");
         });
+        reminder_notification_ = std::make_unique<ImScheduleReminderNotification>(
+            im_runtime_, [this](im::ActionWindow window) { EnqueueReminderActionWindow(std::move(window)); });
         schedule_reminder_service_ = std::make_unique<schedule::ScheduleReminderService>(
-            storage_.GetScheduleRepository(), schedule_service_, schedule_rule_service_, *timing_runtime_,
-            *reminder_speech_);
+            storage_.GetScheduleRepository(), storage_.GetScheduleReminderTaskRepository(), schedule_service_,
+            schedule_rule_service_, *timing_runtime_, *reminder_speech_, reminder_notification_.get());
+        reminder_action_executor_ = std::make_unique<ImScheduleReminderActionExecutor>(*schedule_reminder_service_);
         // 先注册 MCP 工具契约，再启动提醒任务。工具注册会建立参数 Schema 和
         // handler 闭包，属于一次性启动分配；提醒运行时随后启动，避免两者在
         // 内部堆上同时竞争初始化峰值。回调只有在 MCP worker 启动后才会执行。
         if (!schedule_mcp_registered_) {
             init_status_ = mcp::RegisterScheduleMcpTools(mcp_server_, schedule_service_, schedule_rule_service_,
-                                                         schedule_operation_service_, schedule_reminder_service_.get(),
-                                                         {.runtime = &im_runtime_});
+                                                         schedule_operation_service_, schedule_reminder_service_.get());
             if (!init_status_.ok()) return fail_startup(init_status_);
             schedule_mcp_registered_ = true;
             // MCP worker 只产生绑定结果；轮询与 OLED/TTS 均由各自受控任务处理。
-            ESP_LOGI(kTag,
-                     "MCP_TOOLS_READY count=6 names=schedule.create,schedule.query,schedule.update,schedule.delete,"
-                     "schedule.operation_query,im.binding.start");
+            ESP_LOGI(
+                kTag,
+                "MCP_TOOLS_READY count=8 names=schedule.create,schedule.query,schedule.update,schedule.delete,"
+                "schedule.operation_query,schedule.reminder_acknowledge,schedule.reminder_snooze,im.binding.start");
         }
         const Status reminder_status = schedule_reminder_service_->Start();
         if (!reminder_status.ok()) {
@@ -319,12 +325,9 @@ class Runtime final {
             ShowDisplay(voice::VoiceMood::kSad, "错误", "");
             return fail_startup(secret_store);
         }
-#if CONFIG_VOICELIFE_IM_GATEWAY
-        // USB IM provisioning 不依赖 Wi-Fi；即使网络配置缺失并进入 SoftAP，也必须开放物理恢复窗口。
-        if (!StartImProvisioningTask()) {
-            ESP_LOGW(kTag, "IM_PROVISION_TASK_FAILED=1");
-        }
-#endif
+        // USB IM provisioning shares the USB-Serial/JTAG input with the Linx Wi-Fi
+        // recovery protocol. Start it only after the Wi-Fi bootstrap has finished;
+        // otherwise both tasks can consume different halves of the same VLW1 frame.
         auto connection = BootstrapLinxOtaConfig(assembly_->board_identity(),
                                                  [this](std::string_view title, std::string_view detail) {
                                                      ShowDisplay(voice::VoiceMood::kConnecting, title, detail);
@@ -340,6 +343,12 @@ class Runtime final {
         }
         ShowDisplay(voice::VoiceMood::kConnecting, "连接", "");
         linx_config_ = std::move(*connection.value);
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        // Start IM provisioning after Linx has released the shared USB console.
+        if (!StartImProvisioningTask()) {
+            ESP_LOGW(kTag, "IM_PROVISION_TASK_FAILED=1");
+        }
+#endif
         // IM 的 SNTP、Gateway 探针和退避全部在独立任务中完成，语音启动路径不等待网络。
         StartImRuntime();
         auto result = registry.Create("xrobot-websocket", {});
@@ -364,7 +373,10 @@ class Runtime final {
         voice::VoiceSessionConfig config;
         config.session_id = "voicelife-linx-session";
         config.provider_id = "xrobot-websocket";
-        config.mode = voice::VoiceMode::kRealtime;
+        // SparkBot has no playback reference channel or AEC. Match the
+        // Xiaozhi SparkBot default: server VAD closes an auto-stop turn after
+        // playback drains, while realtime is reserved for AEC-capable boards.
+        config.mode = voice::VoiceMode::kAuto;
         config.audio.codec = voice::AudioCodec::kPcmS16Le;
         config.audio.sample_rate_hz = 16000;
         config.audio.channels = 1;
@@ -428,10 +440,19 @@ class Runtime final {
     }
 
     void StopScheduleReminderRuntime() {
+        if (!StopReminderActionWorker()) {
+            // 动作流仍可能持有 ReminderService；在 worker 真正退出前禁止释放其依赖，
+            // 否则启动失败清理路径也会把未完成的 SSE 回调变成悬空引用。
+            ESP_LOGE(kTag, "IM_ACTION_WORKER_STOP_TIMEOUT=1 dependencies_kept=1");
+            return;
+        }
         if (schedule_reminder_service_) {
             schedule_reminder_service_->Stop();
-            schedule_reminder_service_.reset();
         }
+        im_action_channel_.reset();
+        reminder_action_executor_.reset();
+        schedule_reminder_service_.reset();
+        reminder_notification_.reset();
         reminder_speech_.reset();
         timing_runtime_.reset();
     }
@@ -555,7 +576,28 @@ class Runtime final {
         return method != nullptr && method->IsString() && method->string == "tools/call";
     }
 
+    static std::string McpMethod(std::string_view payload) {
+        JsonValue request;
+        if (!ParseJson(payload, request).ok() || !request.IsObject()) return "invalid";
+        const JsonValue* method = request.Get("method");
+        return method != nullptr && method->IsString() ? method->string : "missing";
+    }
+
+    static std::string McpRequestId(std::string_view payload) {
+        JsonValue request;
+        if (!ParseJson(payload, request).ok() || !request.IsObject()) return "invalid";
+        const JsonValue* id = request.Get("id");
+        if (id == nullptr) return "notification";
+        if (id->IsString()) return id->string;
+        if (id->kind == JsonValue::Kind::kNumber) return std::to_string(static_cast<int64_t>(id->number));
+        return "non_scalar";
+    }
+
     Result<std::string> HandleMcpRequest(std::string_view payload, std::string_view session_id) {
+        const std::string method = McpMethod(payload);
+        const std::string request_id = McpRequestId(payload);
+        ESP_LOGI(kTag, "MCP_RX method=%s id=%s bytes=%u session_len=%u", method.c_str(), request_id.c_str(),
+                 static_cast<unsigned>(payload.size()), static_cast<unsigned>(session_id.size()));
         auto request = std::make_shared<McpRequest>();
         request->payload.assign(payload);
         request->session_id.assign(session_id);
@@ -567,7 +609,8 @@ class Runtime final {
             }
             mcp_queue_.push_back(request);
         }
-        ESP_LOGI(kTag, "MCP_REQUEST_QUEUED bytes=%u", static_cast<unsigned>(payload.size()));
+        ESP_LOGI(kTag, "MCP_REQUEST_QUEUED method=%s id=%s bytes=%u", method.c_str(), request_id.c_str(),
+                 static_cast<unsigned>(payload.size()));
         mcp_cv_.notify_one();
 
         std::unique_lock<std::mutex> lock(request->mutex);
@@ -603,6 +646,10 @@ class Runtime final {
                 const LinxMcpToolOutcome outcome = InspectLinxMcpToolOutcome(request->payload, response);
                 session_->ReportToolResult(TruncateUtf8(outcome.summary, 96), outcome.success);
             }
+            ESP_LOGI(kTag, "MCP_TX method=%s id=%s bytes=%u result=%d", McpMethod(request->payload).c_str(),
+                     McpRequestId(request->payload).c_str(),
+                     response.ok() && response.value.has_value() ? static_cast<unsigned>(response.value->size()) : 0U,
+                     response.ok() ? 1 : 0);
             ESP_LOGI(kTag, "MCP_TOOL_EXECUTED tool_call=%d result=%d", tool_call ? 1 : 0, response.ok() ? 1 : 0);
             {
                 std::lock_guard<std::mutex> lock(request->mutex);
@@ -628,6 +675,152 @@ class Runtime final {
         }
 #else
         ESP_LOGI(kTag, "IM_RUNTIME_DISABLED=1");
+#endif
+    }
+
+    void EnqueueReminderActionWindow(im::ActionWindow window) {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        {
+            std::lock_guard<std::mutex> lock(im_action_mutex_);
+            im_action_windows_.push_back(std::move(window));
+        }
+        if (im_runtime_.state() == im::ImRuntimeState::kReady) DrainReminderActionWindows();
+#else
+        (void)window;
+#endif
+    }
+
+    void DrainReminderActionWindows() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        if (im_action_stop_.load() || !reminder_action_executor_ || !im_runtime_.reporting_channel()) return;
+        bool expected = false;
+        if (!im_action_worker_running_.compare_exchange_strong(expected, true)) return;
+        im_action_worker_stopped_.store(false);
+        if (xTaskCreate(&Runtime::ReminderActionTaskEntry, "voicelife_im_actions", 8192, this, 3, nullptr) != pdPASS) {
+            im_action_worker_running_.store(false);
+            im_action_worker_stopped_.store(true);
+            ESP_LOGW(kTag, "IM_ACTION_TASK_FAILED=1");
+        }
+#endif
+    }
+
+    static void ReminderActionTaskEntry(void* context) { static_cast<Runtime*>(context)->ReminderActionTask(); }
+
+    void ReminderActionTask() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        if (!im_action_channel_) {
+            im_action_channel_ = std::make_unique<im::ImActionChannel>(
+                *im_runtime_.reporting_channel(), im_config_, *reminder_action_executor_, reminder_action_clock_);
+        }
+        while (!im_action_stop_.load()) {
+            im::ActionWindow window;
+            {
+                std::lock_guard<std::mutex> lock(im_action_mutex_);
+                if (im_action_windows_.empty()) break;
+                window = std::move(im_action_windows_.front());
+                im_action_windows_.pop_front();
+            }
+            // Gateway 暂时不可用时保留窗口并退避；不能在 worker 退出路径递归创建任务，
+            // 否则断线会形成无退避的任务创建/连接风暴。
+            if (im_runtime_.state() != im::ImRuntimeState::kReady) {
+                {
+                    std::lock_guard<std::mutex> lock(im_action_mutex_);
+                    im_action_windows_.push_front(std::move(window));
+                }
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+            im::EspActionStreamTransport stream(im_gateway_origin_, im_config_, window.reminderTriggerId);
+            const im::ActionRunResult result = im_action_channel_->Run(stream, window);
+            if (result.status == im::ActionRunStatus::kDisconnected) {
+                {
+                    std::lock_guard<std::mutex> lock(im_action_mutex_);
+                    im_action_windows_.push_front(std::move(window));
+                }
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+        }
+
+        // 关闭前最后一次在队列锁内检查，避免“队列刚入队但旧 worker 仍被认为
+        // running”导致新窗口无人消费。队列非空时继续使用同一个 channel，保留
+        // operationId 缓存和 Last-Event-ID 游标。
+        bool restart_in_place = false;
+        {
+            std::lock_guard<std::mutex> lock(im_action_mutex_);
+            restart_in_place = !im_action_stop_.load() && !im_action_windows_.empty();
+            if (!restart_in_place) {
+                im_action_worker_running_.store(false);
+                im_action_worker_stopped_.store(true);
+            }
+        }
+        if (restart_in_place) {
+            while (!im_action_stop_.load()) {
+                im::ActionWindow window;
+                {
+                    std::lock_guard<std::mutex> lock(im_action_mutex_);
+                    if (im_action_windows_.empty()) break;
+                    window = std::move(im_action_windows_.front());
+                    im_action_windows_.pop_front();
+                }
+                if (im_runtime_.state() != im::ImRuntimeState::kReady) {
+                    {
+                        std::lock_guard<std::mutex> lock(im_action_mutex_);
+                        im_action_windows_.push_front(std::move(window));
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    continue;
+                }
+                im::EspActionStreamTransport stream(im_gateway_origin_, im_config_, window.reminderTriggerId);
+                const im::ActionRunResult result = im_action_channel_->Run(stream, window);
+                if (result.status == im::ActionRunStatus::kDisconnected) {
+                    {
+                        std::lock_guard<std::mutex> lock(im_action_mutex_);
+                        im_action_windows_.push_front(std::move(window));
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                }
+            }
+            {
+                std::lock_guard<std::mutex> lock(im_action_mutex_);
+                im_action_worker_running_.store(false);
+                im_action_worker_stopped_.store(true);
+            }
+        }
+#endif
+        // im_action_worker_stopped_ is set immediately before self-deletion. No
+        // Runtime-owned dependency is accessed after this call, so teardown may
+        // safely release the channel and executor after observing the flag.
+        vTaskDelete(nullptr);
+    }
+
+    bool StopReminderActionWorker() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        im_action_stop_.store(true);
+        if (!im_action_worker_running_.load()) {
+            im_action_worker_stopped_.store(true);
+        }
+        // EspActionStreamTransport may be blocked in one bounded 30s HTTP read;
+        // wait longer than that bound instead of destroying its dependencies while
+        // the worker is still inside ImActionChannel::Run().
+        constexpr int kStopWaitAttempts = 4000;
+        for (int attempt = 0; attempt < kStopWaitAttempts && !im_action_worker_stopped_.load(); ++attempt) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        if (!im_action_worker_stopped_.load()) {
+            return false;
+        }
+        im_action_channel_.reset();
+        return true;
+#else
+        return true;
+#endif
+    }
+
+    void ResumeReminderActionWorker() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        im_action_stop_.store(false);
+        im_action_worker_stopped_.store(false);
+        if (im_runtime_.state() == im::ImRuntimeState::kReady) DrainReminderActionWindows();
 #endif
     }
 
@@ -658,12 +851,15 @@ class Runtime final {
             }
 
             if (im_runtime_.state() == im::ImRuntimeState::kReady) {
+                const auto action_config = im_config_.Load();
+                if (action_config.ok()) im_gateway_origin_ = action_config.value->gateway_origin;
                 // 选择 #235 的“重启后重新开始”策略：不恢复任何旧会话；下一次
                 // 明确语音命令会创建新会话，Gateway 会原子取消同设备旧 pending。
                 binding_use_case_.Bind(*im_runtime_.pairing_client(), im_pairing_clock_, im_runtime_.user_id());
                 EnqueueBindingReset(binding_use_case_.generation());
                 RegisterImPairingAcceptance(im_runtime_.pairing_client(), im_runtime_.device_id(),
                                             im_runtime_.user_id());
+                ResumeReminderActionWorker();
                 ESP_LOGI(kTag, "IM_RUNTIME_READY=1");
                 break;
             }
@@ -740,9 +936,26 @@ class Runtime final {
                                         : Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
         };
         callbacks.end_turn = [this]() {
+            auto* injection = assembly_ != nullptr ? assembly_->test_audio_injection() : nullptr;
+            if (injection == nullptr) return Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
+            const Status disabled = injection->SetTestInputEnabled(false);
+            if (!disabled.ok()) return disabled;
             return EnqueueBoardInput(BoardInputAction::kPressUp)
                        ? Status::Ok()
                        : Status::Error(ErrorCode::kUnavailable, "语音测试结束事件未进入状态机队列");
+        };
+        callbacks.begin_wake = [this]() {
+            auto* injection = assembly_ != nullptr ? assembly_->test_audio_injection() : nullptr;
+            if (injection == nullptr) return Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
+            if (!assembly_->wake_gate().standby()) {
+                return Status::Error(ErrorCode::kConflict, "本地唤醒注入要求设备处于待机");
+            }
+            return injection->SetTestInputEnabled(true);
+        };
+        callbacks.end_wake = [this]() {
+            auto* injection = assembly_ != nullptr ? assembly_->test_audio_injection() : nullptr;
+            return injection != nullptr ? injection->SetTestInputEnabled(false)
+                                        : Status::Error(ErrorCode::kUnavailable, "测试注入端口不可用");
         };
         serial_voice_test_ = std::make_unique<SerialVoiceTest>(std::move(callbacks));
         return serial_voice_test_->Start();
@@ -1152,12 +1365,23 @@ class Runtime final {
                 RestoreStandbyFromWakeTask();
                 continue;
             }
-            // SparkBot 目前没有 AEC。确认播报完成后才会由 kTtsStopped 进入
-            // kOpeningCapture，避免把“收到！”录回云端，也避免假“聆听中”。
+            // SparkBot 没有 AEC。普通唤醒先请求一次明确的“收到！”确认音，
+            // 再按 detect -> listen.start 顺序进入同一 Linx 会话；VoiceSession
+            // 会等确认 TTS 的 stop 或有界超时后才打开物理麦克风，避免自我介绍
+            // 或确认音被采进首轮用户语音。
             const Status acknowledge = session_->NotifyLocalWakeWord(request.wake_word, "收到！");
             if (!acknowledge.ok()) {
                 ESP_LOGW(kTag, "唤醒确认请求失败: %s", acknowledge.message.c_str());
-                // 确认请求失败：回待机，不显示"出错了/牛牛走了"。
+                (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
+                continue;
+            }
+            // Linx requires detect -> listen.start in one ordered control
+            // sequence. Keep the physical input gated until the greeting TTS
+            // ends; VoiceSession will reuse this Provider lease when the
+            // interaction event loop later requests BeginCapture().
+            const Status provider_capture = session_->BeginProviderCapture();
+            if (!provider_capture.ok()) {
+                ESP_LOGW(kTag, "唤醒后 Provider 监听启动失败: %s", provider_capture.message.c_str());
                 (void)EnqueueEvent(voice::VoiceInteractionEvent::kStandbyReady);
             }
         }
@@ -1489,8 +1713,13 @@ class Runtime final {
                 wake_ack_tts_started_at_us_ = esp_timer_get_time();
                 ESP_LOGI(kTag, "WAKE_ACK_LATENCY stage=tts_started ms=%lld", static_cast<long long>(wake_latency_ms));
             }
-        } else if (evidence.event == "tts_first_audio" && wake_ack_tts_started_at_us_ > 0) {
+        } else if (evidence.event == "tts_first_audio" && wake_ack_requested_at_us_ > 0) {
+            // Binary PCM can be delivered to the session before the event-loop
+            // item for tts.start is processed. The first actual audio is still
+            // the strongest proof that the greeting stream is alive, so it must
+            // cancel the bounded wake-greeting timer in either ordering.
             CancelListenTimer();
+            if (wake_ack_tts_started_at_us_ == 0) wake_ack_tts_started_at_us_ = esp_timer_get_time();
             const int64_t audio_latency_ms = (esp_timer_get_time() - wake_ack_requested_at_us_) / 1000;
             ESP_LOGI(kTag, "WAKE_ACK_LATENCY stage=first_audio ms=%lld", static_cast<long long>(audio_latency_ms));
         } else if (evidence.event == "tts_stopped" && wake_ack_tts_started_at_us_ > 0) {
@@ -1570,6 +1799,19 @@ class Runtime final {
             // 听到声音。首段 PCM 到达前保留 deadline，防止下行缓冲把首轮卡住。
             if (wake_ack_requested_at_us_ == 0) CancelListenTimer();
             (void)EnqueueEvent(voice::VoiceInteractionEvent::kTtsStarted);
+        } else if (evidence.event == "local_wake_detect_requested") {
+            // detect 已进入 TX FIFO。Linx 可能随后发送本地唤醒问候 TTS；
+            // 先确认协议顺序，再等待 tts.stop，超时才开启干净的用户采集。
+            const auto mode = session_ != nullptr ? session_->config().mode : voice::VoiceMode::kManual;
+            const char* mode_name = "manual";
+            if (mode == voice::VoiceMode::kAuto) {
+                mode_name = "auto";
+            } else if (mode == voice::VoiceMode::kRealtime) {
+                mode_name = "realtime";
+            }
+            ESP_LOGI(kTag, "LOCAL_WAKE_PROTOCOL_ACCEPTED action=await_greeting mode=%s", mode_name);
+            (void)EnqueueEvent(voice::VoiceInteractionEvent::kWakeDetectionAccepted);
+            StartListenTimer(kWakeAckFirstAudioTimeoutMs);
         } else if (evidence.event == "local_wake_ack_requested" || evidence.event == "interrupt_ack_requested") {
             // 本地唤醒/打断确认已提交给 Provider。直到首段 PCM 到达前保留
             // deadline；超时后直接开始采集，不能无限等待远端音频。
@@ -1589,7 +1831,7 @@ class Runtime final {
             }
             // 服务端可能先送文本字幕，数秒后才送 PCM。确认阶段只有实际
             // tts_first_audio 才能解除 deadline，不能把字幕当成已播放。
-            if (wake_ack_tts_started_at_us_ == 0) CancelListenTimer();
+            if (wake_ack_requested_at_us_ == 0) CancelListenTimer();
             if (!evidence.detail.empty()) {
                 // 事件化：文本经事件循环应用（唯一写者），门控仍在事件循环校验。
                 stt_display_text_ = evidence.detail;
@@ -1685,7 +1927,17 @@ class Runtime final {
     bool schedule_mcp_registered_ = false;
     std::unique_ptr<timing_esp::EspTimingTaskRuntime> timing_runtime_;
     std::unique_ptr<ReminderSpeech> reminder_speech_;
+    std::unique_ptr<ImScheduleReminderNotification> reminder_notification_;
     std::unique_ptr<schedule::ScheduleReminderService> schedule_reminder_service_;
+    std::unique_ptr<ImScheduleReminderActionExecutor> reminder_action_executor_;
+    EspScheduleReminderClock reminder_action_clock_;
+    std::mutex im_action_mutex_;
+    std::deque<im::ActionWindow> im_action_windows_;
+    std::unique_ptr<im::ImActionChannel> im_action_channel_;
+    std::atomic_bool im_action_worker_running_{false};
+    std::atomic_bool im_action_stop_{false};
+    std::atomic_bool im_action_worker_stopped_{false};
+    std::string im_gateway_origin_;
     Status init_status_ = Status::Ok();
     linx::LinxJsonCodec linx_codec_;
     linx::LinxConnectionConfig linx_config_;
@@ -2195,10 +2447,18 @@ class Runtime final {
                 continue;
             }
             if (item.listen_timeout) {
-                if (interaction_.state() == voice::VoiceInteractionState::kAcknowledging ||
-                    (interaction_.state() == voice::VoiceInteractionState::kSpeaking && wake_ack_requested_at_us_ > 0 &&
-                     wake_ack_tts_started_at_us_ > 0)) {
-                    ESP_LOGW(kTag, "ACK_FIRST_AUDIO_TIMEOUT transition=acknowledging_or_speaking->opening_capture");
+                if (interaction_.state() == voice::VoiceInteractionState::kAcknowledging) {
+                    // The Provider listen.start was already sent immediately
+                    // after detect. Timeout only opens the physical input; an
+                    // abort/restart here would create a second protocol turn.
+                    ESP_LOGW(kTag, "ACK_FIRST_AUDIO_TIMEOUT transition=acknowledging->opening_capture");
+                    wake_ack_requested_at_us_ = 0;
+                    wake_ack_tts_started_at_us_ = 0;
+                    wake_ack_until_us_ = 0;
+                    (void)HandleInteractionEvent(voice::VoiceInteractionEvent::kAcknowledgementTimedOut);
+                } else if (interaction_.state() == voice::VoiceInteractionState::kSpeaking &&
+                           wake_ack_requested_at_us_ > 0) {
+                    ESP_LOGW(kTag, "ACK_FIRST_AUDIO_TIMEOUT transition=speaking->opening_capture");
                     if (session_) (void)session_->Interrupt();
                     // Interrupt 使旧确认流失效，迟到的 tts.stop 会由会话层
                     // 丢弃；这里必须立即清除归因，避免下一轮正常回复被误算
@@ -2248,6 +2508,13 @@ class Runtime final {
                 wake_ack_requested_at_us_ = now;
                 wake_ack_tts_started_at_us_ = 0;
                 wake_ack_until_us_ = now + kWakeAckDisplayUs;
+            }
+            if (item.event == voice::VoiceInteractionEvent::kWakeDetectionAccepted) {
+                // Keep the wake-greeting timing lease alive. A detect has been
+                // accepted by TX, but the microphone remains closed until the
+                // optional server greeting finishes or the bounded timer fires.
+                ESP_LOGI(kTag, "LOCAL_WAKE_GREETING_WAIT state=%d timeout_ms=%u",
+                         static_cast<int>(interaction_.state()), static_cast<unsigned>(kWakeAckFirstAudioTimeoutMs));
             }
             const Status wake_status = HandleInteractionEvent(item.event, item.wake_word);
             if (item.event != voice::VoiceInteractionEvent::kWakeDetected && !wake_status.ok()) {

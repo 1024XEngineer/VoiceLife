@@ -60,6 +60,7 @@ class Esp32s3PcmAudioPorts::Impl final {
         Status Open(const voice::AudioFormat& format) override;
         Status StartCapture(voice::VoiceMode mode) override;
         Status StopCapture() override;
+        Status DiscardPendingInput() override;
         void Close() override;
 
        private:
@@ -107,6 +108,7 @@ class Esp32s3PcmAudioPorts::Impl final {
     Status OpenOutput(const voice::AudioFormat& format);
     Status StartCapture(voice::VoiceMode mode);
     Status StopCapture();
+    Status DiscardPendingInput();
     Status CloseInput();
     Status PushOutput(voice::AudioFrame frame);
     Status FlushOutput();

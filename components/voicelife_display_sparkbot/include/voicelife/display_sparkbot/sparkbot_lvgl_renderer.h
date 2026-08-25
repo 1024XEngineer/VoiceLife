@@ -23,7 +23,8 @@ struct SparkBotDisplayLayout {
         kHorizontalCircular,
     };
 
-    uint16_t viewport_y = 0;
+    // SparkBot 外壳会遮挡物理屏最上沿，产品视口整体下移少量保留安全边距。
+    uint16_t viewport_y = 6;
     uint16_t viewport_height = 120;
     uint16_t horizontal_inset = 12;
     uint16_t top_bar_height = 16;

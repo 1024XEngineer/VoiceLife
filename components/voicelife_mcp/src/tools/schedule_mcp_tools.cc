@@ -644,7 +644,7 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
         });
     if (!status.ok()) return status;
 
-    return server.add_tool(
+    status = server.add_tool(
         "schedule.delete", "删除单次日程、未来周期单次或整条周期规则。", DeleteProperties(),
         [&service, rule_service, reminder_service](const PropertyList& properties) {
             // delete 根据定位参数拆三条路径：schedule_id 删实例，rule_id 删规则，rule_id + original_start_time
@@ -725,8 +725,11 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
         });
     if (!status.ok()) return status;
 
+    // 只有装配操作记录服务时才暴露查询工具；基础运行时保持原有四个日程工具。
+    if (operation_service == nullptr) return Status::Ok();
+
     // 操作记录查询：记录写入不经过 tool，由变更 service 显式推送；本工具只读查询。
-    return server.add_tool(
+    status = server.add_tool(
         "schedule.operation_query", "查询最近的操作记录，支持按对象类型、操作类型和名称筛选。",
         OperationQueryProperties(), [operation_service](const PropertyList& properties) {
             if (operation_service == nullptr) return FailureOutput("当前运行时未启用操作记录能力");
@@ -760,6 +763,44 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                 MakeToolOutput("total", ToolOutputValue::Integer(result.total)),
                 MakeToolOutput("operations",
                                ToolOutputValue::Array(schedule_tool_output::OperationArrayOutput(result.result.value))),
+            });
+        });
+    if (!status.ok()) return status;
+
+    status = server.add_tool(
+        "schedule.reminder_acknowledge",
+        "当用户明确确认已获知提醒内容（如‘我知道了’、‘好的’、‘收到’等）时调用。批量处理最近 10 "
+        "分钟内所有已触发但未确认的提醒，关闭后续重复提醒，并将对应日程标记为已完成。一次性全部处理。",
+        PropertyList{}, [reminder_service](const PropertyList&) {
+            if (reminder_service == nullptr) return FailureOutput("当前运行时未启用提醒能力");
+            const auto result = reminder_service->AcknowledgeRecentReminders();
+            if (!result.ok()) return FailureOutput(result.status.message);
+            ToolOutputArray events;
+            events.reserve(result.value->events.size());
+            for (const auto& event : result.value->events) {
+                events.emplace_back(MakeToolOutput(ToolOutputValue::String(event)));
+            }
+            return Output({
+                MakeToolOutput("status", ToolOutputValue::String("success")),
+                MakeToolOutput("message", ToolOutputValue::String("已确认提醒")),
+                MakeToolOutput("affected_count", ToolOutputValue::Integer(result.value->affected_count)),
+                MakeToolOutput("events", ToolOutputValue::Array(std::move(events))),
+            });
+        });
+    if (!status.ok()) return status;
+
+    return server.add_tool(
+        "schedule.reminder_snooze",
+        "当用户在语音交互中表达延迟提醒的意图（如‘稍后提醒’、‘过会儿再说’、‘等会儿提醒我’等）时调用。为当前已触发提醒单"
+        "独注册一次新的稍后提醒。",
+        PropertyList{}, [reminder_service](const PropertyList&) {
+            if (reminder_service == nullptr) return FailureOutput("当前运行时未启用提醒能力");
+            const auto result = reminder_service->SnoozeRecentReminders();
+            if (!result.ok()) return FailureOutput(result.status.message);
+            return Output({
+                MakeToolOutput("status", ToolOutputValue::String("success")),
+                MakeToolOutput("message", ToolOutputValue::String("已延迟提醒")),
+                MakeToolOutput("affected_count", ToolOutputValue::Integer(result.value->affected_count)),
             });
         });
 }

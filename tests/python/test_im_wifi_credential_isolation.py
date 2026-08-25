@@ -36,13 +36,13 @@ class ImWifiCredentialIsolationTest(unittest.TestCase):
         self.assertIn("usb_serial_jtag_read_bytes", usb_branch)
         self.assertNotIn("fcntl", usb_branch)
 
-    def test_im_usb_provisioning_starts_before_wifi_bootstrap_can_fail(self):
+    def test_im_usb_provisioning_starts_after_wifi_bootstrap_releases_console(self):
         startup = RUNTIME_SOURCE[
             RUNTIME_SOURCE.index("Status Start(PlatformAssembly& assembly)") : RUNTIME_SOURCE.index(
                 "void StopEventLoop()"
             )
         ]
-        self.assertLess(startup.index("StartImProvisioningTask()"), startup.index("BootstrapLinxOtaConfig("))
+        self.assertLess(startup.index("BootstrapLinxOtaConfig("), startup.index("StartImProvisioningTask()"))
 
     def test_im_provisioning_writes_all_four_credentials_only_in_im_namespace(self):
         im_storage = IM_SOURCE[

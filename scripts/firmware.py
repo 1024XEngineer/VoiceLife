@@ -84,6 +84,17 @@ def validate_profile(profile: dict, path: Path) -> None:
     if len(sdkconfig) != len(set(sdkconfig)):
         raise ProfileError(f"{path}: sdkconfig 不能重复")
 
+    storage = adapters["storage"]
+    if storage["driver"] == "memory" or "persistent-sqlite" not in storage["capabilities"]:
+        raise ProfileError(f"{path}: 设备 Profile 必须使用 persistent-sqlite 持久化存储")
+    required_storage_settings = {
+        "CONFIG_VOICELIFE_STORAGE_FATFS=y",
+        "CONFIG_VOICELIFE_STORAGE_SQLITE=y",
+    }
+    missing_storage_settings = required_storage_settings - set(sdkconfig)
+    if missing_storage_settings:
+        raise ProfileError(f"{path}: 持久化存储缺少 {sorted(missing_storage_settings)}")
+
 
 def profile_path(profile_id: str) -> Path:
     path = PROFILES / f"{profile_id}.json"

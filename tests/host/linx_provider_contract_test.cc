@@ -101,7 +101,8 @@ voicelife::linx::LinxConnectionConfig Connection() {
             .token_ref = "secret://linx/device-token",
             .device_id = "device-test",
             .client_id = "client-test",
-            .agent_id = std::string("agent-test")};
+            .agent_id = std::string("agent-test"),
+            .preferred_audio = std::nullopt};
 }
 
 }  // namespace
@@ -116,8 +117,8 @@ int main() {
     Check(hello.value->find("\"transport\":\"websocket\"") != std::string::npos, "hello 必须声明 websocket transport");
     Check(hello.value->find("\"mcp\":true") != std::string::npos, "hello 必须声明 MCP 能力");
     Check(hello.value->find("\"sample_rate\":16000") != std::string::npos, "hello 必须声明采样率");
-    Check(hello.value->find("\"play_buffer_duration\":200") != std::string::npos,
-          "默认播放缓冲必须保持在 200ms 实时预算内");
+    Check(hello.value->find("\"play_buffer_duration\":1000") != std::string::npos,
+          "默认播放缓冲必须符合 Linx 文档的 1000ms 协议值");
     auto larger_buffer_connection = connection;
     larger_buffer_connection.playback_buffer_duration_ms = 320;
     auto larger_buffer_hello = codec.EncodeHello(config, larger_buffer_connection);
@@ -185,23 +186,26 @@ int main() {
           "Provider 应分别暴露请求的上行格式和 hello 协商的下行格式");
     transport.EmitConnected();
     Check(transport.texts.size() == 1, "重复 connected 事件不得重复发送 hello");
-    Check(provider.NotifyLocalWakeWord("你好牛牛", "收到！").ok() && provider.StartCapture(config.mode).ok() &&
+    Check(provider.NotifyLocalWakeWord("你好牛牛").ok() && provider.StartCapture(config.mode).ok() &&
               provider.StopCapture().ok(),
-          "本地唤醒确认必须先 detect，再由状态机在 TTS 结束后开始采集");
+          "普通本地唤醒必须先发送无确认音 detect，再由状态机开始采集");
     Check(provider.Speak("测试播报").ok() && provider.Abort("user_interrupt").ok(), "detect/abort 应通过传输发送");
     Check(transport.texts.size() == 6, "hello、本地 detect、listen、listen、detect、abort 应各发送一帧");
     Check(transport.texts[1].find("\"type\":\"listen\"") != std::string::npos &&
               transport.texts[1].find("\"state\":\"detect\"") != std::string::npos &&
               transport.texts[1].find("\"text\":\"你好牛牛\"") != std::string::npos &&
-              transport.texts[1].find("\"text_response\":\"收到！\"") != std::string::npos &&
+              transport.texts[1].find("\"text_response\"") == std::string::npos &&
               transport.texts[2].find("\"state\":\"start\"") != std::string::npos,
-          "本地唤醒 detect 必须请求确认播报；listen.start 由后续状态机控制");
+          "普通本地唤醒 detect 不得请求确认播报；listen.start 由后续状态机控制");
     Check(transport.texts[4].find("\"text\":\"system_prompt\"") != std::string::npos &&
               transport.texts[4].find("\"text_response\":\"测试播报\"") != std::string::npos,
           "系统播报必须使用 Linx 定义的 text_response，不能伪装为用户 STT");
     Check(transport.texts[1].find("\"session_id\":\"remote-linx-session\"") != std::string::npos &&
               transport.texts[5].find("\"session_id\":\"remote-linx-session\"") != std::string::npos,
           "服务端 hello 分配的 session_id 必须用于后续控制消息");
+    Check(transport.texts[3].find("\"state\":\"stop\"") != std::string::npos &&
+              transport.texts[3].find("\"mode\"") == std::string::npos,
+          "listen.stop 必须遵循 Linx 文档，不携带 listen.start 的 mode");
     const auto events_before_mismatched_session = events.size();
     transport.EmitText(R"({"type":"stt","session_id":"wrong-session","text":"不应接受"})");
     Check(events.size() == events_before_mismatched_session + 1 &&

@@ -2,6 +2,7 @@ set(voicelife_storage_sqlite_sources)
 if(CONFIG_VOICELIFE_STORAGE_SQLITE)
     list(APPEND voicelife_storage_sqlite_sources
         "src/mapping/schedule_row_mapper.cc"
+        "src/mapping/schedule_reminder_task_row_mapper.cc"
         "src/mapping/operation_row_mapper.cc"
         "src/mapping/schedule_rule_row_mapper.cc"
         "src/mapping/schedule_exception_row_mapper.cc"
@@ -10,14 +11,18 @@ if(CONFIG_VOICELIFE_STORAGE_SQLITE)
         "src/schema/migrations/v003_create_schedule_rule.cc"
         "src/schema/migrations/v004_create_operation_record.cc"
         "src/schema/migrations/v005_add_schedule_reminder_task_id.cc"
+        "src/schema/migrations/v006_create_schedule_reminder_task.cc"
+        "src/schema/migrations/v007_add_schedule_reminder_task_event.cc"
         "src/schema/sqlite_schema.cc"
         "src/schema/voicelife_schema.cc"
         "src/sql/operation_sql.cc"
         "src/sql/schedule_sql.cc"
+        "src/sql/schedule_reminder_task_sql.cc"
         "src/sql/schedule_rule_sql.cc"
         "src/sql/schedule_exception_sql.cc"
         "src/sqlite_database.cc"
         "src/sqlite_schedule_repository.cc"
+        "src/sqlite_schedule_reminder_task_repository.cc"
         "src/sqlite_schedule_rule_repository.cc"
     )
 endif()

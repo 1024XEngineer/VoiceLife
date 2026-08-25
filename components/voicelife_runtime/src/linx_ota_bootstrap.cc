@@ -58,6 +58,8 @@ constexpr EventBits_t kWifiConnectedBit = BIT0;
 constexpr EventBits_t kWifiFailedBit = BIT1;
 constexpr int kWifiConnectTimeoutMs = 15000;
 constexpr int kOtaAttempts = 3;
+constexpr int kOtaBootstrapAttempts = 5;
+constexpr std::array<int, kOtaBootstrapAttempts - 1> kOtaRetryDelayMs = {1000, 2000, 4000, 8000};
 constexpr char kTag[] = "VoiceLifeLinxOta";
 
 struct WifiCredentials {
@@ -561,7 +563,7 @@ Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig(std::string_view board
                                                           const WifiProvisioningStatusSink& provisioning_status_sink) {
     Result<linx::LinxConnectionConfig> last_failure =
         Result<linx::LinxConnectionConfig>::Failure(ErrorCode::kUnavailable, "Linx OTA 初始化失败");
-    for (int attempt = 1; attempt <= kOtaAttempts; ++attempt) {
+    for (int attempt = 1; attempt <= kOtaBootstrapAttempts; ++attempt) {
         auto device = ReadOtaDeviceInfo(board_identity, provisioning_status_sink);
         if (!device.ok() || !device.value.has_value()) {
             last_failure = Result<linx::LinxConnectionConfig>::Failure(device.status.code, device.status.message);
@@ -629,9 +631,10 @@ Result<linx::LinxConnectionConfig> BootstrapLinxOtaConfig(std::string_view board
                 }
             }
         }
-        if (attempt < kOtaAttempts) {
-            ESP_LOGW(kTag, "LINX_OTA_RETRY attempt=%d", attempt + 1);
-            vTaskDelay(pdMS_TO_TICKS(1000));
+        if (attempt < kOtaBootstrapAttempts) {
+            const int delay_ms = kOtaRetryDelayMs[static_cast<size_t>(attempt - 1)];
+            ESP_LOGW(kTag, "LINX_OTA_RETRY attempt=%d delay_ms=%d", attempt + 1, delay_ms);
+            vTaskDelay(pdMS_TO_TICKS(delay_ms));
         }
     }
     return last_failure;

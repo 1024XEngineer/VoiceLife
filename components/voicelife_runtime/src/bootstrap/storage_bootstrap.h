@@ -9,6 +9,7 @@ class ScheduleRepository;
 class ScheduleOperationRepository;
 class ScheduleRuleRepository;
 class ScheduleExceptionRepository;
+class ScheduleReminderTaskRepository;
 }  // namespace voicelife::schedule
 
 namespace voicelife::runtime {
@@ -78,6 +79,9 @@ class StorageBootstrap final {
      * @return 生命周期与当前装配器一致的例外仓储引用；与规则仓储共享同一连接。
      */
     [[nodiscard]] schedule::ScheduleExceptionRepository& GetScheduleExceptionRepository();
+
+    /** @brief 获取独立的日程提醒任务仓储。 */
+    [[nodiscard]] schedule::ScheduleReminderTaskRepository& GetScheduleReminderTaskRepository();
 #endif
 
    private:

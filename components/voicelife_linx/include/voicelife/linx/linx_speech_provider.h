@@ -96,7 +96,6 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     [[nodiscard]] voice::VoiceSessionConfig ActiveSessionConfig() const;
     Status Send(Result<std::string> encoded);
     void Emit(voice::VoiceEvent event);
-
     LinxTransportPort& transport_;
     LinxProtocolCodecPort& codec_;
     LinxConnectionConfig connection_;

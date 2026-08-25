@@ -102,6 +102,14 @@ class AudioInputPort {
      *  @return 停止成功返回 Ok。 */
     virtual Status StopCapture() = 0;
 
+    /** @brief 丢弃采集端已经排队的 PCM，建立新的语音回合边界。
+     *
+     * 默认端口没有独立的有界输入队列时无需操作；硬件端口应在自身
+     * 队列锁内清除排队帧及未完成组帧状态。
+     * @return 清理成功返回 Ok。
+     */
+    virtual Status DiscardPendingInput() { return Status::Ok(); }
+
     /** @brief 释放硬件资源并清除回调。 */
     virtual void Close() = 0;
 };

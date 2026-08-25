@@ -21,8 +21,9 @@
       "configRef": "nvs://linx/websocket_url"
     },
     "storage": {
-      "driver": "sqlite",
+      "driver": "fatfs-sqlite",
       "capabilities": [
+        "persistent-sqlite",
         "atomic-calendar-write",
         "durable-calendar"
       ]

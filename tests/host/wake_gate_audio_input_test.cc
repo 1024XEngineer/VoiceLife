@@ -25,6 +25,10 @@ class FakeInput final : public voicelife::voice::AudioInputPort {
         ++stops;
         return Status::Ok();
     }
+    Status DiscardPendingInput() override {
+        ++discarded;
+        return Status::Ok();
+    }
     void Close() override { ++closes; }
     Status Emit(voicelife::voice::AudioFrame frame) {
         return sink_ ? sink_(std::move(frame)) : Status::Error(ErrorCode::kUnavailable, "采集回调未绑定");
@@ -33,6 +37,7 @@ class FakeInput final : public voicelife::voice::AudioInputPort {
     int opens = 0;
     int starts = 0;
     int stops = 0;
+    int discarded = 0;
     int closes = 0;
 
    private:
@@ -101,9 +106,15 @@ int main() {
     Check(wake_events == 1 && forwarded == 0, "检测事件不能把待机 PCM 误送云端");
 
     Check(gate.StartCapture(voicelife::voice::VoiceMode::kRealtime).ok(), "唤醒后应能切换到云端采集");
-    Check(physical.starts == 1 && detector.stops == 0, "唤醒命中后检测器已自停，切换上行不应重复停止检测器");
+    Check(physical.starts == 1 && physical.stops == 0 && physical.discarded == 1 && detector.stops == 0,
+          "唤醒切换上行必须清除唤醒前 PCM，不能重复停止已自停检测器或重启物理采集");
+    Check(physical.Emit(Frame()).ok() && detector.frames == 1 && forwarded == 0,
+          "唤醒边界迟到 PCM 不得转发 VoiceSession");
+    for (int index = 0; index < 3; ++index) {
+        Check(physical.Emit(Frame()).ok(), "边界窗口内的 PCM 必须可被丢弃");
+    }
     Check(physical.Emit(Frame()).ok() && detector.frames == 1 && forwarded == 1,
-          "上行状态 PCM 必须只转发 VoiceSession");
+          "边界窗口之后的 PCM 必须转发 VoiceSession");
     Check(gate.StopCapture().ok() && !gate.standby(), "停止上行不得在播报或最终识别期间隐式恢复本地唤醒");
     Check(detector.starts == 1 && physical.starts == 1, "停止上行不得重启物理采集或检测器");
     Check(physical.Emit(Frame()).ok() && detector.frames == 1 && forwarded == 1,

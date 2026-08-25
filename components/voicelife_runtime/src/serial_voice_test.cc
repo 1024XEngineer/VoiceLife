@@ -21,6 +21,12 @@ namespace voicelife::runtime {
 namespace {
 
 constexpr char kTag[] = "SerialVoiceTest";
+// Serial PCM arrives from a host-side real-time fixture. Unlike the I2S
+// capture task, this dedicated test task may briefly wait for the bounded
+// transport backlog to drain, preserving the exact source utterance instead
+// of manufacturing a lost-frame failure during a TLS stall.
+constexpr uint32_t kPayloadAcquireTimeoutMs = 2000;
+constexpr uint32_t kPayloadAcquirePollMs = 5;
 Status Unavailable(const char* message) { return Status::Error(ErrorCode::kUnavailable, message); }
 
 }  // namespace
@@ -34,10 +40,14 @@ class SerialVoiceTest::Impl final {
         return Unavailable("串口语音测试只能在 ESP-IDF 目标运行");
 #else
         if (task_ != nullptr) return Status::Ok();
-        if (!callbacks_.begin_turn || !callbacks_.submit_pcm || !callbacks_.end_turn) {
+        if (!callbacks_.begin_turn || !callbacks_.submit_pcm || !callbacks_.end_turn || !callbacks_.begin_wake ||
+            !callbacks_.end_wake) {
             return Status::Error(ErrorCode::kInvalidArgument, "串口语音测试回调不完整");
         }
-        payload_pool_ = voice::AudioPayloadPool::Create(16, detail::kSerialVoicePcmBytes);
+        // The Linx TX worker can briefly retain more than 16 input frames while
+        // TLS is flushing. Keep the serial fixture from rejecting valid PCM
+        // merely because the network is momentarily slower than realtime.
+        payload_pool_ = voice::AudioPayloadPool::Create(32, detail::kSerialVoicePcmBytes);
         if (payload_pool_ == nullptr) return Unavailable("创建串口语音 payload pool 失败");
         if (!usb_serial_jtag_is_driver_installed()) {
             usb_serial_jtag_driver_config_t config = {
@@ -106,6 +116,17 @@ class SerialVoiceTest::Impl final {
         }
     }
 
+    voice::AudioPayload AcquirePcmPayload() {
+        const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(kPayloadAcquireTimeoutMs);
+        while (!stopping_.load()) {
+            voice::AudioPayload payload = payload_pool_->TryAcquire();
+            if (payload.pooled()) return payload;
+            if (xTaskGetTickCount() >= deadline) break;
+            vTaskDelay(pdMS_TO_TICKS(kPayloadAcquirePollMs));
+        }
+        return {};
+    }
+
     void Run() {
         ESP_LOGI(kTag, "SERIAL_VOICE_TEST_READY=1 protocol=VLVT-v1 pcm=s16le-16000-mono-20ms payload_bytes=%u",
                  static_cast<unsigned>(detail::kSerialVoicePcmBytes));
@@ -138,6 +159,14 @@ class SerialVoiceTest::Impl final {
                 LogResult("TURN_END", callbacks_.end_turn());
                 continue;
             }
+            if (frame_header.kind == detail::kSerialVoiceWakeBegin) {
+                LogResult("WAKE_BEGIN", callbacks_.begin_wake());
+                continue;
+            }
+            if (frame_header.kind == detail::kSerialVoiceWakeEnd) {
+                LogResult("WAKE_END", callbacks_.end_wake());
+                continue;
+            }
             if (frame_header.kind != detail::kSerialVoicePcm) {
                 ESP_LOGW(kTag, "SERIAL_VOICE_FRAME_REJECT unknown_kind=%u", static_cast<unsigned>(frame_header.kind));
                 continue;
@@ -150,9 +179,10 @@ class SerialVoiceTest::Impl final {
                             .channels = 1,
                             .bits_per_sample = 16,
                             .frame_duration_ms = 20};
-            frame.payload = payload_pool_->TryAcquire();
+            frame.payload = AcquirePcmPayload();
             if (!frame.payload.pooled()) {
-                ESP_LOGW(kTag, "SERIAL_VOICE_PCM=reject code=%d", static_cast<int>(ErrorCode::kUnavailable));
+                ESP_LOGW(kTag, "SERIAL_VOICE_PCM=reject code=%d reason=payload_backpressure_timeout",
+                         static_cast<int>(ErrorCode::kUnavailable));
                 continue;
             }
             std::memcpy(frame.payload.data(), payload.data(), payload.size());

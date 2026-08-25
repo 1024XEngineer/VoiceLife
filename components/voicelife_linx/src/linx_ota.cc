@@ -221,7 +221,8 @@ Result<LinxConnectionConfig> BuildLinxConnectionConfig(const LinxOtaResponse& re
                                 .token_ref = std::string(token_reference),
                                 .device_id = std::string(device_id),
                                 .client_id = std::string(client_id),
-                                .agent_id = std::nullopt};
+                                .agent_id = std::nullopt,
+                                .preferred_audio = std::nullopt};
     if (!config.valid()) {
         return Result<LinxConnectionConfig>::Failure(ErrorCode::kInvalidArgument, "Linx OTA 连接配置无效");
     }
