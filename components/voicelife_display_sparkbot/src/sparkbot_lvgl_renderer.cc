@@ -181,8 +181,7 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     const bool kai_ok = HasRenderableGlyph(text_font, 0x5F00, &kai_advance);    // 开
     const bool xian_ok = HasRenderableGlyph(text_font, 0x95F2, &xian_advance);  // 闲
     const bool xi_ok = HasRenderableGlyph(text_font, 0x77D2, &xi_advance);      // 矽
-    ESP_LOGI(kTag,
-             "SPARKBOT_TEXT_GLYPH_CHECK kai=%d kai_adv=%u xian=%d xian_adv=%u xi=%d xi_adv=%u common_font=%d",
+    ESP_LOGI(kTag, "SPARKBOT_TEXT_GLYPH_CHECK kai=%d kai_adv=%u xian=%d xian_adv=%u xi=%d xi_adv=%u common_font=%d",
              kai_ok, static_cast<unsigned>(kai_advance), xian_ok, static_cast<unsigned>(xian_advance), xi_ok,
              static_cast<unsigned>(xi_advance), common_text_font_ != nullptr);
 

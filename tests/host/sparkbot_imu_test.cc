@@ -1,10 +1,11 @@
-#include "support/test_support.h"
 #include "voicelife/board_esp/sparkbot_imu.h"
 
+#include "support/test_support.h"
+
 using voicelife::ErrorCode;
-using voicelife::test::Check;
 using voicelife::board_esp::ShakeDetector;
 using voicelife::board_esp::SparkBotImu;
+using voicelife::test::Check;
 
 int main() {
     ShakeDetector detector;

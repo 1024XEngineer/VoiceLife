@@ -125,7 +125,8 @@ assert_dependencies(voicelife_display_sparkbot PUBLIC voicelife_contracts voicel
 assert_dependencies(voicelife_display_sparkbot PRIVATE esp_driver_spi esp_lcd esp_partition esp_psram freertos spi_flash)
 assert_dependencies(voicelife_audio_esp PRIVATE esp_driver_i2c esp_driver_i2s esp_timer espressif__esp-sr)
 assert_dependencies(voicelife_board_esp PUBLIC voicelife_contracts)
-assert_dependencies(voicelife_board_esp PRIVATE esp_hw_support esp_partition esp_psram esp_system spi_flash)
+assert_dependencies(voicelife_board_esp PRIVATE esp_driver_i2c esp_hw_support esp_partition esp_psram esp_system esp_timer
+                    espressif2022__bmi270 espressif__i2c_bus freertos spi_flash)
 assert_dependencies(voicelife_runtime PUBLIC voicelife_contracts)
 assert_dependencies(voicelife_runtime_esp PUBLIC voicelife_application)
 assert_dependencies(voicelife_runtime_esp PRIVATE freertos voicelife_mcp)

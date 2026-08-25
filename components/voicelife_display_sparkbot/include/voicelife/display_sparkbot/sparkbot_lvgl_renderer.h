@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -58,28 +59,30 @@ struct SparkBotDisplayLayout {
  *
  * 文本越长，动画越慢；短文本不启动滚动。上下限避免极短句闪动或长句
  * 在屏幕上一闪而过。该纯函数供 host 契约测试使用。
+ * @param overflow_width 正文超出可视区域的像素宽度。
+ * @return 应使用的滚动时长，单位为毫秒；不溢出时返回 0。
  */
 [[nodiscard]] constexpr uint32_t ScrollDurationForOverflow(uint32_t overflow_width) {
-    if (overflow_width == 0) return 0;
     constexpr uint32_t kMinMs = 3000;
     constexpr uint32_t kMaxMs = 12000;
-    const uint32_t scaled = overflow_width > kMaxMs / 35 ? kMaxMs : overflow_width * 35;
-    return scaled < kMinMs ? kMinMs : scaled;
+    const uint32_t scaled = overflow_width == 0 ? 0 : (overflow_width > kMaxMs / 35 ? kMaxMs : overflow_width * 35);
+    return overflow_width == 0 ? 0 : (scaled < kMinMs ? kMinMs : scaled);
 }
 
 /** @brief Linx 文档列出的常用情感/动作 key，固化在固件供本地渲染映射使用。 */
 inline constexpr std::array<std::string_view, 21> kCommonLinxEmojiKeys = {
-    "neutral", "loving", "happy", "embarrassed", "laughing", "surprised", "funny",
-    "shocked", "sad", "thinking", "angry", "winking", "crying", "cool", "relaxed",
-    "delicious", "kissy", "confident", "sleepy", "silly", "confused",
+    "neutral", "loving",    "happy",    "embarrassed", "laughing", "surprised", "funny",
+    "shocked", "sad",       "thinking", "angry",       "winking",  "crying",    "cool",
+    "relaxed", "delicious", "kissy",    "confident",   "sleepy",   "silly",     "confused",
 };
 
-/** @brief 判断 Linx emotion 是否属于文档列出的常用集合。 */
+/**
+ * @brief 判断 Linx emotion 是否属于文档列出的常用集合。
+ * @param key 待校验的 Linx emotion key。
+ * @return key 在固件固化的常用集合中时返回 true。
+ */
 [[nodiscard]] constexpr bool IsCommonLinxEmojiKey(std::string_view key) {
-    for (const auto candidate : kCommonLinxEmojiKeys) {
-        if (candidate == key) return true;
-    }
-    return false;
+    return std::find(kCommonLinxEmojiKeys.begin(), kCommonLinxEmojiKeys.end(), key) != kCommonLinxEmojiKeys.end();
 }
 
 /**
@@ -100,6 +103,8 @@ inline constexpr std::array<std::string_view, 21> kCommonLinxEmojiKeys = {
  *
  * Linx 常用 key 优先保留原始表情；未知 key 回退到 VoiceMood 的官方资源，
  * 防止服务端扩展值直接进入渲染器。
+ * @param snapshot 当前待渲染的显示快照。
+ * @return 受控的 Linx key 或官方 SparkBot 资源 key。
  */
 [[nodiscard]] std::string_view EmotionKeyForSnapshot(const voicelife::voice::DisplaySnapshot& snapshot);
 

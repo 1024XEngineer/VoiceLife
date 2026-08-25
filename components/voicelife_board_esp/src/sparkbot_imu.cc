@@ -29,8 +29,8 @@ ShakeDetector::ShakeDetector(float threshold_mps2, uint32_t cooldown_ms)
     : threshold_mps2_(threshold_mps2), cooldown_ms_(cooldown_ms) {}
 
 bool ShakeDetector::Push(ImuAcceleration acceleration, uint64_t timestamp_ms) {
-    const float magnitude = std::sqrt(acceleration.x * acceleration.x + acceleration.y * acceleration.y +
-                                      acceleration.z * acceleration.z);
+    const float magnitude =
+        std::sqrt(acceleration.x * acceleration.x + acceleration.y * acceleration.y + acceleration.z * acceleration.z);
     if (!std::isfinite(magnitude)) return false;
     if (!baseline_ready_) {
         baseline_magnitude_mps2_ = magnitude;
@@ -166,7 +166,7 @@ class SparkBotImu::Impl final {
             return BMI2_E_COM_FAIL;
         }
         return i2c_master_transmit_receive(self->device_, &reg, 1, data, length, 100) == ESP_OK ? BMI2_OK
-                                                                                                   : BMI2_E_COM_FAIL;
+                                                                                                : BMI2_E_COM_FAIL;
     }
 
     static int8_t Write(uint8_t reg, const uint8_t* data, uint32_t length, void* context) {
@@ -178,7 +178,7 @@ class SparkBotImu::Impl final {
         payload[0] = reg;
         if (length != 0) std::memcpy(payload.data() + 1, data, length);
         return i2c_master_transmit(self->device_, payload.data(), payload.size(), 100) == ESP_OK ? BMI2_OK
-                                                                                                   : BMI2_E_COM_FAIL;
+                                                                                                 : BMI2_E_COM_FAIL;
     }
 
     static void Delay(uint32_t period_us, void*) {
@@ -199,8 +199,8 @@ class SparkBotImu::Impl final {
             if (bmi2_get_sensor_data(&data, &bmi_) == BMI2_OK && (data.status & BMI2_DRDY_ACC) != 0) {
                 const float scale = (2.0F * kGravityMps2) / static_cast<float>(1U << bmi_.resolution);
                 const ImuAcceleration acceleration{.x = static_cast<float>(data.acc.x) * scale,
-                                                    .y = static_cast<float>(data.acc.y) * scale,
-                                                    .z = static_cast<float>(data.acc.z) * scale};
+                                                   .y = static_cast<float>(data.acc.y) * scale,
+                                                   .z = static_cast<float>(data.acc.z) * scale};
                 const uint64_t now_ms = esp_timer_get_time() / 1000ULL - start_ms;
                 if (detector.Push(acceleration, now_ms) && callback_) callback_();
             }

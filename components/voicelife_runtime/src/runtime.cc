@@ -297,11 +297,10 @@ class Runtime final {
             if (!init_status_.ok()) return fail_startup(init_status_);
             schedule_mcp_registered_ = true;
             // MCP worker 只产生绑定结果；轮询与 OLED/TTS 均由各自受控任务处理。
-            ESP_LOGI(
-                kTag,
-                "MCP_TOOLS_READY count=9 names=schedule.create,schedule.query,schedule.update,schedule.delete,"
-                "schedule.operation_query,schedule.reminder_acknowledge,schedule.reminder_snooze,im.binding.start,"
-                "self.audio_speaker.set_volume");
+            ESP_LOGI(kTag,
+                     "MCP_TOOLS_READY count=9 names=schedule.create,schedule.query,schedule.update,schedule.delete,"
+                     "schedule.operation_query,schedule.reminder_acknowledge,schedule.reminder_snooze,im.binding.start,"
+                     "self.audio_speaker.set_volume");
         }
         const Status reminder_status = schedule_reminder_service_->Start();
         if (!reminder_status.ok()) {

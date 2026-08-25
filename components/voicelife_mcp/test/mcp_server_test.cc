@@ -221,12 +221,14 @@ void TestToolCalls() {
           "未定义参数应被拒绝");
 
     int applied_volume = -1;
-    Check(voicelife::mcp::RegisterAudioMcpTools(server, [&applied_volume](int volume) { applied_volume = volume; }).ok(),
-          "音量 MCP 工具应注册成功");
-    const auto volume_result = server.call({
-        .request_id = "volume-request", .name = "self.audio_speaker.set_volume", .arguments = {{"volume", int64_t{30}}}});
-    Check(volume_result.status.ok() && applied_volume == 30 && volume_result.output.kind == ToolOutputValue::Kind::kBoolean &&
-              volume_result.output.boolean,
+    Check(
+        voicelife::mcp::RegisterAudioMcpTools(server, [&applied_volume](int volume) { applied_volume = volume; }).ok(),
+        "音量 MCP 工具应注册成功");
+    const auto volume_result = server.call({.request_id = "volume-request",
+                                            .name = "self.audio_speaker.set_volume",
+                                            .arguments = {{"volume", int64_t{30}}}});
+    Check(volume_result.status.ok() && applied_volume == 30 &&
+              volume_result.output.kind == ToolOutputValue::Kind::kBoolean && volume_result.output.boolean,
           "音量工具应接受 0..100 整数并返回 true");
     Check(server.call({.request_id = "volume-out-of-range",
                        .name = "self.audio_speaker.set_volume",

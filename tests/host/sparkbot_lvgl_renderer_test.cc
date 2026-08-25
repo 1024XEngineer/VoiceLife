@@ -16,10 +16,10 @@ int main() {
     using voicelife::display_sparkbot::IsCommonLinxEmojiKey;
     using voicelife::display_sparkbot::IsIdleScreenSaverEligible;
     using voicelife::display_sparkbot::IsValidLogicalSpiHost;
+    using voicelife::display_sparkbot::ScrollDurationForOverflow;
     using voicelife::display_sparkbot::ShouldEnterIdleScreenSaver;
     using voicelife::display_sparkbot::ShouldExitIdleScreenSaver;
     using voicelife::display_sparkbot::SparkBotLvglRenderer;
-    using voicelife::display_sparkbot::ScrollDurationForOverflow;
 
     // 官方 emotion key 映射：全部落在官方/受控资源 key 集合内。
     const std::string_view kAllowedKeys[] = {
@@ -70,8 +70,7 @@ int main() {
           "顶部图标应缩小，中央表情舞台应放大到可辨识尺寸");
     Check(layout.content_scroll_mode == decltype(layout.content_scroll_mode)::kHorizontal,
           "正文栏必须使用单向横向滚动，避免整句重复");
-    Check(IsCommonLinxEmojiKey("happy") && IsCommonLinxEmojiKey("confused") &&
-              !IsCommonLinxEmojiKey("unknown"),
+    Check(IsCommonLinxEmojiKey("happy") && IsCommonLinxEmojiKey("confused") && !IsCommonLinxEmojiKey("unknown"),
           "Linx 常用 emoji key 列表必须固化且拒绝未知值");
     Check(ScrollDurationForOverflow(0) == 0 && ScrollDurationForOverflow(1) >= 3000 &&
               ScrollDurationForOverflow(1000) <= 12000,
