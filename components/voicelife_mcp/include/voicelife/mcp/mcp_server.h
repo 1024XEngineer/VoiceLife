@@ -319,7 +319,7 @@ class McpServer {
      * @return 包含完整工具定义和 nextCursor 的一页 JSON，或受控失败。
      */
     [[nodiscard]] Result<std::string> list_tools_page_json(std::size_t start_index,
-                                                            std::size_t maximum_json_bytes) const;
+                                                           std::size_t maximum_json_bytes) const;
 
     /**
      * @brief 根据工具名称校验参数并执行对应 handler。

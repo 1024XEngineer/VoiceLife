@@ -91,9 +91,7 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
 
 class FakeOpusCodecStrategy final : public voicelife::voice::CodecStrategy {
    public:
-    [[nodiscard]] voicelife::voice::AudioCodec codec() const override {
-        return voicelife::voice::AudioCodec::kOpus;
-    }
+    [[nodiscard]] voicelife::voice::AudioCodec codec() const override { return voicelife::voice::AudioCodec::kOpus; }
 
     Status Configure(const voicelife::voice::AudioFormat& local_pcm,
                      const voicelife::voice::AudioFormat& wire) override {
@@ -107,7 +105,7 @@ class FakeOpusCodecStrategy final : public voicelife::voice::CodecStrategy {
         ++encode_calls;
         if (pcm.format.codec != voicelife::voice::AudioCodec::kPcmS16Le) {
             return voicelife::Result<voicelife::voice::AudioFrame>::Failure(ErrorCode::kInvalidArgument,
-                                                                              "测试 PCM 格式错误");
+                                                                            "测试 PCM 格式错误");
         }
         voicelife::voice::AudioFrame encoded;
         encoded.generation = pcm.generation;
@@ -124,7 +122,7 @@ class FakeOpusCodecStrategy final : public voicelife::voice::CodecStrategy {
         }
         if (encoded.format.codec != voicelife::voice::AudioCodec::kOpus) {
             return voicelife::Result<voicelife::voice::AudioFrame>::Failure(ErrorCode::kInvalidArgument,
-                                                                              "测试 Opus 格式错误");
+                                                                            "测试 Opus 格式错误");
         }
         voicelife::voice::AudioFrame pcm;
         pcm.generation = encoded.generation;
@@ -465,7 +463,7 @@ int main() {
 
     FakeTransport missing_strategy_transport;
     voicelife::linx::LinxSpeechProviderAdapter missing_strategy_provider(missing_strategy_transport, codec,
-                                                                           opus_connection);
+                                                                         opus_connection);
     Check(missing_strategy_provider.Connect(session_config, {}).code == ErrorCode::kUnavailable &&
               missing_strategy_transport.connects == 0,
           "缺少 Opus 策略时必须在 hello 前拒绝连接，不能假装支持 Opus");

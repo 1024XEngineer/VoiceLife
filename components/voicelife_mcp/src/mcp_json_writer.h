@@ -21,7 +21,6 @@ std::string SerializeListToolsResult(const ListToolsResult& result);
  * @param end_index 当前页最后一个工具之后的下标。
  * @return 序列化成功时返回带 nextCursor 的 JSON 文本，失败时返回空对象。
  */
-std::string SerializeListToolsResultPage(const ListToolsResult& result, std::size_t begin_index,
-                                         std::size_t end_index);
+std::string SerializeListToolsResultPage(const ListToolsResult& result, std::size_t begin_index, std::size_t end_index);
 
 }  // namespace voicelife::mcp

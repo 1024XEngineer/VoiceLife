@@ -39,8 +39,8 @@ ToolListing ReadAllToolPages(const McpServer& server, std::string_view session_i
     ToolListing listing;
     std::optional<std::string> cursor;
     for (std::size_t page_index = 0; page_index < 16; ++page_index) {
-        std::string request = "{\"jsonrpc\":\"2.0\",\"method\":\"tools/list\",\"id\":\"list-" +
-                              std::to_string(page_index) + "\"";
+        std::string request =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"tools/list\",\"id\":\"list-" + std::to_string(page_index) + "\"";
         if (cursor.has_value()) request += ",\"params\":{\"cursor\":\"" + *cursor + "\"}";
         request += "}";
 
@@ -52,8 +52,7 @@ ToolListing ReadAllToolPages(const McpServer& server, std::string_view session_i
         const JsonValue* result = listed.Get("result");
         const JsonValue* tools = result == nullptr ? nullptr : result->Get("tools");
         const JsonValue* next_cursor = result == nullptr ? nullptr : result->Get("nextCursor");
-        Check(tools != nullptr && tools->IsArray() && next_cursor != nullptr,
-              "每一页必须包含 tools 和 nextCursor");
+        Check(tools != nullptr && tools->IsArray() && next_cursor != nullptr, "每一页必须包含 tools 和 nextCursor");
         for (const auto& tool : tools->array) {
             const JsonValue* name = tool.Get("name");
             Check(name != nullptr && name->IsString(), "目录中的每个工具必须保留名称");
@@ -87,9 +86,9 @@ int main() {
           "initialize 必须声明 MCP tools 能力");
 
     const ToolListing listing = ReadAllToolPages(server, "remote-session");
-    Check(listing.response_sizes.size() > 1 && listing.names ==
-                                                  std::vector<std::string>{"schedule.create", "schedule.query",
-                                                                           "schedule.update", "schedule.delete"},
+    Check(listing.response_sizes.size() > 1 &&
+              listing.names ==
+                  std::vector<std::string>{"schedule.create", "schedule.query", "schedule.update", "schedule.delete"},
           "tools/list 必须按 cursor 分页完整、稳定地返回一次性日程工具");
     const auto* create_schema = listing.first_tool.Get("inputSchema");
     Check(create_schema->Get("required")->array.size() == 1 &&
@@ -110,8 +109,7 @@ int main() {
                   std::string::npos,
           "tools/call 必须返回 MCP text content");
     Check(called.Get("result")->Get("isError")->boolean == false, "成功 tools/call 必须明确声明 isError=false");
-    Check(call_outcome.success && call_outcome.result_status == "success",
-          "直接执行路径必须保留受控的业务成功状态");
+    Check(call_outcome.success && call_outcome.result_status == "success", "直接执行路径必须保留受控的业务成功状态");
     const auto successful_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(
         R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"创建会议","start_time":1900000000}},"id":3})",
         call);

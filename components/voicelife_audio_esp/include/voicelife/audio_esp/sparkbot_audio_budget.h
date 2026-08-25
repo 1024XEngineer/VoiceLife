@@ -16,7 +16,12 @@ inline constexpr std::size_t kSparkBotOpusDecodeCandidateFrames = 1;
 inline constexpr std::size_t kSparkBotOpusDecodePoolSlots =
     kSparkBotPlaybackQueueDepth + kSparkBotPlaybackWriterFrames + kSparkBotOpusDecodeCandidateFrames;
 
+/**
+ * @brief 确保播放队列深度与声明的延迟预算一致。
+ * @param kSparkBotOpusFrameDurationMs 单个 Opus 帧的时长常量。
+ */
 static_assert(kSparkBotPlaybackQueueDepth * kSparkBotOpusFrameDurationMs == kSparkBotPlaybackLatencyBudgetMs);
+/** @brief 确保解码池覆盖队列、写入帧和候选帧。 */
 static_assert(kSparkBotOpusDecodePoolSlots >= kSparkBotPlaybackQueueDepth + 2);
 
 }  // namespace voicelife::audio_esp

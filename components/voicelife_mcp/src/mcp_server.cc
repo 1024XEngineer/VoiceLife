@@ -316,8 +316,7 @@ ListToolsResult McpServer::list_tools() const {
 
 std::string McpServer::list_tools_json() const { return SerializeListToolsResult(list_tools()); }
 
-Result<std::string> McpServer::list_tools_page_json(std::size_t start_index,
-                                                     std::size_t maximum_json_bytes) const {
+Result<std::string> McpServer::list_tools_page_json(std::size_t start_index, std::size_t maximum_json_bytes) const {
     const ListToolsResult result = list_tools();
     if (start_index > result.tools.size()) {
         return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "tools/list cursor 超出范围");

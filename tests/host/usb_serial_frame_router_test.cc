@@ -23,13 +23,14 @@ std::vector<uint8_t> ImFrame(std::string_view magic, std::string_view origin, st
         frame.push_back(static_cast<uint8_t>(value.size() >> 8U));
         frame.push_back(static_cast<uint8_t>(value.size()));
     }
-    for (const std::string_view value : {origin, device_id, token, user_id}) frame.insert(frame.end(), value.begin(), value.end());
+    for (const std::string_view value : {origin, device_id, token, user_id})
+        frame.insert(frame.end(), value.begin(), value.end());
     return frame;
 }
 
 std::vector<uint8_t> VoiceFrame(uint8_t kind, std::span<const uint8_t> payload = {}) {
-    std::vector<uint8_t> frame{'V', 'L', 'V', 'T', 1, kind, static_cast<uint8_t>(payload.size()),
-                               static_cast<uint8_t>(payload.size() >> 8U)};
+    std::vector<uint8_t> frame{
+        'V', 'L', 'V', 'T', 1, kind, static_cast<uint8_t>(payload.size()), static_cast<uint8_t>(payload.size() >> 8U)};
     frame.insert(frame.end(), payload.begin(), payload.end());
     return frame;
 }

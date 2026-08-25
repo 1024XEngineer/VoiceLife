@@ -144,8 +144,8 @@ class EspOpusCodecStrategy final : public voice::CodecStrategy {
         };
         const int status = esp_opus_enc_process(encoder_, &input, &output);
         if (status != ESP_AUDIO_ERR_OK || output.encoded_bytes == 0 || output.encoded_bytes > payload.size()) {
-            return Result<voice::AudioFrame>::Failure(ErrorCode::kUnavailable, "Opus 上行编码失败 err=" +
-                                                                                   std::to_string(status));
+            return Result<voice::AudioFrame>::Failure(ErrorCode::kUnavailable,
+                                                      "Opus 上行编码失败 err=" + std::to_string(status));
         }
         payload.resize(output.encoded_bytes);
         voice::AudioFrame encoded;
@@ -182,9 +182,10 @@ class EspOpusCodecStrategy final : public voice::CodecStrategy {
         };
         esp_audio_dec_info_t info = {};
         const int status = esp_opus_dec_decode(decoder_, &input, &output, &info);
-        if (status != ESP_AUDIO_ERR_OK || input.consumed != encoded.payload.size() || output.decoded_size != kPcmFrameBytes) {
-            return Result<voice::AudioFrame>::Failure(ErrorCode::kUnavailable, "Opus 下行解码失败 err=" +
-                                                                                   std::to_string(status));
+        if (status != ESP_AUDIO_ERR_OK || input.consumed != encoded.payload.size() ||
+            output.decoded_size != kPcmFrameBytes) {
+            return Result<voice::AudioFrame>::Failure(ErrorCode::kUnavailable,
+                                                      "Opus 下行解码失败 err=" + std::to_string(status));
         }
         payload.resize(output.decoded_size);
         voice::AudioFrame pcm;

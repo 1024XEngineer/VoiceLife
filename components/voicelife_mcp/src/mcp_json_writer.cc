@@ -277,11 +277,9 @@ std::string SerializeListToolsResultPage(const ListToolsResult& result, std::siz
     }
 
     const std::string next_cursor_text = std::to_string(end_index);
-    yyjson_mut_val* next_cursor = end_index == result.tools.size()
-                                     ? yyjson_mut_null(document.get())
-                                     : MakeString(document.get(), next_cursor_text);
-    if (next_cursor == nullptr ||
-        !yyjson_mut_obj_add(root, MakeString(document.get(), "nextCursor"), next_cursor)) {
+    yyjson_mut_val* next_cursor = end_index == result.tools.size() ? yyjson_mut_null(document.get())
+                                                                   : MakeString(document.get(), next_cursor_text);
+    if (next_cursor == nullptr || !yyjson_mut_obj_add(root, MakeString(document.get(), "nextCursor"), next_cursor)) {
         return "{}";
     }
 

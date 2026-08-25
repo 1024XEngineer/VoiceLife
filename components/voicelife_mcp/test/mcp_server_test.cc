@@ -545,8 +545,8 @@ void TestToolListingPagination() {
 
     constexpr std::size_t kPageBudget = 600;
     const auto first = server.list_tools_page_json(0, kPageBudget);
-    Check(first.ok() && first.value->size() <= kPageBudget && first.value->find("\"name\":\"page.one\"") !=
-                                                      std::string::npos &&
+    Check(first.ok() && first.value->size() <= kPageBudget &&
+              first.value->find("\"name\":\"page.one\"") != std::string::npos &&
               first.value->find("\"nextCursor\":\"1\"") != std::string::npos,
           "第一页必须保留完整首工具并给出下一游标");
     const auto second = server.list_tools_page_json(1, kPageBudget);

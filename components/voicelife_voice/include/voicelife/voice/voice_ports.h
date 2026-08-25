@@ -214,10 +214,13 @@ class CodecStrategy {
     [[nodiscard]] virtual AudioCodec codec() const = 0;
 
     /**
-     * 配置本地 PCM 与线上编码格式的固定转换契约。
+     * @brief 配置本地 PCM 与线上编码格式的固定转换契约。
      *
      * Provider 必须在 hello 之前调用此方法，使资源、帧时长或码率不满足时
      * 在宣告线上格式前失败，而不是在第一帧语音到达时才暴露。
+     * @param local_pcm 本地 PCM 音频格式。
+     * @param wire 线上编码音频格式。
+     * @return 配置成功返回 Ok，否则返回参数或资源错误。
      */
     virtual Status Configure(const AudioFormat& local_pcm, const AudioFormat& wire) = 0;
 

@@ -291,7 +291,8 @@ void LinxSpeechProviderAdapter::OnTransportConnected() {
 #ifdef ESP_PLATFORM
     const voice::AudioFormat wire = WireAudioFormat();
     ESP_LOGI("voicelife_linx",
-             "LINX_HELLO_REQUEST local_format=%d wire_format=%d sample_rate=%u channels=%u bits=%u frame_ms=%u play_buffer_ms=%u",
+             "LINX_HELLO_REQUEST local_format=%d wire_format=%d sample_rate=%u channels=%u bits=%u frame_ms=%u "
+             "play_buffer_ms=%u",
              static_cast<int>(config_.audio.codec), static_cast<int>(wire.codec),
              static_cast<unsigned>(wire.sample_rate_hz), static_cast<unsigned>(wire.channels),
              static_cast<unsigned>(wire.bits_per_sample), static_cast<unsigned>(wire.frame_duration_ms),
@@ -440,13 +441,12 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
                 const bool is_transcoded_wire = wire.codec != config_.audio.codec;
                 if ((is_transcoded_wire && !SameFormat(server_wire, wire)) ||
                     (!is_transcoded_wire && server_wire.codec != wire.codec)) {
-                    Emit(Event(voice::VoiceEventKind::kError,
-                               "Linx hello 返回了当前固件未配置的线上音频格式"));
+                    Emit(Event(voice::VoiceEventKind::kError, "Linx hello 返回了当前固件未配置的线上音频格式"));
                     {
                         std::lock_guard<std::mutex> lock(hello_mutex_);
                         hello_received_ = true;
-                        hello_status_ = Status::Error(ErrorCode::kInvalidArgument,
-                                                      "Linx hello 返回了当前固件未配置的线上音频格式");
+                        hello_status_ =
+                            Status::Error(ErrorCode::kInvalidArgument, "Linx hello 返回了当前固件未配置的线上音频格式");
                     }
                     hello_cv_.notify_all();
                     return;
