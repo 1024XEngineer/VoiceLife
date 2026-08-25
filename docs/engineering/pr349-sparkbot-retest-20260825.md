@@ -1,0 +1,93 @@
+# PR349 SparkBot 百炼复测记录（2026-08-25）
+
+结论：新的干净工作树已修复缺失 SQLite 生成组件导致的 SparkBot 构建失败；当前固件完成百炼预检、V1 唤醒恢复和儿童视角 8 轮连续对话。8 轮在同一条 Linx 会话中通过，未出现 PCM 拒绝、WebSocket 断开、I2S 错误或交互队列丢弃。
+
+本记录是 PR #359 的可审计摘要。原始串口、百炼音频、密钥和任何认证字段仅留在本机受控目录，不提交仓库。12 轮、终结语、再次唤醒和 MCP 执行验证仍在后续阶段完成前不计为通过。
+
+关联：Issue #358、PR #359，均归入 `MS4：打磨、交付与发布`。
+
+## 构建修复与基线
+
+干净工作树最初执行：
+
+```bash
+python3 scripts/firmware.py build esp32s3-esp-sparkbot-serial-voice
+```
+
+失败于 `Failed to resolve component sqlite3`。`third_party/sqlite3` 是按约定由固定脚本生成且不入 Git 的组件，构建入口此前没有准备它。
+
+- `3f7999e`：构建前检查 `sqlite3.c`、`sqlite3.h` 和 `CMakeLists.txt`；缺失时调用 `scripts/prepare_sqlite.py`，完整组件已存在时直接复用。
+- `ec8a934`：调整新增 Python 测试的上下文写法，使其通过 Ruff `SIM117` 格式门禁。
+
+本轮测试环境：
+
+| 项目 | 值 |
+| --- | --- |
+| 板卡 | SparkBot，ESP32-S3，8 MB PSRAM，ES8311 |
+| 设备 MAC | `98:a3:16:c7:81:b0` |
+| 串口 | `/dev/cu.usbmodem14201` |
+| Wi-Fi | `zxp`（不记录密码） |
+| Profile | `esp32s3-esp-sparkbot-serial-voice` |
+| ESP-IDF | v6.0.2 |
+| 源码 HEAD | `ec8a9344f7629ac4c7b4c233270b29ddf7f5863b` |
+| 应用 ELF SHA-256 | `fb1157ad2ea9ead74731205e8a8f44d2856428b4b1c9ccbb70752e25ce11b7f6` |
+| 应用 BIN SHA-256 | `12b88b95d7a09e7602ab4dba0da021c35a6988f401e81c2e253f64cb37a50bfa` |
+| 镜像大小 / 余量 | `0x287640` / `0x489c0`（10%） |
+
+只刷写了应用分区 `0x10000`，esptool 校验通过。已配 Wi-Fi/NVS、SQLite/FATFS 数据卷、字体、表情资源和 `srmodels` 均保留。启动日志确认 `WIFI_STA_GOT_IP=1`、Linx OTA 响应可用、`DISPLAY_READY=1`、资源 mmap 成功和 `SERIAL_VOICE_TEST_READY=1`。
+
+## 主机与百炼门禁
+
+| 用例 | 结果 |
+| --- | --- |
+| `python3 -m unittest tests/python/test_firmware.py` | 17/17 通过 |
+| `./scripts/run_host_tests.sh` | 91/91 通过 |
+| `./scripts/run_checks.sh` | Python 193 passed、1 skipped、67 subtests；profile validate 全通过 |
+| `./scripts/check_format.sh` | 通过 |
+| 百炼 TTS 预检 | 1/1 通过，音频 58,187 B，TTS p50 890.69 ms，首包 p50 643.48 ms |
+
+从一个未加载 ESP-IDF 的新 shell 运行构建时，脚本按设计提示需要先加载工具链；加载 `/Users/mac/esp-idf-v6.0.2/export.sh` 后，同一构建命令通过。这是环境前置条件，不是源码回归。
+
+## V1：唤醒与自动监听恢复
+
+输入由百炼 `qwen-audio-3.0-tts-flash` / `longanlingxi` 合成：`你好牛牛`。脚本转换并注入 58 个 20 ms PCM 帧（37,120 B）。
+
+1. 本地模型进入 `standby_ready` 后接受 `WAKE_BEGIN`。
+2. `WAKE_DETECTED word=你好牛牛` 出现。
+3. Linx 顺序为 `listen.detect -> listen.start mode=auto`。
+4. 确认音严格为 `收到！`，观察到 `tts_started -> tts_sentence_started -> tts_first_audio -> tts_stopped`，首音频为 407 ms。
+5. 播放结束后重新进入 `capture_started` 和 `SERIAL_VOICE_CAPTURE_READY`。
+
+首次串口打开仍处于 `ready` 到 `standby_ready` 的本地模型启动窗口，出现 `WAKE_BEGIN reject code=4`。夹具等待待机事件后按协议重试成功，没有重刷固件或改写网络配置。最终 `in_drop`、`out_reject`、`short_write`、I2S 输入/输出错误、PCM 拒绝、Provider 错误、交互拒绝和 WebSocket/RST 均为 0。
+
+## V2：儿童视角 8 轮连续对话
+
+同一 Linx 会话内运行 8 轮，严格按去除中文标点和空白后的文本匹配 ASR。问号省略属于该规则，不是文本失配。
+
+| 轮次 | 注入原文 | 板端 ASR | 第一段 TTS | PCM |
+| ---: | --- | --- | --- | ---: |
+| 1 | 我是小朋友，你是谁？ | 我是小朋友，你是谁？ | 😆哈哈，我是牛牛呀！ | 102/102 |
+| 2 | 你喜欢什么颜色？ | 你喜欢什么颜色？ | 😆我最喜欢蓝色啦！ | 87/87 |
+| 3 | 我喜欢蓝色。 | 我喜欢蓝色。 | 😆哇，太棒啦！ | 66/66 |
+| 4 | 蓝色像什么？ | 蓝色像什么 | 😶嗯…蓝色像很多东西呢！ | 78/78 |
+| 5 | 大海里有鱼吗？ | 大海里有鱼吗？ | 😶当然有啦！ | 83/83 |
+| 6 | 海豚会游泳吗？ | 海豚会游泳吗？ | 😶哈哈，海豚可会游泳啦！ | 87/87 |
+| 7 | 月亮会发光吗？ | 月亮会发光吗 | 😶嗯…月亮其实自己不会发光哦！ | 83/83 |
+| 8 | 星星在哪里？ | 星星在哪里 | 😶星星在很远很远的外太空呢！ | 70/70 |
+
+结果：`completed_turns=8/8`、`asr_exact_matches=8/8`、`test_in_frames=656`、`test_in_bytes=419840`。显示记录 73 次文本快照、42 次内容快照，并出现真实横向滚动。
+
+最终音频统计：`in_drop=0`、`in_pool_fail=0`、`out_reject=0`、`short_write=0`、`in_i2s_err=0`、`out_i2s_err=0`，输出队列高水位为 `46/96`。`SERIAL_VOICE_PCM=reject`、`INTERACTION_REJECTED`、`provider_error`、`LINX_WS_ERROR`、`Connection reset`、`transport_poll_write(0)` 和 `MCP_REQUEST_REJECTED` 均为 0。
+
+启动阶段仍发送了 8 个 MCP 工具，`MCP_TX tools/list bytes=7540` 与 `LINX_TX_TEXT_SENT bytes=7540` 相等。随后完成全部八轮且没有重连，因此本轮不能把该目录尺寸认定为断链原因。
+
+## 证据与边界
+
+- V1 明文串口：`/tmp/voicelife-pr359-20260825/wake-20260825-112057.log`
+- V2 明文串口：`/tmp/voicelife-pr359-20260825/multiturn-20260825-112231.log`
+- V2 汇总：`/tmp/voicelife-pr359-20260825/multiturn-20260825-112231.json`
+- 百炼预检：`/tmp/voicelife-pr359-20260825/preflight-20260825-111618.json`
+
+这两项证明的是当前固件、当前网络和指定百炼模型组合下的协议、状态、显示与 I2S 链路。它们不证明真实麦克风长时声学、AEC、双讲、断网恢复或 MCP 工具调用已经通过。
+
+下一步：追加 12 轮儿童上下文、终结语 wake guard、12 轮后的独立再次唤醒，以及收到真实 `tools/call` 后的 MCP 执行边界。
