@@ -325,7 +325,9 @@ void CheckOneShotReminderLifecycle() {
     const auto deleted = server.call({
         .request_id = "delete-reminder",
         .name = "schedule.delete",
-        .arguments = {{"schedule_id", int64_t{1}}},
+        .arguments = {{"schedule_id", int64_t{1}},
+                      {"expected_event", std::string("第二次提醒")},
+                      {"expected_start_time", std::string("2030-01-02 09:00:00")}},
     });
     Check(deleted.status.ok() && OutputString(deleted, "status") == "success", "删除提醒日程应成功");
     const auto deleted_schedule = schedules.FindById(1);
@@ -397,7 +399,9 @@ void CheckReminderSyncFailurePaths() {
     const auto delete_failed = fixture.server.call({
         .request_id = "delete-cancel-failed",
         .name = "schedule.delete",
-        .arguments = {{"schedule_id", int64_t{2}}},
+        .arguments = {{"schedule_id", int64_t{2}},
+                      {"expected_event", std::string("待修改提醒")},
+                      {"expected_start_time", std::string("2030-01-03 09:00:00")}},
     });
     Check(delete_failed.status.ok() && OutputString(delete_failed, "status") == "failure" &&
               OutputString(delete_failed, "message").find("提醒取消失败") != std::string::npos,

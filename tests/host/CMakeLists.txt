@@ -295,6 +295,11 @@ add_voicelife_test(schedule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_
     $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
 target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule im)
 
+add_voicelife_test(schedule_mcp_tools_delete_confirmation_test "unit;mcp;schedule;runtime"
+    schedule_mcp_tools_delete_confirmation_test.cc
+    $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
+target_link_libraries(schedule_mcp_tools_delete_confirmation_test PRIVATE mcp schedule im)
+
 add_voicelife_test(schedule_mcp_tools_reminder_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_reminder_test.cc
     $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
