@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ROOT / "config" / "profiles"
+SQLITE_COMPONENT = ROOT / "third_party" / "sqlite3"
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 CAPABILITY_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
 SDKCONFIG_PATTERN = re.compile(r"^CONFIG_[A-Z0-9_]+=.+$")
@@ -130,8 +131,17 @@ def run(command: list[str]) -> None:
         raise ProfileError(f"找不到命令 {command[0]}，请先加载对应工具链环境") from error
 
 
+def ensure_sqlite_component(component_dir: Path = SQLITE_COMPONENT) -> None:
+    """Prepare the generated SQLite component required by persistent profiles."""
+    required = (component_dir / "sqlite3.c", component_dir / "sqlite3.h", component_dir / "CMakeLists.txt")
+    if all(path.is_file() for path in required):
+        return
+    run([sys.executable, str(ROOT / "scripts" / "prepare_sqlite.py")])
+
+
 def build(profile_id: str) -> Path:
     profile = load_profile(profile_path(profile_id))
+    ensure_sqlite_component()
     build_dir = ROOT / "build" / profile_id
     build_dir.mkdir(parents=True, exist_ok=True)
     defaults = build_dir / "sdkconfig.profile.defaults"

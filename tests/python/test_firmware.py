@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -61,6 +62,24 @@ class ProfileValidationTest(unittest.TestCase):
     def test_reports_missing_tool_without_traceback(self, _: mock.Mock) -> None:
         with self.assertRaisesRegex(firmware.ProfileError, "找不到命令 idf.py"):
             firmware.run(["idf.py", "build"])
+
+    def test_prepares_generated_sqlite_component_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch("firmware.run") as run:
+                firmware.ensure_sqlite_component(Path(directory))
+
+        run.assert_called_once_with([sys.executable, str(ROOT / "scripts" / "prepare_sqlite.py")])
+
+    def test_reuses_existing_generated_sqlite_component(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            component = Path(directory)
+            for name in ("sqlite3.c", "sqlite3.h", "CMakeLists.txt"):
+                (component / name).touch()
+
+            with mock.patch("firmware.run") as run:
+                firmware.ensure_sqlite_component(component)
+
+        run.assert_not_called()
 
     def test_sparkbot_profile_enables_gateway_im_without_selecting_pcb(self) -> None:
         profile_path = ROOT / "config" / "profiles" / "esp32s3-esp-sparkbot.json"
