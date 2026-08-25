@@ -168,7 +168,6 @@ jobs:
         with:
           use_oidc: true
           files: coverage/cpp.xml
-          disable_search: true
           flags: cpp
           fail_ci_if_error: true
           verbose: true
@@ -177,7 +176,6 @@ jobs:
         with:
           use_oidc: true
           files: services/im-gateway/coverage/lcov.info
-          disable_search: true
           flags: typescript
           fail_ci_if_error: true
           verbose: true
