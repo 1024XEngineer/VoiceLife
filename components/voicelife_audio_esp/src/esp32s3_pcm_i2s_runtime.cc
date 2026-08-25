@@ -303,6 +303,7 @@ void Esp32s3PcmAudioPorts::Impl::CaptureLoop() {
 }
 
 void Esp32s3PcmAudioPorts::Impl::DeliveryLoop() {
+    std::size_t delivered_frames = 0;
     while (true) {
         voice::AudioFrame frame;
         voice::AudioFrameSink sink;
@@ -320,6 +321,12 @@ void Esp32s3PcmAudioPorts::Impl::DeliveryLoop() {
             ++dropped_input_frames_;
         } else {
             ++captured_frames_;
+            ++delivered_frames;
+            if (delivered_frames % 128 == 0) {
+                const UBaseType_t remaining_words = uxTaskGetStackHighWaterMark(nullptr);
+                ESP_LOGI(detail::kAudioRuntimeTag, "DELIVERY_TASK_STACK remaining_bytes=%u",
+                         static_cast<unsigned>(remaining_words * sizeof(StackType_t)));
+            }
         }
     }
     MarkTaskDone(&delivery_task_);

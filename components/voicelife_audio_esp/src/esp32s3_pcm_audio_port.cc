@@ -463,11 +463,13 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
         return detail::Unavailable("创建 I2S 采集任务失败");
     }
     // 投递任务栈常驻 PSRAM、TCB 在内部 RAM：待机恢复时内部 RAM 最大连续块
-    // 常 <16KB，16384B 动态栈创建必然失败。xTaskCreateStatic 的栈可放 PSRAM
+    // 常 <16KB，动态栈创建必然失败。Opus 编码在投递任务调用，32 KiB 静态栈
+    // 留出编码器调用链的余量。xTaskCreateStatic 的栈可放 PSRAM
     // （xPortCheckValidStackMem 允许外部 RAM），但 TCB 必须内部 RAM
     // （xPortCheckValidTCBMem 断言，调度器临界区依赖内部寻址）。一次性分配、
     // 跨采集周期复用，不释放（PSRAM 8MB 充裕，随 AudioPorts 生命周期）。
-    constexpr uint32_t kDeliveryStackWords = 16384 / sizeof(StackType_t);
+    constexpr uint32_t kDeliveryStackBytes = 32 * 1024;
+    constexpr uint32_t kDeliveryStackWords = kDeliveryStackBytes / sizeof(StackType_t);
     if (delivery_stack_ == nullptr || delivery_tcb_ == nullptr) {
         delivery_stack_ = static_cast<StackType_t*>(
             heap_caps_malloc(sizeof(StackType_t) * kDeliveryStackWords, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -506,6 +508,8 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
         return detail::Unavailable("创建 I2S 音频投递任务失败");
     }
     delivery_task_ = delivery_task;
+    ESP_LOGI(detail::kAudioRuntimeTag, "DELIVERY_TASK_READY stack_bytes=%u memory=psram",
+             static_cast<unsigned>(kDeliveryStackBytes));
     return Status::Ok();
 #endif
 }

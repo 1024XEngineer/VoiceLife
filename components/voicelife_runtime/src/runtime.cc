@@ -37,6 +37,7 @@
 #include "voicelife/im/im_config_store.h"
 #include "voicelife/im/im_retry_policy.h"
 #include "voicelife/im/im_runtime.h"
+#include "voicelife/audio_esp/esp_opus_codec_strategy.h"
 #include "voicelife/linx/linx_speech_provider.h"
 #include "voicelife/linx/linx_types.h"
 #include "voicelife/linx_esp/esp_websocket_transport.h"
@@ -213,7 +214,8 @@ class Runtime final {
                 *linx_transport_, linx_codec_, linx_config_, linx::LinxSpeechProviderAdapter::DefaultCapabilities(),
                 [this](std::string_view payload, std::string_view session_id) {
                     return HandleMcpRequest(payload, session_id);
-                });
+                },
+                audio_esp::CreateEspOpusCodecStrategy());
         });
 #endif
         registry.Register("scaffold", voice::CapabilityProfile{"scaffold", {"streaming-asr", "tts"}},
@@ -393,6 +395,14 @@ class Runtime final {
         }
         ShowDisplay(voice::VoiceMood::kConnecting, "连接", "");
         linx_config_ = std::move(*connection.value);
+        // SparkBot keeps I2S/VAD/serial injection at PCM 16 kHz / 20 ms.
+        // The Linx provider converts only at the WebSocket boundary, matching
+        // the platform's documented low-latency Opus VoIP profile.
+        linx_config_.preferred_audio = {.codec = voice::AudioCodec::kOpus,
+                                        .sample_rate_hz = 16000,
+                                        .channels = 1,
+                                        .bits_per_sample = 16,
+                                        .frame_duration_ms = 20};
 #if CONFIG_VOICELIFE_IM_GATEWAY
         // Start IM provisioning after Linx has released the shared USB console.
         if (!StartImProvisioningTask()) {
