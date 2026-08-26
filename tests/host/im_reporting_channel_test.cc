@@ -5,10 +5,12 @@
 
 #include "voicelife/im/im_reporting_channel.h"
 
+#include <array>
 #include <fstream>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -486,6 +488,57 @@ void TestIndependentActionStatusReport() {
           "网络恢复后未成功提交的语音事实必须重新发送");
 }
 
+void TestIndependentActionStatusMalformedFields() {
+    constexpr std::string_view kValid = R"({
+        "schemaVersion":"1","eventId":"event","correlationId":"corr",
+        "deviceId":"device","reminderTriggerId":"trigger","operationId":"operation",
+        "action":"acknowledge","status":"succeeded","occurredAt":"2026-08-03T00:01:00.000Z",
+        "source":"voice","details":{"reason":"child"}
+    })";
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(kValid, root).ok(), "动作事实边界测试输入必须可解析");
+    auto rejects = [&](const char* message) {
+        ReminderActionStatusReport parsed;
+        Check(!voicelife::contracts::im::ParseReminderActionStatusReport(root, parsed).ok(), message);
+    };
+
+    const std::array<const char*, 5> required = {"eventId", "correlationId", "deviceId", "reminderTriggerId",
+                                                 "operationId"};
+    for (const char* key : required) {
+        const auto saved = root.object.at(key);
+        root.object.erase(key);
+        rejects("缺少动作事实必填字段必须拒绝");
+        root.object.emplace(key, saved);
+    }
+
+    root.object["schemaVersion"] = voicelife::JsonValue::String("2");
+    rejects("未知契约版本必须拒绝");
+    root.object["schemaVersion"] = voicelife::JsonValue::String("1");
+    root.object["eventId"] = voicelife::JsonValue::String("");
+    rejects("空 eventId 必须拒绝");
+    root.object["eventId"] = voicelife::JsonValue::String("event");
+    root.object["action"] = voicelife::JsonValue::String("delete");
+    rejects("未知动作类型必须拒绝");
+    root.object["action"] = voicelife::JsonValue::String("acknowledge");
+    root.object["status"] = voicelife::JsonValue::String("pending");
+    rejects("未知动作状态必须拒绝");
+    root.object["status"] = voicelife::JsonValue::String("succeeded");
+    root.object["occurredAt"] = voicelife::JsonValue::String("2026-02-30T00:01:00Z");
+    rejects("非法发生时间必须拒绝");
+    root.object["occurredAt"] = voicelife::JsonValue::String("2026-08-03T00:01:00.000Z");
+    root.object["nextTriggerAt"] = voicelife::JsonValue::String("not-a-time");
+    rejects("非法 nextTriggerAt 必须拒绝");
+    root.object.erase("nextTriggerAt");
+    root.object["errorCode"] = voicelife::JsonValue::String("");
+    rejects("空 errorCode 必须拒绝");
+    root.object.erase("errorCode");
+    root.object["details"] = voicelife::JsonValue::Array(std::vector<voicelife::JsonValue>(17));
+    rejects("details 超出资源预算必须拒绝");
+    root.object["details"] = voicelife::JsonValue::Object({});
+    root.object["source"] = voicelife::JsonValue::String("im");
+    rejects("非 voice 来源必须拒绝");
+}
+
 void TestGatewayUrlScheme() {
     Check(voicelife::im::IsHttpsGatewayUrl("https://im.example.com"), "https 基地址必须通过");
     Check(!voicelife::im::IsHttpsGatewayUrl("http://im.example.com"), "http 基地址必须拒绝");
@@ -514,6 +567,7 @@ int main() {
     TestInvalidTransportConfigIsRejected();
     TestActionResultPathEncodesSegments();
     TestIndependentActionStatusReport();
+    TestIndependentActionStatusMalformedFields();
     TestGatewayUrlScheme();
     return 0;
 }
