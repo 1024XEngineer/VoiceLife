@@ -4,7 +4,7 @@ idf_component_register(
          "src/linx_mcp_bridge.cc" "src/linx_ota_bootstrap.cc" "src/wifi_provisioning.cc"
          "src/wifi_provisioning_esp.cc"
          "src/im_binding_mcp_tools.cc" "src/im_binding_presentation.cc"
-         "src/serial_voice_test.cc"
+         "src/serial_voice_test.cc" "src/usb_serial_frame_router.cc"
     INCLUDE_DIRS "include" "src"
     PRIV_INCLUDE_DIRS "../voicelife_im/src/transport"
     REQUIRES voicelife_contracts

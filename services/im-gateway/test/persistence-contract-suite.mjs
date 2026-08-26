@@ -14,6 +14,7 @@ import {
     outboxEvent,
     pairingSession,
     receipt,
+    reminderActionFact,
     T0,
     T1,
     T2,
@@ -580,6 +581,42 @@ export async function sharedRepositoryContractSuite(makeUow) {
             assert.deepEqual(stored, action());
             const notInserted = await uow.transaction((ctx) => ctx.actions.findById('action-other'));
             assert.equal(notInserted, undefined);
+        });
+    });
+
+    await test('device voice action facts persist by event and operation while latest is ordered by occurredAt', async () => {
+        await withUow(makeUow, async (uow) => {
+            await uow.transaction(async (ctx) => {
+                const first = reminderActionFact();
+                assert.deepEqual(await ctx.reminderActionFacts.createIfAbsent(first), { fact: first, created: true });
+                assert.deepEqual(await ctx.reminderActionFacts.createIfAbsent(first), { fact: first, created: false });
+                await ctx.reminderActionFacts.createIfAbsent(
+                    reminderActionFact('voice-event-old', {
+                        fingerprint: 'fingerprint:voice-event-old',
+                        report: {
+                            ...first.report,
+                            eventId: 'voice-event-old',
+                            operationId: 'voice-operation-old',
+                            occurredAt: T0,
+                        },
+                        receivedAt: T2,
+                    }),
+                );
+            });
+            const byEvent = await uow.transaction((ctx) => ctx.reminderActionFacts.findByEventId('voice-event-1'));
+            assert.deepEqual(byEvent, reminderActionFact());
+            const byOperation = await uow.transaction((ctx) =>
+                ctx.reminderActionFacts.findByDeviceAndOperationId('device-1', 'voice-operation-1'),
+            );
+            assert.equal(byOperation.eventId, 'voice-event-1');
+            const byTime = await uow.transaction((ctx) =>
+                ctx.reminderActionFacts.findByDeviceTriggerAndOccurredAt('device-1', 'trigger-1', T1),
+            );
+            assert.equal(byTime.eventId, 'voice-event-1');
+            const latest = await uow.transaction((ctx) =>
+                ctx.reminderActionFacts.findLatestByDeviceAndTrigger('device-1', 'trigger-1'),
+            );
+            assert.equal(latest.eventId, 'voice-event-1');
         });
     });
 

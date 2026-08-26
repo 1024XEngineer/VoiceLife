@@ -46,10 +46,24 @@ class ScheduleReminderNotificationPort {
     virtual Status SendScheduleReminder(const Schedule& schedule, const ScheduleReminderTask& task) = 0;
 };
 
-/** @brief 提醒动作的执行结果。 */
+/** @brief 设备本地提醒动作命令；协议 Adapter 负责映射外部字段。 */
+struct ReminderActionCommand {
+    std::string operation_id;
+    std::string reminder_trigger_id;
+    ScheduleReminderActionKind action = ScheduleReminderActionKind::kAcknowledge;
+    std::optional<int> snooze_minutes;
+};
+
+/** @brief 提醒动作的已提交结果。 */
 struct ReminderActionResult {
     int affected_count = 0;
     std::vector<std::string> events;
+    std::string operation_id;
+    std::string reminder_trigger_id;
+    ScheduleReminderActionKind action = ScheduleReminderActionKind::kAcknowledge;
+    DateTime occurred_at;
+    std::optional<DateTime> next_trigger_at;
+    bool replayed = false;
 };
 
 /** @brief 协调持久化提醒记录、一次性 Timing 任务、语音和通知。 */
@@ -106,6 +120,22 @@ class ScheduleReminderService final {
      * @return 动作结果或错误状态。
      */
     Result<ReminderActionResult> SnoozeRecentReminders();
+    /** @brief 按精确触发标识幂等执行提醒动作。
+     * @param command 本地动作命令。
+     * @return 首次提交或持久化重放的动作结果。
+     */
+    Result<ReminderActionResult> ExecuteReminderAction(const ReminderActionCommand& command);
+    /**
+     * @brief 对最近触发的每个提醒逐条执行动作，返回可上报的持久化结果。
+     * @param action acknowledge 或 snooze。
+     * @return 每个提醒一条结果；没有可操作提醒时返回失败。
+     */
+    Result<std::vector<ReminderActionResult>> ExecuteRecentReminderActions(ScheduleReminderActionKind action);
+    /**
+     * @brief 读取已持久化的语音动作事实，供网络恢复后补报。
+     * @return 已保存的语音动作结果，或仓储错误。
+     */
+    Result<std::vector<ReminderActionResult>> ListPersistedVoiceActionResults() const;
 
    private:
     /// @brief 规则提醒生成的重试状态。
@@ -134,6 +164,7 @@ class ScheduleReminderService final {
     ScheduleReminderNotificationPort* notification_;
     NowProvider now_provider_;
     mutable std::mutex mutex_;
+    std::mutex action_mutex_;
     bool running_ = false;
     int64_t sequence_ = 0;
     int64_t chain_sequence_ = 0;

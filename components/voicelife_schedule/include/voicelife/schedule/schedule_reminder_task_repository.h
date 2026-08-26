@@ -17,6 +17,13 @@ enum class ScheduleReminderBusinessStatus {
     kAcknowledged = 3,
     kExhausted = 4,
     kCancelled = 5,
+    kSnoozed = 6,
+};
+
+/** @brief 已提交到本地提醒事实的用户动作类型。 */
+enum class ScheduleReminderActionKind {
+    kAcknowledge = 1,
+    kSnooze = 2,
 };
 
 /** @brief 一次实际注册的底层 Timing task 状态。 */
@@ -40,6 +47,10 @@ struct ScheduleReminderTask {
     ScheduleReminderBusinessStatus business_status = ScheduleReminderBusinessStatus::kScheduled;
     ScheduleReminderTimerStatus timer_status = ScheduleReminderTimerStatus::kPending;
     std::optional<DateTime> triggered_at;
+    std::optional<std::string> action_operation_id;
+    std::optional<ScheduleReminderActionKind> action_kind;
+    std::optional<DateTime> action_occurred_at;
+    std::optional<DateTime> action_next_trigger_at;
     DateTime created_at;
     DateTime updated_at;
 };
@@ -65,6 +76,11 @@ class ScheduleReminderTaskRepository {
      * @return 查询结果。
      */
     [[nodiscard]] virtual Result<ScheduleReminderTask> FindById(int64_t id) const = 0;
+    /** @brief 按 Timing task 标识查询任务。
+     * @param timing_task_id Timing 层不透明任务标识。
+     * @return 查询结果。
+     */
+    [[nodiscard]] virtual Result<ScheduleReminderTask> FindByTimingTaskId(std::string_view timing_task_id) const = 0;
     /** @brief 按日程查询提醒任务。
      * @param schedule_id 日程标识。
      * @return 查询结果。

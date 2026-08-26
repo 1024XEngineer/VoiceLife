@@ -17,6 +17,7 @@ import type {
     ReminderActionCommand,
     ReminderActionKind,
     ReminderActionResult,
+    ReminderActionStatusReport,
     ScheduleReceiptIntent,
     ScheduleQueryResultIntent,
 } from '../contracts/device-gateway.js';
@@ -31,7 +32,7 @@ import type {
     PairingSession,
 } from '../domain/models.js';
 import type { ActionTokenClaims, ChannelHealth } from '../ports/external.js';
-import type { JsonValue } from '../shared/types.js';
+import type { IsoDateTime, JsonValue } from '../shared/types.js';
 
 /** 注册一个租户 IM 渠道账号所需的参数。 */
 export interface RegisterChannelAccountCommand {
@@ -283,6 +284,7 @@ export interface ConsumedActionUiView {
     readonly state: 'submitted' | 'processing' | 'succeeded' | 'failed' | 'expired';
     readonly action: ReminderActionKind;
     readonly params?: { readonly minutes: number };
+    readonly nextTriggerAt?: IsoDateTime;
     readonly expiresAt: ImAction['expiresAt'];
 }
 
@@ -336,6 +338,12 @@ export interface ActionApplication {
      * @returns 归并结果后的动作记录。
      */
     recordResult(commandId: ActionId, deviceId: DeviceId, result: ReminderActionResult): Promise<ImAction>;
+    /**
+     * 归并设备独立上报的本地提醒动作事实；没有对应 IM Action 时仅持久化事实。
+     * @param report 已校验的设备本地动作事实。
+     * @returns 被收口的 IM 动作；尚未创建对应动作时返回 undefined。
+     */
+    recordDeviceActionStatus(report: ReminderActionStatusReport): Promise<ImAction | undefined>;
     /**
      * 关闭所有超过截止时间的未完成动作。
      * @returns 本次过期的动作数量。

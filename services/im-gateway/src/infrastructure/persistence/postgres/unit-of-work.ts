@@ -10,6 +10,7 @@ import type {
     IntentSubmissionRepository,
     OutboxRepository,
     PairingSessionRepository,
+    ReminderActionFactRepository,
 } from '../../../ports/repositories.js';
 import { PostgresActionRepository } from './action-repository.js';
 import { PostgresBindingRepository } from './binding-repository.js';
@@ -21,6 +22,7 @@ import { PostgresInboundEventRepository } from './inbound-event-repository.js';
 import { PostgresIntentSubmissionRepository } from './intent-submission-repository.js';
 import { PostgresOutboxRepository } from './outbox-repository.js';
 import { PostgresPairingSessionRepository } from './pairing-session-repository.js';
+import { PostgresReminderActionFactRepository } from './reminder-action-fact-repository.js';
 import type { SqlExecutor } from './sql.js';
 
 /** 同一事务内可用的全部 PostgreSQL 仓储。 */
@@ -43,6 +45,8 @@ export class PostgresUnitOfWorkContext implements ImUnitOfWorkContext {
     public readonly deliveries: DeliveryRepository;
     /** 动作仓储。 */
     public readonly actions: ActionRepository;
+    /** 设备语音动作事实仓储。 */
+    public readonly reminderActionFacts: ReminderActionFactRepository;
     /** 事务性发件箱仓储。 */
     public readonly outbox: OutboxRepository;
 
@@ -57,6 +61,7 @@ export class PostgresUnitOfWorkContext implements ImUnitOfWorkContext {
         this.intentSubmissions = new PostgresIntentSubmissionRepository(executor);
         this.deliveries = new PostgresDeliveryRepository(executor);
         this.actions = new PostgresActionRepository(executor);
+        this.reminderActionFacts = new PostgresReminderActionFactRepository(executor);
         this.outbox = new PostgresOutboxRepository(executor);
     }
 }

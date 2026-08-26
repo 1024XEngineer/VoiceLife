@@ -31,7 +31,8 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     LinxSpeechProviderAdapter(LinxTransportPort& transport, LinxProtocolCodecPort& codec,
                               LinxConnectionConfig connection,
                               voice::CapabilityProfile capabilities = DefaultCapabilities(),
-                              LinxMcpMessageHandler mcp_handler = {});
+                              LinxMcpMessageHandler mcp_handler = {},
+                              std::unique_ptr<voice::CodecStrategy> codec_strategy = {});
     /** @brief 停止 MCP worker 并断开底层 Linx 传输。 */
     ~LinxSpeechProviderAdapter() override;
 
@@ -94,6 +95,8 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     void StopMcpWorker();
     void McpWorkerLoop();
     [[nodiscard]] voice::VoiceSessionConfig ActiveSessionConfig() const;
+    [[nodiscard]] voice::AudioFormat WireAudioFormat() const;
+    [[nodiscard]] Status ConfigureCodecStrategy();
     Status Send(Result<std::string> encoded);
     void Emit(voice::VoiceEvent event);
     LinxTransportPort& transport_;
@@ -101,6 +104,7 @@ class LinxSpeechProviderAdapter final : public voice::SpeechProviderAdapter {
     LinxConnectionConfig connection_;
     voice::CapabilityProfile capabilities_;
     LinxMcpMessageHandler mcp_handler_;
+    std::unique_ptr<voice::CodecStrategy> codec_strategy_;
     voice::VoiceSessionConfig config_;
     voice::VoiceEventSink event_sink_;
     voice::AudioFrameSink audio_sink_;

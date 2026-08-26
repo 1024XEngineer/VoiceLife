@@ -200,3 +200,25 @@ export interface ReminderActionResult {
     readonly details?: JsonValue;
     readonly occurredAt: IsoDateTime;
 }
+
+/**
+ * 设备本地（例如语音 MCP）完成提醒动作后上报的独立业务事实。
+ *
+ * 该契约不依赖 Gateway 是否已经创建了 IM Action，因此可以覆盖
+ * “语音先执行、IM 后打开卡片”的顺序；eventId 是事件幂等键。
+ */
+export interface ReminderActionStatusReport {
+    readonly schemaVersion: typeof DEVICE_CONTRACT_VERSION;
+    readonly eventId: EventId;
+    readonly correlationId: CorrelationId;
+    readonly deviceId: DeviceId;
+    readonly reminderTriggerId: ReminderTriggerId;
+    readonly operationId: OperationId;
+    readonly action: ReminderActionKind;
+    readonly status: ReminderActionExecutionStatus;
+    readonly occurredAt: IsoDateTime;
+    readonly nextTriggerAt?: IsoDateTime;
+    readonly errorCode?: string;
+    readonly details?: JsonValue;
+    readonly source: 'voice';
+}

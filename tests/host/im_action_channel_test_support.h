@@ -116,6 +116,7 @@ class FakeStream : public ImActionCommandStream {
     std::vector<ReminderActionCommand> commands;
     std::vector<std::string> open_cursors;
     bool open_result = true;
+    int next_calls = 0;
     int close_count = 0;
     /// 命令耗尽后的终结状态：默认正常结束，测试可改为 kNetworkError/kProtocolError。
     StreamReadStatus terminal = StreamReadStatus::kEndOfStream;
@@ -125,6 +126,7 @@ class FakeStream : public ImActionCommandStream {
         return open_result;
     }
     StreamRead Next() override {
+        ++next_calls;
         if (commands.empty()) {
             return {terminal, {}};
         }

@@ -2,6 +2,7 @@ import type {
     NotificationSubmission,
     ReminderActionKind,
     ReminderActionResult,
+    ReminderActionStatusReport,
 } from '../../../contracts/device-gateway.js';
 import type {
     ActionId,
@@ -29,6 +30,7 @@ import type {
     Delivery,
     DeliveryAttempt,
     DeliveryReceipt,
+    DeviceReminderActionFact,
     DeliveryStatus,
     ExternalIdentity,
     ImAction,
@@ -269,6 +271,34 @@ export function mapAction(row: DbRow): ImAction {
         expiresAt: toIso(row.expires_at),
         createdAt: toIso(row.created_at),
         updatedAt: toIso(row.updated_at),
+    };
+}
+
+/**
+ * 将设备语音动作事实行映射为领域记录。
+ * @param row PostgreSQL 查询返回的动作事实行。
+ * @returns 可供应用层使用的设备动作事实。
+ */
+export function mapReminderActionFact(row: DbRow): DeviceReminderActionFact {
+    return {
+        eventId: row.event_id as EventId,
+        fingerprint: row.fingerprint as string,
+        report: {
+            schemaVersion: row.schema_version as '1',
+            eventId: row.event_id as EventId,
+            correlationId: row.correlation_id as CorrelationId,
+            deviceId: row.device_id as DeviceId,
+            reminderTriggerId: row.reminder_trigger_id as ReminderTriggerId,
+            operationId: row.operation_id as OperationId,
+            action: row.action as ReminderActionKind,
+            status: row.status as ReminderActionStatusReport['status'],
+            occurredAt: toIso(row.occurred_at),
+            ...(row.next_trigger_at === null ? {} : { nextTriggerAt: toIso(row.next_trigger_at) }),
+            ...(row.error_code === null ? {} : { errorCode: row.error_code as string }),
+            ...(row.details === null ? {} : { details: row.details as JsonValue }),
+            source: 'voice',
+        },
+        receivedAt: toIso(row.received_at),
     };
 }
 

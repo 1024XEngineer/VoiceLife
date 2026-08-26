@@ -15,6 +15,7 @@
 #include "support/test_support.h"
 #include "voicelife/contracts/im/notification_intent.h"
 #include "voicelife/contracts/im/reminder_action_result.h"
+#include "voicelife/contracts/im/reminder_action_status_report.h"
 #include "voicelife/contracts/im/schedule_query_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/contracts/json.h"
@@ -27,6 +28,7 @@ using voicelife::contracts::im::ParseNotificationIntent;
 using voicelife::contracts::im::ParseScheduleQueryResultIntent;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
 using voicelife::contracts::im::ReminderActionResult;
+using voicelife::contracts::im::ReminderActionStatusReport;
 using voicelife::contracts::im::ScheduleQueryResultIntent;
 using voicelife::contracts::im::ScheduleReceiptIntent;
 using voicelife::im::ImCredentialProvider;
@@ -417,6 +419,73 @@ void TestActionResultPathEncodesSegments() {
           "deviceId 与 commandId 必须按 path 段百分号编码，不得改写路径");
 }
 
+void TestIndependentActionStatusReport() {
+    FakeTransport transport;
+    FakeCredentials credentials;
+    ImReportingChannel channel(transport, credentials);
+    ReminderActionStatusReport report;
+    report.schemaVersion = "1";
+    report.eventId = "voice-event-1";
+    report.correlationId = "voice-correlation-1";
+    report.deviceId = kDeviceId;
+    report.reminderTriggerId = "trigger-fixture";
+    report.operationId = "voice-operation-1";
+    report.action = "snooze";
+    report.status = "succeeded";
+    report.occurredAt = "2026-08-03T00:01:00.000Z";
+    report.nextTriggerAt = "2026-08-03T00:11:00.000Z";
+    report.source = "voice";
+
+    const ReportResult result = channel.SubmitReminderActionStatusReport(report);
+
+    Check(result.status == ReportStatus::kSubmitted, "独立语音动作事实应提交成功");
+    Check(transport.requests.size() == 1, "独立语音动作事实应发起一次传输");
+    Check(transport.requests[0].path == "/v1/devices/device-fixture/reminder-action-status",
+          "独立语音动作事实不得依赖 commandId 路径");
+    Check(HeaderValue(transport.requests[0], "Idempotency-Key") == report.eventId,
+          "独立语音动作事实幂等键必须使用 eventId");
+    voicelife::JsonValue root;
+    Check(voicelife::ParseJson(transport.requests[0].body, root).ok(), "独立语音动作事实必须是合法 JSON");
+    ReminderActionStatusReport parsed;
+    Check(voicelife::contracts::im::ParseReminderActionStatusReport(root, parsed).ok(),
+          "独立语音动作事实必须通过契约解析");
+    Check(parsed.action == report.action && parsed.nextTriggerAt == report.nextTriggerAt && parsed.source == "voice",
+          "独立语音动作事实字段必须完整保留");
+
+    voicelife::JsonValue invalid_root;
+    Check(voicelife::ParseJson("[]", invalid_root).ok(), "非法动作事实测试输入必须可解析");
+    ReminderActionStatusReport invalid_parsed;
+    Check(!voicelife::contracts::im::ParseReminderActionStatusReport(invalid_root, invalid_parsed).ok(),
+          "非对象动作事实必须被契约解析拒绝");
+
+    ReminderActionStatusReport invalid_ack = report;
+    invalid_ack.action = "acknowledge";
+    const ReportResult invalid_ack_result = channel.SubmitReminderActionStatusReport(invalid_ack);
+    Check(invalid_ack_result.status == ReportStatus::kRejected, "成功确认动作携带 nextTriggerAt 必须在设备侧被拒绝");
+    ReminderActionStatusReport invalid_snooze = report;
+    invalid_snooze.nextTriggerAt.reset();
+    const ReportResult invalid_snooze_result = channel.SubmitReminderActionStatusReport(invalid_snooze);
+    Check(invalid_snooze_result.status == ReportStatus::kRejected, "成功延迟动作缺少 nextTriggerAt 必须在设备侧被拒绝");
+
+    const ReportResult replay = channel.SubmitReminderActionStatusReport(report);
+    Check(replay.status == ReportStatus::kSubmitted, "同一启动周期内相同语音事实重放应视为已提交");
+    Check(transport.requests.size() == 1, "相同语音事实重放不得再次占用网络");
+
+    report.nextTriggerAt = "2026-08-03T00:12:00.000Z";
+    const ReportResult conflict = channel.SubmitReminderActionStatusReport(report);
+    Check(conflict.status == ReportStatus::kSubmitted, "不同正文仍应交给 Gateway 处理，而不是被本地缓存吞掉");
+    Check(transport.requests.size() == 2, "不同正文的同 eventId 必须再次发送以便 Gateway 判定冲突");
+
+    transport.next_status = ImTransportStatus::kNetworkFailure;
+    report.eventId = "voice-event-retry";
+    const ReportResult failed = channel.SubmitReminderActionStatusReport(report);
+    Check(failed.status == ReportStatus::kRetryable, "网络失败的语音事实必须保留重试机会");
+    transport.next_status = ImTransportStatus::kSuccess;
+    const ReportResult recovered = channel.SubmitReminderActionStatusReport(report);
+    Check(recovered.status == ReportStatus::kSubmitted && transport.requests.size() == 4,
+          "网络恢复后未成功提交的语音事实必须重新发送");
+}
+
 void TestGatewayUrlScheme() {
     Check(voicelife::im::IsHttpsGatewayUrl("https://im.example.com"), "https 基地址必须通过");
     Check(!voicelife::im::IsHttpsGatewayUrl("http://im.example.com"), "http 基地址必须拒绝");
@@ -444,6 +513,7 @@ int main() {
     TestStatusCodeMapping();
     TestInvalidTransportConfigIsRejected();
     TestActionResultPathEncodesSegments();
+    TestIndependentActionStatusReport();
     TestGatewayUrlScheme();
     return 0;
 }

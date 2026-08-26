@@ -18,8 +18,7 @@
 </p>
 
 <p>
-<a href="https://github.com/1024XEngineer/VoiceLife/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/1024XEngineer/VoiceLife/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" /></a>
-<a href="https://codecov.io/gh/1024XEngineer/VoiceLife"><img src="https://codecov.io/gh/1024XEngineer/VoiceLife/branch/main/graph/badge.svg" alt="Codecov coverage" /></a>
+<img src="https://img.shields.io/github/actions/workflow/status/1024XEngineer/VoiceLife/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" />
 <img src="https://img.shields.io/badge/ESP--IDF-6.0.2-E7352C?style=flat-square" alt="ESP-IDF 6.0.2" />
 <img src="https://img.shields.io/badge/Target-ESP32--S3-222222?style=flat-square" alt="ESP32-S3" />
 <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square" alt="C++ 20" />

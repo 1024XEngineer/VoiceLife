@@ -20,6 +20,7 @@ import type {
     Delivery,
     DeliveryAttempt,
     DeliveryReceipt,
+    DeviceReminderActionFact,
     ExternalIdentity,
     ImAction,
     ImBinding,
@@ -42,6 +43,7 @@ import type {
     IntentSubmissionRepository,
     OutboxRepository,
     PairingSessionRepository,
+    ReminderActionFactRepository,
 } from '../../ports/repositories.js';
 import type { IsoDateTime } from '../../shared/types.js';
 
@@ -56,6 +58,7 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
     public readonly intentSubmissions: IntentSubmissionRepository = this;
     public readonly deliveries: DeliveryRepository = this;
     public readonly actions: ActionRepository = this;
+    public readonly reminderActionFacts: ReminderActionFactRepository = this;
     public readonly outbox: OutboxRepository = this;
 
     private readonly deviceRows = new Map<DeviceId, ImDevice>();
@@ -69,11 +72,63 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
     private readonly attemptRows = new Map<string, DeliveryAttempt>();
     private readonly receiptRows = new Map<string, DeliveryReceipt>();
     private readonly actionRows = new Map<ActionId, ImAction>();
+    private readonly reminderActionFactRows = new Map<EventId, DeviceReminderActionFact>();
     private readonly outboxRows: ImOutboxEvent[] = [];
 
     /** {@inheritDoc ImUnitOfWork.transaction} */
     public transaction<T>(work: (context: ImUnitOfWorkContext) => Promise<T>): Promise<T> {
         return work(this);
+    }
+
+    /** {@inheritDoc ReminderActionFactRepository.findByEventId} */
+    public findByEventId(eventId: EventId): Promise<DeviceReminderActionFact | undefined> {
+        return Promise.resolve(this.reminderActionFactRows.get(eventId));
+    }
+
+    /** {@inheritDoc ReminderActionFactRepository.findByDeviceAndOperationId} */
+    public findByDeviceAndOperationId(
+        deviceId: DeviceId,
+        operationId: OperationId,
+    ): Promise<DeviceReminderActionFact | undefined> {
+        return Promise.resolve(
+            [...this.reminderActionFactRows.values()].find(
+                (fact) => fact.report.deviceId === deviceId && fact.report.operationId === operationId,
+            ),
+        );
+    }
+
+    /** {@inheritDoc ReminderActionFactRepository.findByDeviceTriggerAndOccurredAt} */
+    public findByDeviceTriggerAndOccurredAt(
+        deviceId: DeviceId,
+        reminderTriggerId: ReminderTriggerId,
+        occurredAt: IsoDateTime,
+    ): Promise<DeviceReminderActionFact | undefined> {
+        const occurredMillis = Date.parse(occurredAt);
+        return Promise.resolve(
+            [...this.reminderActionFactRows.values()].find(
+                (fact) =>
+                    fact.report.deviceId === deviceId &&
+                    fact.report.reminderTriggerId === reminderTriggerId &&
+                    Date.parse(fact.report.occurredAt) === occurredMillis,
+            ),
+        );
+    }
+
+    /** {@inheritDoc ReminderActionFactRepository.findLatestByDeviceAndTrigger} */
+    public findLatestByDeviceAndTrigger(
+        deviceId: DeviceId,
+        reminderTriggerId: ReminderTriggerId,
+    ): Promise<DeviceReminderActionFact | undefined> {
+        return Promise.resolve(
+            [...this.reminderActionFactRows.values()]
+                .filter(
+                    (fact) => fact.report.deviceId === deviceId && fact.report.reminderTriggerId === reminderTriggerId,
+                )
+                .sort((left, right) => {
+                    const occurred = Date.parse(right.report.occurredAt) - Date.parse(left.report.occurredAt);
+                    return occurred !== 0 ? occurred : Date.parse(right.receivedAt) - Date.parse(left.receivedAt);
+                })[0],
+        );
     }
 
     /** @param device 为测试 fixture 同步预置的设备。 */
@@ -190,6 +245,8 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
     public save(value: Delivery): Promise<void>;
     /** {@inheritDoc ActionRepository.save} */
     public save(value: ImAction): Promise<void>;
+    /** {@inheritDoc ReminderActionFactRepository.save} */
+    public save(value: DeviceReminderActionFact): Promise<void>;
     /**
      * 将仓储聚合的当前状态写入对应内存表。
      * @param value 要保存的聚合。
@@ -204,7 +261,8 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
             | ImBinding
             | InboundEventRecord
             | Delivery
-            | ImAction,
+            | ImAction
+            | DeviceReminderActionFact,
     ): Promise<void> {
         if ('tokenDigest' in value) {
             const existing = this.deviceRows.get(value.deviceId);
@@ -217,6 +275,7 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         else if ('externalEventId' in value && 'eventType' in value) {
             this.inboundRows.set(inboundKey(value.channelAccountId, value.externalEventId), value);
         } else if ('businessEventId' in value) this.deliveryRows.set(value.id, value);
+        else if ('fingerprint' in value && 'report' in value) this.reminderActionFactRows.set(value.eventId, value);
         else this.actionRows.set(value.id, value);
         return Promise.resolve();
     }
@@ -231,19 +290,37 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
     ): Promise<{ created: boolean; record: IntentSubmissionRecord }>;
     /** {@inheritDoc IdentityRepository.createIfAbsent} */
     public createIfAbsent(identity: ExternalIdentity): Promise<ExternalIdentity>;
+    /** {@inheritDoc ReminderActionFactRepository.createIfAbsent} */
+    public createIfAbsent(
+        fact: DeviceReminderActionFact,
+    ): Promise<{ readonly fact: DeviceReminderActionFact; readonly created: boolean }>;
     /**
      * 按业务键幂等创建投递或受理记录；同键已存在时保留首条。
      * @param value 待创建的投递或受理记录。
      * @returns 投递：权威标识与是否新建；受理记录：是否新建与当前权威记录。
      */
     public createIfAbsent(
-        value: Delivery | IntentSubmissionRecord | ImAction | ExternalIdentity,
+        value: Delivery | IntentSubmissionRecord | ImAction | ExternalIdentity | DeviceReminderActionFact,
     ): Promise<
         | { readonly action: ImAction; readonly created: boolean }
         | { id: DeliveryId; created: boolean }
         | { created: boolean; record: IntentSubmissionRecord }
         | ExternalIdentity
+        | { readonly fact: DeviceReminderActionFact; readonly created: boolean }
     > {
+        if ('fingerprint' in value && 'report' in value) {
+            const existing = this.reminderActionFactRows.get(value.eventId);
+            if (existing !== undefined) return Promise.resolve({ fact: existing, created: false });
+            const sameTime = [...this.reminderActionFactRows.values()].find(
+                (candidate) =>
+                    candidate.report.deviceId === value.report.deviceId &&
+                    candidate.report.reminderTriggerId === value.report.reminderTriggerId &&
+                    Date.parse(candidate.report.occurredAt) === Date.parse(value.report.occurredAt),
+            );
+            if (sameTime !== undefined) return Promise.resolve({ fact: sameTime, created: false });
+            this.reminderActionFactRows.set(value.eventId, value);
+            return Promise.resolve({ fact: value, created: true });
+        }
         if ('externalUserIdCiphertext' in value) {
             const existing = [...this.identityRows.values()].find(
                 (candidate) =>

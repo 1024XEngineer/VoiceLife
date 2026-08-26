@@ -35,9 +35,9 @@ enum class TransportState {
 struct EspWebSocketTransportOptions {
     // 上限只在分片重组时按实际消息长度占用；64 KiB 可容纳较长的下行控制/文本帧。
     size_t max_message_bytes = 64 * 1024;
-    // A single envelope owns up to 4 KiB of frame data. 32 entries absorb
-    // short STT/TTS bursts without allowing unbounded protocol backlog.
-    size_t event_queue_capacity = 32;
+    // A single envelope owns up to 4 KiB of frame data. 256 entries absorb a
+    // bounded Opus burst while the PCM output port applies playback backpressure.
+    size_t event_queue_capacity = 256;
     size_t event_chunk_bytes = 4096;
     uint32_t connect_timeout_ms = 10000;
     // ESP-IDF applies this to receive operations as well as network I/O.

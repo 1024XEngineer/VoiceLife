@@ -184,6 +184,7 @@ void TestReconnectReplayExecutesOnce() {
     Check(first_result.status == ActionRunStatus::kDisconnected, "网络失败应归类为可重连");
     Check(executor.calls.size() == 1, "网络失败时命令仍执行一次");
     Check(transport.requests.size() == 1, "网络失败时仍应尝试回传");
+    Check(first.next_calls == 1, "回执失败后应立即关闭当前流并交给重连逻辑");
     Check(HeaderValue(transport.requests[0], "Idempotency-Key") == "operation-1",
           "首次回传必须以 operationId 为幂等键");
 

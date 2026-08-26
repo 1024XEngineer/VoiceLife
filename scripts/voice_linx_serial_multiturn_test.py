@@ -12,7 +12,7 @@ import sys
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
@@ -39,8 +39,12 @@ class TurnResult:
     pcm_frames_sent: int = 0
     input_endpoint_truncated: bool = False
     asr_text: str = ""
+    asr_segments: list[str] = field(default_factory=list)
     asr_matches_input: bool = False
     reply_text: str = ""
+    tts_sentences: list[str] = field(default_factory=list)
+    tts_first_audio_seen: bool = False
+    tts_stopped_seen: bool = False
     terminal_guard_armed: bool = False
     terminal_guard_clean: bool = True
     log_start: int = 0
@@ -237,6 +241,25 @@ def wait_evidence(log: SerialLog, event: str, cursor: int, timeout: float) -> tu
     return log.wait_for(f"SERIAL_VOICE_EVIDENCE event={event} ", cursor, timeout)
 
 
+def collect_until(
+    log: SerialLog,
+    markers: tuple[str, ...],
+    cursor: int,
+    timeout: float,
+) -> tuple[int, list[str], str]:
+    """Collect all matching evidence until the terminal marker is observed."""
+    deadline = time.monotonic() + timeout
+    lines: list[str] = []
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(" or ".join(markers))
+        cursor, line = log.wait_for_any(markers, cursor, remaining)
+        lines.append(line)
+        if markers[-1] in line:
+            return cursor, lines, line
+
+
 def evidence_text(line: str) -> str:
     marker = " detail="
     return line.split(marker, 1)[1] if marker in line else ""
@@ -295,9 +318,13 @@ def run_turn(
         # is already Listening, so no duplicate PressDown is generated.
         device.write(packet(BEGIN))
         device.flush()
-        cursor, _ = log.wait_for("SERIAL_VOICE_TURN_BEGIN=ok", cursor, 5)
+        turn_origin = cursor
+        begin_cursor, _ = log.wait_for("SERIAL_VOICE_TURN_BEGIN=ok", turn_origin, 5)
         if first_turn:
-            cursor, _ = log.wait_for("SERIAL_VOICE_CAPTURE_READY", cursor, 12)
+            capture_cursor, _ = log.wait_for("SERIAL_VOICE_CAPTURE_READY", turn_origin, 12)
+            cursor = max(begin_cursor, capture_cursor)
+        else:
+            cursor = begin_cursor
         turn_cursor = cursor
         for frame in prepared.frames:
             # A device-side endpoint closes capture asynchronously. Stop the
@@ -330,9 +357,9 @@ def run_turn(
             turn_cursor,
             turn_end_timeout,
         )
-        asr_line: str | None = None
+        asr_lines: list[str] = []
         if "event=stt_text_received" in endpoint_marker:
-            asr_line = endpoint_marker
+            asr_lines.append(endpoint_marker)
         if "SERIAL_VOICE_TURN_END" in endpoint_marker:
             if "=ok" not in endpoint_marker and not result.input_endpoint_truncated:
                 raise RuntimeError(f"turn_end_failed:{endpoint_marker}")
@@ -345,11 +372,11 @@ def run_turn(
                 response_timeout,
             )
             if "event=stt_text_received" in endpoint_followup:
-                asr_line = endpoint_followup
+                asr_lines.append(endpoint_followup)
                 capture_stopped_seen = False
             else:
                 capture_stopped_seen = True
-        elif asr_line is not None:
+        elif asr_lines:
             capture_stopped_seen = False
         else:
             # Local VAD is a valid endpoint even when the USB fixture's END
@@ -358,22 +385,38 @@ def run_turn(
         # Local VAD can stop capture before the explicit host end packet. The
         # packet still terminates injection, but the real state transition is
         # valid from any point after this turn began.
-        if asr_line is None:
+        if not asr_lines:
             if not capture_stopped_seen:
                 cursor, _ = wait_evidence(log, "capture_stopped", cursor, 12)
             cursor, asr_line = wait_evidence(log, "stt_text_received", cursor, response_timeout)
-        result.asr_text = evidence_text(asr_line)
+            asr_lines.append(asr_line)
+
+        # Server VAD can split one injected utterance into multiple final STT
+        # events. Preserve every segment and compare their concatenation with
+        # the source utterance instead of silently keeping only the first one.
+        result.asr_segments = [evidence_text(line) for line in asr_lines]
+        result.asr_text = "".join(result.asr_segments)
         result.asr_matches_input = normalize_transcript(result.asr_text) == normalize_transcript(result.input_text)
         cursor, _ = wait_evidence(log, "tts_started", cursor, response_timeout)
-        # Linx may announce the first display sentence before its first PCM
-        # packet, or the reverse. Both are valid after tts_started; capture
-        # them from the same origin instead of imposing an artificial order.
-        tts_cursor = cursor
-        first_audio_cursor, _ = wait_evidence(log, "tts_first_audio", tts_cursor, response_timeout)
-        sentence_cursor, reply = wait_evidence(log, "tts_sentence_started", tts_cursor, response_timeout)
-        result.reply_text = evidence_text(reply)
-        cursor = max(first_audio_cursor, sentence_cursor)
-        cursor, _ = wait_evidence(log, "tts_stopped", cursor, response_timeout)
+        # Linx may announce sentence text before the first PCM packet, and a
+        # long answer may contain many sentence_start events. Collect the
+        # complete stream through tts_stopped so the report proves full TTS.
+        cursor, tts_lines, _ = collect_until(
+            log,
+            (
+                "SERIAL_VOICE_EVIDENCE event=tts_first_audio ",
+                "SERIAL_VOICE_EVIDENCE event=tts_sentence_started ",
+                "SERIAL_VOICE_EVIDENCE event=tts_stopped ",
+            ),
+            cursor,
+            response_timeout,
+        )
+        result.tts_first_audio_seen = any("event=tts_first_audio" in line for line in tts_lines)
+        result.tts_stopped_seen = any("event=tts_stopped" in line for line in tts_lines)
+        result.tts_sentences = [evidence_text(line) for line in tts_lines if "event=tts_sentence_started" in line]
+        result.reply_text = result.tts_sentences[0] if result.tts_sentences else ""
+        if not result.tts_first_audio_seen or not result.tts_stopped_seen:
+            raise RuntimeError("tts_stream_incomplete")
         if expect_terminal:
             cursor, _ = log.wait_for("WAKE_GUARD_ARMED ms=8000 reason=terminal_tts", cursor, 12)
             result.terminal_guard_armed = True

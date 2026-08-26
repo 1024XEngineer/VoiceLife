@@ -155,6 +155,8 @@ int main() {
                               .created_at = At(1'999'999'000),
                               .updated_at = At(2'000'000'001)};
     Check(notification.SendScheduleReminder(schedule, task).ok(), "提醒通知应提交到 IM 公共接口");
+    Check(transport_ptr->requests.back().body.find("schedule-reminder-device-device-1-task-10") != std::string::npos,
+          "提醒业务键应包含设备标识，避免不同设备的本地任务 ID 冲突");
     Check(action_window.has_value() && action_window->reminderTriggerId == "timing-1", "强提醒响应应发布动作窗口");
 
     auto final_task = task;
@@ -162,6 +164,8 @@ int main() {
     transport_ptr->response_body =
         R"({"businessEventId":"schedule-reminder-task-10-final","status":"accepted","deliveries":[],"actionStream":{"reminderTriggerId":"timing-1","expiresAt":"2026-08-03T00:10:00.000Z"}})";
     Check(notification.SendScheduleReminder(schedule, final_task).ok(), "第三次提醒通知应提交到 IM 公共接口");
+    Check(transport_ptr->requests.back().body.find("schedule-reminder-device-device-1-task-10") != std::string::npos,
+          "同一提醒任务重试应复用稳定的设备作用域业务键");
     Check(transport_ptr->requests.back().body.find("这是最后一次提醒；之后不再创建新的推迟提醒。") != std::string::npos,
           "第三次 IM 提醒正文应追加最后一次稍后提醒说明");
 
@@ -194,15 +198,57 @@ int main() {
     snooze.action = "snooze";
     snooze.minutes = 10;
     const auto snoozed = executor.Execute(snooze);
-    Check(snoozed.status == "succeeded" && timing.cancel_count == 0, "IM 延迟动作不应取消或重建默认后续提醒");
+    Check(snoozed.status == "succeeded" && snoozed.nextTriggerAt.has_value() && timing.cancel_count == 0,
+          "IM 延迟动作应返回已持久化的下一次提醒时间且不重建默认后续提醒");
+    const auto snoozed_tasks = reminders.FindBySchedule(1);
+    Check(snoozed_tasks.ok() &&
+              snoozed_tasks.value->front().business_status == ScheduleReminderBusinessStatus::kSnoozed &&
+              snoozed_tasks.value->front().action_operation_id == "operation-snooze",
+          "IM 延迟动作应只把目标 ReminderTrigger 持久化为 snoozed");
+
+    ImScheduleReminderActionExecutor restarted_executor(reminder_service);
+    const auto replayed_snooze = restarted_executor.Execute(snooze);
+    Check(replayed_snooze.status == "succeeded" && replayed_snooze.nextTriggerAt == snoozed.nextTriggerAt &&
+              timing.cancel_count == 0,
+          "执行器重建后相同 operationId 应复用持久化结果而不是再次执行动作");
+
+    Schedule acknowledged_schedule = schedule;
+    acknowledged_schedule.id = 2;
+    acknowledged_schedule.event = "吃药";
+    Check(schedules.Insert(acknowledged_schedule).ok(), "确认动作测试应保存独立日程");
+    auto acknowledged_task = task;
+    acknowledged_task.id = 0;
+    acknowledged_task.schedule_id = 2;
+    acknowledged_task.chain_id = 30;
+    acknowledged_task.timing_task_id = "timing-ack-1";
+    Check(reminders.Insert(acknowledged_task).ok(), "确认动作测试应保存目标提醒");
+    auto acknowledged_follow_up = follow_up;
+    acknowledged_follow_up.id = 0;
+    acknowledged_follow_up.schedule_id = 2;
+    acknowledged_follow_up.chain_id = 30;
+    acknowledged_follow_up.timing_task_id = "timing-ack-2";
+    Check(reminders.Insert(acknowledged_follow_up).ok(), "确认动作测试应保存目标后续提醒");
 
     ReminderActionCommand acknowledge = snooze;
-    acknowledge.operationId = "operation-ack";
+    acknowledge.reminderTriggerId = "timing-ack-1";
     acknowledge.action = "acknowledge";
     acknowledge.minutes = std::nullopt;
+    const auto conflicting_operation = executor.Execute(acknowledge);
+    Check(conflicting_operation.status == "failed" && timing.cancel_count == 0 &&
+              schedules.FindById(2).value->status == ScheduleStatus::kActive,
+          "其他提醒不得复用已有 operationId，且冲突不得产生业务副作用");
+
+    acknowledge.operationId = "operation-ack";
     const auto acknowledged = executor.Execute(acknowledge);
-    Check(acknowledged.status == "succeeded" && timing.cancel_count == 1,
-          "IM 确认动作应复用提醒服务并取消默认后续提醒");
-    Check(schedules.FindById(1).value->status == ScheduleStatus::kCompleted, "IM 确认动作应完成关联日程");
+    Check(acknowledged.status == "succeeded" && timing.cancel_count == 1, "IM 确认动作应只取消目标链的默认后续提醒");
+    Check(schedules.FindById(1).value->status == ScheduleStatus::kActive &&
+              schedules.FindById(2).value->status == ScheduleStatus::kCompleted,
+          "IM 确认动作应按 reminderTriggerId 完成关联日程而不影响其他提醒");
+
+    ReminderActionCommand invalid_snooze = snooze;
+    invalid_snooze.operationId = "operation-invalid-snooze";
+    invalid_snooze.reminderTriggerId = "timing-ack-1";
+    invalid_snooze.minutes = 5;
+    Check(executor.Execute(invalid_snooze).status == "failed", "非 10 分钟延迟参数应被业务执行器拒绝");
     return 0;
 }

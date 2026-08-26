@@ -533,7 +533,10 @@ int main() {
     const auto update_cancel_failed = failing_server.call({
         .request_id = "update-cancel-failed",
         .name = "schedule.update",
-        .arguments = {{"schedule_id", int64_t{20}}, {"status", std::string("cancelled")}},
+        .arguments = {{"schedule_id", int64_t{20}},
+                      {"expected_event", std::string("待更新日程")},
+                      {"expected_start_time", std::string("2030-03-18 01:46:40")},
+                      {"status", std::string("cancelled")}},
     });
     Check(OutputString(update_cancel_failed, "status") == "failure", "update 取消失败应返回 failure");
 
@@ -551,7 +554,9 @@ int main() {
     const auto delete_cancel_failed = failing_server.call({
         .request_id = "delete-cancel-failed",
         .name = "schedule.delete",
-        .arguments = {{"schedule_id", int64_t{20}}},
+        .arguments = {{"schedule_id", int64_t{20}},
+                      {"expected_event", std::string("待更新日程")},
+                      {"expected_start_time", std::string("2030-03-18 01:46:40")}},
     });
     Check(OutputString(delete_cancel_failed, "status") == "failure", "删除取消失败应返回 failure");
 

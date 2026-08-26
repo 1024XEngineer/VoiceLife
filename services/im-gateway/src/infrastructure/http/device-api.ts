@@ -1,15 +1,17 @@
-import type { ActionId, DeviceId, PairingSessionId, ReminderTriggerId } from '../../contracts/ids.js';
+import type { ActionId, DeviceId, EventId, PairingSessionId, ReminderTriggerId } from '../../contracts/ids.js';
 import type {
     CreatedPairingSessionResponse,
     NotificationSubmission,
     PairingSessionStatus,
     ReminderActionCommand,
+    ReminderActionStatusReport,
     ReminderType,
 } from '../../contracts/device-gateway.js';
 import {
     parseCreatePairingSessionRequest,
     parseNotificationIntent,
     parseReminderActionResult,
+    parseReminderActionStatusReport,
     parseScheduleReceiptIntent,
     parseScheduleQueryResultIntent,
 } from '../../contracts/device-gateway-parser.js';
@@ -26,6 +28,7 @@ export const DEVICE_API_ROUTES = {
     scheduleQueryResults: '/v1/im/schedule-query-results',
     notifications: '/v1/im/notifications',
     reminderActionResults: '/v1/devices/:deviceId/reminder-actions/:commandId/result',
+    reminderActionStatusReports: '/v1/devices/:deviceId/reminder-action-status',
     reminderActionStream: '/v1/devices/:deviceId/reminder-actions/stream',
 } as const;
 
@@ -54,6 +57,11 @@ export const DEVICE_API_ENDPOINTS = {
     reminderActionResult: {
         method: 'POST',
         path: DEVICE_API_ROUTES.reminderActionResults,
+        transport: 'https',
+    },
+    reminderActionStatusReport: {
+        method: 'POST',
+        path: DEVICE_API_ROUTES.reminderActionStatusReports,
         transport: 'https',
     },
 } as const;
@@ -185,6 +193,27 @@ export class DeviceIntentController {
             throw new ImGatewayError('invalid_transition', 'Device principal does not match the result path');
         }
         return this.actions.recordResult(input.commandId, input.deviceId, body);
+    }
+
+    /**
+     * 认证并受理不依赖 commandId 的设备语音动作事实。
+     * @param input 路径范围、设备凭据、幂等键与未受信任的请求体。
+     * @returns 受理标识以及已被收口的动作（如存在）。
+     */
+    public async postReminderActionStatusReport(input: {
+        readonly authorization: string;
+        readonly idempotencyKey: string;
+        readonly deviceId: DeviceId;
+        readonly body: unknown;
+    }): Promise<{ readonly accepted: true; readonly eventId: EventId; readonly action?: ImAction }> {
+        const body: ReminderActionStatusReport = parseReminderActionStatusReport(input.body);
+        if (body.deviceId !== input.deviceId) {
+            throw new ImGatewayError('invalid_transition', 'Device principal does not match the report path');
+        }
+        await this.authenticateDevice(input.authorization, body.deviceId);
+        this.assertIdempotencyKey(input.idempotencyKey, body.eventId);
+        const action = await this.actions.recordDeviceActionStatus(body);
+        return { accepted: true, eventId: body.eventId, ...(action === undefined ? {} : { action }) };
     }
 
     private async authenticateDevice(
