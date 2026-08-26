@@ -8,6 +8,7 @@ import {
     type ReminderActionIntent,
     type ReminderActionExecutionStatus,
     type ReminderActionResult,
+    type ReminderActionStatusReport,
     type ScheduleOperationType,
     type ScheduleReceiptIntent,
     type ScheduleQueryResultIntent,
@@ -209,6 +210,47 @@ export function parseReminderActionResult(input: unknown): ReminderActionResult 
         ...(errorCode === undefined ? {} : { errorCode }),
         ...(details === undefined ? {} : { details }),
         occurredAt: isoDateTimeAt(value.occurredAt, 'body.occurredAt'),
+    };
+}
+
+/**
+ * 解析不依赖 commandId 的设备语音提醒动作事实。
+ * @param input 未受信任的请求体。
+ * @returns 已完成契约校验的设备语音动作事实。
+ */
+export function parseReminderActionStatusReport(input: unknown): ReminderActionStatusReport {
+    const value = objectAt(input, 'body');
+    const nextTriggerAt = optionalIsoDateTime(value, 'nextTriggerAt', 'body.nextTriggerAt');
+    const errorCode = optionalString(value, 'errorCode', 'body.errorCode');
+    const details = optionalJsonValue(value, 'details', 'body.details');
+    if (value.source !== 'voice') invalid('body.source', 'must equal voice');
+    const action = enumAt(value.action, ['acknowledge', 'snooze'] as const, 'body.action');
+    const status = enumAt(
+        value.status,
+        ['succeeded', 'retryable_failed', 'failed', 'expired'] as const,
+        'body.status',
+    ) satisfies ReminderActionExecutionStatus;
+    if (
+        status === 'succeeded' &&
+        ((action === 'snooze' && nextTriggerAt === undefined) ||
+            (action === 'acknowledge' && nextTriggerAt !== undefined))
+    ) {
+        invalid('body.nextTriggerAt', 'must match the action type for a succeeded report');
+    }
+    return {
+        schemaVersion: contractVersion(value),
+        eventId: requiredId<EventId>(value, 'eventId', 'body.eventId'),
+        correlationId: requiredId<CorrelationId>(value, 'correlationId', 'body.correlationId'),
+        deviceId: requiredId<DeviceId>(value, 'deviceId', 'body.deviceId'),
+        reminderTriggerId: requiredId<ReminderTriggerId>(value, 'reminderTriggerId', 'body.reminderTriggerId'),
+        operationId: requiredId<OperationId>(value, 'operationId', 'body.operationId'),
+        action,
+        status,
+        occurredAt: isoDateTimeAt(value.occurredAt, 'body.occurredAt'),
+        ...(nextTriggerAt === undefined ? {} : { nextTriggerAt }),
+        ...(errorCode === undefined ? {} : { errorCode }),
+        ...(details === undefined ? {} : { details }),
+        source: 'voice',
     };
 }
 

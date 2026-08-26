@@ -494,7 +494,9 @@ int main() {
     const auto delete_schedule = server.call({
         .request_id = "delete-schedule",
         .name = "schedule.delete",
-        .arguments = {{"schedule_id", int64_t{2}}},
+        .arguments = {{"schedule_id", int64_t{2}},
+                      {"expected_event", std::string("每日站会")},
+                      {"expected_start_time", std::string("2099-01-01 09:00:00")}},
     });
     Check(delete_schedule.status.ok() && OutputString(delete_schedule, "status") == "success",
           "按 schedule_id 删除应成功");
@@ -586,7 +588,10 @@ int main() {
     const auto cancel_by_id = server.call({
         .request_id = "update-cancel",
         .name = "schedule.update",
-        .arguments = {{"schedule_id", int64_t{4}}, {"status", std::string("cancelled")}},
+        .arguments = {{"schedule_id", int64_t{4}},
+                      {"expected_event", std::string("更新目标")},
+                      {"expected_start_time", std::string("2030-05-02 09:00:00")},
+                      {"status", std::string("cancelled")}},
     });
     Check(OutputString(cancel_by_id, "status") == "success", "按 schedule_id 取消应成功");
 

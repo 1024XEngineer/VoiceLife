@@ -24,6 +24,7 @@
 #include "driver/i2s_std.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 
 #endif
@@ -148,6 +149,7 @@ class Esp32s3PcmAudioPorts::Impl final {
     mutable std::mutex mutex_;
     std::condition_variable input_cv_;
     std::condition_variable output_cv_;
+    std::condition_variable output_space_cv_;
     std::condition_variable done_cv_;
     std::deque<voice::AudioFrame> input_queue_;
     std::deque<voice::AudioFrame> output_queue_;

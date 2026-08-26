@@ -17,7 +17,12 @@ import type {
     RequestId,
     UserId,
 } from '../contracts/ids.js';
-import type { NotificationSubmission, ReminderActionKind, ReminderActionResult } from '../contracts/device-gateway.js';
+import type {
+    NotificationSubmission,
+    ReminderActionKind,
+    ReminderActionResult,
+    ReminderActionStatusReport,
+} from '../contracts/device-gateway.js';
 import type { ImPlatform } from '../contracts/platform-events.js';
 import type { IsoDateTime, JsonValue } from '../shared/types.js';
 
@@ -201,6 +206,14 @@ export interface ImAction {
     readonly expiresAt: IsoDateTime;
     readonly createdAt: IsoDateTime;
     readonly updatedAt: IsoDateTime;
+}
+
+/** 设备本地动作事实的持久化记录；eventId 与 fingerprint 提供幂等和冲突检测。 */
+export interface DeviceReminderActionFact {
+    readonly eventId: EventId;
+    readonly fingerprint: string;
+    readonly report: ReminderActionStatusReport;
+    readonly receivedAt: IsoDateTime;
 }
 
 /** 服务端事务性发件箱事件，不代表设备侧 Local Outbox。 */

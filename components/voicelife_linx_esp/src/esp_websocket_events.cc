@@ -107,7 +107,12 @@ void EspWebSocketTransport::Impl::Enqueue(int32_t event_id, const esp_websocket_
     } else {
         return;
     }
-    if (xQueueSend(event_queue_, &envelope, 0) != pdTRUE) {
+    // If playback is applying backpressure, wait briefly for the worker to
+    // drain a slot so the TCP receive path slows the server instead of
+    // silently dropping a TTS frame. callback_mutex_ is intentionally not
+    // used by SinkSnapshot; holding it while waiting would deadlock the
+    // worker on a full queue.
+    if (xQueueSend(event_queue_, &envelope, pdMS_TO_TICKS(500)) != pdTRUE) {
         ESP_LOGW(detail::kTag, "Linx WebSocket 事件队列已满，丢弃事件");
         queue_overflowed_.store(true);
         state_ = TransportState::kFailed;
@@ -350,7 +355,7 @@ void EspWebSocketTransport::Impl::HandleData(const detail::EventEnvelope& envelo
 }
 
 linx::LinxTransportSink EspWebSocketTransport::Impl::SinkSnapshot() {
-    std::lock_guard<std::mutex> callback_lock(callback_mutex_);
+    std::lock_guard<std::mutex> sink_lock(sink_mutex_);
     return sink_;
 }
 

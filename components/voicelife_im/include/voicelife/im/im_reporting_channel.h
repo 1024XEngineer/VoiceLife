@@ -1,9 +1,13 @@
 #pragma once
 
+#include <deque>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 
 #include "voicelife/contracts/im/notification_intent.h"
 #include "voicelife/contracts/im/reminder_action_result.h"
+#include "voicelife/contracts/im/reminder_action_status_report.h"
 #include "voicelife/contracts/im/schedule_query_result.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/im/im_credentials.h"
@@ -72,14 +76,27 @@ class ImReportingChannel {
      */
     ReportResult SubmitReminderActionResult(const contracts::im::ReminderActionResult& result,
                                             const std::string& device_id, const std::string& command_id);
+    /**
+     * @brief 提交不依赖 commandId 的设备语音动作事实。
+     * @param report 已在设备本地持久化的动作事实。
+     * @return 提交结果分类。
+     */
+    ReportResult SubmitReminderActionStatusReport(const contracts::im::ReminderActionStatusReport& report);
 
    private:
+    /// 同一启动周期内成功提交过的语音事实无需再次占用网络；重启后缓存自然清空，
+    /// 由 Runtime 的持久化扫描继续补报。保留正文用于避免吞掉同 eventId 的冲突载荷。
+    static constexpr std::size_t kSubmittedStatusReportCacheLimit = 128;
+
     /// 统一提交入口：装配请求头并映射传输结果。
     ReportResult Submit(const std::string& path, const std::string& idempotency_key,
                         const std::string& intent_device_id, const std::string& body);
 
     ImTransport& transport_;
     ImCredentialProvider& credentials_;
+    std::mutex status_report_mutex_;
+    std::unordered_map<std::string, std::string> submitted_status_report_bodies_;
+    std::deque<std::string> submitted_status_report_order_;
 };
 
 }  // namespace voicelife::im

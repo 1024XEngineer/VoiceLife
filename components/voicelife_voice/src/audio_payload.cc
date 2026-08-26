@@ -11,6 +11,14 @@
 #endif
 
 namespace voicelife::voice {
+namespace {
+
+uint32_t AvailableMask(std::size_t slot_count) {
+    return slot_count == AudioPayloadPool::kSlotsPerBitmapWord ? std::numeric_limits<uint32_t>::max()
+                                                               : (uint32_t{1} << slot_count) - uint32_t{1};
+}
+
+}  // namespace
 
 AudioPayload::AudioPayload(std::shared_ptr<AudioPayloadPool> pool, std::size_t slot, uint8_t* data,
                            std::size_t capacity) noexcept
@@ -91,7 +99,7 @@ AudioPayloadPool::~AudioPayloadPool() {
 }
 
 std::shared_ptr<AudioPayloadPool> AudioPayloadPool::Create(std::size_t slot_count, std::size_t slot_bytes) {
-    if (slot_count == 0 || slot_count > 32 || slot_bytes == 0 ||
+    if (slot_count == 0 || slot_count > kMaximumSlots || slot_bytes == 0 ||
         slot_count > std::numeric_limits<std::size_t>::max() / slot_bytes) {
         return {};
     }
@@ -107,27 +115,33 @@ bool AudioPayloadPool::Initialize() noexcept {
     bytes_ = new (std::nothrow) uint8_t[total_bytes];
 #endif
     if (bytes_ == nullptr) return false;
-    const uint32_t mask =
-        slot_count_ == 32 ? std::numeric_limits<uint32_t>::max() : (uint32_t{1} << slot_count_) - uint32_t{1};
-    available_slots_.store(mask, std::memory_order_release);
+    for (std::size_t word = 0; word < kBitmapWordCount; ++word) {
+        const std::size_t word_start = word * kSlotsPerBitmapWord;
+        const std::size_t slots_in_word =
+            word_start < slot_count_ ? std::min(kSlotsPerBitmapWord, slot_count_ - word_start) : 0;
+        available_slots_[word].store(slots_in_word == 0 ? 0 : AvailableMask(slots_in_word), std::memory_order_release);
+    }
     return true;
 }
 
 AudioPayload AudioPayloadPool::TryAcquire() {
-    uint32_t available = available_slots_.load(std::memory_order_acquire);
-    while (available != 0) {
-        const uint32_t selected = available & (uint32_t{0} - available);
-        const uint32_t next = available & ~selected;
-        if (available_slots_.compare_exchange_weak(available, next, std::memory_order_acq_rel,
-                                                   std::memory_order_acquire)) {
-            const std::size_t in_use = in_use_.fetch_add(1, std::memory_order_relaxed) + 1;
-            std::size_t high_watermark = high_watermark_.load(std::memory_order_relaxed);
-            while (in_use > high_watermark &&
-                   !high_watermark_.compare_exchange_weak(high_watermark, in_use, std::memory_order_relaxed,
-                                                          std::memory_order_relaxed)) {
+    for (std::size_t word = 0; word < kBitmapWordCount; ++word) {
+        uint32_t available = available_slots_[word].load(std::memory_order_acquire);
+        while (available != 0) {
+            const uint32_t selected = available & (uint32_t{0} - available);
+            const uint32_t next = available & ~selected;
+            if (available_slots_[word].compare_exchange_weak(available, next, std::memory_order_acq_rel,
+                                                             std::memory_order_acquire)) {
+                const std::size_t in_use = in_use_.fetch_add(1, std::memory_order_relaxed) + 1;
+                std::size_t high_watermark = high_watermark_.load(std::memory_order_relaxed);
+                while (in_use > high_watermark &&
+                       !high_watermark_.compare_exchange_weak(high_watermark, in_use, std::memory_order_relaxed,
+                                                              std::memory_order_relaxed)) {
+                }
+                const std::size_t slot =
+                    word * kSlotsPerBitmapWord + static_cast<std::size_t>(std::countr_zero(selected));
+                return AudioPayload(shared_from_this(), slot, bytes_ + slot * slot_bytes_, slot_bytes_);
             }
-            const std::size_t slot = static_cast<std::size_t>(std::countr_zero(selected));
-            return AudioPayload(shared_from_this(), slot, bytes_ + slot * slot_bytes_, slot_bytes_);
         }
     }
     acquisition_failures_.fetch_add(1, std::memory_order_relaxed);
@@ -136,8 +150,9 @@ AudioPayload AudioPayloadPool::TryAcquire() {
 
 void AudioPayloadPool::Release(std::size_t slot) noexcept {
     if (slot >= slot_count_) return;
-    const uint32_t slot_bit = uint32_t{1} << slot;
-    const uint32_t previous = available_slots_.fetch_or(slot_bit, std::memory_order_release);
+    const std::size_t word = slot / kSlotsPerBitmapWord;
+    const uint32_t slot_bit = uint32_t{1} << (slot % kSlotsPerBitmapWord);
+    const uint32_t previous = available_slots_[word].fetch_or(slot_bit, std::memory_order_release);
     if ((previous & slot_bit) == 0) {
         in_use_.fetch_sub(1, std::memory_order_relaxed);
     }
@@ -146,6 +161,8 @@ void AudioPayloadPool::Release(std::size_t slot) noexcept {
 std::size_t AudioPayloadPool::acquisition_failures() const {
     return acquisition_failures_.load(std::memory_order_relaxed);
 }
+
+std::size_t AudioPayloadPool::in_use() const { return in_use_.load(std::memory_order_relaxed); }
 
 std::size_t AudioPayloadPool::high_watermark() const { return high_watermark_.load(std::memory_order_relaxed); }
 

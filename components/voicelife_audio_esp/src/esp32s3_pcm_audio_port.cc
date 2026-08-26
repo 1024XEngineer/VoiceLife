@@ -396,7 +396,8 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
         amplifier_callback_(true);  // 播放打开：经板级仲裁请求功放。
         amplifier_enabled_ = true;
     }
-    if (xTaskCreate(&OutputTaskEntry, "voice_audio_out", 4096, this, 4, &output_task_) != pdPASS) {
+    if (xTaskCreateWithCaps(&OutputTaskEntry, "voice_audio_out", 4096, this, 4, &output_task_,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         if (amplifier_callback_) {
             amplifier_callback_(false);
             amplifier_enabled_ = false;
@@ -462,11 +463,13 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
         return detail::Unavailable("创建 I2S 采集任务失败");
     }
     // 投递任务栈常驻 PSRAM、TCB 在内部 RAM：待机恢复时内部 RAM 最大连续块
-    // 常 <16KB，16384B 动态栈创建必然失败。xTaskCreateStatic 的栈可放 PSRAM
+    // 常 <16KB，动态栈创建必然失败。Opus 编码在投递任务调用，32 KiB 静态栈
+    // 留出编码器调用链的余量。xTaskCreateStatic 的栈可放 PSRAM
     // （xPortCheckValidStackMem 允许外部 RAM），但 TCB 必须内部 RAM
     // （xPortCheckValidTCBMem 断言，调度器临界区依赖内部寻址）。一次性分配、
     // 跨采集周期复用，不释放（PSRAM 8MB 充裕，随 AudioPorts 生命周期）。
-    constexpr uint32_t kDeliveryStackWords = 16384 / sizeof(StackType_t);
+    constexpr uint32_t kDeliveryStackBytes = 32 * 1024;
+    constexpr uint32_t kDeliveryStackWords = kDeliveryStackBytes / sizeof(StackType_t);
     if (delivery_stack_ == nullptr || delivery_tcb_ == nullptr) {
         delivery_stack_ = static_cast<StackType_t*>(
             heap_caps_malloc(sizeof(StackType_t) * kDeliveryStackWords, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -505,6 +508,8 @@ Status Esp32s3PcmAudioPorts::Impl::StartCapture(voice::VoiceMode) {
         return detail::Unavailable("创建 I2S 音频投递任务失败");
     }
     delivery_task_ = delivery_task;
+    ESP_LOGI(detail::kAudioRuntimeTag, "DELIVERY_TASK_READY stack_bytes=%u memory=psram",
+             static_cast<unsigned>(kDeliveryStackBytes));
     return Status::Ok();
 #endif
 }
@@ -582,7 +587,7 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(voice::AudioFrame frame) {
     (void)frame;
     return detail::Unavailable("ESP32-S3 PCM Audio Port 只能在 ESP-IDF 目标运行");
 #else
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     if (!output_open_ || output_closing_ || !playback_format_.has_value()) {
         return detail::Unavailable("输出端口尚未打开");
     }
@@ -595,6 +600,17 @@ Status Esp32s3PcmAudioPorts::Impl::PushOutput(voice::AudioFrame frame) {
     const uint64_t frame_duration_ms = detail::PcmDurationMs(frame);
     if (frame_duration_ms == 0) {
         return detail::Invalid("播放帧无法推导 PCM 时长");
+    }
+    // Linx may deliver Opus frames in a burst faster than the I2S clock. Keep
+    // the frame and apply backpressure until the bounded playback queue has
+    // room; dropping here would silently truncate otherwise valid TTS audio.
+    output_space_cv_.wait(lock, [this, frame_duration_ms]() {
+        const bool has_capacity = output_queue_.size() < options_.output_queue_depth &&
+                                  output_queue_duration_ms_ + frame_duration_ms <= options_.maximum_playback_latency_ms;
+        return has_capacity || !output_running_ || output_closing_ || !output_open_;
+    });
+    if (!output_open_ || output_closing_ || !output_running_) {
+        return detail::Unavailable("输出端口已停止");
     }
     if (output_queue_.size() >= options_.output_queue_depth) {
         ++rejected_output_frames_;
@@ -641,6 +657,7 @@ Status Esp32s3PcmAudioPorts::Impl::FlushOutput() {
     std::lock_guard<std::mutex> lock(mutex_);
     output_queue_.clear();
     output_queue_duration_ms_ = 0;
+    output_space_cv_.notify_all();
     if (output_writing_) {
         amplifier_disable_pending_ = true;
     } else if (amplifier_enabled_ && amplifier_callback_) {
@@ -687,6 +704,7 @@ Status Esp32s3PcmAudioPorts::Impl::CloseOutput() {
             output_queue_.clear();
             output_queue_duration_ms_ = 0;
             output_cv_.notify_all();
+            output_space_cv_.notify_all();
         }
     }
     std::unique_lock<std::mutex> lock(mutex_);
