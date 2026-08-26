@@ -9,30 +9,19 @@ import {
     SSE_RESPONSE_HEADERS,
     SseActionCommandHub,
 } from '../dist/index.js';
-import {
-    buildGateway,
-    expectGatewayError,
-    pendingStrongDelivery,
-    scheduleQueryResultIntent,
-    strongIntent,
-} from './helpers.mjs';
+import { buildGateway, expectGatewayError, scheduleQueryResultIntent, strongIntent } from './helpers.mjs';
 
 test('device route metadata matches the Issue #65 transport contract', () => {
     assert.equal(DEVICE_API_ROUTES.pairingSessions, '/v1/im/pairing-sessions');
     assert.equal(DEVICE_API_ROUTES.scheduleReceipts, '/v1/im/schedule-receipts');
     assert.equal(DEVICE_API_ROUTES.scheduleQueryResults, '/v1/im/schedule-query-results');
     assert.equal(DEVICE_API_ROUTES.notifications, '/v1/im/notifications');
-    assert.equal(DEVICE_API_ROUTES.voiceReminderActionStatuses, '/v1/im/reminder-action-statuses');
     assert.equal(DEVICE_API_ROUTES.reminderActionStream, '/v1/devices/:deviceId/reminder-actions/stream');
     assert.equal(DEVICE_API_ROUTES.reminderActionResults, '/v1/devices/:deviceId/reminder-actions/:commandId/result');
+    assert.equal(DEVICE_API_ROUTES.reminderActionStatusReports, '/v1/devices/:deviceId/reminder-action-status');
     assert.deepEqual(DEVICE_API_ENDPOINTS.notification, {
         method: 'POST',
         path: '/v1/im/notifications',
-        transport: 'https',
-    });
-    assert.deepEqual(DEVICE_API_ENDPOINTS.voiceReminderActionStatus, {
-        method: 'POST',
-        path: '/v1/im/reminder-action-statuses',
         transport: 'https',
     });
     assert.deepEqual(SSE_RESPONSE_HEADERS, {
@@ -43,80 +32,86 @@ test('device route metadata matches the Issue #65 transport contract', () => {
     assert.equal(SSE_HEARTBEAT_INTERVAL_SECONDS >= 15 && SSE_HEARTBEAT_INTERVAL_SECONDS <= 30, true);
 });
 
-test('voice reminder status is idempotent and closes the pending H5 action', async () => {
+test('device voice action status report is authenticated and idempotent', async () => {
     const { gateway } = buildGateway();
-    const deliveryId = await pendingStrongDelivery(gateway);
-    await gateway.application.deliveryDispatch.dispatch(deliveryId);
-    const token = await gateway.application.actionUi.issue(deliveryId);
-    const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
     const body = {
         schemaVersion: '1',
-        eventId: 'voice-event-fixture',
-        correlationId: 'voice-correlation-fixture',
+        eventId: 'voice-status-event',
+        correlationId: 'voice-status-correlation',
         deviceId: 'device-fixture',
-        reminderTriggerId: command.reminderTriggerId,
-        operationId: 'voice-operation-fixture',
-        action: 'acknowledge',
+        reminderTriggerId: 'trigger-fixture',
+        operationId: 'voice-status-operation',
+        action: 'snooze',
         status: 'succeeded',
         occurredAt: '2026-08-03T00:01:00.000Z',
+        nextTriggerAt: '2026-08-03T00:11:00.000Z',
         source: 'voice',
     };
-    const first = await gateway.deviceApi.postVoiceReminderActionStatus({
+    const first = await gateway.deviceApi.postReminderActionStatusReport({
         authorization: 'Bearer fixture-device-token',
         idempotencyKey: body.eventId,
+        deviceId: body.deviceId,
         body,
     });
-    assert.equal(first[0].status, 'succeeded');
-    const replay = await gateway.deviceApi.postVoiceReminderActionStatus({
+    const replay = await gateway.deviceApi.postReminderActionStatusReport({
         authorization: 'Bearer fixture-device-token',
         idempotencyKey: body.eventId,
+        deviceId: body.deviceId,
         body,
     });
     assert.deepEqual(replay, first);
-    assert.equal((await gateway.application.actionUi.show(token)).state, 'succeeded');
     await expectGatewayError(
         () =>
-            gateway.deviceApi.postVoiceReminderActionStatus({
+            gateway.deviceApi.postReminderActionStatusReport({
                 authorization: 'Bearer fixture-device-token',
                 idempotencyKey: 'other-event',
+                deviceId: body.deviceId,
                 body,
             }),
         'duplicate_event',
-        'A mismatched voice status Idempotency-Key was accepted',
+        'A mismatched voice action report Idempotency-Key was accepted',
     );
 });
 
-test('voice reminder status materializes an action when H5 was never opened', async () => {
-    const { gateway, unitOfWork } = buildGateway();
-    const deliveryId = await pendingStrongDelivery(gateway);
-    await gateway.application.deliveryDispatch.dispatch(deliveryId);
-    const body = {
+test('device voice action status report enforces nextTriggerAt by action type', async () => {
+    const { gateway } = buildGateway();
+    const base = {
         schemaVersion: '1',
-        eventId: 'voice-event-without-h5',
-        correlationId: 'voice-correlation-without-h5',
+        correlationId: 'voice-contract-correlation',
         deviceId: 'device-fixture',
-        reminderTriggerId: 'trigger-fixture',
-        operationId: 'voice-operation-without-h5',
-        action: 'snooze',
+        reminderTriggerId: 'trigger-contract',
+        operationId: 'voice-contract-operation',
         status: 'succeeded',
-        nextTriggerAt: '2026-08-03T00:11:00.000Z',
         occurredAt: '2026-08-03T00:01:00.000Z',
         source: 'voice',
     };
-    const result = await gateway.deviceApi.postVoiceReminderActionStatus({
-        authorization: 'Bearer fixture-device-token',
-        idempotencyKey: body.eventId,
-        body,
-    });
-    assert.equal(result[0].status, 'succeeded');
-    const token = await gateway.application.actionUi.issue(deliveryId);
-    assert.equal((await gateway.application.actionUi.show(token)).state, 'succeeded');
-    const stored = await unitOfWork.transaction((tx) => tx.actions.findByOperationId(body.operationId));
-    assert.deepEqual(stored?.result?.details, {
-        source: 'voice',
-        correlationId: body.correlationId,
-    });
-    assert.equal(stored?.deliveryId, deliveryId);
+    await expectGatewayError(
+        () =>
+            gateway.deviceApi.postReminderActionStatusReport({
+                authorization: 'Bearer fixture-device-token',
+                idempotencyKey: 'voice-contract-ack-with-time',
+                deviceId: 'device-fixture',
+                body: {
+                    ...base,
+                    eventId: 'voice-contract-ack-with-time',
+                    action: 'acknowledge',
+                    nextTriggerAt: '2026-08-03T00:11:00.000Z',
+                },
+            }),
+        'invalid_contract',
+        'Acknowledge report with nextTriggerAt was accepted',
+    );
+    await expectGatewayError(
+        () =>
+            gateway.deviceApi.postReminderActionStatusReport({
+                authorization: 'Bearer fixture-device-token',
+                idempotencyKey: 'voice-contract-snooze-without-time',
+                deviceId: 'device-fixture',
+                body: { ...base, eventId: 'voice-contract-snooze-without-time', action: 'snooze' },
+            }),
+        'invalid_contract',
+        'Snooze report without nextTriggerAt was accepted',
+    );
 });
 
 test('schedule query result enforces device identity and idempotency', async () => {

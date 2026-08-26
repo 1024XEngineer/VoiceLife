@@ -295,7 +295,11 @@ int main() {
     Check(session.state() == voicelife::voice::VoiceSessionState::kSpeaking &&
               evidence.size() == evidence_before_late_asr + 1 && evidence.back().event == "stale_event_dropped",
           "播报中的迟到 STT 必须在 VoiceSession 丢弃，不能重新驱动交互状态");
-    session.EndCapture();
+    const int input_stops_before_late_end = input.stops;
+    const int provider_stops_before_late_end = provider.stops;
+    Check(session.EndCapture().ok() && input.stops == input_stops_before_late_end &&
+              provider.stops == provider_stops_before_late_end,
+          "TTS 已关闭输入后，迟到的结束采集必须幂等且不得停止正在播报的会话");
     provider.Emit(voicelife::voice::VoiceEvent{
         .kind = voicelife::voice::VoiceEventKind::kTtsStopped, .generation = generation, .text = {}, .aborted = false});
     Check(session.state() == voicelife::voice::VoiceSessionState::kReady, "TTS stop 后回到 ready");

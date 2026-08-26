@@ -172,9 +172,11 @@ function renderActionStatePage(view: Exclude<ActionUiView, { state: 'available' 
     }
     if (view.state === 'succeeded') {
         const detail =
-            view.action === 'snooze' && view.params !== undefined
-                ? `设备已确认推迟 ${String(view.params.minutes)} 分钟。`
-                : '设备已确认这条提醒。';
+            view.action === 'snooze' && view.nextTriggerAt !== undefined
+                ? `设备已确认推迟，下一次提醒时间为 ${formatTime(view.nextTriggerAt)}。`
+                : view.action === 'snooze' && view.params !== undefined
+                  ? `设备已确认推迟 ${String(view.params.minutes)} 分钟。`
+                  : '设备已确认这条提醒。';
         return pageShell(
             '提醒已处理',
             `<main class="result"><div class="check" aria-hidden="true">&#10003;</div><p class="kicker">已完成</p><h1>提醒已处理</h1><p class="summary">${escapeHtml(detail)}</p></main>`,

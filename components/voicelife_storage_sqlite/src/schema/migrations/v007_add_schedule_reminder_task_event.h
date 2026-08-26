@@ -4,7 +4,5 @@
 #include "voicelife/storage_sqlite/sqlite_database.h"
 
 namespace voicelife::storage_sqlite::schema::migrations {
-
-Status ApplyV008AddActionReportState(SqliteDatabase& database);
-
-}  // namespace voicelife::storage_sqlite::schema::migrations
+Status ApplyV007AddScheduleReminderTaskEvent(SqliteDatabase& database);
+}

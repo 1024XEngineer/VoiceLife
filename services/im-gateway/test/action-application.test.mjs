@@ -61,6 +61,22 @@ function succeededResult(command, occurredAt, overrides = {}) {
     };
 }
 
+function voiceReport(overrides = {}) {
+    return {
+        schemaVersion: '1',
+        eventId: 'voice-event-fixture',
+        correlationId: 'voice-correlation-fixture',
+        deviceId: 'device-fixture',
+        reminderTriggerId: 'trigger-fixture',
+        operationId: 'voice-operation-fixture',
+        action: 'acknowledge',
+        status: 'succeeded',
+        occurredAt: '2026-08-03T00:01:00.000Z',
+        source: 'voice',
+        ...overrides,
+    };
+}
+
 test('a token that was never issued is rejected on show and execute', async () => {
     const { gateway } = buildGateway();
     const forged = 'mock-token:forged-action';
@@ -197,6 +213,217 @@ test('triggering a prepared acknowledge publishes a well-formed command', async 
     assert.equal(found.status, 'dispatched');
     assert.equal(found.actionType, 'acknowledge');
     assert.equal((await gateway.application.actions.findByOperationId(command.operationId)).id, command.commandId);
+});
+
+test('a voice-first acknowledge is persisted and consumed when IM later opens the action', async () => {
+    const { gateway, stream } = actionGateway();
+    await gateway.application.actions.recordDeviceActionStatus(voiceReport());
+
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+    const action = await gateway.application.actions.find(command.commandId);
+
+    assert.equal(action.status, 'succeeded');
+    assert.equal(action.result.status, 'succeeded');
+    assert.equal(stream.commands.length, 0);
+});
+
+test('a voice-first snooze preserves nextTriggerAt in the later IM action', async () => {
+    const { gateway } = actionGateway();
+    await gateway.application.actions.recordDeviceActionStatus(
+        voiceReport({
+            eventId: 'voice-snooze-event',
+            operationId: 'voice-snooze-operation',
+            action: 'snooze',
+            nextTriggerAt: '2026-08-03T00:11:00.000Z',
+        }),
+    );
+
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'snooze', params: { minutes: 10 } });
+    const action = await gateway.application.actions.find(command.commandId);
+
+    assert.equal(action.status, 'succeeded');
+    assert.equal(action.result.nextTriggerAt, '2026-08-03T00:11:00.000Z');
+});
+
+test('a later conflicting IM action is superseded by a terminal voice fact without dispatch', async () => {
+    const { gateway, stream } = actionGateway();
+    await gateway.application.actions.recordDeviceActionStatus(voiceReport());
+
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'snooze', params: { minutes: 10 } });
+    const action = await gateway.application.actions.find(command.commandId);
+
+    assert.equal(action.status, 'failed');
+    assert.equal(action.result.status, 'failed');
+    assert.equal(action.result.errorCode, 'superseded_by_device_action');
+    assert.equal(stream.commands.length, 0);
+});
+
+test('a device voice report closes a pending IM action and is idempotent', async () => {
+    const { gateway, stream } = actionGateway();
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+    const report = voiceReport({ operationId: command.operationId, correlationId: command.correlationId });
+
+    const updated = await gateway.application.actions.recordDeviceActionStatus(report);
+    const replay = await gateway.application.actions.recordDeviceActionStatus(report);
+
+    assert.equal(updated.status, 'succeeded');
+    assert.equal(replay.status, 'succeeded');
+    assert.equal(stream.closed.includes(command.commandId), true);
+});
+
+test('a voice action wins over a pending conflicting IM command without a terminal rollback', async () => {
+    const { gateway, clock, stream } = actionGateway();
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+    const voice = voiceReport({
+        eventId: 'voice-snooze-wins-event',
+        operationId: 'voice-snooze-wins-operation',
+        correlationId: 'voice-snooze-wins-correlation',
+        action: 'snooze',
+        nextTriggerAt: '2026-08-03T00:11:00.000Z',
+    });
+
+    const outcome = await gateway.application.actions.recordDeviceActionStatus(voice);
+    const settled = await gateway.application.actions.find(command.commandId);
+
+    assert.equal(outcome, undefined);
+    assert.equal(settled.status, 'failed');
+    assert.equal(settled.result.status, 'failed');
+    assert.equal(settled.result.errorCode, 'superseded_by_device_action');
+    assert.equal(stream.closed.includes(command.commandId), true);
+    await assert.rejects(
+        () =>
+            gateway.application.actions.recordResult(
+                command.commandId,
+                'device-fixture',
+                succeededResult(command, clock.now()),
+            ),
+        (error) => error.code === 'invalid_transition',
+    );
+    const replay = await gateway.application.actions.recordDeviceActionStatus(voice);
+    const unchanged = await gateway.application.actions.find(command.commandId);
+    assert.equal(replay, undefined);
+    assert.deepEqual(unchanged, settled);
+});
+
+test('a reused device event with different content is rejected', async () => {
+    const { gateway } = actionGateway();
+    await gateway.application.actions.recordDeviceActionStatus(voiceReport());
+
+    await assert.rejects(
+        () =>
+            gateway.application.actions.recordDeviceActionStatus(
+                voiceReport({ action: 'snooze', nextTriggerAt: '2026-08-03T00:11:00.000Z' }),
+            ),
+        (error) => error.code === 'idempotency_conflict',
+    );
+});
+
+test('a reused device operation id with a different event is rejected', async () => {
+    const { gateway } = actionGateway();
+    await gateway.application.actions.recordDeviceActionStatus(voiceReport());
+
+    await assert.rejects(
+        () =>
+            gateway.application.actions.recordDeviceActionStatus(
+                voiceReport({
+                    eventId: 'voice-event-conflict',
+                    action: 'snooze',
+                    operationId: 'voice-operation-fixture',
+                    nextTriggerAt: '2026-08-03T00:11:00.000Z',
+                }),
+            ),
+        (error) => error.code === 'idempotency_conflict',
+    );
+});
+
+test('a later failed voice report cannot overwrite an already succeeded fact', async () => {
+    const { gateway } = actionGateway();
+    await gateway.application.actions.recordDeviceActionStatus(voiceReport({ occurredAt: '2026-08-03T00:02:00.000Z' }));
+    await assert.rejects(
+        () =>
+            gateway.application.actions.recordDeviceActionStatus(
+                voiceReport({
+                    eventId: 'voice-failed-later',
+                    operationId: 'voice-failed-later-operation',
+                    status: 'failed',
+                    occurredAt: '2026-08-03T00:03:00.000Z',
+                    errorCode: 'device_busy',
+                }),
+            ),
+        (error) => error.code === 'invalid_transition',
+    );
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+    const action = await gateway.application.actions.find(command.commandId);
+    assert.equal(action.status, 'succeeded');
+});
+
+test('a concurrent same-time device report cannot replace the first accepted fact', async () => {
+    const { gateway } = actionGateway();
+    await gateway.application.actions.recordDeviceActionStatus(voiceReport());
+    await assert.rejects(
+        () =>
+            gateway.application.actions.recordDeviceActionStatus(
+                voiceReport({
+                    eventId: 'voice-same-time-conflict',
+                    operationId: 'voice-same-time-operation',
+                    action: 'snooze',
+                    nextTriggerAt: '2026-08-03T00:11:00.000Z',
+                }),
+            ),
+        (error) => error.code === 'invalid_transition',
+    );
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+    const action = await gateway.application.actions.find(command.commandId);
+    assert.equal(action.status, 'succeeded');
+    assert.equal(action.result.nextTriggerAt, undefined);
+});
+
+test('concurrent first device reports converge on one same-time fact', async () => {
+    const unitOfWork = new InMemoryImUnitOfWork();
+    seedDevice(unitOfWork, 'device-fixture');
+    const { gateway } = actionGateway({ unitOfWork });
+    const reports = [
+        voiceReport({ eventId: 'voice-concurrent-a', operationId: 'voice-concurrent-a-operation' }),
+        voiceReport({
+            eventId: 'voice-concurrent-b',
+            operationId: 'voice-concurrent-b-operation',
+            action: 'snooze',
+            nextTriggerAt: '2026-08-03T00:11:00.000Z',
+        }),
+    ];
+    const outcomes = await Promise.allSettled(
+        reports.map((report) => gateway.application.actions.recordDeviceActionStatus(report)),
+    );
+    assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 1);
+    assert.equal(outcomes.filter((outcome) => outcome.status === 'rejected').length, 1);
+    const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
+    assert.equal(rejected.reason.code, 'invalid_transition');
+});
+
+test('an older device report cannot roll back a newer report', async () => {
+    const { gateway } = actionGateway();
+    await gateway.application.actions.recordDeviceActionStatus(
+        voiceReport({ eventId: 'voice-new', occurredAt: '2026-08-03T00:02:00.000Z' }),
+    );
+    await gateway.application.actions.recordDeviceActionStatus(
+        voiceReport({
+            eventId: 'voice-old',
+            operationId: 'voice-old-operation',
+            occurredAt: '2026-08-03T00:01:00.000Z',
+            status: 'failed',
+        }),
+    );
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+    const action = await gateway.application.actions.find(command.commandId);
+    assert.equal(action.status, 'succeeded');
 });
 
 test('resolveActionWindow accepts only the matching active strong-reminder window', async () => {

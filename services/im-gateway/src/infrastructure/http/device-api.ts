@@ -1,18 +1,19 @@
-import type { ActionId, DeviceId, PairingSessionId, ReminderTriggerId } from '../../contracts/ids.js';
+import type { ActionId, DeviceId, EventId, PairingSessionId, ReminderTriggerId } from '../../contracts/ids.js';
 import type {
     CreatedPairingSessionResponse,
     NotificationSubmission,
     PairingSessionStatus,
     ReminderActionCommand,
+    ReminderActionStatusReport,
     ReminderType,
 } from '../../contracts/device-gateway.js';
 import {
     parseCreatePairingSessionRequest,
     parseNotificationIntent,
     parseReminderActionResult,
+    parseReminderActionStatusReport,
     parseScheduleReceiptIntent,
     parseScheduleQueryResultIntent,
-    parseVoiceReminderActionStatus,
 } from '../../contracts/device-gateway-parser.js';
 import type { ActionApplication, NotificationApplication, PairingApplication } from '../../application/api.js';
 import type { ImAction, PairingSession } from '../../domain/models.js';
@@ -26,8 +27,8 @@ export const DEVICE_API_ROUTES = {
     scheduleReceipts: '/v1/im/schedule-receipts',
     scheduleQueryResults: '/v1/im/schedule-query-results',
     notifications: '/v1/im/notifications',
-    voiceReminderActionStatuses: '/v1/im/reminder-action-statuses',
     reminderActionResults: '/v1/devices/:deviceId/reminder-actions/:commandId/result',
+    reminderActionStatusReports: '/v1/devices/:deviceId/reminder-action-status',
     reminderActionStream: '/v1/devices/:deviceId/reminder-actions/stream',
 } as const;
 
@@ -48,11 +49,6 @@ export const DEVICE_API_ENDPOINTS = {
         path: DEVICE_API_ROUTES.notifications,
         transport: 'https',
     },
-    voiceReminderActionStatus: {
-        method: 'POST',
-        path: '/v1/im/reminder-action-statuses',
-        transport: 'https',
-    },
     reminderActionCommand: {
         method: 'GET',
         path: DEVICE_API_ROUTES.reminderActionStream,
@@ -61,6 +57,11 @@ export const DEVICE_API_ENDPOINTS = {
     reminderActionResult: {
         method: 'POST',
         path: DEVICE_API_ROUTES.reminderActionResults,
+        transport: 'https',
+    },
+    reminderActionStatusReport: {
+        method: 'POST',
+        path: DEVICE_API_ROUTES.reminderActionStatusReports,
         transport: 'https',
     },
 } as const;
@@ -195,22 +196,24 @@ export class DeviceIntentController {
     }
 
     /**
-     * 认证并接收设备语音直接消费后的状态事实。
-     * @param input 带设备授权和状态事实的请求。
-     * @returns 归并结果后的动作记录。
+     * 认证并受理不依赖 commandId 的设备语音动作事实。
+     * @param input 路径范围、设备凭据、幂等键与未受信任的请求体。
+     * @returns 受理标识以及已被收口的动作（如存在）。
      */
-    public async postVoiceReminderActionStatus(input: {
+    public async postReminderActionStatusReport(input: {
         readonly authorization: string;
         readonly idempotencyKey: string;
+        readonly deviceId: DeviceId;
         readonly body: unknown;
-    }): Promise<readonly ImAction[]> {
-        const body = parseVoiceReminderActionStatus(input.body);
-        const principal = await this.authentication.authenticate(input.authorization);
-        if (principal.deviceId !== body.deviceId) {
-            throw new ImGatewayError('invalid_transition', 'Device principal does not match the status body');
+    }): Promise<{ readonly accepted: true; readonly eventId: EventId; readonly action?: ImAction }> {
+        const body: ReminderActionStatusReport = parseReminderActionStatusReport(input.body);
+        if (body.deviceId !== input.deviceId) {
+            throw new ImGatewayError('invalid_transition', 'Device principal does not match the report path');
         }
+        await this.authenticateDevice(input.authorization, body.deviceId);
         this.assertIdempotencyKey(input.idempotencyKey, body.eventId);
-        return this.actions.recordVoiceStatus(body);
+        const action = await this.actions.recordDeviceActionStatus(body);
+        return { accepted: true, eventId: body.eventId, ...(action === undefined ? {} : { action }) };
     }
 
     private async authenticateDevice(

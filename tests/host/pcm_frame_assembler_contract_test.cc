@@ -1,12 +1,14 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <set>
 #include <thread>
 #include <vector>
 
 #include "support/test_support.h"
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #include "voicelife/audio_esp/pcm_frame_assembler.h"
+#include "voicelife/audio_esp/sparkbot_audio_budget.h"
 
 using voicelife::ErrorCode;
 using voicelife::Status;
@@ -120,7 +122,31 @@ int main() {
     Check(acquisition_failures.load() == 0, "有空闲 slot 时跨线程获取和归还不能因短暂竞争被误判为 pool 耗尽");
     Check(concurrent_pool->acquisition_failures() == 0, "原子 pool 的失败统计只能表示真实容量耗尽，不能包含锁竞争");
     Check(concurrent_pool->high_watermark() <= 2, "并发租约高水位不能超过同时在途的两个消费者");
-    Check(voicelife::voice::AudioPayloadPool::Create(33, 640) == nullptr, "原子位图实现必须拒绝超过 32 槽的未支持配置");
+    constexpr std::size_t kDecodePoolSlots = voicelife::audio_esp::kSparkBotOpusDecodePoolSlots;
+    static_assert(kDecodePoolSlots >= voicelife::audio_esp::kSparkBotPlaybackQueueDepth + 2);
+    auto decode_pool = voicelife::voice::AudioPayloadPool::Create(kDecodePoolSlots, 640);
+    Check(decode_pool != nullptr, "SparkBot Opus 下行池必须覆盖播放队列和在途帧");
+    std::vector<voicelife::voice::AudioPayload> decode_leases;
+    decode_leases.reserve(kDecodePoolSlots);
+    std::set<const uint8_t*> decode_addresses;
+    for (std::size_t index = 0; index < kDecodePoolSlots; ++index) {
+        auto payload = decode_pool->TryAcquire();
+        Check(payload.pooled(), "下行池容量内必须返回池化租约");
+        decode_addresses.insert(payload.data());
+        decode_leases.push_back(std::move(payload));
+    }
+    Check(decode_addresses.size() == kDecodePoolSlots, "下行池每个槽位必须拥有独立地址");
+    Check(decode_pool->in_use() == kDecodePoolSlots, "保留的下行帧必须反映为全部槽位在用");
+    Check(decode_pool->high_watermark() == kDecodePoolSlots, "下行池高水位必须覆盖播放容量契约");
+    Check(!decode_pool->TryAcquire().pooled(), "下行池耗尽时必须立即拒绝第 99 个租约");
+    Check(decode_pool->acquisition_failures() == 1, "下行池耗尽必须留下准确失败计数");
+    decode_leases.pop_back();
+    Check(decode_pool->in_use() == kDecodePoolSlots - 1, "释放一个下行帧后在用数必须下降");
+    Check(decode_pool->TryAcquire().pooled(), "释放后的下行槽位必须立即可重用");
+
+    Check(voicelife::voice::AudioPayloadPool::Create(voicelife::voice::AudioPayloadPool::kMaximumSlots + 1, 640) ==
+              nullptr,
+          "原子位图实现必须拒绝超过最大槽位数的配置");
 
     Check(assembler.Push(nullptr, 1, sink).code == ErrorCode::kInvalidArgument, "非零样本数不能搭配空指针");
     Check(assembler.Push(period.data(), period.size(), {}).code == ErrorCode::kInvalidArgument, "组帧必须拒绝空 sink");

@@ -29,6 +29,7 @@ namespace {
 using contracts::im::NotificationAction;
 using contracts::im::NotificationIntent;
 using contracts::im::ReminderActionResult;
+using contracts::im::ReminderActionStatusReport;
 using contracts::im::ScheduleQueryResultIntent;
 using contracts::im::ScheduleReceiptIntent;
 
@@ -336,33 +337,41 @@ std::string SerializeReminderActionResult(const ReminderActionResult& result) {
     return out;
 }
 
-std::string SerializeVoiceReminderActionStatus(const contracts::im::VoiceReminderActionStatus& status) {
+std::string SerializeReminderActionStatusReport(const ReminderActionStatusReport& report) {
     std::string out;
     out.reserve(384);
     out += "{\"schemaVersion\":";
-    AppendJsonString(out, status.schemaVersion);
+    AppendJsonString(out, report.schemaVersion);
     out += ",\"eventId\":";
-    AppendJsonString(out, status.eventId);
+    AppendJsonString(out, report.eventId);
     out += ",\"correlationId\":";
-    AppendJsonString(out, status.correlationId);
+    AppendJsonString(out, report.correlationId);
     out += ",\"deviceId\":";
-    AppendJsonString(out, status.deviceId);
+    AppendJsonString(out, report.deviceId);
     out += ",\"reminderTriggerId\":";
-    AppendJsonString(out, status.reminderTriggerId);
+    AppendJsonString(out, report.reminderTriggerId);
     out += ",\"operationId\":";
-    AppendJsonString(out, status.operationId);
+    AppendJsonString(out, report.operationId);
     out += ",\"action\":";
-    AppendJsonString(out, status.action);
+    AppendJsonString(out, report.action);
     out += ",\"status\":";
-    AppendJsonString(out, status.status);
+    AppendJsonString(out, report.status);
     out += ",\"occurredAt\":";
-    AppendJsonString(out, status.occurredAt);
-    if (status.nextTriggerAt.has_value()) {
+    AppendJsonString(out, report.occurredAt);
+    if (report.nextTriggerAt.has_value()) {
         out += ",\"nextTriggerAt\":";
-        AppendJsonString(out, *status.nextTriggerAt);
+        AppendJsonString(out, *report.nextTriggerAt);
+    }
+    if (report.errorCode.has_value()) {
+        out += ",\"errorCode\":";
+        AppendJsonString(out, *report.errorCode);
+    }
+    if (report.details.has_value()) {
+        out += ",\"details\":";
+        AppendJsonValue(out, *report.details);
     }
     out += ",\"source\":";
-    AppendJsonString(out, status.source);
+    AppendJsonString(out, report.source);
     out.push_back('}');
     return out;
 }

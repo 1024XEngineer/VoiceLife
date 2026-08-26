@@ -26,7 +26,6 @@ using voicelife::im::ImTransport;
 using voicelife::im::ImTransportStatus;
 using voicelife::runtime::ImScheduleReminderActionExecutor;
 using voicelife::runtime::ImScheduleReminderNotification;
-using voicelife::runtime::ImVoiceReminderActionReporter;
 using voicelife::schedule::DateTime;
 using voicelife::schedule::Schedule;
 using voicelife::schedule::ScheduleException;
@@ -51,9 +50,6 @@ class FakeTransport final : public ImTransport {
    public:
     ImHttpResponse Post(const ImHttpRequest& request) override {
         requests.push_back(request);
-        if (fail_posts) {
-            return {.status = ImTransportStatus::kNetworkFailure, .status_code = 0, .message = "offline"};
-        }
         return {.status = ImTransportStatus::kSuccess, .status_code = 202, .body = response_body};
     }
     ImHttpResponse Get(const ImHttpRequest& request) override {
@@ -61,7 +57,6 @@ class FakeTransport final : public ImTransport {
         return {.status = ImTransportStatus::kSuccess, .status_code = 200};
     }
     std::string response_body;
-    bool fail_posts = false;
     std::vector<ImHttpRequest> requests;
 };
 
@@ -160,7 +155,19 @@ int main() {
                               .created_at = At(1'999'999'000),
                               .updated_at = At(2'000'000'001)};
     Check(notification.SendScheduleReminder(schedule, task).ok(), "提醒通知应提交到 IM 公共接口");
+    Check(transport_ptr->requests.back().body.find("schedule-reminder-device-device-1-task-10") != std::string::npos,
+          "提醒业务键应包含设备标识，避免不同设备的本地任务 ID 冲突");
     Check(action_window.has_value() && action_window->reminderTriggerId == "timing-1", "强提醒响应应发布动作窗口");
+
+    auto final_task = task;
+    final_task.attempt = 3;
+    transport_ptr->response_body =
+        R"({"businessEventId":"schedule-reminder-task-10-final","status":"accepted","deliveries":[],"actionStream":{"reminderTriggerId":"timing-1","expiresAt":"2026-08-03T00:10:00.000Z"}})";
+    Check(notification.SendScheduleReminder(schedule, final_task).ok(), "第三次提醒通知应提交到 IM 公共接口");
+    Check(transport_ptr->requests.back().body.find("schedule-reminder-device-device-1-task-10") != std::string::npos,
+          "同一提醒任务重试应复用稳定的设备作用域业务键");
+    Check(transport_ptr->requests.back().body.find("这是最后一次提醒；之后不再创建新的推迟提醒。") != std::string::npos,
+          "第三次 IM 提醒正文应追加最后一次稍后提醒说明");
 
     InMemoryScheduleRepository schedules({schedule});
     voicelife::storage_memory::MemoryScheduleReminderTaskRepository reminders;
@@ -198,16 +205,6 @@ int main() {
               snoozed_tasks.value->front().business_status == ScheduleReminderBusinessStatus::kSnoozed &&
               snoozed_tasks.value->front().action_operation_id == "operation-snooze",
           "IM 延迟动作应只把目标 ReminderTrigger 持久化为 snoozed");
-
-    ImVoiceReminderActionReporter reporter(runtime, reminder_service);
-    const auto snoozed_local =
-        reminder_service.ExecuteReminderAction({.operation_id = "operation-snooze",
-                                                .reminder_trigger_id = "timing-1",
-                                                .action = voicelife::schedule::ScheduleReminderActionKind::kSnooze,
-                                                .snooze_minutes = 10});
-    Check(snoozed_local.ok() && reporter.Report(*snoozed_local.value).ok() &&
-              !reminder_service.HasPendingVoiceActionReports(),
-          "Gateway 接受语音动作后应清理本地 durable outbox");
 
     ImScheduleReminderActionExecutor restarted_executor(reminder_service);
     const auto replayed_snooze = restarted_executor.Execute(snooze);
@@ -247,18 +244,6 @@ int main() {
     Check(schedules.FindById(1).value->status == ScheduleStatus::kActive &&
               schedules.FindById(2).value->status == ScheduleStatus::kCompleted,
           "IM 确认动作应按 reminderTriggerId 完成关联日程而不影响其他提醒");
-    transport_ptr->fail_posts = true;
-    const auto acknowledged_local =
-        reminder_service.ExecuteReminderAction({.operation_id = "operation-ack",
-                                                .reminder_trigger_id = "timing-ack-1",
-                                                .action = voicelife::schedule::ScheduleReminderActionKind::kAcknowledge,
-                                                .snooze_minutes = std::nullopt});
-    Check(acknowledged_local.ok() && !reporter.Report(*acknowledged_local.value).ok() &&
-              reminder_service.HasPendingVoiceActionReports(),
-          "Gateway 暂不可用时本地语音事实必须保留待重试状态");
-    transport_ptr->fail_posts = false;
-    Check(reporter.RetryPending().ok() && !reminder_service.HasPendingVoiceActionReports(),
-          "Gateway 恢复后应使用持久化 operationId 重试并清理待上报状态");
 
     ReminderActionCommand invalid_snooze = snooze;
     invalid_snooze.operationId = "operation-invalid-snooze";

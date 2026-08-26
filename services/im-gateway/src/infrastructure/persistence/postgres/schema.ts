@@ -1,7 +1,7 @@
 import { queryOne, type SqlExecutor } from './sql.js';
 
 /** 当前 schema 版本号；低于该版本的库会在 migrate() 时逐版本升级。 */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 10;
 
 /** 迁移版本表：version 行与对应 DDL 在同一事务内写入，保证原子可见。 */
 const SCHEMA_MIGRATIONS_TABLE = 'im_schema_migrations';
@@ -22,6 +22,7 @@ export const IM_TABLES = [
     'im_delivery_attempts',
     'im_delivery_receipts',
     'im_actions',
+    'im_reminder_action_facts',
     'im_outbox_events',
 ] as const;
 
@@ -308,6 +309,51 @@ const V7_STATEMENTS: readonly string[] = [
     'ALTER TABLE im_bindings VALIDATE CONSTRAINT im_bindings_active_device_check',
 ];
 
+/** v8 设备语音动作事实：独立于 IM Action 保存，支持语音先执行与重启补报。 */
+const V8_STATEMENTS: readonly string[] = [
+    `CREATE TABLE IF NOT EXISTS im_reminder_action_facts (
+        event_id text PRIMARY KEY,
+        fingerprint text NOT NULL,
+        schema_version text NOT NULL,
+        correlation_id text NOT NULL,
+        device_id text NOT NULL,
+        reminder_trigger_id text NOT NULL,
+        operation_id text NOT NULL,
+        action text NOT NULL CHECK (action IN ('acknowledge', 'snooze')),
+        status text NOT NULL CHECK (status IN ('succeeded', 'retryable_failed', 'failed', 'expired')),
+        occurred_at timestamptz NOT NULL,
+        next_trigger_at timestamptz,
+        error_code text,
+        details jsonb,
+        received_at timestamptz NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS im_reminder_action_facts_device_trigger_idx
+        ON im_reminder_action_facts (device_id, reminder_trigger_id, occurred_at DESC, received_at DESC)`,
+];
+
+/** v9 为设备 operationId 建立唯一约束，防止不同 eventId 重复消费同一动作。 */
+const V9_STATEMENTS: readonly string[] = [
+    `CREATE UNIQUE INDEX IF NOT EXISTS im_reminder_action_facts_device_operation_uq
+        ON im_reminder_action_facts (device_id, operation_id)`,
+];
+
+/** v10 保证同一设备提醒业务时间只有一个首次动作事实，收口数据库并发写入。 */
+const V10_STATEMENTS: readonly string[] = [
+    `WITH ranked AS (
+        SELECT event_id,
+               row_number() OVER (
+                   PARTITION BY device_id, reminder_trigger_id, occurred_at
+                   ORDER BY received_at ASC, event_id ASC
+               ) AS rank
+        FROM im_reminder_action_facts
+    )
+    DELETE FROM im_reminder_action_facts AS facts
+    USING ranked
+    WHERE facts.event_id = ranked.event_id AND ranked.rank > 1`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS im_reminder_action_facts_device_trigger_time_uq
+        ON im_reminder_action_facts (device_id, reminder_trigger_id, occurred_at)`,
+];
+
 /** 按版本号索引的迁移脚本；下标 i 对应版本 i+1。 */
 const VERSIONED_STATEMENTS: readonly (readonly string[])[] = [
     V1_STATEMENTS,
@@ -317,6 +363,9 @@ const VERSIONED_STATEMENTS: readonly (readonly string[])[] = [
     V5_STATEMENTS,
     V6_STATEMENTS,
     V7_STATEMENTS,
+    V8_STATEMENTS,
+    V9_STATEMENTS,
+    V10_STATEMENTS,
 ];
 
 /**

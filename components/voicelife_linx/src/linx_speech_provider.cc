@@ -71,12 +71,14 @@ const char* TtsStateName(const std::optional<LinxTtsState>& state) {
 LinxSpeechProviderAdapter::LinxSpeechProviderAdapter(LinxTransportPort& transport, LinxProtocolCodecPort& codec,
                                                      LinxConnectionConfig connection,
                                                      voice::CapabilityProfile capabilities,
-                                                     LinxMcpMessageHandler mcp_handler)
+                                                     LinxMcpMessageHandler mcp_handler,
+                                                     std::unique_ptr<voice::CodecStrategy> codec_strategy)
     : transport_(transport),
       codec_(codec),
       connection_(std::move(connection)),
       capabilities_(std::move(capabilities)),
-      mcp_handler_(std::move(mcp_handler)) {}
+      mcp_handler_(std::move(mcp_handler)),
+      codec_strategy_(std::move(codec_strategy)) {}
 
 LinxSpeechProviderAdapter::~LinxSpeechProviderAdapter() {
     (void)Disconnect();
@@ -84,7 +86,8 @@ LinxSpeechProviderAdapter::~LinxSpeechProviderAdapter() {
 }
 
 voice::CapabilityProfile LinxSpeechProviderAdapter::DefaultCapabilities() {
-    return {.provider_id = "xrobot-websocket", .capabilities = {"streaming-asr", "tts", "cancel-generation", "pcm"}};
+    return {.provider_id = "xrobot-websocket",
+            .capabilities = {"streaming-asr", "tts", "cancel-generation", "pcm", "opus"}};
 }
 
 void LinxSpeechProviderAdapter::SetAudioSink(voice::AudioFrameSink sink) {
@@ -108,6 +111,9 @@ Status LinxSpeechProviderAdapter::Connect(const voice::VoiceSessionConfig& confi
         return Status::Error(ErrorCode::kConflict, "Linx Provider 或底层 Transport 已连接");
     }
     config_ = config;
+    if (const Status codec_status = ConfigureCodecStrategy(); !codec_status.ok()) {
+        return codec_status;
+    }
     explicit_disconnect_.store(false);
     transport_connected_.store(false);
     connected_.store(false);
@@ -206,6 +212,21 @@ Status LinxSpeechProviderAdapter::SendAudio(voice::AudioFrame frame) {
     if (frame.generation != generation_.load()) {
         return Status::Error(ErrorCode::kConflict, "Linx 音频帧属于旧连接代次");
     }
+    if (!SameFormat(frame.format, config_.audio)) {
+        return Status::Error(ErrorCode::kInvalidArgument, "Linx 上行帧不是本地协商 PCM 格式");
+    }
+    const voice::AudioFormat wire = WireAudioFormat();
+    if (wire.codec != frame.format.codec) {
+        if (codec_strategy_ == nullptr || codec_strategy_->codec() != wire.codec) {
+            return Status::Error(ErrorCode::kUnavailable, "Linx 上行缺少已配置的音频转码策略");
+        }
+        auto encoded = codec_strategy_->Encode(frame);
+        if (!encoded.ok() || !encoded.value.has_value()) return encoded.status;
+        frame = std::move(*encoded.value);
+        if (!SameFormat(frame.format, wire)) {
+            return Status::Error(ErrorCode::kInvalidArgument, "Linx 编码器返回的线上格式与 hello 不一致");
+        }
+    }
     return transport_.SendAudio(std::move(frame));
 }
 
@@ -268,11 +289,13 @@ void LinxSpeechProviderAdapter::OnTransportConnected() {
         hello_status_ = Status::Ok();
     }
 #ifdef ESP_PLATFORM
+    const voice::AudioFormat wire = WireAudioFormat();
     ESP_LOGI("voicelife_linx",
-             "LINX_HELLO_REQUEST format=%d sample_rate=%u channels=%u bits=%u frame_ms=%u play_buffer_ms=%u",
-             static_cast<int>(config_.audio.codec), static_cast<unsigned>(config_.audio.sample_rate_hz),
-             static_cast<unsigned>(config_.audio.channels), static_cast<unsigned>(config_.audio.bits_per_sample),
-             static_cast<unsigned>(config_.audio.frame_duration_ms),
+             "LINX_HELLO_REQUEST local_format=%d wire_format=%d sample_rate=%u channels=%u bits=%u frame_ms=%u "
+             "play_buffer_ms=%u",
+             static_cast<int>(config_.audio.codec), static_cast<int>(wire.codec),
+             static_cast<unsigned>(wire.sample_rate_hz), static_cast<unsigned>(wire.channels),
+             static_cast<unsigned>(wire.bits_per_sample), static_cast<unsigned>(wire.frame_duration_ms),
              static_cast<unsigned>(connection_.playback_buffer_duration_ms));
 #endif
     const Status status = Send(codec_.EncodeHello(config_, connection_));
@@ -294,6 +317,19 @@ voice::VoiceSessionConfig LinxSpeechProviderAdapter::ActiveSessionConfig() const
         config.session_id = *remote_session_id_;
     }
     return config;
+}
+
+voice::AudioFormat LinxSpeechProviderAdapter::WireAudioFormat() const {
+    return connection_.preferred_audio.value_or(config_.audio);
+}
+
+Status LinxSpeechProviderAdapter::ConfigureCodecStrategy() {
+    const voice::AudioFormat wire = WireAudioFormat();
+    if (wire.codec == config_.audio.codec) return Status::Ok();
+    if (codec_strategy_ == nullptr || codec_strategy_->codec() != wire.codec) {
+        return Status::Error(ErrorCode::kUnavailable, "Linx hello 请求的编码缺少转码策略");
+    }
+    return codec_strategy_->Configure(config_.audio, wire);
 }
 
 void LinxSpeechProviderAdapter::OnTransportDisconnected() {
@@ -396,22 +432,28 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
                          static_cast<unsigned>(negotiated.frame_duration_ms), inbound.session_id.has_value() ? 1 : 0,
                          inbound.session_id.has_value() ? static_cast<unsigned>(inbound.session_id->size()) : 0U);
 #endif
-                if (negotiated.codec != config_.audio.codec) {
-                    Emit(Event(voice::VoiceEventKind::kError, "Linx hello 改变音频编码，但当前未配置转码策略"));
+                const voice::AudioFormat wire = WireAudioFormat();
+                const voice::AudioFormat server_wire = {.codec = negotiated.codec,
+                                                        .sample_rate_hz = negotiated.sample_rate_hz,
+                                                        .channels = negotiated.channels,
+                                                        .bits_per_sample = negotiated.bits_per_sample,
+                                                        .frame_duration_ms = negotiated.frame_duration_ms};
+                const bool is_transcoded_wire = wire.codec != config_.audio.codec;
+                if ((is_transcoded_wire && !SameFormat(server_wire, wire)) ||
+                    (!is_transcoded_wire && server_wire.codec != wire.codec)) {
+                    Emit(Event(voice::VoiceEventKind::kError, "Linx hello 返回了当前固件未配置的线上音频格式"));
                     {
                         std::lock_guard<std::mutex> lock(hello_mutex_);
                         hello_received_ = true;
                         hello_status_ =
-                            Status::Error(ErrorCode::kInvalidArgument, "Linx hello 改变音频编码，但当前未配置转码策略");
+                            Status::Error(ErrorCode::kInvalidArgument, "Linx hello 返回了当前固件未配置的线上音频格式");
                     }
                     hello_cv_.notify_all();
                     return;
                 }
-                formats.playback = {.codec = negotiated.codec,
-                                    .sample_rate_hz = negotiated.sample_rate_hz,
-                                    .channels = negotiated.channels,
-                                    .bits_per_sample = negotiated.bits_per_sample,
-                                    .frame_duration_ms = negotiated.frame_duration_ms};
+                // Local AudioInput/Output remain PCM. If the wire codec is
+                // also PCM, preserve the server's downlink format as before.
+                if (wire.codec == config_.audio.codec) formats.playback = server_wire;
             }
             bool format_changed = false;
             Status format_status = Status::Ok();
@@ -582,11 +624,34 @@ void LinxSpeechProviderAdapter::OnBinary(std::vector<uint8_t> payload) {
     voice::AudioFrame frame;
     frame.generation = generation_.load();
     frame.sequence = output_sequence_.fetch_add(1);
-    {
+    const voice::AudioFormat wire = WireAudioFormat();
+    if (wire.codec == config_.audio.codec) {
         std::lock_guard<std::mutex> lock(hello_mutex_);
         frame.format = audio_formats_.playback;
+    } else {
+        frame.format = wire;
     }
     frame.payload = std::move(payload);
+    if (frame.format.codec != config_.audio.codec) {
+        if (codec_strategy_ == nullptr || codec_strategy_->codec() != frame.format.codec) {
+            Emit(Event(voice::VoiceEventKind::kError, "Linx 下行缺少已配置的音频解码策略"));
+            return;
+        }
+        auto decoded = codec_strategy_->Decode(frame);
+        if (!decoded.ok() || !decoded.value.has_value()) {
+            // A bounded codec pool can reject a burst after all playable PCM
+            // slots are occupied. Treat that as a per-frame drop, like an
+            // output-queue conflict, rather than a provider lifecycle fault.
+            if (decoded.status.code == ErrorCode::kConflict) return;
+            Emit(Event(voice::VoiceEventKind::kError, decoded.status.message));
+            return;
+        }
+        frame = std::move(*decoded.value);
+        if (!SameFormat(frame.format, config_.audio)) {
+            Emit(Event(voice::VoiceEventKind::kError, "Linx 解码器返回的本地 PCM 格式不匹配"));
+            return;
+        }
+    }
     voice::AudioFrameSink sink;
     {
         std::lock_guard<std::mutex> lock(callback_mutex_);

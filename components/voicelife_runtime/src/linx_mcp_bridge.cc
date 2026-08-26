@@ -1,6 +1,8 @@
 #include "linx_mcp_bridge.h"
 
+#include <cstddef>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -110,6 +112,32 @@ std::string ToolOutcomeSummary(std::string_view request_payload, bool success) {
     return success ? "操作已完成" : "操作失败";
 }
 
+bool IsKnownToolResultStatus(std::string_view value) {
+    return value == "success" || value == "conflict" || value == "failure";
+}
+
+std::string ToolResultStatus(const ToolResult& result) {
+    if (!result.status.ok()) return "failure";
+    if (!result.output.IsObject() || result.output.object == nullptr) return "unknown";
+    for (const auto& [key, value] : *result.output.object) {
+        if (key != "status" || value == nullptr || !value->IsString()) continue;
+        return IsKnownToolResultStatus(value->string) ? value->string : "unknown";
+    }
+    return "unknown";
+}
+
+LinxMcpToolOutcome ToolOutcomeFromResult(std::string_view request_payload, const ToolResult& result) {
+    LinxMcpToolOutcome outcome;
+    outcome.result_status = ToolResultStatus(result);
+    outcome.success = outcome.result_status == "success";
+    outcome.summary = ToolOutcomeSummary(request_payload, outcome.success);
+    return outcome;
+}
+
+void SetToolOutcome(LinxMcpToolOutcome* destination, std::string_view request_payload, const ToolResult& result) {
+    if (destination != nullptr) *destination = ToolOutcomeFromResult(request_payload, result);
+}
+
 std::string Wrap(std::string payload, std::string_view session_id) {
     std::string result = "{\"type\":\"mcp\"";
     if (!session_id.empty()) result += ",\"session_id\":\"" + Escape(session_id) + "\"";
@@ -123,6 +151,52 @@ Result<std::string> ErrorResponse(const JsonValue& id, int code, std::string_vie
                                 ",\"error\":{\"code\":" + std::to_string(code) + ",\"message\":\"" + Escape(message) +
                                 "\"}}";
     return Result<std::string>::Success(Wrap(payload, session_id));
+}
+
+Result<std::size_t> ParseToolsListStart(const JsonValue& request) {
+    const JsonValue* params = Get(request, "params");
+    if (params == nullptr) return Result<std::size_t>::Success(0);
+    if (!params->IsObject()) {
+        return Result<std::size_t>::Failure(ErrorCode::kInvalidArgument, "tools/list params 无效");
+    }
+    const JsonValue* cursor = Get(*params, "cursor");
+    if (cursor == nullptr || !cursor->IsString() || cursor->string.empty()) {
+        return Result<std::size_t>::Failure(ErrorCode::kInvalidArgument, "tools/list cursor 无效");
+    }
+
+    std::size_t start = 0;
+    for (const unsigned char character : cursor->string) {
+        if (character < '0' || character > '9') {
+            return Result<std::size_t>::Failure(ErrorCode::kInvalidArgument, "tools/list cursor 无效");
+        }
+        const std::size_t digit = character - '0';
+        if (start > (std::numeric_limits<std::size_t>::max() - digit) / 10U) {
+            return Result<std::size_t>::Failure(ErrorCode::kInvalidArgument, "tools/list cursor 超出范围");
+        }
+        start = start * 10U + digit;
+    }
+    return Result<std::size_t>::Success(start);
+}
+
+Result<std::string> BuildToolsListResponse(const JsonValue& id, const mcp::McpServer& server,
+                                           std::string_view session_id, std::size_t start_index) {
+    const std::string json_rpc_prefix = "{\"jsonrpc\":\"2.0\",\"id\":" + Serialize(id) + ",\"result\":";
+    const std::string empty_result_envelope = Wrap(json_rpc_prefix + "}", session_id);
+    if (empty_result_envelope.size() >= kLinxMcpMaxResponseBytes) {
+        return Result<std::string>::Failure(ErrorCode::kUnavailable, "tools/list 响应超过安全上限");
+    }
+
+    const std::size_t result_budget = kLinxMcpMaxResponseBytes - empty_result_envelope.size();
+    const auto page = server.list_tools_page_json(start_index, result_budget);
+    if (!page.ok() || !page.value.has_value()) {
+        return Result<std::string>::Failure(page.status.code, page.status.message);
+    }
+
+    const std::string response = Wrap(json_rpc_prefix + *page.value + "}", session_id);
+    if (response.size() > kLinxMcpMaxResponseBytes) {
+        return Result<std::string>::Failure(ErrorCode::kInternal, "tools/list 响应超过安全上限");
+    }
+    return Result<std::string>::Success(response);
 }
 
 Result<ToolValue> ToolValueFromJson(const JsonValue& value) {
@@ -150,7 +224,7 @@ std::string ResolveToolResultText(const ToolResult& result) {
 }  // namespace
 
 Result<std::string> HandleLinxMcpPayload(std::string_view payload, const mcp::McpServer& server,
-                                         std::string_view session_id) {
+                                         std::string_view session_id, LinxMcpToolOutcome* tool_outcome) {
     JsonValue request;
     const Status parsed = ParseJson(payload, request);
     if (!parsed.ok() || !request.IsObject()) {
@@ -176,9 +250,14 @@ Result<std::string> HandleLinxMcpPayload(std::string_view payload, const mcp::Mc
         return Result<std::string>::Success(Wrap(result, session_id));
     }
     if (method->string == "tools/list") {
-        return Result<std::string>::Success(
-            Wrap("{\"jsonrpc\":\"2.0\",\"id\":" + Serialize(*id) + ",\"result\":" + server.list_tools_json() + "}",
-                 session_id));
+        const auto start = ParseToolsListStart(request);
+        if (!start.ok() || !start.value.has_value()) {
+            return ErrorResponse(*id, -32602, start.status.message, session_id);
+        }
+        const auto response = BuildToolsListResponse(*id, server, session_id, *start.value);
+        if (response.ok()) return response;
+        const int error_code = response.status.code == ErrorCode::kInvalidArgument ? -32602 : -32603;
+        return ErrorResponse(*id, error_code, response.status.message, session_id);
     }
     if (method->string != "tools/call") return ErrorResponse(*id, -32601, "未知 MCP 方法", session_id);
 
@@ -198,6 +277,7 @@ Result<std::string> HandleLinxMcpPayload(std::string_view payload, const mcp::Mc
         }
     }
     const auto call = server.call({.request_id = IdText(*id), .name = name->string, .arguments = std::move(converted)});
+    SetToolOutcome(tool_outcome, payload, call);
     if (!call.status.ok()) {
         const int code = call.status.code == ErrorCode::kNotFound ? -32601 : -32602;
         return ErrorResponse(*id, code, call.status.message, session_id);
@@ -257,6 +337,7 @@ LinxMcpToolOutcome InspectLinxMcpToolOutcome(std::string_view request_payload, c
 
     outcome.success = true;
     outcome.summary = ToolOutcomeSummary(request_payload, true);
+    outcome.result_status = "success";
     // 成功内容同样是 MCP 的机器可读回包（例如 event=、status=、count=）。
     // 它只随 JSON-RPC 响应回传给 Linx，不能成为设备底部用户文案。
     return outcome;

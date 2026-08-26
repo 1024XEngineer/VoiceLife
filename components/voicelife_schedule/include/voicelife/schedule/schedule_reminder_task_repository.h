@@ -39,6 +39,7 @@ enum class ScheduleReminderTimerStatus {
 struct ScheduleReminderTask {
     int64_t id = 0;
     ScheduleId schedule_id = 0;
+    std::string event;
     int64_t chain_id = 0;
     int attempt = 1;
     std::optional<std::string> timing_task_id;
@@ -50,8 +51,6 @@ struct ScheduleReminderTask {
     std::optional<ScheduleReminderActionKind> action_kind;
     std::optional<DateTime> action_occurred_at;
     std::optional<DateTime> action_next_trigger_at;
-    // 本地动作已完成，但语音事实尚未被 Gateway 接受时保留为 durable outbox。
-    bool action_reported = false;
     DateTime created_at;
     DateTime updated_at;
 };

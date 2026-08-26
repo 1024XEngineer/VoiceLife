@@ -33,6 +33,15 @@ void CheckBridgeProtocolFailures() {
     Check(!missing_id.ok() && missing_id.status.code == ErrorCode::kInvalidArgument,
           "非通知请求缺少 id 应返回 invalid argument");
 
+    const auto numeric_cursor = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"tools/list","params":{"cursor":1},"id":"cursor-number"})", server);
+    Check(numeric_cursor.ok() && numeric_cursor.value->find("\"code\":-32602") != std::string::npos,
+          "非字符串 tools/list cursor 必须返回 invalid params");
+    const auto out_of_range_cursor = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"tools/list","params":{"cursor":"1"},"id":"cursor-range"})", server);
+    Check(out_of_range_cursor.ok() && out_of_range_cursor.value->find("\"code\":-32602") != std::string::npos,
+          "超出目录范围的 tools/list cursor 必须返回 invalid params");
+
     const auto ping = voicelife::runtime::HandleLinxMcpPayload(R"({"jsonrpc":"2.0","method":"ping"})", server);
     Check(ping.ok() && ping.value.has_value() && ping.value->empty(), "无 id ping 应作为通知消费");
 

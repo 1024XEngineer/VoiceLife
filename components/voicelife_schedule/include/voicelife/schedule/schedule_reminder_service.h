@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include "voicelife/contracts/status.h"
 #include "voicelife/schedule/schedule_reminder_task_repository.h"
@@ -56,6 +57,7 @@ struct ReminderActionCommand {
 /** @brief 提醒动作的已提交结果。 */
 struct ReminderActionResult {
     int affected_count = 0;
+    std::vector<std::string> events;
     std::string operation_id;
     std::string reminder_trigger_id;
     ScheduleReminderActionKind action = ScheduleReminderActionKind::kAcknowledge;
@@ -118,19 +120,22 @@ class ScheduleReminderService final {
      * @return 动作结果或错误状态。
      */
     Result<ReminderActionResult> SnoozeRecentReminders();
-    /** @brief 为设备语音入口选择最近一条可操作提醒并按稳定 operationId 精确执行。 */
-    Result<ReminderActionResult> ExecuteLatestVoiceAction(ScheduleReminderActionKind action);
-    /** @brief 查询尚未被 Gateway 接受的本地语音动作事实。 */
-    Result<std::vector<ReminderActionResult>> PendingVoiceActionReports();
-    /** @brief 将指定 operationId 的语音动作事实标记为已上报。 */
-    Status MarkVoiceActionReported(std::string_view operation_id);
-    /** @brief 判断是否仍有待上报的本地语音动作事实。 */
-    bool HasPendingVoiceActionReports();
     /** @brief 按精确触发标识幂等执行提醒动作。
      * @param command 本地动作命令。
      * @return 首次提交或持久化重放的动作结果。
      */
     Result<ReminderActionResult> ExecuteReminderAction(const ReminderActionCommand& command);
+    /**
+     * @brief 对最近触发的每个提醒逐条执行动作，返回可上报的持久化结果。
+     * @param action acknowledge 或 snooze。
+     * @return 每个提醒一条结果；没有可操作提醒时返回失败。
+     */
+    Result<std::vector<ReminderActionResult>> ExecuteRecentReminderActions(ScheduleReminderActionKind action);
+    /**
+     * @brief 读取已持久化的语音动作事实，供网络恢复后补报。
+     * @return 已保存的语音动作结果，或仓储错误。
+     */
+    Result<std::vector<ReminderActionResult>> ListPersistedVoiceActionResults() const;
 
    private:
     /// @brief 规则提醒生成的重试状态。

@@ -8,7 +8,7 @@ import {
     type ReminderActionIntent,
     type ReminderActionExecutionStatus,
     type ReminderActionResult,
-    type VoiceReminderActionStatus,
+    type ReminderActionStatusReport,
     type ScheduleOperationType,
     type ScheduleReceiptIntent,
     type ScheduleQueryResultIntent,
@@ -214,20 +214,28 @@ export function parseReminderActionResult(input: unknown): ReminderActionResult 
 }
 
 /**
- * 解析设备本地语音动作状态事实。
- * @param input 未信任的设备请求体。
- * @returns 已校验的语音动作状态。
+ * 解析不依赖 commandId 的设备语音提醒动作事实。
+ * @param input 未受信任的请求体。
+ * @returns 已完成契约校验的设备语音动作事实。
  */
-export function parseVoiceReminderActionStatus(input: unknown): VoiceReminderActionStatus {
+export function parseReminderActionStatusReport(input: unknown): ReminderActionStatusReport {
     const value = objectAt(input, 'body');
-    const action = enumAt(value.action, ['acknowledge', 'snooze'] as const, 'body.action');
-    const status = enumAt(value.status, ['succeeded', 'failed'] as const, 'body.status');
     const nextTriggerAt = optionalIsoDateTime(value, 'nextTriggerAt', 'body.nextTriggerAt');
-    if (action === 'snooze' && status === 'succeeded' && nextTriggerAt === undefined) {
-        invalid('body.nextTriggerAt', 'is required for a successful snooze');
-    }
-    if (action === 'acknowledge' && nextTriggerAt !== undefined) {
-        invalid('body.nextTriggerAt', 'must be omitted for acknowledge');
+    const errorCode = optionalString(value, 'errorCode', 'body.errorCode');
+    const details = optionalJsonValue(value, 'details', 'body.details');
+    if (value.source !== 'voice') invalid('body.source', 'must equal voice');
+    const action = enumAt(value.action, ['acknowledge', 'snooze'] as const, 'body.action');
+    const status = enumAt(
+        value.status,
+        ['succeeded', 'retryable_failed', 'failed', 'expired'] as const,
+        'body.status',
+    ) satisfies ReminderActionExecutionStatus;
+    if (
+        status === 'succeeded' &&
+        ((action === 'snooze' && nextTriggerAt === undefined) ||
+            (action === 'acknowledge' && nextTriggerAt !== undefined))
+    ) {
+        invalid('body.nextTriggerAt', 'must match the action type for a succeeded report');
     }
     return {
         schemaVersion: contractVersion(value),
@@ -240,7 +248,9 @@ export function parseVoiceReminderActionStatus(input: unknown): VoiceReminderAct
         status,
         occurredAt: isoDateTimeAt(value.occurredAt, 'body.occurredAt'),
         ...(nextTriggerAt === undefined ? {} : { nextTriggerAt }),
-        source: enumAt(value.source, ['voice'] as const, 'body.source'),
+        ...(errorCode === undefined ? {} : { errorCode }),
+        ...(details === undefined ? {} : { details }),
+        source: 'voice',
     };
 }
 

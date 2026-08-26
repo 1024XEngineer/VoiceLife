@@ -251,7 +251,10 @@ bool AppendTool(yyjson_mut_doc* document, yyjson_mut_val* tools, const ToolDefin
 
 }  // namespace
 
-std::string SerializeListToolsResult(const ListToolsResult& result) {
+std::string SerializeListToolsResultPage(const ListToolsResult& result, std::size_t begin_index,
+                                         std::size_t end_index) {
+    if (begin_index > end_index || end_index > result.tools.size()) return "{}";
+
     MutableDocumentPtr document(yyjson_mut_doc_new(nullptr));
     if (!document) {
         return "{}";
@@ -267,19 +270,24 @@ std::string SerializeListToolsResult(const ListToolsResult& result) {
     if (tools == nullptr) {
         return "{}";
     }
-    for (const auto& definition : result.tools) {
-        if (!AppendTool(document.get(), tools, definition)) {
+    for (std::size_t index = begin_index; index < end_index; ++index) {
+        if (!AppendTool(document.get(), tools, result.tools[index])) {
             return "{}";
         }
     }
 
-    // Linx treats tools/list as a paginated response even when all tools fit
-    // in one page. An explicit nullable cursor is required to complete the
-    // discovery exchange; omitting it causes the platform to reset the
-    // WebSocket before it can issue tools/call.
-    (void)yyjson_mut_obj_add(root, MakeString(document.get(), "nextCursor"), yyjson_mut_null(document.get()));
+    const std::string next_cursor_text = std::to_string(end_index);
+    yyjson_mut_val* next_cursor = end_index == result.tools.size() ? yyjson_mut_null(document.get())
+                                                                   : MakeString(document.get(), next_cursor_text);
+    if (next_cursor == nullptr || !yyjson_mut_obj_add(root, MakeString(document.get(), "nextCursor"), next_cursor)) {
+        return "{}";
+    }
 
     return WriteDocument(document.get());
+}
+
+std::string SerializeListToolsResult(const ListToolsResult& result) {
+    return SerializeListToolsResultPage(result, 0, result.tools.size());
 }
 
 std::string SerializeToolOutputValue(const ToolOutputValue& output) {

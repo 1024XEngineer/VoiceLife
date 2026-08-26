@@ -93,17 +93,24 @@ void CheckActionValidationAndConflicts() {
     Check(
         replayed.ok() && replayed.value->replayed && replayed.value->next_trigger_at == snoozed.value->next_trigger_at,
         "相同动作应重放持久化结果");
-    const auto pending_reports = fixture.reminder.PendingVoiceActionReports();
-    Check(pending_reports.ok() && pending_reports.value->size() == 1 &&
-              pending_reports.value->front().operation_id == "operation-1",
-          "本地动作完成后应保留待上报事实");
-    Check(fixture.reminder.MarkVoiceActionReported("operation-1").ok() &&
-              !fixture.reminder.HasPendingVoiceActionReports(),
-          "Gateway 接受后应将待上报事实标记为已完成");
     Check(
         fixture.reminder.ExecuteReminderAction(Action("operation-2", "trigger-1", ScheduleReminderActionKind::kSnooze))
-                .status.code == ErrorCode::kAlreadyExists,
-        "同一提醒不能由不同 operationId 重复处理");
+            .ok(),
+        "同一提醒的相同动作应允许不同 operationId 幂等重放");
+    Check(fixture.reminder
+                  .ExecuteReminderAction(Action("operation-ack", "trigger-1", ScheduleReminderActionKind::kAcknowledge))
+                  .status.code == ErrorCode::kAlreadyExists,
+          "同一提醒的不同动作仍必须拒绝");
+
+    ScriptedFixture acknowledge_fixture({MakeSchedule(3, "重复确认", At(1'100))}, At(1'101));
+    SeedActionChain(acknowledge_fixture, 3, 33, "ack-trigger");
+    const auto acknowledged = acknowledge_fixture.reminder.ExecuteReminderAction(
+        Action("operation-ack-1", "ack-trigger", ScheduleReminderActionKind::kAcknowledge));
+    const auto replayed_acknowledge = acknowledge_fixture.reminder.ExecuteReminderAction(
+        Action("operation-ack-2", "ack-trigger", ScheduleReminderActionKind::kAcknowledge));
+    Check(acknowledged.ok() && !acknowledged.value->replayed && replayed_acknowledge.ok() &&
+              replayed_acknowledge.value->replayed && replayed_acknowledge.value->next_trigger_at == std::nullopt,
+          "确认动作应允许跨入口幂等重放且不产生下一次提醒");
     Check(fixture.reminder
                   .ExecuteReminderAction(Action("operation-1", "trigger-2", ScheduleReminderActionKind::kAcknowledge))
                   .status.code == ErrorCode::kAlreadyExists,
@@ -137,6 +144,26 @@ void CheckTerminalAndCancellationFailures() {
                       Action("ack-operation", "unavailable-trigger", ScheduleReminderActionKind::kAcknowledge))
                   .status.code == ErrorCode::kUnavailable,
           "确认动作应传播后续提醒取消失败");
+
+    ScriptedFixture mixed({MakeSchedule(4, "部分成功", At(1'100)), MakeSchedule(5, "部分失败", At(1'100))}, At(1'101));
+    SeedActionChain(mixed, 4, 44, "mixed-success", true);
+    SeedActionChain(mixed, 5, 55, "mixed-failure", false);
+    const auto mixed_result = mixed.reminder.ExecuteRecentReminderActions(ScheduleReminderActionKind::kSnooze);
+    Check(!mixed_result.ok() && mixed_result.status.code == ErrorCode::kNotFound,
+          "批量动作只要有一项失败就不能伪报整体成功");
+}
+
+void CheckPersistedVoiceActionRecoveryFacts() {
+    ScriptedFixture fixture({MakeSchedule(4, "重启补报", At(1'100))}, At(1'101));
+    SeedActionChain(fixture, 4, 44, "voice-trigger");
+    const auto result = fixture.reminder.ExecuteReminderAction(
+        Action("voice-action-44", "voice-trigger", ScheduleReminderActionKind::kSnooze));
+    Check(result.ok(), "语音动作应先成功写入本地事实");
+    const auto persisted = fixture.reminder.ListPersistedVoiceActionResults();
+    Check(persisted.ok() && persisted.value->size() == 1 &&
+              persisted.value->front().operation_id == "voice-action-44" &&
+              persisted.value->front().next_trigger_at == At(1'700),
+          "重启恢复扫描必须保留语音动作 operationId 与 nextTriggerAt");
 }
 
 class ImmediateActionNotification final : public ScheduleReminderNotificationPort {
@@ -222,6 +249,7 @@ void CheckImmediateNotificationActions() {
 int main() {
     CheckActionValidationAndConflicts();
     CheckTerminalAndCancellationFailures();
+    CheckPersistedVoiceActionRecoveryFacts();
     CheckImmediateNotificationActions();
     return 0;
 }

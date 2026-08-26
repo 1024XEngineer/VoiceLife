@@ -12,7 +12,7 @@ using schedule::ScheduleReminderTask;
 bool ValidAction(const ScheduleReminderTask& task) {
     if (!task.action_operation_id.has_value()) {
         return !task.action_kind.has_value() && !task.action_occurred_at.has_value() &&
-               !task.action_next_trigger_at.has_value() && !task.action_reported;
+               !task.action_next_trigger_at.has_value();
     }
     if (task.action_operation_id->empty() || !task.action_kind.has_value() || !task.action_occurred_at.has_value()) {
         return false;

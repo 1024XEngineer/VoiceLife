@@ -1,5 +1,6 @@
 #include "platform_assemblies.h"
 
+#include "voicelife/audio_esp/sparkbot_audio_budget.h"
 #include "voicelife/board_esp/sparkbot_profile.h"
 #include "voicelife/display_sparkbot/sparkbot_lvgl_display.h"
 
@@ -20,13 +21,6 @@ constexpr const char* kPowerTag = "sparkbot_power";
 namespace voicelife::runtime {
 
 namespace {
-
-// Linx can deliver several 20 ms PCM frames in one TLS/WebSocket burst. The
-// The V3 CRUD probe exposed a longer Linx TTS burst than the previous 960 ms
-// window. Keep a finite 1.92 s jitter buffer so a burst is played in order
-// without dropping PCM or turning playback into an unbounded cache.
-constexpr std::size_t kSparkBotPlaybackQueueDepth = 96;
-constexpr uint32_t kSparkBotPlaybackLatencyBudgetMs = 1920;
 
 /** @brief 从官方 SparkBot 板级 Profile 填充 LVGL 显示配置。 */
 voicelife::display_sparkbot::SparkBotLcdConfig MakeSparkBotLcdConfig() {
@@ -211,8 +205,8 @@ void VoiceLifePcbAssembly::LogAudioStats() {
 
 SparkBotAssembly::SparkBotAssembly()
     : audio_ports_(audio_esp::SparkBotEsp32s3AudioProfile(),
-                   {.output_queue_depth = kSparkBotPlaybackQueueDepth,
-                    .maximum_playback_latency_ms = kSparkBotPlaybackLatencyBudgetMs},
+                   {.output_queue_depth = audio_esp::kSparkBotPlaybackQueueDepth,
+                    .maximum_playback_latency_ms = audio_esp::kSparkBotPlaybackLatencyBudgetMs},
                    [this](bool enabled) { (void)SetAudioOutputEnabled(enabled); }),
       arbiter_(voicelife::board_esp::SparkBotProfile().shared_power),
       adapter_(MakeSparkBotLcdConfig(), [this](bool enabled) { ApplyBacklight(enabled); }) {}
@@ -298,7 +292,8 @@ void SparkBotAssembly::LogAudioStats() {
         static_cast<unsigned long long>(stats.input_payload_pool_acquisition_failures),
         static_cast<unsigned long long>(stats.rejected_output_frames),
         static_cast<unsigned long long>(stats.output_high_watermark),
-        static_cast<unsigned>(kSparkBotPlaybackQueueDepth), static_cast<unsigned>(kSparkBotPlaybackLatencyBudgetMs),
+        static_cast<unsigned>(audio_esp::kSparkBotPlaybackQueueDepth),
+        static_cast<unsigned>(audio_esp::kSparkBotPlaybackLatencyBudgetMs),
         static_cast<unsigned long long>(stats.resampled_frames),
         static_cast<unsigned long long>(stats.minimum_free_heap_bytes), static_cast<unsigned>(stats.output_volume),
         static_cast<unsigned long long>(stats.output_clipped_samples),

@@ -6,7 +6,7 @@ import {
     type NotificationSubmission,
     type ReminderActionCommand,
     type ReminderActionResult,
-    type VoiceReminderActionStatus,
+    type ReminderActionStatusReport,
     type ScheduleReceiptIntent,
     type ScheduleQueryResultIntent,
 } from '../contracts/device-gateway.js';
@@ -819,6 +819,9 @@ export class DefaultActionApplication implements ActionApplication {
                     state: actionUiState(existing.status),
                     action: existing.actionType,
                     ...actionUiParams(existing),
+                    ...(existing.result?.nextTriggerAt === undefined
+                        ? {}
+                        : { nextTriggerAt: existing.result.nextTriggerAt }),
                     expiresAt: existing.expiresAt,
                 };
             }
@@ -891,6 +894,14 @@ export class DefaultActionApplication implements ActionApplication {
             }
 
             const now = this.clock.now();
+            const deviceFact = await tx.reminderActionFacts.findLatestByDeviceAndTrigger(
+                metadata.deviceId,
+                metadata.reminderTriggerId,
+            );
+            const factReport = deviceFact?.report;
+            const factIsTerminal = factReport !== undefined && factReport.status !== 'retryable_failed';
+            const factMatches = factIsTerminal && factReport!.action === command.actionType;
+            const factConflicts = factIsTerminal && factReport!.action !== command.actionType;
             const action: ImAction = {
                 id: command.claims.actionId,
                 operationId: this.ids.nextOperationId(),
@@ -904,10 +915,23 @@ export class DefaultActionApplication implements ActionApplication {
                 actionKeyHash: command.actionKeyHash,
                 expectedIdentityId: binding.externalIdentityId,
                 actualIdentityId: command.actualIdentityId ?? binding.externalIdentityId,
-                status: 'pending',
+                status: factConflicts ? 'failed' : factMatches ? toActionStatus(factReport!.status) : 'pending',
                 expiresAt: command.claims.expiresAt,
                 createdAt: now,
                 updatedAt: now,
+                ...(factMatches
+                    ? {
+                          result: toReminderActionResult(factReport!),
+                      }
+                    : factConflicts
+                      ? {
+                            result: {
+                                ...toReminderActionResult(factReport!),
+                                status: 'failed' as const,
+                                errorCode: 'superseded_by_device_action',
+                            },
+                        }
+                      : {}),
             };
             const created = await tx.actions.createIfAbsent(action);
             if (!created.created) {
@@ -923,7 +947,7 @@ export class DefaultActionApplication implements ActionApplication {
                 }
                 return { command: toCommand(existingAction), shouldDispatch: false };
             }
-            return { command: toCommand(created.action), shouldDispatch: true };
+            return { command: toCommand(created.action), shouldDispatch: !factMatches && !factConflicts };
         });
         if (prepared.shouldDispatch) await this.dispatch(prepared.command);
         return prepared.command;
@@ -934,133 +958,129 @@ export class DefaultActionApplication implements ActionApplication {
         return this.recordResultAndClose(commandId, deviceId, result);
     }
 
-    /**
-     * 归并设备本地语音事实；设备事实优先于尚未完成的 H5 Action。
-     * @param status 已校验的设备语音动作状态。
-     * @returns 归并结果后的动作记录。
-     */
-    public async recordVoiceStatus(status: VoiceReminderActionStatus): Promise<readonly ImAction[]> {
-        const updated = await this.unitOfWork.transaction(async (tx) => {
-            const existing =
-                (await tx.actions.findByOperationId(status.operationId)) ??
-                (await tx.actions.findByResultOperationId(status.operationId));
-            if (existing !== undefined) {
-                if (
-                    existing.deviceId !== status.deviceId ||
-                    existing.reminderTriggerId !== status.reminderTriggerId ||
-                    existing.actionType !== status.action
-                ) {
-                    throw new ImGatewayError('invalid_transition', 'Voice status does not match operation scope');
+    /** {@inheritDoc ActionApplication.recordDeviceActionStatus} */
+    public async recordDeviceActionStatus(report: ReminderActionStatusReport): Promise<ImAction | undefined> {
+        validateDeviceActionStatusReport(report);
+        const fingerprint = canonicalizeJson(report as unknown as JsonValue);
+        const updatedActions: ImAction[] = [];
+        const outcome = await this.unitOfWork.transaction(async (tx) => {
+            const existingEvent = await tx.reminderActionFacts.findByEventId(report.eventId);
+            if (existingEvent !== undefined) {
+                if (existingEvent.fingerprint !== fingerprint) {
+                    throw new ImGatewayError(
+                        'idempotency_conflict',
+                        'Device action event was reused with different data',
+                    );
                 }
-                return [existing];
+                const existingAction = await tx.actions.findByOperationId(report.operationId);
+                if (existingAction !== undefined && existingAction.deviceId === report.deviceId) return existingAction;
             }
+
+            const existingOperation = await tx.reminderActionFacts.findByDeviceAndOperationId(
+                report.deviceId,
+                report.operationId,
+            );
+            if (existingOperation !== undefined && existingOperation.eventId !== report.eventId) {
+                throw new ImGatewayError(
+                    'idempotency_conflict',
+                    'Device action operationId was reused with different data',
+                );
+            }
+
+            const previousLatest = await tx.reminderActionFacts.findLatestByDeviceAndTrigger(
+                report.deviceId,
+                report.reminderTriggerId,
+            );
+            if (
+                previousLatest !== undefined &&
+                previousLatest.eventId !== report.eventId &&
+                Date.parse(report.occurredAt) === Date.parse(previousLatest.report.occurredAt)
+            ) {
+                throw new ImGatewayError(
+                    'invalid_transition',
+                    'Concurrent device reports for one reminder must have one authoritative event',
+                );
+            }
+            if (
+                previousLatest !== undefined &&
+                previousLatest.eventId !== report.eventId &&
+                previousLatest.report.status === 'succeeded' &&
+                isStrictlyLater(report.occurredAt, previousLatest.report.occurredAt)
+            ) {
+                throw new ImGatewayError(
+                    'invalid_transition',
+                    'A later device report cannot overwrite an already succeeded reminder action',
+                );
+            }
+
+            if (existingEvent === undefined) {
+                const created = await tx.reminderActionFacts.createIfAbsent({
+                    eventId: report.eventId,
+                    fingerprint,
+                    report,
+                    receivedAt: this.clock.now(),
+                });
+                if (!created.created && created.fact.fingerprint !== fingerprint) {
+                    if (
+                        created.fact.report.deviceId === report.deviceId &&
+                        created.fact.report.reminderTriggerId === report.reminderTriggerId &&
+                        Date.parse(created.fact.report.occurredAt) === Date.parse(report.occurredAt)
+                    ) {
+                        throw new ImGatewayError(
+                            'invalid_transition',
+                            'Concurrent device reports for one reminder must have one authoritative event',
+                        );
+                    }
+                    throw new ImGatewayError(
+                        'idempotency_conflict',
+                        'Device action event was reused with different data',
+                    );
+                }
+            }
+
+            const latest = await tx.reminderActionFacts.findLatestByDeviceAndTrigger(
+                report.deviceId,
+                report.reminderTriggerId,
+            );
+            if (latest === undefined || latest.report.eventId !== report.eventId) return undefined;
+
             const pending = await tx.actions.findPendingByDeviceAndTrigger(
-                status.deviceId,
-                status.reminderTriggerId,
+                report.deviceId,
+                report.reminderTriggerId,
                 this.clock.now(),
             );
-            const result: ReminderActionResult = {
-                schemaVersion: DEVICE_CONTRACT_VERSION,
-                operationId: status.operationId,
-                reminderTriggerId: status.reminderTriggerId,
-                status: status.status,
-                details: { source: status.source, correlationId: status.correlationId },
-                ...(status.nextTriggerAt === undefined ? {} : { nextTriggerAt: status.nextTriggerAt }),
-                occurredAt: status.occurredAt,
-            };
-            if (pending.length === 0) {
-                const delivery = await tx.deliveries.findActiveActionWindow(
-                    status.deviceId,
-                    status.reminderTriggerId,
-                    this.clock.now(),
-                );
-                const metadata =
-                    delivery === undefined ? undefined : readStrongReminderMetadata(delivery.semanticPayload);
-                const binding = delivery === undefined ? undefined : await tx.bindings.findById(delivery.bindingId);
-                const option = metadata?.options.find((candidate) => candidate.type === status.action);
-                if (
-                    delivery === undefined ||
-                    delivery.expiresAt === undefined ||
-                    metadata === undefined ||
-                    metadata.deviceId !== status.deviceId ||
-                    metadata.reminderTriggerId !== status.reminderTriggerId ||
-                    binding === undefined ||
-                    binding.status !== 'active' ||
-                    option === undefined ||
-                    !hasApprovedActionOption(metadata.options, status.action, option.params)
-                ) {
-                    throw new ImGatewayError(
-                        'action_not_found',
-                        'No active strong-reminder action window for voice status',
-                    );
-                }
-                const action: ImAction = {
-                    id: this.ids.actionIdForDelivery(delivery.id),
-                    operationId: status.operationId,
-                    correlationId: delivery.correlationId,
-                    deliveryId: delivery.id,
-                    actorBindingId: binding.id,
-                    deviceId: metadata.deviceId,
-                    reminderTriggerId: metadata.reminderTriggerId,
-                    actionType: status.action,
-                    ...(option?.params === undefined ? {} : { actionParams: option.params }),
-                    actionKeyHash: `voice:${status.operationId}`,
-                    expectedIdentityId: binding.externalIdentityId,
-                    actualIdentityId: binding.externalIdentityId,
-                    status: status.status,
-                    result,
-                    expiresAt: delivery.expiresAt,
-                    createdAt: this.clock.now(),
-                    updatedAt: this.clock.now(),
-                };
-                const created = await tx.actions.createIfAbsent(action);
-                if (!created.created && created.action.operationId !== status.operationId) {
-                    throw new ImGatewayError(
-                        'invalid_transition',
-                        'Voice status conflicts with an existing delivery action',
-                    );
-                }
-                return [created.action];
-            }
-            const changed: ImAction[] = [];
-            let applied = false;
+            let matching: ImAction | undefined;
             for (const action of pending) {
-                const isWinner = !applied && action.actionType === status.action;
-                const next: ImAction = isWinner
-                    ? { ...action, status: status.status, result, updatedAt: this.clock.now() }
+                const sameKind = action.actionType === report.action;
+                const result = sameKind
+                    ? toReminderActionResult(report)
                     : {
-                          ...action,
-                          status: 'failed',
-                          result: {
-                              schemaVersion: DEVICE_CONTRACT_VERSION,
-                              operationId: action.operationId,
-                              reminderTriggerId: action.reminderTriggerId,
-                              status: 'failed',
-                              errorCode: 'superseded_by_voice',
-                              details: {
-                                  source: status.source,
-                                  correlationId: status.correlationId,
-                                  operationId: status.operationId,
-                              },
-                              occurredAt: status.occurredAt,
-                          },
-                          updatedAt: this.clock.now(),
+                          ...toReminderActionResult(report),
+                          status: 'failed' as const,
+                          errorCode: 'superseded_by_device_action',
                       };
-                await tx.actions.save(next);
-                changed.push(next);
-                if (isWinner) applied = true;
+                const nextStatus: ActionStatus = sameKind
+                    ? report.status === 'retryable_failed'
+                        ? 'pending'
+                        : report.status
+                    : 'failed';
+                const updated: ImAction = { ...action, status: nextStatus, result, updatedAt: this.clock.now() };
+                await tx.actions.save(updated);
+                updatedActions.push(updated);
+                if (sameKind) matching = updated;
             }
-            if (!applied) throw new ImGatewayError('invalid_transition', 'Voice action does not match pending options');
-            return changed;
+            return matching;
         });
-        for (const action of updated) {
-            await this.stream.close(action.id, {
-                deviceId: action.deviceId,
-                reminderTriggerId: action.reminderTriggerId,
-                expiresAt: action.expiresAt,
-            });
+        for (const action of updatedActions) {
+            if (action.status !== 'pending') {
+                await this.stream.close(action.id, {
+                    deviceId: action.deviceId,
+                    reminderTriggerId: action.reminderTriggerId,
+                    expiresAt: action.expiresAt,
+                });
+            }
         }
-        return updated;
+        return outcome;
     }
 
     private async recordResultAndClose(
@@ -1560,6 +1580,39 @@ function deliveryRetryDelayMinutes(attemptNo: number): number {
 
 function isJsonObject(value: JsonValue | undefined): value is { readonly [key: string]: JsonValue } {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toReminderActionResult(report: ReminderActionStatusReport): ReminderActionResult {
+    return {
+        schemaVersion: report.schemaVersion,
+        operationId: report.operationId,
+        reminderTriggerId: report.reminderTriggerId,
+        status: report.status,
+        ...(report.nextTriggerAt === undefined ? {} : { nextTriggerAt: report.nextTriggerAt }),
+        ...(report.errorCode === undefined ? {} : { errorCode: report.errorCode }),
+        ...(report.details === undefined ? {} : { details: report.details }),
+        occurredAt: report.occurredAt,
+    };
+}
+
+function toActionStatus(status: ReminderActionStatusReport['status']): ActionStatus {
+    return status === 'retryable_failed' ? 'pending' : status;
+}
+
+/** 设备成功事实的动作与下一次触发时间必须在进入持久化前一致。 */
+function validateDeviceActionStatusReport(report: ReminderActionStatusReport): void {
+    if (
+        report.status === 'succeeded' &&
+        ((report.action === 'snooze' && report.nextTriggerAt === undefined) ||
+            (report.action === 'acknowledge' && report.nextTriggerAt !== undefined))
+    ) {
+        throw new ImGatewayError('invalid_transition', 'Device action nextTriggerAt does not match action');
+    }
+}
+
+/** ISO 8601 已由契约层校验，此处只比较两个已规范化业务时间。 */
+function isStrictlyLater(left: IsoDateTime, right: IsoDateTime): boolean {
+    return Date.parse(left) > Date.parse(right);
 }
 
 /**

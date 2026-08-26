@@ -8,8 +8,16 @@
 #include "voicelife/contracts/im/im_contracts.h"
 #include "voicelife/im/im_reporting_channel.h"
 
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
+
 namespace voicelife::runtime {
 namespace {
+
+#ifdef ESP_PLATFORM
+constexpr char kLogTag[] = "VoiceLifeReminderIm";
+#endif
 
 std::string FormatIso(schedule::DateTime value) {
     const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(value.time_since_epoch()).count();
@@ -59,7 +67,10 @@ Status ImScheduleReminderNotification::SendScheduleReminder(const schedule::Sche
 
     contracts::im::NotificationIntent intent;
     intent.schemaVersion = contracts::im::kDeviceContractVersion;
-    intent.businessEventId = "schedule-reminder-task-" + DecimalId(task.id);
+    // Task IDs are local SQLite row IDs and can be reused after a database
+    // rebuild. Include the provisioned device identity in the global
+    // idempotency key while keeping it stable across retries.
+    intent.businessEventId = "schedule-reminder-device-" + device_id + "-task-" + DecimalId(task.id);
     intent.correlationId = "schedule-reminder-chain-" + DecimalId(task.chain_id);
     intent.kind = "reminder_due";
     intent.recipient = {.userId = user_id, .deviceId = device_id};
@@ -68,7 +79,9 @@ Status ImScheduleReminderNotification::SendScheduleReminder(const schedule::Sche
     intent.instanceId = DecimalId(schedule.id);
     intent.reminderTriggerId = task.timing_task_id.value_or("schedule-reminder-task-" + DecimalId(task.id));
     intent.reminderType = "strong";
-    intent.content = {.title = "日程提醒", .body = schedule.event};
+    intent.content = {
+        .title = "日程提醒",
+        .body = schedule.event + (task.attempt >= 3 ? "\n这是最后一次提醒；之后不再创建新的推迟提醒。" : "")};
     intent.actions = {
         {.kind = "command", .type = "acknowledge", .label = "知道了", .minutes = std::nullopt},
         {.kind = "command", .type = "snooze", .label = "推迟 10 分钟", .minutes = 10},
@@ -78,13 +91,30 @@ Status ImScheduleReminderNotification::SendScheduleReminder(const schedule::Sche
     intent.occurredAt = FormatIso(task.triggered_at.value_or(task.trigger_at));
 
     const im::ReportResult result = reporting->SubmitNotification(intent);
+#ifdef ESP_PLATFORM
+    ESP_LOGI(kLogTag, "IM_REMINDER_SUBMIT_RESULT status=%d response_bytes=%u correlation_id=%s reminder_trigger_id=%s",
+             static_cast<int>(result.status), static_cast<unsigned>(result.response_body.size()),
+             intent.correlationId.c_str(), intent.reminderTriggerId.c_str());
+#endif
     if (result.status == im::ReportStatus::kSubmitted) {
+        auto window = im::ExtractActionWindow(result.response_body);
+#ifdef ESP_PLATFORM
+        if (window.has_value()) {
+            ESP_LOGI(kLogTag, "IM_ACTION_WINDOW_ACCEPTED=1 reminder_trigger_id=%s expires_at=%s",
+                     window->reminderTriggerId.c_str(), window->expiresAt.c_str());
+        } else {
+            ESP_LOGW(kLogTag, "IM_ACTION_WINDOW_ACCEPTED=0 reminder_trigger_id=%s", intent.reminderTriggerId.c_str());
+        }
+#endif
         if (action_window_sink_) {
-            auto window = im::ExtractActionWindow(result.response_body);
             if (window.has_value()) action_window_sink_(std::move(*window));
         }
         return Status::Ok();
     }
+#ifdef ESP_PLATFORM
+    ESP_LOGW(kLogTag, "IM_REMINDER_SUBMIT_FAILED=1 status=%d correlation_id=%s reminder_trigger_id=%s",
+             static_cast<int>(result.status), intent.correlationId.c_str(), intent.reminderTriggerId.c_str());
+#endif
     const ErrorCode code =
         result.status == im::ReportStatus::kRetryable ? ErrorCode::kUnavailable : ErrorCode::kInternal;
     return Status::Error(code, result.message.empty() ? "IM 提醒通知提交失败" : result.message);
@@ -115,44 +145,6 @@ contracts::im::ReminderActionResult ImScheduleReminderActionExecutor::Execute(
         return ActionResult(command, "retryable_failed", "unavailable", occurred_at);
     }
     return ActionResult(command, "failed", "reminder_action_rejected", occurred_at);
-}
-
-Status ImVoiceReminderActionReporter::Report(const schedule::ReminderActionResult& result) {
-    if (result.operation_id.empty() || result.reminder_trigger_id.empty()) {
-        return Status::Error(ErrorCode::kInvalidArgument, "语音动作结果缺少幂等标识");
-    }
-    im::ImReportingChannel* reporting = runtime_.reporting_channel();
-    if (reporting == nullptr || runtime_.state() != im::ImRuntimeState::kReady) {
-        return Status::Error(ErrorCode::kUnavailable, "IM Runtime 尚未就绪");
-    }
-    contracts::im::VoiceReminderActionStatus status;
-    status.schemaVersion = contracts::im::kDeviceContractVersion;
-    status.eventId = "voice-reminder-action-" + result.operation_id;
-    status.correlationId = status.eventId;
-    status.deviceId = runtime_.device_id();
-    status.reminderTriggerId = result.reminder_trigger_id;
-    status.operationId = result.operation_id;
-    status.action = result.action == schedule::ScheduleReminderActionKind::kSnooze ? "snooze" : "acknowledge";
-    status.status = "succeeded";
-    status.occurredAt = FormatIso(result.occurred_at);
-    if (result.next_trigger_at.has_value()) status.nextTriggerAt = FormatIso(*result.next_trigger_at);
-    status.source = "voice";
-    const im::ReportResult submitted = reporting->SubmitVoiceReminderActionStatus(status);
-    if (submitted.status == im::ReportStatus::kSubmitted) return service_.MarkVoiceActionReported(result.operation_id);
-    const ErrorCode code =
-        submitted.status == im::ReportStatus::kRetryable ? ErrorCode::kUnavailable : ErrorCode::kInternal;
-    return Status::Error(code, submitted.message.empty() ? "语音动作状态上报失败" : submitted.message);
-}
-
-Status ImVoiceReminderActionReporter::RetryPending() {
-    const auto pending = service_.PendingVoiceActionReports();
-    if (!pending.ok()) return pending.status;
-    Status first_failure = Status::Ok();
-    for (const auto& result : *pending.value) {
-        const Status reported = Report(result);
-        if (!reported.ok() && first_failure.ok()) first_failure = reported;
-    }
-    return first_failure;
 }
 
 std::string EspScheduleReminderClock::NowIso() {
