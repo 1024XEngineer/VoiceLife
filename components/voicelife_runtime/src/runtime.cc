@@ -1574,13 +1574,12 @@ class Runtime final {
         }
     }
 
-    // “收到！”是唤醒确认的短暂显示。即使服务端暂时没有后续语音事件，
-    // 也必须由事件循环在租约到期后主动刷新，否则 OLED 会永久保留确认文本。
+    // 唤醒确认的状态栏显示有短暂租约。即使服务端暂时没有后续语音事件，
+    // 也必须由事件循环在租约到期后主动刷新，避免确认状态停留在屏幕上。
     void ClearExpiredWakeAck() {
         if (wake_ack_until_us_ == 0 || esp_timer_get_time() < wake_ack_until_us_) return;
         wake_ack_until_us_ = 0;
-        if (snapshot_.phase != voice::VoiceInteractionState::kAcknowledging ||
-            snapshot_.role != voice::VoiceContentRole::kSystem || snapshot_.content_text != "收到！") {
+        if (snapshot_.phase != voice::VoiceInteractionState::kAcknowledging) {
             return;
         }
         snapshot_.content_text.clear();
@@ -1640,14 +1639,14 @@ class Runtime final {
         // - kIntentReceived（STT）：内容栏显示用户语音，角色 user
         // - kTtsStarted：内容栏保持/显示助手文本，角色 assistant
         // - 会话结束/回待机：清空内容栏
-        // WakeAck 租约：确认阶段显示“收到！”。麦克风只会在确认播报完整
-        // 结束并经 kCaptureStarted 确认后打开。
+        // WakeAck 租约：确认阶段只在顶部状态栏显示一次“收到”。确认音本身
+        // 仍由 Provider 播放，但不再把相同语义复制到下方字幕栏。
         if ((event == voice::VoiceInteractionEvent::kWakeDetected ||
              event == voice::VoiceInteractionEvent::kInterruptAndAcknowledge) &&
             snapshot_.phase == voice::VoiceInteractionState::kAcknowledging && wake_ack_until_us_ > 0 &&
             esp_timer_get_time() < wake_ack_until_us_) {
-            snapshot_.content_text = "收到！";
-            snapshot_.role = voice::VoiceContentRole::kSystem;
+            snapshot_.content_text.clear();
+            snapshot_.role = voice::VoiceContentRole::kNone;
         } else if (event == voice::VoiceInteractionEvent::kAcknowledgementTimedOut) {
             // 已放弃迟到的确认流，显示不能继续保留“收到！”。否则开麦后会
             // 出现状态栏为“准备中/聆听中”但内容仍是确认字幕的假反馈。

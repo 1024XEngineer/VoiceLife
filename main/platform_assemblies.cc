@@ -321,8 +321,8 @@ voicelife::Status SparkBotAssembly::Start() {
     const Status display = adapter_.Start();
     if (!display.ok()) return display;
     // Keep the board profiles equal at the voice boundary: both boards use
-    // the existing MultiNet7 command grammar for "你好牛牛". ESP-SR emits the
-    // model partition image from the selected profile at build time.
+    // the MultiNet7 command grammar registered by the wake detector. ESP-SR
+    // emits the model partition image from the selected profile at build time.
     wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
     wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_.input(), *wake_detector_, true);
     wake_ready_ = true;

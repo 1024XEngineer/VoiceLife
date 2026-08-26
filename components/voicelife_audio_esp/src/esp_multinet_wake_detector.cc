@@ -42,8 +42,8 @@ struct LocalCommand {
 // registered once per active board assembly, not from Runtime.
 constexpr LocalCommand kCommands[] = {
     {1, "ni hao niu niu", "你好牛牛"},
-    {2, "niu niu", "牛牛"},
-    {3, "bie shuo le", "别说了"},
+    {2, "bie shuo le", "别说了"},
+    {3, "niu lai", "牛来"},
 };
 
 Status DetectorError(ErrorCode code, const char* message) { return Status::Error(code, message); }
@@ -331,7 +331,7 @@ class EspMultiNetWakeDetector::Impl final {
             model_status_ = DetectorError(ErrorCode::kUnavailable, "MultiNet 唤醒命令注册失败");
             return model_status_;
         }
-        ESP_LOGI(kTag, "本地命令检测器已就绪：MultiNet=%s commands=你好牛牛,牛牛,别说了", model_name);
+        ESP_LOGI(kTag, "本地命令检测器已就绪：MultiNet=%s commands=你好牛牛,别说了,牛来", model_name);
         model_status_ = Status::Ok();
         return model_status_;
     }

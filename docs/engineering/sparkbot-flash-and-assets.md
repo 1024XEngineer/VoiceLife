@@ -69,6 +69,6 @@ esptool.py --port "$PORT" write_flash \
 3. 10 个受控 asset_id（boot/connecting/error/happy/idle/listening/
    provisioning/sleepy/speaking/thinking）全部可 `Load`，`ZZ` magic 校验通过。
 4. 状态映射（EmotionKeyForMood）与 GIF 播放节奏符合官方。
-5. 日志出现 `本地命令检测器已就绪` 与三句命令 `你好牛牛,牛牛,别说了`；唤醒确认
+5. 日志出现 `本地命令检测器已就绪` 与三句命令 `你好牛牛,别说了,牛来`；唤醒确认
    必须出现 `LINX_SEND listen state=detect`、真实 `tts_started/tts_stopped` 和 I2S
    输出统计。仅代码或主机测试不构成唤醒、声音通过证据。
