@@ -515,6 +515,42 @@ void TestToolListing() {
 }
 
 /**
+ * @brief 验证按字节预算分页的工具目录不会拆分、丢失或重排工具定义。
+ * @return 无。
+ */
+void TestToolListingPagination() {
+    McpServer server;
+    const PropertyHandler handler = [](const PropertyList&) { return ToolResult::Success(ToolOutputValue::Null()); };
+    const std::string description(350, 'x');
+    Check(server.add_tool("page.one", description, {}, handler).ok(), "分页测试工具一应注册成功");
+    Check(server.add_tool("page.two", description, {}, handler).ok(), "分页测试工具二应注册成功");
+    Check(server.add_tool("page.three", description, {}, handler).ok(), "分页测试工具三应注册成功");
+
+    constexpr std::size_t kPageBudget = 600;
+    const auto first = server.list_tools_page_json(0, kPageBudget);
+    Check(first.ok() && first.value->size() <= kPageBudget &&
+              first.value->find("\"name\":\"page.one\"") != std::string::npos &&
+              first.value->find("\"nextCursor\":\"1\"") != std::string::npos,
+          "第一页必须保留完整首工具并给出下一游标");
+    const auto second = server.list_tools_page_json(1, kPageBudget);
+    Check(second.ok() && second.value->find("\"name\":\"page.two\"") != std::string::npos &&
+              second.value->find("\"nextCursor\":\"2\"") != std::string::npos,
+          "第二页必须按注册顺序继续并给出下一游标");
+    const auto final = server.list_tools_page_json(2, kPageBudget);
+    Check(final.ok() && final.value->find("\"name\":\"page.three\"") != std::string::npos &&
+              final.value->find("\"nextCursor\":null") != std::string::npos,
+          "末页必须保留完整末工具并以 null 结束游标");
+    const auto terminal = server.list_tools_page_json(3, kPageBudget);
+    Check(terminal.ok() && terminal.value->find("\"tools\":[]") != std::string::npos &&
+              terminal.value->find("\"nextCursor\":null") != std::string::npos,
+          "终止游标应得到显式空末页");
+    Check(server.list_tools_page_json(4, kPageBudget).status.code == ErrorCode::kInvalidArgument,
+          "超出目录范围的游标必须被拒绝");
+    Check(server.list_tools_page_json(0, 64).status.code == ErrorCode::kUnavailable,
+          "不足以容纳单个完整工具的预算必须被拒绝");
+}
+
+/**
  * @brief 验证工具输出值 JSON 序列化覆盖标量、数组、对象和空指针元素。
  * @return 无。
  */
@@ -561,6 +597,7 @@ int main() {
     TestObjectDefaults();
     TestNestedFieldValidation();
     TestToolListing();
+    TestToolListingPagination();
     TestToolOutputSerialization();
     return 0;
 }

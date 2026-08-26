@@ -30,6 +30,8 @@
 #include "freertos/task.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "voicelife/audio_esp/esp_opus_codec_strategy.h"
+#include "voicelife/contracts/im/reminder_action_status_report.h"
 #include "voicelife/contracts/json.h"
 #include "voicelife/im/esp_http_transport_factory.h"
 #include "voicelife/im/im_action_channel.h"
@@ -81,6 +83,20 @@ constexpr uint32_t kFinalSttTimeoutMs = 5000;
 // 确认语音不能拖慢首轮交互。Linx 若未在此窗口内送达首段 PCM，保留
 // 原音色的最佳策略是跳过迟到确认并立即开麦，而不是播放一段过时的“收到”。
 constexpr uint32_t kWakeAckFirstAudioTimeoutMs = 1800;
+
+std::string FormatReminderIso(schedule::DateTime value) {
+    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(value.time_since_epoch()).count();
+    const std::time_t timestamp = static_cast<std::time_t>(seconds);
+    std::tm utc{};
+#if defined(_WIN32)
+    if (gmtime_s(&utc, &timestamp) != 0) return "1970-01-01T00:00:00.000Z";
+#else
+    if (gmtime_r(&timestamp, &utc) == nullptr) return "1970-01-01T00:00:00.000Z";
+#endif
+    char buffer[32]{};
+    if (std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", &utc) == 0) return "1970-01-01T00:00:00.000Z";
+    return std::string(buffer) + ".000Z";
+}
 #if CONFIG_VOICELIFE_IM_GATEWAY
 constexpr bool kImGatewayEnabled = true;
 #else
@@ -213,7 +229,8 @@ class Runtime final {
                 *linx_transport_, linx_codec_, linx_config_, linx::LinxSpeechProviderAdapter::DefaultCapabilities(),
                 [this](std::string_view payload, std::string_view session_id) {
                     return HandleMcpRequest(payload, session_id);
-                });
+                },
+                audio_esp::CreateEspOpusCodecStrategy());
         });
 #endif
         registry.Register("scaffold", voice::CapabilityProfile{"scaffold", {"streaming-asr", "tts"}},
@@ -267,8 +284,23 @@ class Runtime final {
             }
             ESP_LOGI(kTag, "NVS_READY=1");
         }
+#ifdef ESP_PLATFORM
+        // IM lifecycle reads encrypted NVS and must keep an internal stack. Reserve
+        // it before storage, MCP, Wi-Fi, TLS, and audio fragment the internal heap;
+        // the task remains blocked until the Linx startup path explicitly activates it.
+        ReserveImRuntimeTask();
+        // Action windows are consumed by short-lived PSRAM-backed workers only
+        // after they arrive, avoiding the startup allocation peak.
+        im_action_stop_.store(false);
+        im_action_worker_stopped_.store(true);
+#endif
         const Status storage_status = storage_.Start();
-        if (!storage_status.ok()) return storage_status;
+        if (!storage_status.ok()) {
+#ifdef ESP_PLATFORM
+            (void)StopReminderActionWorker();
+#endif
+            return storage_status;
+        }
 #ifdef ESP_PLATFORM
         // 显示在连接、MCP Schema 和提醒任务之前启动。这样既能尽早给出设备反馈，
         // 也让 SPI 中断分配不与大批量动态对象构造交错。
@@ -308,7 +340,8 @@ class Runtime final {
         // 内部堆上同时竞争初始化峰值。回调只有在 MCP worker 启动后才会执行。
         if (!schedule_mcp_registered_) {
             init_status_ = mcp::RegisterScheduleMcpTools(mcp_server_, schedule_service_, schedule_rule_service_,
-                                                         schedule_operation_service_, schedule_reminder_service_.get());
+                                                         schedule_operation_service_, schedule_reminder_service_.get(),
+                                                         {.runtime = &im_runtime_});
             if (!init_status_.ok()) return fail_startup(init_status_);
             schedule_mcp_registered_ = true;
             // MCP worker 只产生绑定结果；轮询与 OLED/TTS 均由各自受控任务处理。
@@ -387,6 +420,14 @@ class Runtime final {
         }
         ShowDisplay(voice::VoiceMood::kConnecting, "连接", "");
         linx_config_ = std::move(*connection.value);
+        // SparkBot keeps I2S/VAD/serial injection at PCM 16 kHz / 20 ms.
+        // The Linx provider converts only at the WebSocket boundary, matching
+        // the platform's documented low-latency Opus VoIP profile.
+        linx_config_.preferred_audio = {.codec = voice::AudioCodec::kOpus,
+                                        .sample_rate_hz = 16000,
+                                        .channels = 1,
+                                        .bits_per_sample = 16,
+                                        .frame_duration_ms = 20};
 #if CONFIG_VOICELIFE_IM_GATEWAY
         // Start IM provisioning after Linx has released the shared USB console.
         if (!StartImProvisioningTask()) {
@@ -596,6 +637,14 @@ class Runtime final {
         return method != nullptr && method->IsString() && method->string == "tools/call";
     }
 
+    static std::string McpToolName(std::string_view payload) {
+        JsonValue request;
+        if (!ParseJson(payload, request).ok() || !request.IsObject()) return "invalid";
+        const JsonValue* params = request.Get("params");
+        const JsonValue* name = params != nullptr && params->IsObject() ? params->Get("name") : nullptr;
+        return name != nullptr && name->IsString() ? name->string : "missing";
+    }
+
     static std::string McpMethod(std::string_view payload) {
         JsonValue request;
         if (!ParseJson(payload, request).ok() || !request.IsObject()) return "invalid";
@@ -657,13 +706,16 @@ class Runtime final {
             }
             if (request->abandoned.load()) continue;
             const bool tool_call = IsMcpToolCall(request->payload);
+            const std::string tool_name = tool_call ? McpToolName(request->payload) : std::string{};
             if (tool_call && session_) session_->ReportToolCallStarted();
-            auto response = HandleLinxMcpPayload(request->payload, mcp_server_, request->session_id);
+            LinxMcpToolOutcome outcome;
+            auto response = HandleLinxMcpPayload(request->payload, mcp_server_, request->session_id,
+                                                 tool_call ? &outcome : nullptr);
             if (!response.ok()) {
                 response = BuildLinxMcpUnavailableResponse(request->payload, "设备 MCP 执行失败", request->session_id);
+                outcome = InspectLinxMcpToolOutcome(request->payload, response);
             }
             if (tool_call && !request->abandoned.load() && session_) {
-                const LinxMcpToolOutcome outcome = InspectLinxMcpToolOutcome(request->payload, response);
                 session_->ReportToolResult(TruncateUtf8(outcome.summary, 96), outcome.success);
             }
             ESP_LOGI(kTag, "MCP_TX method=%s id=%s bytes=%u result=%d", McpMethod(request->payload).c_str(),
@@ -671,6 +723,10 @@ class Runtime final {
                      response.ok() && response.value.has_value() ? static_cast<unsigned>(response.value->size()) : 0U,
                      response.ok() ? 1 : 0);
             ESP_LOGI(kTag, "MCP_TOOL_EXECUTED tool_call=%d result=%d", tool_call ? 1 : 0, response.ok() ? 1 : 0);
+            if (tool_call) {
+                ESP_LOGI(kTag, "MCP_TOOL_OUTCOME name=%s result_status=%s success=%d", tool_name.c_str(),
+                         outcome.result_status.c_str(), outcome.success ? 1 : 0);
+            }
             {
                 std::lock_guard<std::mutex> lock(request->mutex);
                 if (!request->abandoned.load()) {
@@ -684,15 +740,31 @@ class Runtime final {
         vTaskDelete(nullptr);
     }
 
-    void StartImRuntime() {
+    void ReserveImRuntimeTask() {
 #if CONFIG_VOICELIFE_IM_GATEWAY
         bool expected = false;
-        if (!im_lifecycle_started_.compare_exchange_strong(expected, true)) return;
+        if (!im_lifecycle_reserved_.compare_exchange_strong(expected, true)) return;
+        // This task loads IM configuration from encrypted NVS. NVS can disable
+        // flash cache, so ESP-IDF requires the caller's stack to be in DRAM.
         if (xTaskCreate(&Runtime::ImLifecycleTaskEntry, "voicelife_im_lifecycle", 8192, this, 3, &im_lifecycle_task_) !=
             pdPASS) {
-            im_lifecycle_started_.store(false);
+            im_lifecycle_reserved_.store(false);
             ESP_LOGW(kTag, "IM_RUNTIME_TASK_FAILED=1");
+            return;
         }
+        ESP_LOGI(kTag, "IM_RUNTIME_TASK_RESERVED=1");
+#else
+        ESP_LOGI(kTag, "IM_RUNTIME_DISABLED=1");
+#endif
+    }
+
+    void StartImRuntime() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        ReserveImRuntimeTask();
+        if (im_lifecycle_task_ == nullptr) return;
+        bool expected = false;
+        if (!im_lifecycle_activated_.compare_exchange_strong(expected, true)) return;
+        xTaskNotifyGive(im_lifecycle_task_);
 #else
         ESP_LOGI(kTag, "IM_RUNTIME_DISABLED=1");
 #endif
@@ -734,6 +806,33 @@ class Runtime final {
                 ESP_LOGW(kTag, "IM_ACTION_TASK_FAILED=1");
                 break;
             }
+        }
+#endif
+    }
+
+    void ReportPersistedVoiceActions() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        if (!schedule_reminder_service_ || im_runtime_.state() != im::ImRuntimeState::kReady ||
+            im_runtime_.reporting_channel() == nullptr || im_runtime_.device_id().empty())
+            return;
+        const auto persisted = schedule_reminder_service_->ListPersistedVoiceActionResults();
+        if (!persisted.ok()) return;
+        for (const auto& result : *persisted.value) {
+            contracts::im::ReminderActionStatusReport report;
+            report.schemaVersion = contracts::im::kDeviceContractVersion;
+            report.eventId = "voice-action:" + result.operation_id;
+            report.correlationId = result.operation_id;
+            report.deviceId = im_runtime_.device_id();
+            report.reminderTriggerId = result.reminder_trigger_id;
+            report.operationId = result.operation_id;
+            report.action = result.action == schedule::ScheduleReminderActionKind::kSnooze ? "snooze" : "acknowledge";
+            report.status = "succeeded";
+            report.occurredAt = FormatReminderIso(result.occurred_at);
+            if (result.next_trigger_at.has_value()) report.nextTriggerAt = FormatReminderIso(*result.next_trigger_at);
+            report.source = "voice";
+            const auto submitted = im_runtime_.reporting_channel()->SubmitReminderActionStatusReport(report);
+            ESP_LOGI(kTag, "IM_VOICE_ACTION_REPORT event_id=%s status=%d trigger=%s", report.eventId.c_str(),
+                     static_cast<int>(submitted.status), report.reminderTriggerId.c_str());
         }
 #endif
     }
@@ -810,7 +909,17 @@ class Runtime final {
 #endif
     }
 
-    static void ImLifecycleTaskEntry(void* context) { static_cast<Runtime*>(context)->ImLifecycleTask(); }
+    static void ImLifecycleTaskEntry(void* context) {
+        auto* runtime = static_cast<Runtime*>(context);
+        (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (!runtime->im_lifecycle_activated_.load()) {
+            runtime->im_lifecycle_task_ = nullptr;
+            runtime->im_lifecycle_reserved_.store(false);
+            vTaskDelete(nullptr);
+            return;
+        }
+        runtime->ImLifecycleTask();
+    }
 
     void ImLifecycleTask() {
         im::ImRetryPolicy retry_policy;
@@ -846,6 +955,7 @@ class Runtime final {
                 RegisterImPairingAcceptance(im_runtime_.pairing_client(), im_runtime_.device_id(),
                                             im_runtime_.user_id());
                 ResumeReminderActionWorker();
+                ReportPersistedVoiceActions();
                 ESP_LOGI(kTag, "IM_RUNTIME_READY=1");
                 break;
             }
@@ -867,6 +977,7 @@ class Runtime final {
                      static_cast<unsigned>(*delay_ms));
             vTaskDelay(pdMS_TO_TICKS(*delay_ms));
         }
+        im_lifecycle_task_ = nullptr;
         vTaskDelete(nullptr);
     }
 
@@ -1103,6 +1214,7 @@ class Runtime final {
     bool QueueCaptureStop() {
         BoardRequest request{};
         request.kind = BoardRequestKind::kStopCapture;
+        request.expected_state = interaction_.state();
         return EnqueueBoardRequest(request, "stop_capture");
     }
 
@@ -1316,18 +1428,27 @@ class Runtime final {
                 continue;
             }
             if (request.kind == BoardRequestKind::kStopCapture) {
+                const auto actual_state = interaction_.state();
+                if (actual_state != request.expected_state) {
+                    // 服务端 VAD/TTS 可能在 WakeTask 消费排队 stop 前完成本轮。
+                    // 不能让旧 stop 停掉新阶段，或把已开始的播报升级为失败。
+                    ESP_LOGI(kTag, "BOARD_REQUEST_STALE kind=stop_capture expected_state=%d actual_state=%d",
+                             static_cast<int>(request.expected_state), static_cast<int>(actual_state));
+                    continue;
+                }
                 const Status stop =
                     session_ ? session_->EndCapture() : Status::Error(ErrorCode::kUnavailable, "语音会话尚未启动");
                 if (!stop.ok()) {
+                    if (interaction_.state() != request.expected_state) {
+                        ESP_LOGI(kTag, "BOARD_REQUEST_STALE kind=stop_capture expected_state=%d actual_state=%d",
+                                 static_cast<int>(request.expected_state), static_cast<int>(interaction_.state()));
+                        continue;
+                    }
                     ESP_LOGW(kTag, "板级按键结束采集失败: %s", stop.message.c_str());
                     (void)EnqueueEvent(voice::VoiceInteractionEvent::kFailure);
-                } else {
-                    // 仅当已离开 kFinalizing（VAD 端点后等待最终 STT 中）才恢复待机：
-                    // kFinalizing 表示本轮还在等最终 STT/TTS，不能提前回待机。
-                    // 其余（聆听正常结束、超时、按键停止）恢复待机。
-                    if (interaction_.state() != voice::VoiceInteractionState::kFinalizing) {
-                        RestoreStandbyFromWakeTask();
-                    }
+                } else if (request.expected_state != voice::VoiceInteractionState::kFinalizing) {
+                    // kFinalizing 必须等待最终 STT/TTS；其它停止来源按原状态安全回待机。
+                    RestoreStandby(request);
                 }
                 continue;
             }
@@ -1903,7 +2024,8 @@ class Runtime final {
     std::string binding_content_text_;
     std::optional<BindingPresentation> deferred_binding_presentation_;
     std::string deferred_binding_speech_;
-    std::atomic_bool im_lifecycle_started_{false};
+    std::atomic_bool im_lifecycle_reserved_{false};
+    std::atomic_bool im_lifecycle_activated_{false};
     bool im_system_time_logged_ = false;
     TaskHandle_t im_lifecycle_task_ = nullptr;
     mcp::McpServer mcp_server_;

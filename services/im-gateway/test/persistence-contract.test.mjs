@@ -23,6 +23,7 @@ import {
     makePostgresUow,
     outboxEvent,
     receipt,
+    reminderActionFact,
     POSTGRES_URL,
     T0,
     T1,
@@ -121,6 +122,32 @@ describe(
                 recovered.map((item) => item.id),
                 ['action-1'],
             );
+            await second.close();
+        });
+
+        await test('a persisted voice action fact is recoverable and operation-id unique after process restart', async () => {
+            const first = await makePostgresUow();
+            await first.transaction((ctx) => ctx.reminderActionFacts.save(reminderActionFact()));
+            await first.close();
+
+            const second = new PostgresImUnitOfWork(POSTGRES_URL);
+            const recovered = await second.transaction((ctx) =>
+                ctx.reminderActionFacts.findByDeviceAndOperationId('device-1', 'voice-operation-1'),
+            );
+            assert.equal(recovered.eventId, 'voice-event-1');
+            const duplicate = await second.transaction((ctx) =>
+                ctx.reminderActionFacts.createIfAbsent(
+                    reminderActionFact('voice-event-conflict', {
+                        fingerprint: 'fingerprint:voice-event-conflict',
+                        report: {
+                            ...reminderActionFact().report,
+                            eventId: 'voice-event-conflict',
+                        },
+                    }),
+                ),
+            );
+            assert.equal(duplicate.created, false);
+            assert.equal(duplicate.fact.eventId, 'voice-event-1');
             await second.close();
         });
 
@@ -424,7 +451,7 @@ describe(
             await uow.runRaw('DROP INDEX IF EXISTS im_bindings_active_device_uq');
             await uow.runRaw('DROP INDEX IF EXISTS im_bindings_active_external_identity_uq');
             await uow.runRaw('ALTER TABLE im_bindings DROP CONSTRAINT IF EXISTS im_bindings_active_device_check');
-            await uow.runRaw('DELETE FROM im_schema_migrations WHERE version = 7');
+            await uow.runRaw('DELETE FROM im_schema_migrations WHERE version >= 7');
             await uow.runRaw(
                 `INSERT INTO im_bindings
                     (id, user_id, device_id, external_identity_id, priority, status, bound_at)

@@ -252,6 +252,10 @@ PropertyList UpdateProperties() {
     return PropertyList({
         Property::Optional("schedule_id", PropertyType::kInteger)
             .with_description("更新或取消已物化日程时使用的日程 ID，由 schedule.query 返回"),
+        Property::Optional("expected_event", PropertyType::kString)
+            .with_description("取消单次日程时，必须逐字回传 schedule.query 返回的 event 以确认目标"),
+        Property::Optional("expected_start_time", PropertyType::kString)
+            .with_description("取消单次日程时，必须逐字回传 schedule.query 返回的 start_time 以确认目标"),
         Property::Optional("rule_id", PropertyType::kInteger)
             .with_description("更新未来周期实例或整条周期规则时使用的规则 ID"),
         Property::Optional("original_start_time", PropertyType::kString)
@@ -272,7 +276,12 @@ PropertyList UpdateProperties() {
 
 PropertyList DeleteProperties() {
     return PropertyList({
-        Property::Optional("schedule_id", PropertyType::kInteger).with_description("要删除或取消的单次日程 ID"),
+        Property::Optional("schedule_id", PropertyType::kInteger)
+            .with_description("要删除或取消的单次日程 ID；必须先由 schedule.query 返回"),
+        Property::Optional("expected_event", PropertyType::kString)
+            .with_description("按 schedule_id 删除时，必须逐字回传 schedule.query 返回的 event 以确认目标"),
+        Property::Optional("expected_start_time", PropertyType::kString)
+            .with_description("按 schedule_id 删除时，必须逐字回传 schedule.query 返回的 start_time 以确认目标"),
         Property::Optional("rule_id", PropertyType::kInteger).with_description("要删除或取消的周期规则 ID"),
         Property::Optional("original_start_time", PropertyType::kString)
             .with_description("删除未来周期单次时使用的原始发生时间，格式 YYYY-MM-DD HH:mm:ss"),

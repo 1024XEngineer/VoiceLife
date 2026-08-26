@@ -18,6 +18,7 @@ test('device route metadata matches the Issue #65 transport contract', () => {
     assert.equal(DEVICE_API_ROUTES.notifications, '/v1/im/notifications');
     assert.equal(DEVICE_API_ROUTES.reminderActionStream, '/v1/devices/:deviceId/reminder-actions/stream');
     assert.equal(DEVICE_API_ROUTES.reminderActionResults, '/v1/devices/:deviceId/reminder-actions/:commandId/result');
+    assert.equal(DEVICE_API_ROUTES.reminderActionStatusReports, '/v1/devices/:deviceId/reminder-action-status');
     assert.deepEqual(DEVICE_API_ENDPOINTS.notification, {
         method: 'POST',
         path: '/v1/im/notifications',
@@ -29,6 +30,88 @@ test('device route metadata matches the Issue #65 transport contract', () => {
         'X-Accel-Buffering': 'no',
     });
     assert.equal(SSE_HEARTBEAT_INTERVAL_SECONDS >= 15 && SSE_HEARTBEAT_INTERVAL_SECONDS <= 30, true);
+});
+
+test('device voice action status report is authenticated and idempotent', async () => {
+    const { gateway } = buildGateway();
+    const body = {
+        schemaVersion: '1',
+        eventId: 'voice-status-event',
+        correlationId: 'voice-status-correlation',
+        deviceId: 'device-fixture',
+        reminderTriggerId: 'trigger-fixture',
+        operationId: 'voice-status-operation',
+        action: 'snooze',
+        status: 'succeeded',
+        occurredAt: '2026-08-03T00:01:00.000Z',
+        nextTriggerAt: '2026-08-03T00:11:00.000Z',
+        source: 'voice',
+    };
+    const first = await gateway.deviceApi.postReminderActionStatusReport({
+        authorization: 'Bearer fixture-device-token',
+        idempotencyKey: body.eventId,
+        deviceId: body.deviceId,
+        body,
+    });
+    const replay = await gateway.deviceApi.postReminderActionStatusReport({
+        authorization: 'Bearer fixture-device-token',
+        idempotencyKey: body.eventId,
+        deviceId: body.deviceId,
+        body,
+    });
+    assert.deepEqual(replay, first);
+    await expectGatewayError(
+        () =>
+            gateway.deviceApi.postReminderActionStatusReport({
+                authorization: 'Bearer fixture-device-token',
+                idempotencyKey: 'other-event',
+                deviceId: body.deviceId,
+                body,
+            }),
+        'duplicate_event',
+        'A mismatched voice action report Idempotency-Key was accepted',
+    );
+});
+
+test('device voice action status report enforces nextTriggerAt by action type', async () => {
+    const { gateway } = buildGateway();
+    const base = {
+        schemaVersion: '1',
+        correlationId: 'voice-contract-correlation',
+        deviceId: 'device-fixture',
+        reminderTriggerId: 'trigger-contract',
+        operationId: 'voice-contract-operation',
+        status: 'succeeded',
+        occurredAt: '2026-08-03T00:01:00.000Z',
+        source: 'voice',
+    };
+    await expectGatewayError(
+        () =>
+            gateway.deviceApi.postReminderActionStatusReport({
+                authorization: 'Bearer fixture-device-token',
+                idempotencyKey: 'voice-contract-ack-with-time',
+                deviceId: 'device-fixture',
+                body: {
+                    ...base,
+                    eventId: 'voice-contract-ack-with-time',
+                    action: 'acknowledge',
+                    nextTriggerAt: '2026-08-03T00:11:00.000Z',
+                },
+            }),
+        'invalid_contract',
+        'Acknowledge report with nextTriggerAt was accepted',
+    );
+    await expectGatewayError(
+        () =>
+            gateway.deviceApi.postReminderActionStatusReport({
+                authorization: 'Bearer fixture-device-token',
+                idempotencyKey: 'voice-contract-snooze-without-time',
+                deviceId: 'device-fixture',
+                body: { ...base, eventId: 'voice-contract-snooze-without-time', action: 'snooze' },
+            }),
+        'invalid_contract',
+        'Snooze report without nextTriggerAt was accepted',
+    );
 });
 
 test('schedule query result enforces device identity and idempotency', async () => {

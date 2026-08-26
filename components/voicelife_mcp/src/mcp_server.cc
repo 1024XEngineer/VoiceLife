@@ -316,6 +316,32 @@ ListToolsResult McpServer::list_tools() const {
 
 std::string McpServer::list_tools_json() const { return SerializeListToolsResult(list_tools()); }
 
+Result<std::string> McpServer::list_tools_page_json(std::size_t start_index, std::size_t maximum_json_bytes) const {
+    const ListToolsResult result = list_tools();
+    if (start_index > result.tools.size()) {
+        return Result<std::string>::Failure(ErrorCode::kInvalidArgument, "tools/list cursor 超出范围");
+    }
+
+    if (start_index == result.tools.size()) {
+        const std::string terminal = SerializeListToolsResultPage(result, start_index, start_index);
+        if (terminal != "{}" && terminal.size() <= maximum_json_bytes) {
+            return Result<std::string>::Success(terminal);
+        }
+        return Result<std::string>::Failure(ErrorCode::kUnavailable, "tools/list 响应超过安全上限");
+    }
+
+    std::string selected;
+    for (std::size_t end_index = start_index + 1; end_index <= result.tools.size(); ++end_index) {
+        std::string candidate = SerializeListToolsResultPage(result, start_index, end_index);
+        if (candidate == "{}" || candidate.size() > maximum_json_bytes) continue;
+        selected = std::move(candidate);
+    }
+    if (selected.empty()) {
+        return Result<std::string>::Failure(ErrorCode::kUnavailable, "单个工具定义超过安全上限");
+    }
+    return Result<std::string>::Success(std::move(selected));
+}
+
 PropertyList PropertyList::with_values(const ToolArguments& arguments) const {
     PropertyList result = *this;
     result.values_ = arguments;

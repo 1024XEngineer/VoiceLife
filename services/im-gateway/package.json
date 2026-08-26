@@ -17,7 +17,7 @@
     "device": "node scripts/run-device-cli.mjs",
     "start": "pnpm run build && node --env-file-if-exists=../../.env scripts/start-gateway.mjs",
     "test": "pnpm run build && node test/run-tests.mjs && node --test --test-concurrency=1 test/*.test.mjs",
-    "coverage": "pnpm run build && c8 --all --clean false --temp-directory coverage/.tmp --extension .js --include 'dist/**/*.js' --exclude 'dist/**/*.d.ts' --reporter=none --reports-dir coverage node test/run-tests.mjs && c8 --all --clean false --temp-directory coverage/.tmp --extension .js --include 'dist/**/*.js' --exclude 'dist/**/*.d.ts' --reporter=none --reports-dir coverage node --test --test-concurrency=1 test/*.test.mjs && c8 report --temp-directory coverage/.tmp --reporter=lcov --reporter=text --reports-dir coverage",
+    "coverage": "pnpm run build && c8 --all --clean --temp-directory coverage/.tmp --extension .js --include 'dist/**/*.js' --exclude 'dist/**/*.d.ts' --exclude 'scripts/**' --reporter=none --reports-dir coverage node test/run-tests.mjs && c8 --all --clean false --temp-directory coverage/.tmp --extension .js --include 'dist/**/*.js' --exclude 'dist/**/*.d.ts' --exclude 'scripts/**' --reporter=none --reports-dir coverage node --test --test-concurrency=1 test/*.test.mjs && c8 report --temp-directory coverage/.tmp --exclude 'scripts/**' --reporter=lcov --reporter=text --reports-dir coverage",
     "format:check": "prettier --check \"src/**/*.ts\" \"scripts/*.mjs\" \"test/*.mjs\" \"*.{mjs,json,md}\"",
     "lint": "eslint src test scripts",
     "ci": "pnpm run format:check && pnpm run lint && pnpm run check && pnpm run docs:check && pnpm run test"

@@ -4,3 +4,4 @@ dependencies:
     version: ">=6.0.2"
   espressif/esp-sr: "==2.4.7"
   espressif/esp_codec_dev: "~1.5.6"
+  espressif/esp_audio_codec: "~2.5.0"

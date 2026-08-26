@@ -13,6 +13,7 @@ const WECHAT_BODY_LIMIT = 64 * 1024;
 const FORM_BODY_LIMIT = 8 * 1024;
 const PAIRING_SESSION_PATH = /^\/v1\/im\/pairing-sessions\/([^/]+)$/u;
 const ACTION_RESULT_PATH = /^\/v1\/devices\/([^/]+)\/reminder-actions\/([^/]+)\/result$/u;
+const ACTION_STATUS_REPORT_PATH = /^\/v1\/devices\/([^/]+)\/reminder-action-status$/u;
 const ACTION_STREAM_PATH = /^\/v1\/devices\/([^/]+)\/reminder-actions\/stream$/u;
 const ACTION_UI_PATH = /^\/voicelife\/reminder-actions\/([^/]+)$/u;
 const SCHEDULE_QUERY_PAGE_PATH = /^\/voicelife\/reminder-actions\/query-result\/([^/]+)$/u;
@@ -220,6 +221,20 @@ async function routeRequest(
         });
         context.correlationId = action.correlationId;
         writeJson(response, 200, action);
+        return;
+    }
+    const actionStatusReportMatch = ACTION_STATUS_REPORT_PATH.exec(url.pathname);
+    if (actionStatusReportMatch !== null && method === 'POST') {
+        context.route = 'device.action-status-report.create';
+        const body = await readJson(request);
+        const result = await options.runtime.deviceApi.postReminderActionStatusReport({
+            authorization: authorization(request),
+            idempotencyKey: requiredHeader(request, 'idempotency-key'),
+            deviceId: unsafeId<DeviceId>(decodePathSegment(actionStatusReportMatch[1]!)),
+            body,
+        });
+        context.correlationId = correlationId(body);
+        writeJson(response, 202, result);
         return;
     }
     const actionStreamMatch = ACTION_STREAM_PATH.exec(url.pathname);

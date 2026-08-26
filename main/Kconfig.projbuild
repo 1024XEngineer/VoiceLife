@@ -60,6 +60,14 @@ config VOICELIFE_SERIAL_VOICE_TEST
         build emits unredacted voice text and detailed hardware telemetry for
         board diagnosis. It must remain disabled in production profiles.
 
+config VOICELIFE_MCP_TOOLS
+    bool "Enable VoiceLife MCP tool advertisement"
+    default y
+    help
+        Register VoiceLife MCP tools while keeping the MCP worker available.
+        Profiles that require an empty tool catalog must explicitly set this
+        option to n.
+
 if VOICELIFE_AUDIO_PROBE
 
 choice VOICELIFE_AUDIO_PROBE_PROFILE

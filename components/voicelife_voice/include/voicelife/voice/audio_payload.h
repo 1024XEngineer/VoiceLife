@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -104,6 +105,10 @@ class AudioPayload final {
 /** @brief 为 PCM 生产者提供固定大小、非阻塞获取的负载租约池。 */
 class AudioPayloadPool final : public std::enable_shared_from_this<AudioPayloadPool> {
    public:
+    static constexpr std::size_t kSlotsPerBitmapWord = 32;
+    static constexpr std::size_t kBitmapWordCount = 4;
+    static constexpr std::size_t kMaximumSlots = kSlotsPerBitmapWord * kBitmapWordCount;
+
     /** @brief 创建并初始化固定槽位池。
      * @param slot_count 可同时租用的槽位数。
      * @param slot_bytes 每个槽位的字节容量。
@@ -133,6 +138,10 @@ class AudioPayloadPool final : public std::enable_shared_from_this<AudioPayloadP
      * @return 获取失败次数。
      */
     [[nodiscard]] std::size_t acquisition_failures() const;
+    /** @brief 返回当前已租用的槽位数。
+     * @return 当前已租用槽位数。
+     */
+    [[nodiscard]] std::size_t in_use() const;
     /** @brief 返回同时被租用的槽位历史峰值。
      * @return 峰值已租用槽位数。
      */
@@ -147,11 +156,9 @@ class AudioPayloadPool final : public std::enable_shared_from_this<AudioPayloadP
     std::size_t slot_count_ = 0;
     std::size_t slot_bytes_ = 0;
     uint8_t* bytes_ = nullptr;
-    // A PCM producer runs on the I2S capture task while consumers release
-    // leases from other tasks. It must not treat brief lock contention as an
-    // exhausted pool, so slot ownership is represented by a non-blocking bit
-    // map. The public factory limits this to 32 slots.
-    std::atomic<uint32_t> available_slots_{0};
+    // PCM producers and consumers run on different real-time tasks. Slot
+    // ownership therefore remains a non-blocking bitmap rather than a mutex.
+    std::array<std::atomic<uint32_t>, kBitmapWordCount> available_slots_{};
     std::atomic_size_t in_use_{0};
     std::atomic_size_t high_watermark_{0};
     std::atomic_size_t acquisition_failures_{0};

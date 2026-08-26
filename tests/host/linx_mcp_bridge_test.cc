@@ -1,5 +1,9 @@
 #include "linx_mcp_bridge.h"
 
+#include <optional>
+#include <string>
+#include <vector>
+
 #include "support/in_memory_schedule_repository.h"
 #include "support/test_support.h"
 #include "voicelife/contracts/json.h"
@@ -25,6 +29,44 @@ voicelife::JsonValue ParseMcpEnvelope(const std::string& encoded) {
     return *payload;
 }
 
+struct ToolListing {
+    std::vector<std::string> names;
+    std::vector<std::size_t> response_sizes;
+    JsonValue first_tool;
+};
+
+ToolListing ReadAllToolPages(const McpServer& server, std::string_view session_id) {
+    ToolListing listing;
+    std::optional<std::string> cursor;
+    for (std::size_t page_index = 0; page_index < 16; ++page_index) {
+        std::string request =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"tools/list\",\"id\":\"list-" + std::to_string(page_index) + "\"";
+        if (cursor.has_value()) request += ",\"params\":{\"cursor\":\"" + *cursor + "\"}";
+        request += "}";
+
+        const auto response = voicelife::runtime::HandleLinxMcpPayload(request, server, session_id);
+        Check(response.ok() && response.value->size() <= voicelife::runtime::kLinxMcpMaxResponseBytes,
+              "每个 tools/list 的完整 Linx 信封都必须落在安全上限内");
+        listing.response_sizes.push_back(response.value->size());
+        const JsonValue listed = ParseMcpEnvelope(*response.value);
+        const JsonValue* result = listed.Get("result");
+        const JsonValue* tools = result == nullptr ? nullptr : result->Get("tools");
+        const JsonValue* next_cursor = result == nullptr ? nullptr : result->Get("nextCursor");
+        Check(tools != nullptr && tools->IsArray() && next_cursor != nullptr, "每一页必须包含 tools 和 nextCursor");
+        for (const auto& tool : tools->array) {
+            const JsonValue* name = tool.Get("name");
+            Check(name != nullptr && name->IsString(), "目录中的每个工具必须保留名称");
+            if (listing.names.empty()) listing.first_tool = tool;
+            listing.names.push_back(name->string);
+        }
+        if (next_cursor->kind == JsonValue::Kind::kNull) return listing;
+        Check(next_cursor->IsString() && !next_cursor->string.empty(), "非末页必须返回非空字符串 cursor");
+        cursor = next_cursor->string;
+    }
+    Check(false, "tools/list cursor 未在合理页数内结束");
+    return listing;
+}
+
 }  // namespace
 
 int main() {
@@ -43,27 +85,22 @@ int main() {
               initialized.Get("result")->Get("capabilities")->Get("tools")->IsObject(),
           "initialize 必须声明 MCP tools 能力");
 
-    const auto list = voicelife::runtime::HandleLinxMcpPayload(
-        R"({"jsonrpc":"2.0","method":"tools/list","id":"list-1"})", server, "remote-session");
-    Check(list.ok(), "tools/list 应返回可发现的日程工具和 Schema");
-    const auto& listed = ParseMcpEnvelope(*list.value);
-    Check(list.value->find("\"session_id\":\"remote-session\"") != std::string::npos,
-          "MCP 响应必须回传 Linx session_id");
-    const auto& tools = listed.Get("result")->Get("tools")->array;
-    Check(tools.size() == 4 && tools[0].Get("name")->string == "schedule.create" &&
-              tools[1].Get("name")->string == "schedule.query" && tools[2].Get("name")->string == "schedule.update" &&
-              tools[3].Get("name")->string == "schedule.delete",
-          "tools/list 必须返回稳定排序的一次性日程工具");
-    const auto* create_schema = tools[0].Get("inputSchema");
+    const ToolListing listing = ReadAllToolPages(server, "remote-session");
+    Check(listing.response_sizes.size() > 1 &&
+              listing.names ==
+                  std::vector<std::string>{"schedule.create", "schedule.query", "schedule.update", "schedule.delete"},
+          "tools/list 必须按 cursor 分页完整、稳定地返回一次性日程工具");
+    const auto* create_schema = listing.first_tool.Get("inputSchema");
     Check(create_schema->Get("required")->array.size() == 1 &&
               create_schema->Get("required")->array[0].string == "event" &&
               create_schema->Get("properties")->Get("start_time")->Get("type")->string == "string" &&
               create_schema->Get("properties")->Get("start_time")->Get("default") == nullptr,
           "可选日程时间不得被伪造成带默认值的必填参数");
 
+    voicelife::runtime::LinxMcpToolOutcome call_outcome;
     const auto call = voicelife::runtime::HandleLinxMcpPayload(
         R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"创建会议","start_time":"2030-03-18 00:00:00"}},"id":3})",
-        server);
+        server, {}, &call_outcome);
     Check(call.ok(), "tools/call 应分发给日程工具并回传文本结果");
     const auto& called = ParseMcpEnvelope(*call.value);
     Check(called.Get("result")->Get("content")->array.size() == 1 &&
@@ -72,6 +109,7 @@ int main() {
                   std::string::npos,
           "tools/call 必须返回 MCP text content");
     Check(called.Get("result")->Get("isError")->boolean == false, "成功 tools/call 必须明确声明 isError=false");
+    Check(call_outcome.success && call_outcome.result_status == "success", "直接执行路径必须保留受控的业务成功状态");
     const auto successful_outcome = voicelife::runtime::InspectLinxMcpToolOutcome(
         R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"创建会议","start_time":1900000000}},"id":3})",
         call);
@@ -111,6 +149,13 @@ int main() {
         invalid_arguments);
     Check(!invalid_outcome.success && invalid_outcome.summary == "日程创建失败",
           "非法参数错误不得进入用户可见 MCP 摘要");
+
+    voicelife::runtime::LinxMcpToolOutcome conflict_outcome;
+    const auto conflict = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":{"event":"冲突会议","start_time":"2030-03-18 00:00:00"}},"id":7})",
+        server, {}, &conflict_outcome);
+    Check(conflict.ok() && !conflict_outcome.success && conflict_outcome.result_status == "conflict",
+          "冲突是合法 MCP 回包，但运行时必须保留为非成功业务状态");
 
     const auto schedules_before_unavailable = service.query_schedule({
         .schedule_id = std::nullopt,

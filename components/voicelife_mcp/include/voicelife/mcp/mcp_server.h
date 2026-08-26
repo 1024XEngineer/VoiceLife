@@ -313,6 +313,15 @@ class McpServer {
     [[nodiscard]] std::string list_tools_json() const;
 
     /**
+     * @brief 生成从指定游标开始且不超过字节预算的一页 MCP tools/list 结果。
+     * @param start_index 当前页第一个工具的注册顺序下标。
+     * @param maximum_json_bytes 当前页 result JSON 的最大字节数。
+     * @return 包含完整工具定义和 nextCursor 的一页 JSON，或受控失败。
+     */
+    [[nodiscard]] Result<std::string> list_tools_page_json(std::size_t start_index,
+                                                           std::size_t maximum_json_bytes) const;
+
+    /**
      * @brief 根据工具名称校验参数并执行对应 handler。
      * @param call 工具调用请求。
      * @return 工具执行结果或参数校验错误。

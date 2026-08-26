@@ -213,6 +213,17 @@ class CodecStrategy {
      *  @return 编解码器枚举值。 */
     [[nodiscard]] virtual AudioCodec codec() const = 0;
 
+    /**
+     * @brief 配置本地 PCM 与线上编码格式的固定转换契约。
+     * @param local_pcm 本地采集或播放的 PCM 格式。
+     * @param wire 线上传输的编码格式。
+     * @return 配置成功返回 Ok，否则返回不支持的格式或资源错误。
+     *
+     * Provider 必须在 hello 之前调用此方法，使资源、帧时长或码率不满足时
+     * 在宣告线上格式前失败，而不是在第一帧语音到达时才暴露。
+     */
+    virtual Status Configure(const AudioFormat& local_pcm, const AudioFormat& wire) = 0;
+
     /** @brief 将 PCM 帧编码为压缩格式。
      *  @param pcm 原始 PCM 帧。
      *  @return 编码成功返回压缩帧。 */
@@ -220,7 +231,8 @@ class CodecStrategy {
 
     /** @brief 将压缩帧解码回 PCM。
      *  @param encoded 压缩帧。
-     *  @return 解码成功返回 PCM 帧。 */
+     *  @return 解码成功返回 PCM 帧；固定容量池的可恢复满载必须返回 kConflict，
+     *          由 Provider 丢弃该帧而不改变连接生命周期。 */
     virtual Result<AudioFrame> Decode(const AudioFrame& encoded) = 0;
 };
 
