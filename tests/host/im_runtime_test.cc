@@ -381,6 +381,61 @@ void TestFactoryFailureIsDegraded() {
           "Transport factory 失败不得留下半初始化上报通道");
 }
 
+void TestMissingTransportFactoryIsDegraded() {
+    FakeConfig config;
+    FakeCredentials credentials;
+    FakeReadiness readiness;
+    ImRuntime runtime(config, credentials, readiness, {});
+
+    Check(runtime.Start().code == ErrorCode::kUnavailable, "缺失 Transport factory 必须返回 unavailable");
+    Check(runtime.state() == ImRuntimeState::kDegraded && runtime.reporting_channel() == nullptr &&
+              runtime.pairing_client() == nullptr,
+          "缺失 Transport factory 不得发布半初始化客户端");
+}
+
+void TestProbeRejectsMissingTransportAndInvalidCurrentCredential() {
+    RuntimeFixture not_started;
+    const ImHttpResponse missing_transport = not_started.runtime.ProbeGateway();
+    Check(missing_transport.status == voicelife::im::ImTransportStatus::kInvalidConfig &&
+              not_started.runtime.state() == ImRuntimeState::kDegraded,
+          "未启动 Runtime 不得执行认证探针");
+
+    RuntimeFixture expired_credential;
+    Check(expired_credential.runtime.Start().ok(), "有效初始凭据必须先创建受控 Transport");
+    expired_credential.credentials.token = "expired\ncredential";
+    const ImHttpResponse invalid_credential = expired_credential.runtime.ProbeGateway();
+    Check(invalid_credential.status == voicelife::im::ImTransportStatus::kInvalidConfig &&
+              expired_credential.runtime.state() == ImRuntimeState::kUnconfigured &&
+              expired_credential.transport->get_calls == 0,
+          "探测前必须重新校验凭据，失效凭据不得进入 HTTP header");
+}
+
+void TestProbeTransitionsReadyRuntimeBackToDegraded() {
+    RuntimeFixture fixture;
+    Check(fixture.runtime.Start().ok(), "有效配置必须进入探测阶段");
+    fixture.transport->next_get_response = {
+        .status = voicelife::im::ImTransportStatus::kSuccess,
+        .status_code = 200,
+        .body = {},
+        .message = {},
+    };
+    (void)fixture.runtime.ProbeGateway();
+    Check(fixture.runtime.state() == ImRuntimeState::kReady && fixture.runtime.reporting_channel() != nullptr &&
+              fixture.runtime.pairing_client() != nullptr,
+          "成功探测必须发布 Runtime 客户端");
+
+    fixture.transport->next_get_response = {
+        .status = voicelife::im::ImTransportStatus::kHttpError,
+        .status_code = 503,
+        .body = "unavailable",
+        .message = "503",
+    };
+    (void)fixture.runtime.ProbeGateway();
+    Check(fixture.runtime.state() == ImRuntimeState::kDegraded && fixture.runtime.reporting_channel() == nullptr &&
+              fixture.runtime.pairing_client() == nullptr,
+          "已就绪 Runtime 的认证探针失败必须撤销客户端");
+}
+
 void TestTrustedSystemTimeBoundary() {
     Check(!voicelife::im::IsTrustedSystemTime(0), "1970 默认 epoch 不得视为可信时间");
     Check(!voicelife::im::IsTrustedSystemTime(1704067199), "2024-01-01 前一秒不得视为可信时间");
@@ -471,6 +526,9 @@ int main() {
     TestArbitraryNotFoundResponseDoesNotMakeRuntimeReady();
     TestAuthenticatedNotFoundWithoutRetainedBodyMakesRuntimeReady();
     TestFactoryFailureIsDegraded();
+    TestMissingTransportFactoryIsDegraded();
+    TestProbeRejectsMissingTransportAndInvalidCurrentCredential();
+    TestProbeTransitionsReadyRuntimeBackToDegraded();
     TestTrustedSystemTimeBoundary();
     TestStoredConfigurationReadsSecretsOnlyWhenEnabled();
     TestStoredConfigurationFailsClosedOnMissingFields();

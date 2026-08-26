@@ -16,6 +16,7 @@ import type {
 import type {
     ChannelAccount,
     Delivery,
+    DeviceReminderActionFact,
     DeliveryAttempt,
     DeliveryReceipt,
     ExternalIdentity,
@@ -427,6 +428,62 @@ export interface ActionRepository {
     createIfAbsent(action: ImAction): Promise<{ readonly action: ImAction; readonly created: boolean }>;
 }
 
+/** 设备本地提醒动作事实的幂等与最新版本持久化端口。 */
+export interface ReminderActionFactRepository {
+    /**
+     * 按事件幂等键查询设备动作事实。
+     * @param eventId 设备事件标识。
+     * @returns 对应事实；不存在时返回 undefined。
+     */
+    findByEventId(eventId: EventId): Promise<DeviceReminderActionFact | undefined>;
+    /**
+     * 按设备和操作标识查询设备动作事实。
+     * @param deviceId 设备标识。
+     * @param operationId 本地操作标识。
+     * @returns 对应事实；不存在时返回 undefined。
+     */
+    findByDeviceAndOperationId(
+        deviceId: DeviceId,
+        operationId: OperationId,
+    ): Promise<DeviceReminderActionFact | undefined>;
+    /**
+     * 按设备、提醒触发标识和业务发生时间查询事实，用于并发首次写入收口。
+     * @param deviceId 设备标识。
+     * @param reminderTriggerId 提醒触发标识。
+     * @param occurredAt 设备声明的动作发生时间。
+     * @returns 同一业务时间的权威事实；不存在时返回 undefined。
+     */
+    findByDeviceTriggerAndOccurredAt(
+        deviceId: DeviceId,
+        reminderTriggerId: ReminderTriggerId,
+        occurredAt: IsoDateTime,
+    ): Promise<DeviceReminderActionFact | undefined>;
+    /**
+     * 查询某设备提醒的最新动作事实。
+     * @param deviceId 设备标识。
+     * @param reminderTriggerId 提醒触发标识。
+     * @returns 按发生时间排序的最新事实；不存在时返回 undefined。
+     */
+    findLatestByDeviceAndTrigger(
+        deviceId: DeviceId,
+        reminderTriggerId: ReminderTriggerId,
+    ): Promise<DeviceReminderActionFact | undefined>;
+    /**
+     * 幂等写入设备动作事实。
+     * @param fact 待写入的设备动作事实。
+     * @returns 权威事实以及本次是否创建。
+     */
+    createIfAbsent(
+        fact: DeviceReminderActionFact,
+    ): Promise<{ readonly fact: DeviceReminderActionFact; readonly created: boolean }>;
+    /**
+     * 保存既有设备动作事实。
+     * @param fact 要保存的事实。
+     * @returns 保存完成后兑现的 Promise。
+     */
+    save(fact: DeviceReminderActionFact): Promise<void>;
+}
+
 /** 服务端事务性发件箱的持久化端口。 */
 export interface OutboxRepository {
     /**
@@ -475,6 +532,7 @@ export interface ImUnitOfWorkContext {
     readonly intentSubmissions: IntentSubmissionRepository;
     readonly deliveries: DeliveryRepository;
     readonly actions: ActionRepository;
+    readonly reminderActionFacts: ReminderActionFactRepository;
     readonly outbox: OutboxRepository;
 }
 

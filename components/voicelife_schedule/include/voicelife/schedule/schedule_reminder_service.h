@@ -125,6 +125,17 @@ class ScheduleReminderService final {
      * @return 首次提交或持久化重放的动作结果。
      */
     Result<ReminderActionResult> ExecuteReminderAction(const ReminderActionCommand& command);
+    /**
+     * @brief 对最近触发的每个提醒逐条执行动作，返回可上报的持久化结果。
+     * @param action acknowledge 或 snooze。
+     * @return 每个提醒一条结果；没有可操作提醒时返回失败。
+     */
+    Result<std::vector<ReminderActionResult>> ExecuteRecentReminderActions(ScheduleReminderActionKind action);
+    /**
+     * @brief 读取已持久化的语音动作事实，供网络恢复后补报。
+     * @return 已保存的语音动作结果，或仓储错误。
+     */
+    Result<std::vector<ReminderActionResult>> ListPersistedVoiceActionResults() const;
 
    private:
     /// @brief 规则提醒生成的重试状态。

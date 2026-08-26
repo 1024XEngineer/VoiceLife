@@ -32,6 +32,8 @@ comment:
   require_changes: true
 
 ignore:
+  # 第三方源码由上游维护，不纳入项目覆盖率统计。
+  - "third_party/**"
   - "tests/**"
   # Component-local test sources are not production code and are not included
   # in the gcovr C++ report consistently across host targets.
@@ -40,6 +42,9 @@ ignore:
   # test, but gcovr cannot attribute its inline instantiation reliably.
   - "components/voicelife_runtime/src/serial_voice_protocol.h"
   - "services/im-gateway/test/**"
+  # Executable entrypoints are covered by smoke and integration tests, not by
+  # the product source-coverage denominator.
+  - "services/im-gateway/scripts/**"
   - "main/**"
   # 语音模块仍在开发中,实板验证与 host 覆盖率补齐前暂缓计入 codecov。
   - "components/voicelife_voice/**"

@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -48,6 +49,7 @@ std::vector<UsbSerialFrame> Push(UsbSerialFrameDecoder& decoder, std::span<const
 int main() {
     UsbSerialFrameDecoder decoder;
     const auto provisioning = ImFrame("VLI1", "https://gateway.test", "device-test", "token-test", "user-test");
+    const auto provisioning_v2 = ImFrame("VLI2", "https://gateway.test", "device-test", "token-test", "user-test");
     const auto voice_begin = VoiceFrame(voicelife::runtime::detail::kSerialVoiceBegin);
     constexpr std::array<uint8_t, 12> kPairing = {'V', 'L', 'P', '1', 5, 0, 0, 0, 0, 0, 0, 0};
 
@@ -57,6 +59,11 @@ int main() {
     Check(rest.size() == 1 && rest.front().kind == UsbSerialFrameKind::kImProvisioning,
           "完整 VLI1 必须仅路由到 IM provisioning 队列");
     Check(rest.front().view().size() == provisioning.size(), "IM 路由必须保留完整帧边界");
+
+    UsbSerialFrameDecoder v2_decoder;
+    const auto v2_result = Push(v2_decoder, provisioning_v2);
+    Check(v2_result.size() == 1 && v2_result.front().kind == UsbSerialFrameKind::kImProvisioning,
+          "完整 VLI2 必须路由到 IM provisioning 队列");
 
     const auto voice = Push(decoder, voice_begin);
     Check(voice.size() == 1 && voice.front().kind == UsbSerialFrameKind::kSerialVoice,
@@ -82,5 +89,41 @@ int main() {
     const auto recovered = Push(malformed_decoder, voice_begin);
     Check(recovered.size() == 1 && recovered.front().kind == UsbSerialFrameKind::kSerialVoice,
           "非法帧之后必须重新同步，不影响下一条合法 VLVT");
+
+    UsbSerialFrameDecoder invalid_provisioning_decoder;
+    const auto invalid_provisioning = ImFrame("VLI1", "", "device-test", "token-test", "user-test");
+    Check(Push(invalid_provisioning_decoder, invalid_provisioning).empty(),
+          "字段长度非法的 provisioning 头必须在路由层丢弃");
+
+    UsbSerialFrameDecoder oversized_provisioning_decoder;
+    const auto oversized_provisioning =
+        ImFrame("VLI1", std::string(256, 'o'), "device-test", "token-test", "user-test");
+    Check(Push(oversized_provisioning_decoder, oversized_provisioning).empty(),
+          "超过字段上限的 provisioning 头必须在路由层丢弃");
+
+    auto invalid_voice = voice_begin;
+    invalid_voice[4] = 2;
+    UsbSerialFrameDecoder invalid_voice_decoder;
+    Check(Push(invalid_voice_decoder, invalid_voice).empty(), "非法语音协议版本必须丢弃");
+
+    invalid_voice = voice_begin;
+    invalid_voice[5] = 99;
+    UsbSerialFrameDecoder invalid_kind_decoder;
+    Check(Push(invalid_kind_decoder, invalid_voice).empty(), "非法语音帧类型必须丢弃");
+
+    const auto invalid_pcm = VoiceFrame(voicelife::runtime::detail::kSerialVoicePcm);
+    UsbSerialFrameDecoder invalid_pcm_decoder;
+    Check(Push(invalid_pcm_decoder, invalid_pcm).empty(), "缺少 PCM payload 的语音帧必须丢弃");
+
+    const auto oversized_pcm = VoiceFrame(voicelife::runtime::detail::kSerialVoicePcm, std::vector<uint8_t>(641, 0));
+    UsbSerialFrameDecoder oversized_pcm_decoder;
+    Check(Push(oversized_pcm_decoder, oversized_pcm).empty(), "超过 PCM 上限的语音帧必须丢弃");
+
+    UsbSerialFrameDecoder resync_decoder;
+    const std::array<uint8_t, 5> noise = {'x', 'y', 'z', 'q', 'w'};
+    Check(Push(resync_decoder, noise).empty(), "无关串口噪声不得产生帧");
+    const auto resync_result = Push(resync_decoder, voice_begin);
+    Check(resync_result.size() == 1 && resync_result.front().kind == UsbSerialFrameKind::kSerialVoice,
+          "连续噪声后必须重新同步到合法语音帧");
     return 0;
 }

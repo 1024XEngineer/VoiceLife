@@ -11,6 +11,7 @@
 
 #include "schedule_mcp_tools_input.h"
 #include "schedule_tool_output.h"
+#include "voicelife/contracts/im/reminder_action_status_report.h"
 #include "voicelife/contracts/im/schedule_query_result.h"
 #include "voicelife/im/im_reporting_channel.h"
 #include "voicelife/im/im_runtime.h"
@@ -245,6 +246,50 @@ bool WithinRange(const std::optional<DateTime>& start, const std::optional<DateT
     if (start.has_value() && value < *start) return false;
     if (end.has_value() && value >= *end) return false;
     return true;
+}
+
+std::string IsoFromDateTime(DateTime value) {
+    const auto seconds = std::chrono::time_point_cast<std::chrono::seconds>(value);
+    const std::time_t raw = std::chrono::system_clock::to_time_t(seconds);
+    std::tm utc{};
+#if defined(_WIN32)
+    gmtime_s(&utc, &raw);
+#else
+    gmtime_r(&raw, &utc);
+#endif
+    char buffer[32]{};
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &utc);
+    return buffer;
+}
+
+const char* ActionName(schedule::ScheduleReminderActionKind action) {
+    return action == schedule::ScheduleReminderActionKind::kSnooze ? "snooze" : "acknowledge";
+}
+
+bool ReportVoiceActionResults(const std::vector<schedule::ReminderActionResult>& results,
+                              ScheduleQueryReportingContext reporting_context) {
+    auto* runtime = reporting_context.runtime;
+    auto* channel = runtime == nullptr ? nullptr : runtime->reporting_channel();
+    // 本地事实已经落库；IM 未 ready 时由 Runtime worker 补报，不能把“未发送”伪报为成功。
+    if (channel == nullptr || runtime == nullptr || runtime->device_id().empty()) return false;
+    bool all_submitted = true;
+    for (const auto& result : results) {
+        contracts::im::ReminderActionStatusReport report;
+        report.schemaVersion = "1";
+        report.eventId = "voice-action:" + result.operation_id;
+        report.correlationId = result.operation_id;
+        report.deviceId = runtime->device_id();
+        report.reminderTriggerId = result.reminder_trigger_id;
+        report.operationId = result.operation_id;
+        report.action = ActionName(result.action);
+        report.status = "succeeded";
+        report.occurredAt = IsoFromDateTime(result.occurred_at);
+        if (result.next_trigger_at.has_value()) report.nextTriggerAt = IsoFromDateTime(*result.next_trigger_at);
+        report.source = "voice";
+        const auto submitted = channel->SubmitReminderActionStatusReport(report);
+        if (submitted.status != voicelife::im::ReportStatus::kSubmitted) all_submitted = false;
+    }
+    return all_submitted;
 }
 
 }  // namespace
@@ -797,20 +842,24 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
         "schedule.reminder_acknowledge",
         "当用户明确确认已获知提醒内容（如‘我知道了’、‘好的’、‘收到’等）时调用。批量处理最近 10 "
         "分钟内所有已触发但未确认的提醒，关闭后续重复提醒，并将对应日程标记为已完成。一次性全部处理。",
-        PropertyList{}, [reminder_service](const PropertyList&) {
+        PropertyList{}, [reminder_service, reporting_context](const PropertyList&) {
             if (reminder_service == nullptr) return FailureOutput("当前运行时未启用提醒能力");
-            const auto result = reminder_service->AcknowledgeRecentReminders();
+            const auto result =
+                reminder_service->ExecuteRecentReminderActions(schedule::ScheduleReminderActionKind::kAcknowledge);
             if (!result.ok()) return FailureOutput(result.status.message);
             ToolOutputArray events;
-            events.reserve(result.value->events.size());
-            for (const auto& event : result.value->events) {
-                events.emplace_back(MakeToolOutput(ToolOutputValue::String(event)));
+            for (const auto& action_result : *result.value) {
+                for (const auto& event : action_result.events) {
+                    events.emplace_back(MakeToolOutput(ToolOutputValue::String(event)));
+                }
             }
+            const bool reported = ReportVoiceActionResults(*result.value, reporting_context);
             return Output({
                 MakeToolOutput("status", ToolOutputValue::String("success")),
                 MakeToolOutput("message", ToolOutputValue::String("已确认提醒")),
-                MakeToolOutput("affected_count", ToolOutputValue::Integer(result.value->affected_count)),
+                MakeToolOutput("affected_count", ToolOutputValue::Integer(static_cast<int64_t>(result.value->size()))),
                 MakeToolOutput("events", ToolOutputValue::Array(std::move(events))),
+                MakeToolOutput("im_delivery", ToolOutputValue::String(reported ? "submitted" : "retryable_failed")),
             });
         });
     if (!status.ok()) return status;
@@ -819,14 +868,17 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
         "schedule.reminder_snooze",
         "当用户在语音交互中表达延迟提醒的意图（如‘稍后提醒’、‘过会儿再说’、‘等会儿提醒我’等）时调用。为当前已触发提醒单"
         "独注册一次新的稍后提醒。",
-        PropertyList{}, [reminder_service](const PropertyList&) {
+        PropertyList{}, [reminder_service, reporting_context](const PropertyList&) {
             if (reminder_service == nullptr) return FailureOutput("当前运行时未启用提醒能力");
-            const auto result = reminder_service->SnoozeRecentReminders();
+            const auto result =
+                reminder_service->ExecuteRecentReminderActions(schedule::ScheduleReminderActionKind::kSnooze);
             if (!result.ok()) return FailureOutput(result.status.message);
+            const bool reported = ReportVoiceActionResults(*result.value, reporting_context);
             return Output({
                 MakeToolOutput("status", ToolOutputValue::String("success")),
                 MakeToolOutput("message", ToolOutputValue::String("已延迟提醒")),
-                MakeToolOutput("affected_count", ToolOutputValue::Integer(result.value->affected_count)),
+                MakeToolOutput("affected_count", ToolOutputValue::Integer(static_cast<int64_t>(result.value->size()))),
+                MakeToolOutput("im_delivery", ToolOutputValue::String(reported ? "submitted" : "retryable_failed")),
             });
         });
 }

@@ -29,6 +29,7 @@ namespace {
 using contracts::im::NotificationAction;
 using contracts::im::NotificationIntent;
 using contracts::im::ReminderActionResult;
+using contracts::im::ReminderActionStatusReport;
 using contracts::im::ScheduleQueryResultIntent;
 using contracts::im::ScheduleReceiptIntent;
 
@@ -332,6 +333,45 @@ std::string SerializeReminderActionResult(const ReminderActionResult& result) {
     out.push_back(',');
     AppendKey(out, "occurredAt");
     AppendJsonString(out, result.occurredAt);
+    out.push_back('}');
+    return out;
+}
+
+std::string SerializeReminderActionStatusReport(const ReminderActionStatusReport& report) {
+    std::string out;
+    out.reserve(384);
+    out += "{\"schemaVersion\":";
+    AppendJsonString(out, report.schemaVersion);
+    out += ",\"eventId\":";
+    AppendJsonString(out, report.eventId);
+    out += ",\"correlationId\":";
+    AppendJsonString(out, report.correlationId);
+    out += ",\"deviceId\":";
+    AppendJsonString(out, report.deviceId);
+    out += ",\"reminderTriggerId\":";
+    AppendJsonString(out, report.reminderTriggerId);
+    out += ",\"operationId\":";
+    AppendJsonString(out, report.operationId);
+    out += ",\"action\":";
+    AppendJsonString(out, report.action);
+    out += ",\"status\":";
+    AppendJsonString(out, report.status);
+    out += ",\"occurredAt\":";
+    AppendJsonString(out, report.occurredAt);
+    if (report.nextTriggerAt.has_value()) {
+        out += ",\"nextTriggerAt\":";
+        AppendJsonString(out, *report.nextTriggerAt);
+    }
+    if (report.errorCode.has_value()) {
+        out += ",\"errorCode\":";
+        AppendJsonString(out, *report.errorCode);
+    }
+    if (report.details.has_value()) {
+        out += ",\"details\":";
+        AppendJsonValue(out, *report.details);
+    }
+    out += ",\"source\":";
+    AppendJsonString(out, report.source);
     out.push_back('}');
     return out;
 }

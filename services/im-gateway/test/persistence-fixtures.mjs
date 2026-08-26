@@ -192,6 +192,29 @@ export function action(id = 'action-1', overrides = {}) {
     };
 }
 
+/** 构造设备语音直接消费后上报的动作事实。 */
+export function reminderActionFact(eventId = 'voice-event-1', overrides = {}) {
+    return {
+        eventId,
+        fingerprint: `fingerprint:${eventId}`,
+        report: {
+            schemaVersion: '1',
+            eventId,
+            correlationId: 'voice-correlation-1',
+            deviceId: 'device-1',
+            reminderTriggerId: 'trigger-1',
+            operationId: 'voice-operation-1',
+            action: 'snooze',
+            status: 'succeeded',
+            occurredAt: T1,
+            nextTriggerAt: T2,
+            source: 'voice',
+        },
+        receivedAt: T1,
+        ...overrides,
+    };
+}
+
 /** 构造事务性发件箱事件。 */
 export function outboxEvent(id = 'outbox-1', overrides = {}) {
     return {
