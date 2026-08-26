@@ -1,7 +1,7 @@
 <div align="center">
 
 <h1 align="center">
-  <img src="./assets/logo.png" alt="VoiceLife 声活 Logo"  valign="middle" />
+  <img src="./assets/logo.svg" alt="VoiceLife 声活 Logo" width="300"  valign="middle" />
 </h1>
 
 <p><strong>面向本地日程、提醒、存储、语音和消息渠道的设备端系统</strong></p>
