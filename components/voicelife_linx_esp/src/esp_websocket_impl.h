@@ -140,6 +140,7 @@ class EspWebSocketTransport::Impl final {
     std::recursive_mutex close_mutex_;
     std::mutex assembler_mutex_;
     std::mutex callback_mutex_;
+    std::mutex sink_mutex_;
     std::mutex status_mutex_;
     LinxTxGenerationGate tx_generation_gate_;
     WebSocketFragmentAssembler assembler_;

@@ -1,19 +1,14 @@
 #include "im_runtime_bootstrap.h"
 
-#include <fcntl.h>
 #include <time.h>
-#include <unistd.h>
 
 #include <algorithm>
-#include <array>
 #include <atomic>
-#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <new>
 #include <string>
-#include <vector>
 
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -22,14 +17,11 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
-#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-#include "driver/usb_serial_jtag.h"
-#include "driver/usb_serial_jtag_vfs.h"
-#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "linx_ota_bootstrap.h"
 #include "nvs.h"
+#include "usb_serial_frame_router.h"
 #include "voicelife/im/im_endpoint.h"
 #include "voicelife/im/im_pairing_controller.h"
 #include "voicelife/im/im_provisioning.h"
@@ -47,11 +39,6 @@ std::atomic_uint32_t g_pairing_window_generation{0};
 std::atomic_bool g_pairing_active{false};
 std::string g_pairing_device_id;
 std::optional<std::string> g_pairing_user_id;
-
-bool IsPairingTrigger(std::span<const uint8_t> bytes) {
-    constexpr std::array<uint8_t, 4> kMagic{'V', 'L', 'P', '1'};
-    return bytes.size() >= kMagic.size() && std::equal(kMagic.begin(), kMagic.end(), bytes.begin());
-}
 
 const char* PairingStatusName(im::PairingFlowStatus status) {
     switch (status) {
@@ -131,8 +118,11 @@ Status StartPairingAcceptance(std::span<const uint8_t> frame) {
         return Status::Error(ErrorCode::kAlreadyExists, "已有配对会话正在轮询");
     }
     auto* arguments = new (std::nothrow) PairingTaskArguments{static_cast<uint8_t>(trigger.value->expires_in_minutes)};
-    if (arguments == nullptr ||
-        xTaskCreate(&PairingTask, "voicelife_im_pairing", 6144, arguments, 3, nullptr) != pdPASS) {
+    if (arguments == nullptr) {
+        g_pairing_active.store(false, std::memory_order_release);
+        return Status::Error(ErrorCode::kInternal, "创建配对轮询参数失败");
+    }
+    if (xTaskCreate(&PairingTask, "voicelife_im_pairing", 6144, arguments, 3, nullptr) != pdPASS) {
         delete arguments;
         g_pairing_active.store(false, std::memory_order_release);
         return Status::Error(ErrorCode::kInternal, "创建配对轮询任务失败");
@@ -145,22 +135,6 @@ struct ConsoleCommandResult {
     bool pairing = false;
     bool restart = false;
 };
-
-Status PrepareProvisioningConsole() {
-#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-    if (!usb_serial_jtag_is_driver_installed()) {
-        usb_serial_jtag_driver_config_t config = {
-            .tx_buffer_size = 512,
-            .rx_buffer_size = 1024,
-        };
-        if (usb_serial_jtag_driver_install(&config) != ESP_OK) {
-            return Status::Error(ErrorCode::kUnavailable, "初始化 USB provisioning 输入缓冲失败");
-        }
-    }
-    usb_serial_jtag_vfs_use_driver();
-#endif
-    return Status::Ok();
-}
 
 void SecureClear(std::string& value) {
     std::fill(value.begin(), value.end(), '\0');
@@ -188,36 +162,6 @@ Result<std::string> ReadNvsString(nvs_handle_t handle, std::string_view key) {
     }
     value.resize(required - 1);
     return Result<std::string>::Success(std::move(value));
-}
-
-bool ReadConsoleBytes(uint8_t* destination, std::size_t size, int timeout_ms) {
-    std::size_t received = 0;
-    const int64_t deadline_us = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 1000;
-#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-    while (received < size) {
-        const int64_t remaining_ms = std::max<int64_t>(0, (deadline_us - esp_timer_get_time()) / 1000);
-        const int count = usb_serial_jtag_read_bytes(destination + received, size - received,
-                                                     pdMS_TO_TICKS(std::min<int64_t>(remaining_ms, 10)));
-        if (count > 0) received += static_cast<std::size_t>(count);
-        if (count < 0 || esp_timer_get_time() >= deadline_us) break;
-    }
-    return received == size;
-#else
-    const int original_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-    if (original_flags < 0 || fcntl(STDIN_FILENO, F_SETFL, original_flags | O_NONBLOCK) < 0) return false;
-    while (received < size) {
-        const ssize_t count = read(STDIN_FILENO, destination + received, size - received);
-        if (count > 0) {
-            received += static_cast<std::size_t>(count);
-            continue;
-        }
-        if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK) break;
-        if (esp_timer_get_time() >= deadline_us) break;
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    (void)fcntl(STDIN_FILENO, F_SETFL, original_flags);
-    return received == size;
-#endif
 }
 
 Status StoreProvisioningRequest(im::ImProvisioningRequest& request) {
@@ -258,28 +202,23 @@ Status StoreProvisioningRequest(im::ImProvisioningRequest& request) {
 }
 
 ConsoleCommandResult ReadImConsoleCommand() {
-    const Status console_status = PrepareProvisioningConsole();
-    if (!console_status.ok()) return {.status = console_status};
+    const Status router_status = StartUsbSerialFrameRouter();
+    if (!router_status.ok()) return {.status = router_status};
     ESP_LOGW(kTag, "IM_PROVISION_READY=1 timeout_ms=%d", kProvisionTimeoutMs);
     if (g_pairing_client.load(std::memory_order_acquire) != nullptr) {
         ESP_LOGW(kTag, "IM_PAIRING_READY=1 timeout_ms=%d", kProvisionTimeoutMs);
     }
-    std::array<uint8_t, im::kImProvisioningHeaderSize> header_bytes{};
-    if (!ReadConsoleBytes(header_bytes.data(), header_bytes.size(), kProvisionTimeoutMs)) {
+    UsbSerialFrame frame;
+    if (!ReceiveImUsbSerialFrame(&frame, kProvisionTimeoutMs)) {
         return {.status = Status::Error(ErrorCode::kNotFound, "未收到物理串口 IM 请求")};
     }
-    if (IsPairingTrigger(header_bytes)) return {.status = StartPairingAcceptance(header_bytes), .pairing = true};
-    auto header = im::ParseImProvisioningHeader(header_bytes);
-    if (!header.ok() || !header.value.has_value()) return {.status = header.status};
-
-    std::vector<uint8_t> frame(header_bytes.begin(), header_bytes.end());
-    frame.resize(header_bytes.size() + header.value->payload_size);
-    if (!ReadConsoleBytes(frame.data() + header_bytes.size(), header.value->payload_size, kProvisionTimeoutMs)) {
-        std::fill(frame.begin(), frame.end(), 0);
-        return {.status = Status::Error(ErrorCode::kInvalidArgument, "物理串口 IM provisioning 内容不完整")};
+    if (frame.kind == UsbSerialFrameKind::kImPairing) {
+        const Status status = StartPairingAcceptance(frame.view());
+        std::fill(frame.bytes.begin(), frame.bytes.end(), 0);
+        return {.status = status, .pairing = true};
     }
-    auto request = im::ParseImProvisioningRequest(frame);
-    std::fill(frame.begin(), frame.end(), 0);
+    auto request = im::ParseImProvisioningRequest(frame.view());
+    std::fill(frame.bytes.begin(), frame.bytes.end(), 0);
     if (!request.ok() || !request.value.has_value()) return {.status = request.status};
 
     const Status status = StoreProvisioningRequest(*request.value);

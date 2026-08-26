@@ -216,7 +216,7 @@ void Esp32s3PcmAudioPorts::Impl::DeliveryTaskEntry(void* arg) {
 void Esp32s3PcmAudioPorts::Impl::OutputTaskEntry(void* arg) {
     auto* self = static_cast<Impl*>(arg);
     self->OutputLoop();
-    vTaskDelete(nullptr);
+    vTaskDeleteWithCaps(nullptr);
 }
 
 void Esp32s3PcmAudioPorts::Impl::MarkTaskDone(TaskHandle_t* task) {
@@ -303,6 +303,7 @@ void Esp32s3PcmAudioPorts::Impl::CaptureLoop() {
 }
 
 void Esp32s3PcmAudioPorts::Impl::DeliveryLoop() {
+    std::size_t delivered_frames = 0;
     while (true) {
         voice::AudioFrame frame;
         voice::AudioFrameSink sink;
@@ -320,6 +321,12 @@ void Esp32s3PcmAudioPorts::Impl::DeliveryLoop() {
             ++dropped_input_frames_;
         } else {
             ++captured_frames_;
+            ++delivered_frames;
+            if (delivered_frames % 128 == 0) {
+                const UBaseType_t remaining_words = uxTaskGetStackHighWaterMark(nullptr);
+                ESP_LOGI(detail::kAudioRuntimeTag, "DELIVERY_TASK_STACK remaining_bytes=%u",
+                         static_cast<unsigned>(remaining_words * sizeof(StackType_t)));
+            }
         }
     }
     MarkTaskDone(&delivery_task_);
@@ -472,6 +479,7 @@ void Esp32s3PcmAudioPorts::Impl::OutputLoop() {
             } else {
                 output_queue_duration_ms_ = 0;
             }
+            output_space_cv_.notify_one();
         }
         {
             std::lock_guard<std::mutex> lock(mutex_);

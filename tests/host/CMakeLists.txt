@@ -47,6 +47,7 @@ add_voicelife_library(contracts voicelife_contracts
     "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_receipt.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/schedule_query_result.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_result.cc"
+    "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_status_report.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/reminder_action_command.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/notification_submission.cc"
     "${ROOT_DIR}/components/voicelife_contracts/src/im/pairing_session.cc")
@@ -134,6 +135,7 @@ add_voicelife_library(storage_sqlite voicelife_storage_sqlite
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v005_add_schedule_reminder_task_id.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v006_create_schedule_reminder_task.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v007_add_schedule_reminder_task_event.cc"
+    "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/migrations/v008_add_reminder_action_state.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/sqlite_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/schema/voicelife_schema.cc"
     "${ROOT_DIR}/components/voicelife_storage_sqlite/src/sql/operation_sql.cc"
@@ -295,6 +297,11 @@ add_voicelife_test(schedule_mcp_tools_test "unit;mcp;schedule;runtime" schedule_
     $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
 target_link_libraries(schedule_mcp_tools_test PRIVATE mcp schedule im)
 
+add_voicelife_test(schedule_mcp_tools_delete_confirmation_test "unit;mcp;schedule;runtime"
+    schedule_mcp_tools_delete_confirmation_test.cc
+    $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
+target_link_libraries(schedule_mcp_tools_delete_confirmation_test PRIVATE mcp schedule im)
+
 add_voicelife_test(schedule_mcp_tools_reminder_test "unit;mcp;schedule;reminder"
     schedule_mcp_tools_reminder_test.cc
     $<TARGET_OBJECTS:schedule_mcp_tools_coverage_impl>)
@@ -344,6 +351,10 @@ target_link_libraries(schedule_reminder_edge_cases_test PRIVATE schedule timing 
 add_voicelife_test(schedule_reminder_recovery_action_test "unit;schedule;timing;reminder"
     schedule_reminder_recovery_action_test.cc)
 target_link_libraries(schedule_reminder_recovery_action_test PRIVATE schedule timing storage_memory)
+
+add_voicelife_test(schedule_reminder_action_execution_test "unit;schedule;timing;reminder"
+    schedule_reminder_action_execution_test.cc)
+target_link_libraries(schedule_reminder_action_execution_test PRIVATE schedule timing storage_memory)
 
 add_voicelife_test(schedule_reminder_terminal_sync_test "unit;schedule;timing;reminder"
     schedule_reminder_terminal_sync_test.cc)
@@ -550,6 +561,11 @@ target_link_libraries(runtime_smoke_test PRIVATE mcp voice)
 
 add_voicelife_test(serial_voice_protocol_test "unit;runtime;voice" serial_voice_protocol_test.cc)
 target_include_directories(serial_voice_protocol_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+
+add_voicelife_test(usb_serial_frame_router_test "unit;runtime;voice;im" usb_serial_frame_router_test.cc
+    "${ROOT_DIR}/components/voicelife_runtime/src/usb_serial_frame_router.cc")
+target_include_directories(usb_serial_frame_router_test PRIVATE "${ROOT_DIR}/components/voicelife_runtime/src")
+target_link_libraries(usb_serial_frame_router_test PRIVATE im contracts)
 
 add_voicelife_test(wifi_provisioning_test "unit;runtime;wifi;provisioning"
     wifi_provisioning_test.cc

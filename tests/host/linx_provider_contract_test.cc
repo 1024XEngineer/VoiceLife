@@ -1,6 +1,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -88,6 +89,60 @@ class FakeTransport final : public voicelife::linx::LinxTransportPort {
     std::function<void()> text_sent_callback;
 };
 
+class FakeOpusCodecStrategy final : public voicelife::voice::CodecStrategy {
+   public:
+    [[nodiscard]] voicelife::voice::AudioCodec codec() const override { return voicelife::voice::AudioCodec::kOpus; }
+
+    Status Configure(const voicelife::voice::AudioFormat& local_pcm,
+                     const voicelife::voice::AudioFormat& wire) override {
+        ++configure_calls;
+        local_ = local_pcm;
+        wire_ = wire;
+        return configure_status;
+    }
+
+    voicelife::Result<voicelife::voice::AudioFrame> Encode(const voicelife::voice::AudioFrame& pcm) override {
+        ++encode_calls;
+        if (pcm.format.codec != voicelife::voice::AudioCodec::kPcmS16Le) {
+            return voicelife::Result<voicelife::voice::AudioFrame>::Failure(ErrorCode::kInvalidArgument,
+                                                                            "测试 PCM 格式错误");
+        }
+        voicelife::voice::AudioFrame encoded;
+        encoded.generation = pcm.generation;
+        encoded.sequence = pcm.sequence;
+        encoded.format = wire_;
+        encoded.payload = {0xF8, 0x01};
+        return voicelife::Result<voicelife::voice::AudioFrame>::Success(std::move(encoded));
+    }
+
+    voicelife::Result<voicelife::voice::AudioFrame> Decode(const voicelife::voice::AudioFrame& encoded) override {
+        ++decode_calls;
+        if (!decode_status.ok()) {
+            return voicelife::Result<voicelife::voice::AudioFrame>::Failure(decode_status.code, decode_status.message);
+        }
+        if (encoded.format.codec != voicelife::voice::AudioCodec::kOpus) {
+            return voicelife::Result<voicelife::voice::AudioFrame>::Failure(ErrorCode::kInvalidArgument,
+                                                                            "测试 Opus 格式错误");
+        }
+        voicelife::voice::AudioFrame pcm;
+        pcm.generation = encoded.generation;
+        pcm.sequence = encoded.sequence;
+        pcm.format = local_;
+        pcm.payload = {1, 2, 3};
+        return voicelife::Result<voicelife::voice::AudioFrame>::Success(std::move(pcm));
+    }
+
+    Status configure_status = Status::Ok();
+    Status decode_status = Status::Ok();
+    int configure_calls = 0;
+    int encode_calls = 0;
+    int decode_calls = 0;
+
+   private:
+    voicelife::voice::AudioFormat local_;
+    voicelife::voice::AudioFormat wire_;
+};
+
 voicelife::voice::VoiceSessionConfig Config() {
     voicelife::voice::VoiceSessionConfig config;
     config.session_id = "linx-test-session";
@@ -125,6 +180,17 @@ int main() {
     Check(larger_buffer_hello.ok() &&
               larger_buffer_hello.value->find("\"play_buffer_duration\":320") != std::string::npos,
           "连接配置必须能显式控制 Linx 下行缓冲预算");
+    auto opus_connection = connection;
+    opus_connection.preferred_audio = {.codec = voicelife::voice::AudioCodec::kOpus,
+                                       .sample_rate_hz = 16000,
+                                       .channels = 1,
+                                       .bits_per_sample = 16,
+                                       .frame_duration_ms = 20};
+    auto opus_hello = codec.EncodeHello(config, opus_connection);
+    Check(opus_hello.ok() && opus_hello.value->find("\"format\":\"opus\"") != std::string::npos &&
+              opus_hello.value->find("\"play_buffer_duration\":1000") != std::string::npos &&
+              opus_hello.value->find("\"bit_depth\"") == std::string::npos,
+          "Opus hello 必须保留播放缓冲预算且不得伪造 PCM 字段");
     auto detect = codec.EncodeListenDetect(config, "请播报\\测试", "收到！");
     Check(detect.ok() && detect.value->find("\\\\测试") != std::string::npos &&
               detect.value->find("\"text_response\":\"收到！\"") != std::string::npos,
@@ -307,10 +373,12 @@ int main() {
           "二进制下行音频应使用协商格式并携带 generation");
     const auto events_before_output_backpressure = events.size();
     reject_output = true;
-    transport.EmitBinary({5, 6, 7});
+    for (int frame = 0; frame < 120; ++frame) {
+        transport.EmitBinary({5, 6, 7});
+    }
     reject_output = false;
     Check(events.size() == events_before_output_backpressure,
-          "有界播放队列拒绝单帧应只计入端口指标，不能伪装成 Provider 失败");
+          "长 TTS 的连续播放队列拒绝只能计入端口指标，不能伪装成 Provider 失败或触发重连");
     transport.EmitDisconnected();
     Check(events.back().kind == voicelife::voice::VoiceEventKind::kDisconnected, "物理断线必须向会话上报生命周期事件");
     Check(provider.SendAudio({}).code == ErrorCode::kUnavailable, "断线后必须立即阻断音频上行");
@@ -338,6 +406,66 @@ int main() {
           "重连改变下行格式后不得继续暴露旧的协商格式");
     Check(provider.StartCapture(config.mode).code == ErrorCode::kUnavailable, "重连改变下行格式后必须阻断上行");
     Check(provider.Disconnect().ok() && transport.closes == 1, "断开应关闭传输并清理回调");
+
+    // Wire Opus must remain entirely inside the provider. VoiceSession and
+    // board ports continue to see their original PCM format.
+    FakeTransport opus_transport;
+    opus_transport.hello_message =
+        R"({"type":"hello","transport":"websocket","session_id":"opus-session","audio_params":{"format":"opus","sample_rate":16000,"channels":1,"frame_duration":20}})";
+    auto opus_strategy = std::make_unique<FakeOpusCodecStrategy>();
+    auto* opus_strategy_raw = opus_strategy.get();
+    voicelife::linx::LinxSpeechProviderAdapter opus_provider(
+        opus_transport, codec, opus_connection, voicelife::linx::LinxSpeechProviderAdapter::DefaultCapabilities(), {},
+        std::move(opus_strategy));
+    std::vector<voicelife::voice::VoiceEvent> opus_events;
+    std::vector<voicelife::voice::AudioFrame> opus_received;
+    opus_provider.SetAudioSink([&opus_received](voicelife::voice::AudioFrame frame) {
+        opus_received.push_back(std::move(frame));
+        return Status::Ok();
+    });
+    Check(opus_provider
+                  .Connect(session_config,
+                           [&opus_events](const voicelife::voice::VoiceEvent& event) { opus_events.push_back(event); })
+                  .ok() &&
+              opus_strategy_raw->configure_calls == 1,
+          "Opus 策略必须在发送 hello 前配置成功");
+    Check(opus_transport.texts.front().find("\"format\":\"opus\"") != std::string::npos &&
+              opus_transport.texts.front().find("\"play_buffer_duration\":1000") != std::string::npos,
+          "Provider 必须以官方 Opus hello 格式连接");
+    auto opus_formats = opus_provider.audio_formats();
+    Check(opus_formats.ok() && opus_formats.value->capture.codec == voicelife::voice::AudioCodec::kPcmS16Le &&
+              opus_formats.value->playback.codec == voicelife::voice::AudioCodec::kPcmS16Le,
+          "Provider 对 VoiceSession 暴露的双向格式必须保持本地 PCM");
+    voicelife::voice::AudioFrame opus_uplink;
+    opus_uplink.generation = session_config.generation;
+    opus_uplink.sequence = 0;
+    opus_uplink.format = config.audio;
+    opus_uplink.payload = {9, 8, 7};
+    Check(opus_provider.SendAudio(std::move(opus_uplink)).ok() && opus_strategy_raw->encode_calls == 1 &&
+              opus_transport.audio_frames.size() == 1 &&
+              opus_transport.audio_frames.front().format.codec == voicelife::voice::AudioCodec::kOpus &&
+              opus_transport.audio_frames.front().payload.size() == 2,
+          "PCM 上行必须先编码为 Opus，再交给 WebSocket");
+    opus_transport.EmitBinary({0xF8, 0x02});
+    Check(opus_strategy_raw->decode_calls == 1 && opus_received.size() == 1 &&
+              opus_received.front().format.codec == voicelife::voice::AudioCodec::kPcmS16Le &&
+              opus_received.front().payload.size() == 3,
+          "WebSocket 下行 Opus 必须先解码为本地 PCM");
+    const auto opus_events_before_decode_backpressure = opus_events.size();
+    opus_strategy_raw->decode_status = Status::Error(ErrorCode::kConflict, "测试 Opus 下行池已满");
+    for (int frame = 0; frame < 120; ++frame) {
+        opus_transport.EmitBinary({0xF8, 0x02});
+    }
+    Check(opus_events.size() == opus_events_before_decode_backpressure,
+          "长 TTS 耗尽 Opus 下行池时只能丢帧，不能伪装成 Provider 错误或触发重连");
+    Check(opus_provider.Disconnect().ok(), "Opus Provider 应正常清理传输");
+
+    FakeTransport missing_strategy_transport;
+    voicelife::linx::LinxSpeechProviderAdapter missing_strategy_provider(missing_strategy_transport, codec,
+                                                                         opus_connection);
+    Check(missing_strategy_provider.Connect(session_config, {}).code == ErrorCode::kUnavailable &&
+              missing_strategy_transport.connects == 0,
+          "缺少 Opus 策略时必须在 hello 前拒绝连接，不能假装支持 Opus");
 
     FakeTransport failed_transport;
     failed_transport.connect_result = Status::Error(ErrorCode::kUnavailable, "网络不可用");

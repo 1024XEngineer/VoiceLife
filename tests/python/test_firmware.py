@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -62,6 +63,22 @@ class ProfileValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(firmware.ProfileError, "找不到命令 idf.py"):
             firmware.run(["idf.py", "build"])
 
+    def test_prepares_generated_sqlite_component_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, mock.patch("firmware.run") as run:
+            firmware.ensure_sqlite_component(Path(directory))
+
+        run.assert_called_once_with([sys.executable, str(ROOT / "scripts" / "prepare_sqlite.py")])
+
+    def test_reuses_existing_generated_sqlite_component(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, mock.patch("firmware.run") as run:
+            component = Path(directory)
+            for name in ("sqlite3.c", "sqlite3.h", "CMakeLists.txt"):
+                (component / name).touch()
+
+            firmware.ensure_sqlite_component(component)
+
+        run.assert_not_called()
+
     def test_sparkbot_profile_enables_gateway_im_without_selecting_pcb(self) -> None:
         profile_path = ROOT / "config" / "profiles" / "esp32s3-esp-sparkbot.json"
         profile = json.loads(profile_path.read_text(encoding="utf-8"))
@@ -112,19 +129,34 @@ class ProfileValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(firmware.ProfileError, "持久化存储缺少"):
             firmware.validate_profile(profile, Path("missing-storage-flags.json"))
 
-    def test_sparkbot_serial_voice_profile_uses_persistent_storage_without_im_overhead(self) -> None:
+    def test_sparkbot_serial_voice_profile_uses_persistent_storage_and_im_gateway(self) -> None:
         profile_path = ROOT / "config" / "profiles" / "esp32s3-esp-sparkbot-serial-voice.json"
         profile = json.loads(profile_path.read_text(encoding="utf-8"))
 
-        self.assertEqual(profile["adapters"]["im"]["driver"], "disabled")
-        self.assertEqual(profile["adapters"]["im"]["capabilities"], [])
-        self.assertNotIn("CONFIG_VOICELIFE_IM_GATEWAY=y", profile["sdkconfig"])
+        self.assertEqual(len(profile["sdkconfig"]), len(set(profile["sdkconfig"])))
+        self.assertEqual(profile["adapters"]["im"]["driver"], "voicelife-gateway")
+        self.assertEqual(profile["adapters"]["im"]["capabilities"], ["https", "secure-credentials"])
+        self.assertEqual(profile["adapters"]["im"]["configRef"], "nvs://im")
+        self.assertIn("CONFIG_VOICELIFE_IM_GATEWAY=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_LWIP_DHCP_GET_NTP_SRV=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_LWIP_SNTP_MAX_SERVERS=2", profile["sdkconfig"])
+        self.assertIn("CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y", profile["sdkconfig"])
+        self.assertIn("CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y", profile["sdkconfig"])
         self.assertEqual(profile["adapters"]["storage"]["driver"], "fatfs-sqlite")
         self.assertIn("persistent-sqlite", profile["adapters"]["storage"]["capabilities"])
         self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS=y", profile["sdkconfig"])
         self.assertIn("CONFIG_VOICELIFE_STORAGE_SQLITE=y", profile["sdkconfig"])
         self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_ADDRESS=0x700000", profile["sdkconfig"])
         self.assertIn("CONFIG_VOICELIFE_STORAGE_FATFS_EXPECTED_PARTITION_SIZE=0x900000", profile["sdkconfig"])
+        self.assertIn("CONFIG_VOICELIFE_MCP_TOOLS=y", profile["sdkconfig"])
+
+    def test_sparkbot_profiles_keep_websocket_rx_tx_locks_separate(self) -> None:
+        for profile_name in ("esp32s3-esp-sparkbot", "esp32s3-esp-sparkbot-serial-voice"):
+            profile_path = ROOT / "config" / "profiles" / f"{profile_name}.json"
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+            self.assertIn("CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK=y", profile["sdkconfig"])
+            self.assertIn("CONFIG_ESP_WS_CLIENT_TX_LOCK_TIMEOUT_MS=2000", profile["sdkconfig"])
 
     def test_sparkbot_partition_reserves_persistent_data_after_model(self) -> None:
         lines = (ROOT / "config" / "partitions" / "sparkbot.csv").read_text(encoding="utf-8").splitlines()

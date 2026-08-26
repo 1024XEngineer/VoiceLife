@@ -107,5 +107,7 @@ int main() {
     Check(QueryProperties().to_schema().properties.contains("keyword"), "query 工具应声明 keyword 参数");
     Check(UpdateProperties().to_schema().properties.contains("repeat"), "update 工具应声明 repeat 参数");
     Check(DeleteProperties().to_schema().properties.contains("rule_id"), "delete 工具应声明 rule_id 参数");
+    Check(DeleteProperties().to_schema().properties.contains("expected_event"), "delete 工具应声明目标确认事件");
+    Check(DeleteProperties().to_schema().properties.contains("expected_start_time"), "delete 工具应声明目标确认时间");
     return 0;
 }

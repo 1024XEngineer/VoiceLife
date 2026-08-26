@@ -104,6 +104,10 @@ function fakeRuntime(events) {
                 status: input.body.status,
                 correlationId: 'correlation-action-result',
             }),
+            postReminderActionStatusReport: async (input) => ({
+                accepted: true,
+                eventId: input.body.eventId,
+            }),
         },
         actionStreamApi: {
             connect: async () =>
@@ -559,6 +563,32 @@ test('production server mounts health, device, Action UI and webhook routes', as
         );
         assert.equal(actionResult.status, 200);
         assert.equal((await actionResult.json()).correlationId, 'correlation-action-result');
+
+        const actionStatusReport = await globalThis.fetch(
+            `${origin}/v1/devices/device-fixture/reminder-action-status`,
+            {
+                method: 'POST',
+                headers: {
+                    authorization: `Bearer ${deviceToken}`,
+                    'content-type': 'application/json',
+                    'idempotency-key': 'voice-event-1',
+                },
+                body: JSON.stringify({
+                    schemaVersion: '1',
+                    eventId: 'voice-event-1',
+                    correlationId: 'voice-correlation-1',
+                    deviceId: 'device-fixture',
+                    reminderTriggerId: 'trigger-fixture',
+                    operationId: 'voice-operation-1',
+                    action: 'acknowledge',
+                    status: 'succeeded',
+                    occurredAt: '2026-08-03T00:01:00.000Z',
+                    source: 'voice',
+                }),
+            },
+        );
+        assert.equal(actionStatusReport.status, 202);
+        assert.equal((await actionStatusReport.json()).eventId, 'voice-event-1');
 
         assert.deepEqual(events, [{ kind: 'worker-wake' }]);
 

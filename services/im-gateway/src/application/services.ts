@@ -6,6 +6,7 @@ import {
     type NotificationSubmission,
     type ReminderActionCommand,
     type ReminderActionResult,
+    type ReminderActionStatusReport,
     type ScheduleReceiptIntent,
     type ScheduleQueryResultIntent,
 } from '../contracts/device-gateway.js';
@@ -818,6 +819,9 @@ export class DefaultActionApplication implements ActionApplication {
                     state: actionUiState(existing.status),
                     action: existing.actionType,
                     ...actionUiParams(existing),
+                    ...(existing.result?.nextTriggerAt === undefined
+                        ? {}
+                        : { nextTriggerAt: existing.result.nextTriggerAt }),
                     expiresAt: existing.expiresAt,
                 };
             }
@@ -890,6 +894,14 @@ export class DefaultActionApplication implements ActionApplication {
             }
 
             const now = this.clock.now();
+            const deviceFact = await tx.reminderActionFacts.findLatestByDeviceAndTrigger(
+                metadata.deviceId,
+                metadata.reminderTriggerId,
+            );
+            const factReport = deviceFact?.report;
+            const factIsTerminal = factReport !== undefined && factReport.status !== 'retryable_failed';
+            const factMatches = factIsTerminal && factReport!.action === command.actionType;
+            const factConflicts = factIsTerminal && factReport!.action !== command.actionType;
             const action: ImAction = {
                 id: command.claims.actionId,
                 operationId: this.ids.nextOperationId(),
@@ -903,10 +915,23 @@ export class DefaultActionApplication implements ActionApplication {
                 actionKeyHash: command.actionKeyHash,
                 expectedIdentityId: binding.externalIdentityId,
                 actualIdentityId: command.actualIdentityId ?? binding.externalIdentityId,
-                status: 'pending',
+                status: factConflicts ? 'failed' : factMatches ? toActionStatus(factReport!.status) : 'pending',
                 expiresAt: command.claims.expiresAt,
                 createdAt: now,
                 updatedAt: now,
+                ...(factMatches
+                    ? {
+                          result: toReminderActionResult(factReport!),
+                      }
+                    : factConflicts
+                      ? {
+                            result: {
+                                ...toReminderActionResult(factReport!),
+                                status: 'failed' as const,
+                                errorCode: 'superseded_by_device_action',
+                            },
+                        }
+                      : {}),
             };
             const created = await tx.actions.createIfAbsent(action);
             if (!created.created) {
@@ -922,7 +947,7 @@ export class DefaultActionApplication implements ActionApplication {
                 }
                 return { command: toCommand(existingAction), shouldDispatch: false };
             }
-            return { command: toCommand(created.action), shouldDispatch: true };
+            return { command: toCommand(created.action), shouldDispatch: !factMatches && !factConflicts };
         });
         if (prepared.shouldDispatch) await this.dispatch(prepared.command);
         return prepared.command;
@@ -931,6 +956,131 @@ export class DefaultActionApplication implements ActionApplication {
     /** {@inheritDoc ActionApplication.recordResult} */
     public recordResult(commandId: ActionId, deviceId: DeviceId, result: ReminderActionResult): Promise<ImAction> {
         return this.recordResultAndClose(commandId, deviceId, result);
+    }
+
+    /** {@inheritDoc ActionApplication.recordDeviceActionStatus} */
+    public async recordDeviceActionStatus(report: ReminderActionStatusReport): Promise<ImAction | undefined> {
+        validateDeviceActionStatusReport(report);
+        const fingerprint = canonicalizeJson(report as unknown as JsonValue);
+        const updatedActions: ImAction[] = [];
+        const outcome = await this.unitOfWork.transaction(async (tx) => {
+            const existingEvent = await tx.reminderActionFacts.findByEventId(report.eventId);
+            if (existingEvent !== undefined) {
+                if (existingEvent.fingerprint !== fingerprint) {
+                    throw new ImGatewayError(
+                        'idempotency_conflict',
+                        'Device action event was reused with different data',
+                    );
+                }
+                const existingAction = await tx.actions.findByOperationId(report.operationId);
+                if (existingAction !== undefined && existingAction.deviceId === report.deviceId) return existingAction;
+            }
+
+            const existingOperation = await tx.reminderActionFacts.findByDeviceAndOperationId(
+                report.deviceId,
+                report.operationId,
+            );
+            if (existingOperation !== undefined && existingOperation.eventId !== report.eventId) {
+                throw new ImGatewayError(
+                    'idempotency_conflict',
+                    'Device action operationId was reused with different data',
+                );
+            }
+
+            const previousLatest = await tx.reminderActionFacts.findLatestByDeviceAndTrigger(
+                report.deviceId,
+                report.reminderTriggerId,
+            );
+            if (
+                previousLatest !== undefined &&
+                previousLatest.eventId !== report.eventId &&
+                Date.parse(report.occurredAt) === Date.parse(previousLatest.report.occurredAt)
+            ) {
+                throw new ImGatewayError(
+                    'invalid_transition',
+                    'Concurrent device reports for one reminder must have one authoritative event',
+                );
+            }
+            if (
+                previousLatest !== undefined &&
+                previousLatest.eventId !== report.eventId &&
+                previousLatest.report.status === 'succeeded' &&
+                isStrictlyLater(report.occurredAt, previousLatest.report.occurredAt)
+            ) {
+                throw new ImGatewayError(
+                    'invalid_transition',
+                    'A later device report cannot overwrite an already succeeded reminder action',
+                );
+            }
+
+            if (existingEvent === undefined) {
+                const created = await tx.reminderActionFacts.createIfAbsent({
+                    eventId: report.eventId,
+                    fingerprint,
+                    report,
+                    receivedAt: this.clock.now(),
+                });
+                if (!created.created && created.fact.fingerprint !== fingerprint) {
+                    if (
+                        created.fact.report.deviceId === report.deviceId &&
+                        created.fact.report.reminderTriggerId === report.reminderTriggerId &&
+                        Date.parse(created.fact.report.occurredAt) === Date.parse(report.occurredAt)
+                    ) {
+                        throw new ImGatewayError(
+                            'invalid_transition',
+                            'Concurrent device reports for one reminder must have one authoritative event',
+                        );
+                    }
+                    throw new ImGatewayError(
+                        'idempotency_conflict',
+                        'Device action event was reused with different data',
+                    );
+                }
+            }
+
+            const latest = await tx.reminderActionFacts.findLatestByDeviceAndTrigger(
+                report.deviceId,
+                report.reminderTriggerId,
+            );
+            if (latest === undefined || latest.report.eventId !== report.eventId) return undefined;
+
+            const pending = await tx.actions.findPendingByDeviceAndTrigger(
+                report.deviceId,
+                report.reminderTriggerId,
+                this.clock.now(),
+            );
+            let matching: ImAction | undefined;
+            for (const action of pending) {
+                const sameKind = action.actionType === report.action;
+                const result = sameKind
+                    ? toReminderActionResult(report)
+                    : {
+                          ...toReminderActionResult(report),
+                          status: 'failed' as const,
+                          errorCode: 'superseded_by_device_action',
+                      };
+                const nextStatus: ActionStatus = sameKind
+                    ? report.status === 'retryable_failed'
+                        ? 'pending'
+                        : report.status
+                    : 'failed';
+                const updated: ImAction = { ...action, status: nextStatus, result, updatedAt: this.clock.now() };
+                await tx.actions.save(updated);
+                updatedActions.push(updated);
+                if (sameKind) matching = updated;
+            }
+            return matching;
+        });
+        for (const action of updatedActions) {
+            if (action.status !== 'pending') {
+                await this.stream.close(action.id, {
+                    deviceId: action.deviceId,
+                    reminderTriggerId: action.reminderTriggerId,
+                    expiresAt: action.expiresAt,
+                });
+            }
+        }
+        return outcome;
     }
 
     private async recordResultAndClose(
@@ -1430,6 +1580,39 @@ function deliveryRetryDelayMinutes(attemptNo: number): number {
 
 function isJsonObject(value: JsonValue | undefined): value is { readonly [key: string]: JsonValue } {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toReminderActionResult(report: ReminderActionStatusReport): ReminderActionResult {
+    return {
+        schemaVersion: report.schemaVersion,
+        operationId: report.operationId,
+        reminderTriggerId: report.reminderTriggerId,
+        status: report.status,
+        ...(report.nextTriggerAt === undefined ? {} : { nextTriggerAt: report.nextTriggerAt }),
+        ...(report.errorCode === undefined ? {} : { errorCode: report.errorCode }),
+        ...(report.details === undefined ? {} : { details: report.details }),
+        occurredAt: report.occurredAt,
+    };
+}
+
+function toActionStatus(status: ReminderActionStatusReport['status']): ActionStatus {
+    return status === 'retryable_failed' ? 'pending' : status;
+}
+
+/** 设备成功事实的动作与下一次触发时间必须在进入持久化前一致。 */
+function validateDeviceActionStatusReport(report: ReminderActionStatusReport): void {
+    if (
+        report.status === 'succeeded' &&
+        ((report.action === 'snooze' && report.nextTriggerAt === undefined) ||
+            (report.action === 'acknowledge' && report.nextTriggerAt !== undefined))
+    ) {
+        throw new ImGatewayError('invalid_transition', 'Device action nextTriggerAt does not match action');
+    }
+}
+
+/** ISO 8601 已由契约层校验，此处只比较两个已规范化业务时间。 */
+function isStrictlyLater(left: IsoDateTime, right: IsoDateTime): boolean {
+    return Date.parse(left) > Date.parse(right);
 }
 
 /**

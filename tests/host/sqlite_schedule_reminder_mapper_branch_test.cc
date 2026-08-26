@@ -83,10 +83,28 @@ void CheckInvalidTimerStatus() {
     Check(!mapped.ok() && mapped.status.code == ErrorCode::kInternal, "非法 Timer 状态应被行映射器拒绝");
 }
 
+/**
+ * @brief 验证提醒任务行映射器拒绝非法动作类型。
+ * @return 无。
+ */
+void CheckInvalidActionKind() {
+    const TemporaryDatabase temporary = MakeTemporaryDatabase();
+    SqliteDatabase database(temporary.path.string());
+    Check(database.Open().ok(), "非法动作类型测试应打开临时数据库");
+    auto prepared =
+        database.Prepare("SELECT 1, 1, 1, 1, 'timing', 2000, 6, 2, 2000, 'operation', 99, 2001, 2600, 1000, 2001;");
+    Check(prepared.ok(), "非法动作类型测试应准备查询语句");
+    auto statement = std::move(*prepared.value);
+    Check(statement.Step().ok(), "非法动作类型测试应读取一行");
+    const auto mapped = voicelife::storage_sqlite::mapping::ReadScheduleReminderTask(statement);
+    Check(!mapped.ok() && mapped.status.code == ErrorCode::kInternal, "非法动作类型应被行映射器拒绝");
+}
+
 }  // namespace
 
 int main() {
     CheckOptionalFieldBindingFailures();
     CheckInvalidTimerStatus();
+    CheckInvalidActionKind();
     return 0;
 }

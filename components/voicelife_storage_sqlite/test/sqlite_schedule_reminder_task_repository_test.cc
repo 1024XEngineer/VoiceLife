@@ -12,6 +12,7 @@
 
 using voicelife::ErrorCode;
 using voicelife::schedule::DateTime;
+using voicelife::schedule::ScheduleReminderActionKind;
 using voicelife::schedule::ScheduleReminderBusinessStatus;
 using voicelife::schedule::ScheduleReminderTask;
 using voicelife::schedule::ScheduleReminderTimerStatus;
@@ -67,6 +68,9 @@ void CheckRepository(const std::filesystem::path& path) {
     Check(first.ok() && second.ok() && third.ok() && first.value->id > 0, "SQLite 提醒仓储应插入并生成记录 ID");
     Check(repository.FindById(first.value->id).ok() && repository.FindById(99999).status.code == ErrorCode::kNotFound,
           "SQLite 提醒仓储应支持按 ID 查询");
+    Check(repository.FindByTimingTaskId("sqlite-timing-1").ok() &&
+              repository.FindByTimingTaskId("missing").status.code == ErrorCode::kNotFound,
+          "SQLite 提醒仓储应支持按 Timing task 标识查询");
     Check(repository.FindBySchedule(1).ok() && repository.FindBySchedule(1).value->size() == 2 &&
               repository.FindAll().value->size() == 3,
           "SQLite 提醒仓储应支持日程和全量查询");
@@ -80,15 +84,21 @@ void CheckRepository(const std::filesystem::path& path) {
     const auto recent = repository.FindTriggered(At(2'100), At(2'100));
     Check(recent.ok() && recent.value->size() == 1 && recent.value->front().id == triggered.id,
           "SQLite 触发查询应包含闭区间边界");
+    triggered.business_status = ScheduleReminderBusinessStatus::kSnoozed;
+    triggered.action_operation_id = "sqlite-operation-1";
+    triggered.action_kind = ScheduleReminderActionKind::kSnooze;
+    triggered.action_occurred_at = At(2'101);
+    triggered.action_next_trigger_at = At(2'700);
+    Check(repository.Update(triggered).ok(), "SQLite 提醒仓储应保存延迟动作结果");
 
     auto exhausted = *second.value;
     exhausted.timer_status = ScheduleReminderTimerStatus::kTriggered;
     exhausted.business_status = ScheduleReminderBusinessStatus::kExhausted;
     exhausted.triggered_at = At(2'099);
-    Check(repository.Update(exhausted).ok() && repository.FindTriggered(At(2'099), At(2'100)).value->size() == 2,
-          "SQLite 触发查询应包含耗尽任务");
-    exhausted.business_status = ScheduleReminderBusinessStatus::kAcknowledged;
     Check(repository.Update(exhausted).ok() && repository.FindTriggered(At(2'099), At(2'100)).value->size() == 1,
+          "SQLite 触发查询应包含耗尽任务并排除已延迟终态");
+    exhausted.business_status = ScheduleReminderBusinessStatus::kAcknowledged;
+    Check(repository.Update(exhausted).ok() && repository.FindTriggered(At(2'099), At(2'100)).value->empty(),
           "SQLite 触发查询应排除已确认任务");
 
     Check(!repository.Insert(MakeTask(1, 10, 1, "duplicate-chain-attempt")).ok(), "SQLite 应拒绝重复链和尝试次数");
@@ -98,6 +108,65 @@ void CheckRepository(const std::filesystem::path& path) {
     invalid = MakeTask(3, 30, 1, "invalid-business");
     invalid.business_status = static_cast<ScheduleReminderBusinessStatus>(99);
     Check(repository.Insert(invalid).status.code == ErrorCode::kInvalidArgument, "SQLite 应在写入前拒绝非法业务状态");
+    auto duplicate_operation = MakeTask(3, 30, 1, "sqlite-operation-duplicate");
+    duplicate_operation.business_status = ScheduleReminderBusinessStatus::kAcknowledged;
+    duplicate_operation.action_operation_id = "sqlite-operation-1";
+    duplicate_operation.action_kind = ScheduleReminderActionKind::kAcknowledge;
+    duplicate_operation.action_occurred_at = At(2'200);
+    Check(!repository.Insert(duplicate_operation).ok(), "SQLite 应拒绝重复动作 operationId");
+
+    const auto check_invalid_action = [&repository](ScheduleReminderTask task, const char* message) {
+        Check(repository.Insert(task).status.code == ErrorCode::kInvalidArgument, message);
+    };
+    auto invalid_action = MakeTask(4, 40, 1, "sqlite-action-kind-without-operation");
+    invalid_action.action_kind = ScheduleReminderActionKind::kAcknowledge;
+    check_invalid_action(invalid_action, "SQLite 动作类型不能脱离 operationId 单独保存");
+    invalid_action = MakeTask(4, 40, 1, "sqlite-empty-action-operation");
+    invalid_action.business_status = ScheduleReminderBusinessStatus::kAcknowledged;
+    invalid_action.action_operation_id = "";
+    invalid_action.action_kind = ScheduleReminderActionKind::kAcknowledge;
+    invalid_action.action_occurred_at = At(2'200);
+    check_invalid_action(invalid_action, "SQLite 动作 operationId 不能为空");
+    invalid_action = MakeTask(4, 40, 1, "sqlite-operation-without-kind");
+    invalid_action.action_operation_id = "sqlite-operation-without-kind";
+    invalid_action.action_occurred_at = At(2'200);
+    check_invalid_action(invalid_action, "SQLite operationId 必须配套动作类型");
+    invalid_action = MakeTask(4, 40, 1, "sqlite-operation-without-time");
+    invalid_action.action_operation_id = "sqlite-operation-without-time";
+    invalid_action.action_kind = ScheduleReminderActionKind::kAcknowledge;
+    check_invalid_action(invalid_action, "SQLite operationId 必须配套动作发生时间");
+    invalid_action = MakeTask(4, 40, 1, "sqlite-acknowledge-with-next-trigger");
+    invalid_action.business_status = ScheduleReminderBusinessStatus::kAcknowledged;
+    invalid_action.action_operation_id = "sqlite-acknowledge-with-next-trigger";
+    invalid_action.action_kind = ScheduleReminderActionKind::kAcknowledge;
+    invalid_action.action_occurred_at = At(2'200);
+    invalid_action.action_next_trigger_at = At(2'800);
+    check_invalid_action(invalid_action, "SQLite 确认动作不能保存下一次触发时间");
+    invalid_action = MakeTask(4, 40, 1, "sqlite-acknowledge-wrong-status");
+    invalid_action.business_status = ScheduleReminderBusinessStatus::kSnoozed;
+    invalid_action.action_operation_id = "sqlite-acknowledge-wrong-status";
+    invalid_action.action_kind = ScheduleReminderActionKind::kAcknowledge;
+    invalid_action.action_occurred_at = At(2'200);
+    check_invalid_action(invalid_action, "SQLite 确认动作必须对应已确认业务状态");
+    invalid_action = MakeTask(4, 40, 1, "sqlite-snooze-without-next-trigger");
+    invalid_action.business_status = ScheduleReminderBusinessStatus::kSnoozed;
+    invalid_action.action_operation_id = "sqlite-snooze-without-next-trigger";
+    invalid_action.action_kind = ScheduleReminderActionKind::kSnooze;
+    invalid_action.action_occurred_at = At(2'200);
+    check_invalid_action(invalid_action, "SQLite 延迟动作必须保存下一次触发时间");
+    invalid_action = MakeTask(4, 40, 1, "sqlite-snooze-wrong-status");
+    invalid_action.business_status = ScheduleReminderBusinessStatus::kAcknowledged;
+    invalid_action.action_operation_id = "sqlite-snooze-wrong-status";
+    invalid_action.action_kind = ScheduleReminderActionKind::kSnooze;
+    invalid_action.action_occurred_at = At(2'200);
+    invalid_action.action_next_trigger_at = At(2'800);
+    check_invalid_action(invalid_action, "SQLite 延迟动作必须对应已延迟业务状态");
+    invalid_action = MakeTask(4, 40, 1, "sqlite-unknown-action-kind");
+    invalid_action.business_status = ScheduleReminderBusinessStatus::kAcknowledged;
+    invalid_action.action_operation_id = "sqlite-unknown-action-kind";
+    invalid_action.action_kind = static_cast<ScheduleReminderActionKind>(99);
+    invalid_action.action_occurred_at = At(2'200);
+    check_invalid_action(invalid_action, "SQLite 仓储必须拒绝未知动作类型");
 
     database.Close();
     Check(database.Open().ok(), "SQLite 重启测试应重新打开数据库");
@@ -105,8 +174,12 @@ void CheckRepository(const std::filesystem::path& path) {
     Check(restarted.FindAll().ok() && restarted.FindAll().value->size() == 3, "SQLite 重启后应保留提醒任务");
     const auto persisted = restarted.FindById(first.value->id);
     Check(persisted.ok() && persisted.value->timer_status == ScheduleReminderTimerStatus::kTriggered &&
-              persisted.value->triggered_at == At(2'100),
-          "SQLite 重启后应保留触发状态和时间");
+              persisted.value->triggered_at == At(2'100) &&
+              persisted.value->business_status == ScheduleReminderBusinessStatus::kSnoozed &&
+              persisted.value->action_operation_id == "sqlite-operation-1" &&
+              persisted.value->action_kind == ScheduleReminderActionKind::kSnooze &&
+              persisted.value->action_occurred_at == At(2'101) && persisted.value->action_next_trigger_at == At(2'700),
+          "SQLite 重启后应保留触发状态和完整动作结果");
 }
 
 }  // namespace

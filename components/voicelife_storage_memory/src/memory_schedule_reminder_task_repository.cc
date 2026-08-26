@@ -4,9 +4,26 @@
 
 namespace voicelife::storage_memory {
 namespace {
+using schedule::ScheduleReminderActionKind;
 using schedule::ScheduleReminderBusinessStatus;
 using schedule::ScheduleReminderTask;
 using schedule::ScheduleReminderTimerStatus;
+
+bool ValidAction(const ScheduleReminderTask& task) {
+    if (!task.action_operation_id.has_value()) {
+        return !task.action_kind.has_value() && !task.action_occurred_at.has_value() &&
+               !task.action_next_trigger_at.has_value();
+    }
+    if (task.action_operation_id->empty() || !task.action_kind.has_value() || !task.action_occurred_at.has_value()) {
+        return false;
+    }
+    if (*task.action_kind == ScheduleReminderActionKind::kAcknowledge) {
+        return task.business_status == ScheduleReminderBusinessStatus::kAcknowledged &&
+               !task.action_next_trigger_at.has_value();
+    }
+    return *task.action_kind == ScheduleReminderActionKind::kSnooze &&
+           task.business_status == ScheduleReminderBusinessStatus::kSnoozed && task.action_next_trigger_at.has_value();
+}
 
 bool Valid(const ScheduleReminderTask& task) {
     const int business_status = static_cast<int>(task.business_status);
@@ -14,9 +31,9 @@ bool Valid(const ScheduleReminderTask& task) {
     return task.schedule_id > 0 && task.chain_id > 0 && task.attempt > 0 && task.attempt <= 3 &&
            task.trigger_at != schedule::DateTime{} &&
            business_status >= static_cast<int>(ScheduleReminderBusinessStatus::kScheduled) &&
-           business_status <= static_cast<int>(ScheduleReminderBusinessStatus::kCancelled) &&
+           business_status <= static_cast<int>(ScheduleReminderBusinessStatus::kSnoozed) &&
            timer_status >= static_cast<int>(ScheduleReminderTimerStatus::kPending) &&
-           timer_status <= static_cast<int>(ScheduleReminderTimerStatus::kFailed);
+           timer_status <= static_cast<int>(ScheduleReminderTimerStatus::kFailed) && ValidAction(task);
 }
 }  // namespace
 
@@ -33,6 +50,11 @@ Result<schedule::ScheduleReminderTask> MemoryScheduleReminderTaskRepository::Ins
             return value.timing_task_id == task.timing_task_id;
         })) {
         return Result<ScheduleReminderTask>::Failure(ErrorCode::kAlreadyExists, "Timing task 标识已存在");
+    }
+    if (task.action_operation_id.has_value() && std::any_of(tasks_.begin(), tasks_.end(), [&task](const auto& value) {
+            return value.action_operation_id == task.action_operation_id;
+        })) {
+        return Result<ScheduleReminderTask>::Failure(ErrorCode::kAlreadyExists, "提醒动作 operationId 已存在");
     }
     ScheduleReminderTask stored = task;
     stored.id = next_id_++;
@@ -57,6 +79,10 @@ Status MemoryScheduleReminderTaskRepository::Update(const ScheduleReminderTask& 
             return value.id != task.id && value.timing_task_id == task.timing_task_id;
         }))
         return Status::Error(ErrorCode::kAlreadyExists, "Timing task 标识已存在");
+    if (task.action_operation_id.has_value() && std::any_of(tasks_.begin(), tasks_.end(), [&task](const auto& value) {
+            return value.id != task.id && value.action_operation_id == task.action_operation_id;
+        }))
+        return Status::Error(ErrorCode::kAlreadyExists, "提醒动作 operationId 已存在");
     *found = task;
     return Status::Ok();
 }
@@ -64,6 +90,16 @@ Status MemoryScheduleReminderTaskRepository::Update(const ScheduleReminderTask& 
 Result<ScheduleReminderTask> MemoryScheduleReminderTaskRepository::FindById(int64_t id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto found = std::find_if(tasks_.begin(), tasks_.end(), [id](const auto& value) { return value.id == id; });
+    if (found == tasks_.end()) return Result<ScheduleReminderTask>::Failure(ErrorCode::kNotFound, "提醒任务不存在");
+    return Result<ScheduleReminderTask>::Success(*found);
+}
+
+Result<ScheduleReminderTask> MemoryScheduleReminderTaskRepository::FindByTimingTaskId(
+    std::string_view timing_task_id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto found = std::find_if(tasks_.begin(), tasks_.end(), [timing_task_id](const auto& value) {
+        return value.timing_task_id.has_value() && *value.timing_task_id == timing_task_id;
+    });
     if (found == tasks_.end()) return Result<ScheduleReminderTask>::Failure(ErrorCode::kNotFound, "提醒任务不存在");
     return Result<ScheduleReminderTask>::Success(*found);
 }
