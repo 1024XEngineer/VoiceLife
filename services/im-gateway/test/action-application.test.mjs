@@ -220,6 +220,10 @@ test('a voice-first acknowledge is persisted and consumed when IM later opens th
     await gateway.application.actions.recordDeviceActionStatus(voiceReport());
 
     const { token } = await prepareAction(gateway);
+    const view = await gateway.application.actionUi.show(token);
+    assert.equal(view.state, 'succeeded');
+    assert.equal(view.action, 'acknowledge');
+    assert.equal(view.source, 'voice');
     const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
     const action = await gateway.application.actions.find(command.commandId);
 

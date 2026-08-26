@@ -150,6 +150,10 @@ test('H5 refresh renders every consumed action state without reusable controls',
             expected: /提醒已处理/u,
         },
         {
+            view: { state: 'succeeded', action: 'acknowledge', source: 'voice', expiresAt },
+            expected: /提醒已通过语音处理/u,
+        },
+        {
             view: { state: 'succeeded', action: 'snooze', params: { minutes: 10 }, expiresAt },
             expected: /设备已确认推迟 10 分钟/u,
         },

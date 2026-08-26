@@ -177,9 +177,10 @@ function renderActionStatePage(view: Exclude<ActionUiView, { state: 'available' 
                 : view.action === 'snooze' && view.params !== undefined
                   ? `设备已确认推迟 ${String(view.params.minutes)} 分钟。`
                   : '设备已确认这条提醒。';
+        const title = view.source === 'voice' ? '提醒已通过语音处理' : '提醒已处理';
         return pageShell(
             '提醒已处理',
-            `<main class="result"><div class="check" aria-hidden="true">&#10003;</div><p class="kicker">已完成</p><h1>提醒已处理</h1><p class="summary">${escapeHtml(detail)}</p></main>`,
+            `<main class="result"><div class="check" aria-hidden="true">&#10003;</div><p class="kicker">${view.source === 'voice' ? '语音已处理' : '已完成'}</p><h1>${escapeHtml(title)}</h1><p class="summary">${escapeHtml(detail)}</p></main>`,
         );
     }
     if (view.state === 'failed') {
