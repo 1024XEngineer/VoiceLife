@@ -110,7 +110,7 @@ void CheckActionValidationAndConflicts() {
         Action("operation-ack-2", "ack-trigger", ScheduleReminderActionKind::kAcknowledge));
     Check(acknowledged.ok() && !acknowledged.value->replayed && replayed_acknowledge.ok() &&
               replayed_acknowledge.value->replayed && replayed_acknowledge.value->next_trigger_at == std::nullopt,
-        "确认动作应允许跨入口幂等重放且不产生下一次提醒");
+          "确认动作应允许跨入口幂等重放且不产生下一次提醒");
     Check(fixture.reminder
                   .ExecuteReminderAction(Action("operation-1", "trigger-2", ScheduleReminderActionKind::kAcknowledge))
                   .status.code == ErrorCode::kAlreadyExists,

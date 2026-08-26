@@ -83,6 +83,7 @@ constexpr uint32_t kFinalSttTimeoutMs = 5000;
 // 确认语音不能拖慢首轮交互。Linx 若未在此窗口内送达首段 PCM，保留
 // 原音色的最佳策略是跳过迟到确认并立即开麦，而不是播放一段过时的“收到”。
 constexpr uint32_t kWakeAckFirstAudioTimeoutMs = 1800;
+constexpr int64_t kVoiceActionReportRetryUs = 5 * 1000 * 1000;
 
 std::string FormatReminderIso(schedule::DateTime value) {
     const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(value.time_since_epoch()).count();
@@ -289,10 +290,12 @@ class Runtime final {
         // it before storage, MCP, Wi-Fi, TLS, and audio fragment the internal heap;
         // the task remains blocked until the Linx startup path explicitly activates it.
         ReserveImRuntimeTask();
-        // Action windows are consumed by short-lived PSRAM-backed workers only
-        // after they arrive, avoiding the startup allocation peak.
-        im_action_stop_.store(false);
-        im_action_worker_stopped_.store(true);
+        // Strong-reminder actions can enter SQLite/FATFS and temporarily disable
+        // flash cache. Their stack must live in DRAM, so reserve the worker before
+        // storage startup and the later display/audio/network allocation peaks.
+        if (!StartReminderActionWorker()) {
+            return Status::Error(ErrorCode::kInternal, "创建提醒动作工作任务失败");
+        }
 #endif
         const Status storage_status = storage_.Start();
         if (!storage_status.ok()) {
@@ -786,27 +789,9 @@ class Runtime final {
 
     void DrainReminderActionWindows() {
 #if CONFIG_VOICELIFE_IM_GATEWAY
-        if (im_action_stop_.load() || !reminder_action_executor_ || !im_runtime_.reporting_channel()) return;
-        constexpr int kMaxConcurrentActionWorkers = 4;
-        while (!im_action_stop_.load()) {
-            {
-                std::lock_guard<std::mutex> lock(im_action_mutex_);
-                if (im_action_windows_.empty()) break;
-            }
-            int worker_count = im_action_worker_count_.load();
-            do {
-                if (worker_count >= kMaxConcurrentActionWorkers) return;
-            } while (!im_action_worker_count_.compare_exchange_weak(worker_count, worker_count + 1));
-            im_action_worker_stopped_.store(false);
-            // This task is created at reminder time, when TLS/audio allocations can leave no contiguous
-            // 8KB internal block. Its HTTPS/SSE work does not require an internal-memory stack.
-            if (xTaskCreateWithCaps(&Runtime::ReminderActionTaskEntry, "voicelife_im_actions", 8192, this, 3, nullptr,
-                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
-                im_action_worker_count_.fetch_sub(1);
-                ESP_LOGW(kTag, "IM_ACTION_TASK_FAILED=1");
-                break;
-            }
-        }
+        // The single worker is reserved during startup; action windows only need
+        // to wake its bounded polling loop after they are queued.
+        (void)im_action_worker_task_;
 #endif
     }
 
@@ -837,21 +822,55 @@ class Runtime final {
 #endif
     }
 
+    bool StartReminderActionWorker() {
+#if CONFIG_VOICELIFE_IM_GATEWAY
+        if (im_action_worker_task_ != nullptr) return true;
+        constexpr uint32_t kReminderActionWorkerStackBytes = 16 * 1024;
+        im_action_stop_.store(false);
+        im_action_worker_stopped_.store(false);
+        im_action_worker_count_.store(1);
+        if (xTaskCreateWithCaps(&Runtime::ReminderActionTaskEntry, "voicelife_im_actions",
+                                kReminderActionWorkerStackBytes, this, 3, &im_action_worker_task_,
+                                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) != pdPASS) {
+            im_action_worker_task_ = nullptr;
+            im_action_worker_count_.store(0);
+            im_action_worker_stopped_.store(true);
+            ESP_LOGW(kTag, "IM_ACTION_TASK_FAILED=1");
+            return false;
+        }
+        ESP_LOGI(kTag, "IM_ACTION_WORKER_READY stack_bytes=%u caps=internal",
+                 static_cast<unsigned>(kReminderActionWorkerStackBytes));
+        return true;
+#else
+        return true;
+#endif
+    }
+
     static void ReminderActionTaskEntry(void* context) { static_cast<Runtime*>(context)->ReminderActionTask(); }
 
     void ReminderActionTask() {
 #if CONFIG_VOICELIFE_IM_GATEWAY
-        im::ActionWindow window;
-        bool has_window = false;
-        {
-            std::lock_guard<std::mutex> lock(im_action_mutex_);
-            if (!im_action_windows_.empty()) {
-                window = std::move(im_action_windows_.front());
-                im_action_windows_.pop_front();
-                has_window = true;
+        int64_t last_report_us = 0;
+        while (!im_action_stop_.load()) {
+            im::ActionWindow window;
+            bool has_window = false;
+            {
+                std::lock_guard<std::mutex> lock(im_action_mutex_);
+                if (!im_action_windows_.empty()) {
+                    window = std::move(im_action_windows_.front());
+                    im_action_windows_.pop_front();
+                    has_window = true;
+                }
             }
-        }
-        if (has_window) {
+            if (!has_window) {
+                const int64_t now_us = esp_timer_get_time();
+                if (now_us - last_report_us >= kVoiceActionReportRetryUs) {
+                    ReportPersistedVoiceActions();
+                    last_report_us = now_us;
+                }
+                vTaskDelay(pdMS_TO_TICKS(100));
+                continue;
+            }
             im::ImActionChannel channel(*im_runtime_.reporting_channel(), im_config_, *reminder_action_executor_,
                                         reminder_action_clock_);
             while (!im_action_stop_.load()) {
@@ -873,7 +892,7 @@ class Runtime final {
 #if CONFIG_VOICELIFE_IM_GATEWAY
         im_action_worker_count_.fetch_sub(1);
         if (im_action_worker_count_.load() == 0) im_action_worker_stopped_.store(true);
-        if (!im_action_stop_.load()) DrainReminderActionWindows();
+        im_action_worker_task_ = nullptr;
 #endif
         vTaskDeleteWithCaps(nullptr);
     }
@@ -894,6 +913,7 @@ class Runtime final {
         if (im_action_worker_count_.load() != 0) {
             return false;
         }
+        im_action_worker_task_ = nullptr;
         im_action_worker_stopped_.store(true);
         return true;
 #else
@@ -2044,6 +2064,7 @@ class Runtime final {
     std::atomic_int im_action_worker_count_{0};
     std::atomic_bool im_action_stop_{false};
     std::atomic_bool im_action_worker_stopped_{false};
+    TaskHandle_t im_action_worker_task_ = nullptr;
     std::string im_gateway_origin_;
     Status init_status_ = Status::Ok();
     linx::LinxJsonCodec linx_codec_;

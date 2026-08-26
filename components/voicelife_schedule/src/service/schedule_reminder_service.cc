@@ -310,7 +310,7 @@ Result<ReminderActionResult> ScheduleReminderService::ExecuteReminderAction(cons
         // remains a conflict and must not mutate the completed reminder.
         if (target.action_kind != command.action || !target.action_occurred_at.has_value()) {
             return Result<ReminderActionResult>::Failure(ErrorCode::kAlreadyExists,
-                                                          "提醒已由其他 operationId 或动作处理");
+                                                         "提醒已由其他 operationId 或动作处理");
         }
         return Result<ReminderActionResult>::Success({.affected_count = 1,
                                                       .events = {},
