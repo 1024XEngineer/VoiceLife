@@ -12,12 +12,22 @@ import { DeviceManagementError, DeviceManagementService, tokenDigest } from '../
 import { DatabaseDeviceAuthenticationPort } from '../dist/infrastructure/security/production-ports.js';
 import { FixedClock } from '../dist/infrastructure/mock-support.js';
 import { InMemoryImUnitOfWork } from '../dist/infrastructure/persistence/in-memory.js';
+import { PostgresImUnitOfWork } from '../dist/infrastructure/persistence/postgres.js';
 
 const TOKENS = [
     'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
     'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
     'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
 ];
+
+function isPostgresUnavailable(error) {
+    return (
+        error !== null &&
+        typeof error === 'object' &&
+        'code' in error &&
+        ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(error.code)
+    );
+}
 
 function service(tokens = [...TOKENS]) {
     const unitOfWork = new InMemoryImUnitOfWork();
@@ -241,6 +251,88 @@ test('pnpm device successful create emits only the one-time credential JSON on s
         assert.equal(result.status, 0, result.stderr);
         assert.equal(result.stdout, `${JSON.stringify(credential)}\n`);
         assert.equal(result.stderr, '');
+    } finally {
+        await rm(fakeBin, { recursive: true, force: true });
+    }
+});
+
+test('device CLI performs create, list, rotate and revoke against PostgreSQL', async (context) => {
+    const databaseUrl = process.env.DATABASE_URL ?? 'postgres://voicelife:voicelife@127.0.0.1:5432/voicelife';
+    const probe = new PostgresImUnitOfWork(databaseUrl);
+    try {
+        await probe.migrate();
+    } catch (error) {
+        await probe.close().catch(() => undefined);
+        if (isPostgresUnavailable(error)) {
+            context.skip(`PostgreSQL unavailable: ${error instanceof Error ? error.name : 'unknown'}`);
+            return;
+        }
+        throw error;
+    }
+    await probe.close();
+
+    const suffix = `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+    const userId = `user-cli-${suffix}`;
+    const deviceId = `device-cli-${suffix}`;
+    const runCli = (args) =>
+        spawnSync(process.execPath, ['scripts/device-cli.mjs', ...args], {
+            cwd: new URL('..', import.meta.url),
+            encoding: 'utf8',
+            env: { ...process.env, DATABASE_URL: databaseUrl, DATABASE_HOST: '' },
+        });
+
+    const created = runCli(['create', '--user-id', userId, '--device-id', deviceId]);
+    assert.equal(created.status, 0, created.stderr);
+    assert.equal(created.stderr, '');
+    const createResult = JSON.parse(created.stdout);
+    assert.deepEqual(
+        { deviceId: createResult.deviceId, userId: createResult.userId, status: createResult.status },
+        { deviceId, userId, status: 'active' },
+    );
+    assert.match(createResult.deviceToken, /^[A-Za-z0-9_-]{43}$/u);
+
+    const listed = runCli(['list', '--user-id', userId]);
+    assert.equal(listed.status, 0, listed.stderr);
+    assert.deepEqual(
+        JSON.parse(listed.stdout).map((device) => device.deviceId),
+        [deviceId],
+    );
+    assert.equal('deviceToken' in JSON.parse(listed.stdout)[0], false);
+
+    const rotated = runCli(['rotate-token', '--device-id', deviceId]);
+    assert.equal(rotated.status, 0, rotated.stderr);
+    const rotateResult = JSON.parse(rotated.stdout);
+    assert.match(rotateResult.deviceToken, /^[A-Za-z0-9_-]{43}$/u);
+    assert.notEqual(rotateResult.deviceToken, createResult.deviceToken);
+
+    const revoked = runCli(['revoke', '--device-id', deviceId]);
+    assert.equal(revoked.status, 0, revoked.stderr);
+    assert.deepEqual(
+        { deviceId: JSON.parse(revoked.stdout).deviceId, status: JSON.parse(revoked.stdout).status },
+        { deviceId, status: 'revoked' },
+    );
+
+    const rotateRevoked = runCli(['rotate-token', '--device-id', deviceId]);
+    assert.equal(rotateRevoked.status, 4);
+    assert.equal(rotateRevoked.stdout, '');
+    assert.match(rotateRevoked.stderr, /Revoked device cannot rotate token/u);
+});
+
+test('device CLI wrapper returns its stable build-failure exit code without writing stdout', async () => {
+    const fakeBin = await mkdtemp(join(tmpdir(), 'device-cli-build-failure-bin-'));
+    try {
+        await writeFile(join(fakeBin, 'pnpm'), '#!/bin/sh\nprintf build-stdout\nprintf build-stderr >&2\nexit 42\n', {
+            mode: 0o755,
+        });
+        const result = spawnSync(process.execPath, ['scripts/run-device-cli.mjs'], {
+            cwd: new URL('..', import.meta.url),
+            encoding: 'utf8',
+            env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH ?? ''}` },
+        });
+        assert.equal(result.status, 5);
+        assert.equal(result.stdout, '');
+        assert.match(result.stderr, /build-stdout/u);
+        assert.match(result.stderr, /build-stderr/u);
     } finally {
         await rm(fakeBin, { recursive: true, force: true });
     }
