@@ -893,8 +893,8 @@ class Runtime final {
         im_action_worker_count_.fetch_sub(1);
         if (im_action_worker_count_.load() == 0) im_action_worker_stopped_.store(true);
         im_action_worker_task_ = nullptr;
-        vTaskDeleteWithCaps(nullptr);
 #endif
+        vTaskDeleteWithCaps(nullptr);
     }
 
     bool StopReminderActionWorker() {
