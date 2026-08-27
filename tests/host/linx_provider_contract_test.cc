@@ -494,6 +494,20 @@ int main() {
               codec.EncodeHello(config, invalid_connection).status.code == ErrorCode::kInvalidArgument,
           "零播放缓冲预算不能生成 Linx hello");
     Check(codec.EncodeAbort(config, "").status.code == ErrorCode::kInvalidArgument, "空 abort 原因必须拒绝");
+    auto no_session_config = config;
+    no_session_config.session_id.clear();
+    Check(codec.EncodeListenStart(no_session_config).ok() &&
+              codec.EncodeListenStart(no_session_config).value->find("session_id") == std::string::npos,
+          "没有 session id 的 listen.start 不应伪造字段");
+    Check(codec.EncodeListenStop(no_session_config).ok() &&
+              codec.EncodeListenStop(no_session_config).value->find("session_id") == std::string::npos,
+          "没有 session id 的 listen.stop 不应伪造字段");
+    Check(codec.EncodeAbort(no_session_config, "user_cancel").ok() &&
+              codec.EncodeAbort(no_session_config, "user_cancel").value->find("session_id") == std::string::npos,
+          "没有 session id 的 abort 不应伪造字段");
+    Check(codec.EncodeListenDetect(no_session_config, "detect").ok() &&
+              codec.EncodeListenDetect(no_session_config, "detect").value->find("text_response") == std::string::npos,
+          "没有确认文本的 detect 不应伪造 text_response");
     Check(codec.DecodeText("not-json").status.code == ErrorCode::kInvalidArgument, "非 JSON 输入必须拒绝");
     Check(codec.DecodeText(R"({"type":123})").status.code == ErrorCode::kInvalidArgument, "type 非字符串必须拒绝");
     Check(codec.DecodeText(R"({"type":"stt"})").status.code == ErrorCode::kInvalidArgument, "stt 缺少 text 必须拒绝");
@@ -504,6 +518,13 @@ int main() {
     Check(codec.DecodeText(R"({"type":"hello","audio_params":{"format":"pcm","sample_rate":16000,"channels":0}})")
                   .status.code == ErrorCode::kInvalidArgument,
           "超出范围的音频参数必须拒绝");
+    Check(codec.DecodeText(R"({"type":"hello"})").ok(), "没有音频协商字段的 hello 应可解析");
+    Check(codec.DecodeText(R"({"type":"tts","state":"start"})").ok(), "tts start 应可解析");
+    Check(codec.DecodeText(R"({"type":"tts","state":"sentence_start"})").ok(),
+          "没有文本的 tts sentence_start 应可解析");
+    Check(codec.DecodeText(R"({"type":"tts","state":"stop"})").ok() &&
+              !codec.DecodeText(R"({"type":"tts","state":"stop"})").value->aborted,
+          "没有 is_aborted 的 tts stop 应默认为未中止");
     Check(codec.DecodeText(R"({"type":"error","message":"boom"})").value->kind ==
               voicelife::linx::LinxMessageKind::kError,
           "error 消息应解析 message");
@@ -523,5 +544,30 @@ int main() {
                  R"({"type":"hello","audio_params":{"format":"pcm","sample_rate":16000,"channels":1,"bit_depth":300}})")
                 .status.code == ErrorCode::kInvalidArgument,
         "超范围位深必须拒绝");
+    Check(
+        codec.DecodeText(
+                 R"({"type":"hello","audio_params":{"format":"pcm","sample_rate":16000,"channels":1,"frame_duration":0}})")
+                .status.code == ErrorCode::kInvalidArgument,
+        "零帧时长必须拒绝");
+    Check(
+        codec.DecodeText(
+                 R"({"type":"hello","audio_params":{"format":"pcm","sample_rate":16000,"channels":1,"frame_duration":65536}})")
+                .status.code == ErrorCode::kInvalidArgument,
+        "超范围帧时长必须拒绝");
+    Check(
+        codec
+            .DecodeText(
+                R"({"type":"hello","audio_params":{"format":"pcm","sample_rate":16000,"channels":1,"bit_depth":1,"frame_duration":65535}})")
+            .ok(),
+        "音频可选参数的有效边界应接受");
+    Check(codec.DecodeText(R"({"type":"error"})").ok() && codec.DecodeText(R"({"type":"error"})").value->text.empty(),
+          "没有 message 的 error 应可解析");
+    Check(
+        codec.DecodeText(R"({"type":"goodbye"})").ok() && codec.DecodeText(R"({"type":"goodbye"})").value->text.empty(),
+        "没有 message 的 goodbye 应可解析");
+    Check(codec.DecodeText(R"({"type":"llm"})").ok() &&
+              !codec.DecodeText(R"({"type":"llm"})").value->emotion.has_value() &&
+              !codec.DecodeText(R"({"type":"llm"})").value->action.has_value(),
+          "没有可选字段的 llm 应可解析");
     return 0;
 }

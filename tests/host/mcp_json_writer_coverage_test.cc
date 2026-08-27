@@ -142,5 +142,12 @@ int main() {
               yyjson_get_sint(yyjson_arr_get(items, 2)) == 42 && yyjson_is_null(yyjson_arr_get(items, 4)),
           "数组标量与空指针序列化结果应正确");
     yyjson_doc_free(document);
+    // 空容器和分页边界也必须产生稳定的 JSON，而不是依赖实现细节。
+    Check(SerializeToolOutputValue(ToolOutputValue::Array({})) == "[]", "空数组应序列化为 []");
+    Check(SerializeToolOutputValue(ToolOutputValue::Object({})) == "{}", "空对象应序列化为 {}");
+    const ListToolsResult empty_list{.tools = {}, .total = 0};
+    Check(SerializeListToolsResult(empty_list) == R"({"tools":[],"nextCursor":null})", "空工具列表应带终止游标");
+    Check(voicelife::mcp::SerializeListToolsResultPage(empty_list, 1, 0) == "{}", "反向分页范围应返回空对象");
+    Check(voicelife::mcp::SerializeListToolsResultPage(empty_list, 0, 1) == "{}", "越界分页范围应返回空对象");
     return 0;
 }

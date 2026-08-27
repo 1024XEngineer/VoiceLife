@@ -61,10 +61,13 @@ int main() {
     Check(Ssd1306ContentFitsLine("12345678"), "8 位 ASCII 配网密码必须完整显示而不滚动");
     Check(Ssd1306ContentFitsLine("123456789012"), "12 位 ASCII 必须刚好填满内容栏");
     Check(!Ssd1306ContentFitsLine("1234567890123"), "超过内容栏宽度的 ASCII 必须滚动");
+    Check(Ssd1306ContentFitsLine("一二三四五六"), "6 个中文字符应刚好填满内容栏");
     Check(!Ssd1306ContentFitsLine("一二三四五六七"), "7 个中文字符必须滚动，保留 6 字绑定码布局");
     Check(Ssd1306ContentFitsLine("\xc2\xa9"), "2 字节 UTF-8 字符必须按宽字符处理");
+    Check(Ssd1306ContentFitsLine("\xe4\xb8\xad"), "3 字节 UTF-8 字符必须按宽字符处理");
     Check(Ssd1306ContentFitsLine("\xf0\x9f\x98\x80"), "4 字节 UTF-8 字符必须按宽字符处理");
     Check(Ssd1306ContentFitsLine(std::string(1, static_cast<char>(0xff))), "非法 UTF-8 首字节必须安全处理");
+    Check(Ssd1306ContentFitsLine(std::string("\xe4\xb8")), "截断的 3 字节 UTF-8 应按剩余字节安全处理");
     Ssd1306PresentationAdapter initialized_display(&InitializeDisplaySuccessfully);
     Check(initialized_display.Start().ok() && g_display_initializations == 1, "SSD1306 Start 必须调用面板初始化");
     Ssd1306PresentationAdapter unavailable_display(&InitializeDisplayFailure);
@@ -97,6 +100,15 @@ int main() {
     Check(!sparkbot_as_interface.uses_local_wake_detector(),
           "SparkBot 在真实 assets/WakeNet 未启动前不得错误声明本地唤醒就绪");
     Check(sparkbot_as_interface.SetAudioOutputEnabled(true).ok(), "SparkBot 音频功放请求必须经仲裁接口接受");
+
+    // 显式调用基类默认实现，固定无硬件能力时的空操作契约。
+    Check(pcb_assembly.PlatformAssembly::test_audio_injection() == nullptr, "基类默认测试注入端口应为空");
+    Check(pcb_assembly.PlatformAssembly::uses_local_wake_detector(), "基类默认应启用本地唤醒检测");
+    pcb_assembly.PlatformAssembly::InitializeBoardLeds();
+    pcb_assembly.PlatformAssembly::SetOutputVolume(42);
+    pcb_assembly.PlatformAssembly::LogAudioStats();
+    Check(pcb_assembly.PlatformAssembly::StartBoardInput({}).ok(), "基类默认输入启动应成功");
+    Check(pcb_assembly.PlatformAssembly::SetAudioOutputEnabled(false).ok(), "基类默认功放请求应成功");
 
     return 0;
 }
