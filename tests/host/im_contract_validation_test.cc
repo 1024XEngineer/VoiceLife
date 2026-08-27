@@ -4,6 +4,7 @@
 #include "support/test_support.h"
 #include "voicelife/contracts/im/notification_intent.h"
 #include "voicelife/contracts/im/reminder_action_result.h"
+#include "voicelife/contracts/im/reminder_action_status_report.h"
 #include "voicelife/contracts/im/schedule_receipt.h"
 #include "voicelife/contracts/json.h"
 
@@ -13,8 +14,10 @@ using voicelife::Status;
 using voicelife::contracts::im::NotificationIntent;
 using voicelife::contracts::im::ParseNotificationIntent;
 using voicelife::contracts::im::ParseReminderActionResult;
+using voicelife::contracts::im::ParseReminderActionStatusReport;
 using voicelife::contracts::im::ParseScheduleReceiptIntent;
 using voicelife::contracts::im::ReminderActionResult;
+using voicelife::contracts::im::ReminderActionStatusReport;
 using voicelife::contracts::im::ScheduleReceiptIntent;
 using voicelife::test::Check;
 namespace {
@@ -247,6 +250,24 @@ int main() {
                   .ok() &&
               with_body.content.body.has_value(),
           "可选 content.body 应被接受");
+    // 有效动作参数边界：acknowledge 允许保留参数，snooze 接受最大延迟值。
+    NotificationIntent boundary_actions;
+    Check(ParseNotificationIntent(ParseDocument(R"json({
+                "schemaVersion":"1","businessEventId":"e","correlationId":"c",
+                "kind":"reminder_due","recipient":{"userId":"u","deviceId":"d"},
+                "scheduleId":"s","taskId":"t","instanceId":"i","reminderTriggerId":"r",
+                "reminderType":"strong","content":{"title":"x"},
+                "plannedAt":"2026-01-01T00:00:00Z","triggerAt":"2026-01-01T00:00:00Z",
+                "actions":[
+                  {"kind":"command","type":"acknowledge","label":"知道了","params":{"minutes":1}},
+                  {"kind":"command","type":"snooze","label":"推迟","params":{"minutes":1440}}
+                ],"occurredAt":"2026-01-01T00:00:00Z"
+              })json"),
+                                  boundary_actions)
+                  .ok() &&
+              boundary_actions.actions.size() == 2 && boundary_actions.actions[0].minutes == 1 &&
+              boundary_actions.actions[1].minutes == 1440,
+          "有效动作参数边界应被接受");
     // snooze minutes 与动作数量必须受设备侧预算约束。
     RequireNotificationRejected(
         "{\"schemaVersion\":\"1\",\"businessEventId\":\"e\",\"correlationId\":\"c\",\"kind\":\"reminder_due\","
@@ -495,5 +516,32 @@ int main() {
               reused_result.operationId == "without-options" && !reused_result.errorCode.has_value() &&
               !reused_result.details.has_value(),
           "动作结果解析失败时不应改写已有输出");
+    // 独立语音动作事实的非成功状态不受 nextTriggerAt 约束，但可选字段仍需严格校验。
+    for (const char* status : {"retryable_failed", "failed", "expired"}) {
+        const std::string json =
+            std::string(R"json({"schemaVersion":"1","eventId":"e","correlationId":"c","deviceId":"d",
+                "reminderTriggerId":"r","operationId":"o","action":"acknowledge","status":")json") +
+            status + R"json(","occurredAt":"2026-01-01T00:00:00Z","source":"voice",
+                "errorCode":"transport","details":{"attempt":1}})json";
+        ReminderActionStatusReport report;
+        Check(ParseReminderActionStatusReport(ParseDocument(json), report).ok() && report.status == status &&
+                  report.errorCode.has_value() && report.details.has_value(),
+              "非成功动作事实状态及可选字段应被接受");
+    }
+    const std::string valid_report = R"json({"schemaVersion":"1","eventId":"e","correlationId":"c","deviceId":"d",
+        "reminderTriggerId":"r","operationId":"o","action":"snooze","status":"succeeded",
+        "occurredAt":"2026-01-01T00:00:00Z","nextTriggerAt":"2026-01-01T00:10:00Z","source":"voice"})json";
+    for (const char* key : {"nextTriggerAt", "errorCode"}) {
+        JsonValue invalid = ParseDocument(valid_report);
+        invalid.object[key] = JsonValue::Number(1);
+        ReminderActionStatusReport report;
+        Check(!ParseReminderActionStatusReport(invalid, report).ok(), "动作事实可选字段类型错误必须拒绝");
+    }
+    ReminderActionStatusReport scalar_details;
+    JsonValue scalar_details_root = ParseDocument(valid_report);
+    scalar_details_root.object["details"] = JsonValue::Number(1);
+    Check(ParseReminderActionStatusReport(scalar_details_root, scalar_details).ok() &&
+              scalar_details.details.has_value() && scalar_details.details->number == 1,
+          "动作事实 details 应接受受限 JSON 标量");
     return 0;
 }
