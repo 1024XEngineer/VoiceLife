@@ -28,8 +28,8 @@ void CheckScheduleToolOutputBoundaryPaths() {
     using voicelife::schedule::ScheduleStatus;
 
     Check(ParseDateTime("2024-02-29 23:59:59").has_value(), "合法闰日时间应解析成功");
-    for (const std::string& invalid : {"", "2024-2-29 23:59:59", "2023-02-29 00:00:00", "2024-01-01 24:00:00",
-                                       "2024-01-01 00:00:60", "2024-01-01 00:00:00x"}) {
+    for (const char* invalid : {"", "2024-2-29 23:59:59", "2023-02-29 00:00:00", "2024-01-01 24:00:00",
+                                "2024-01-01 00:00:60", "2024-01-01 00:00:00x"}) {
         Check(!ParseDateTime(invalid).has_value(), "非法日期时间应被拒绝");
     }
     Check(ParseLocalTime("09:08:07").has_value() && !ParseLocalTime("9:08:07").has_value(),
