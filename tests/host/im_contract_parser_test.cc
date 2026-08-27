@@ -167,13 +167,11 @@ int main() {
               "配对请求的对象、平台数组和整数有效期约束必须执行");
     }
     JsonValue all_platforms;
-    Check(
-        ParseJson(
-            R"({"deviceId":"device-fixture","allowedPlatforms":["wechat_official","wecom_aibot","feishu","dingtalk"]})",
-            all_platforms)
-                .ok() &&
-            ParseCreatePairingSessionRequest(all_platforms, pairing_request).ok(),
-        "全部声明平台必须被契约解析器识别");
+    Check(ParseJson(R"({"deviceId":"device-fixture","allowedPlatforms":["wechat_official","feishu","dingtalk"]})",
+                    all_platforms)
+                  .ok() &&
+              ParseCreatePairingSessionRequest(all_platforms, pairing_request).ok(),
+          "全部声明平台必须被契约解析器识别");
     JsonValue invalid_empty_platforms;
     Check(ParseJson(R"({"deviceId":"device-fixture","allowedPlatforms":[]})", invalid_empty_platforms).ok() &&
               !ParseCreatePairingSessionRequest(invalid_empty_platforms, pairing_request).ok(),

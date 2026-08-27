@@ -3,7 +3,7 @@ import type { ReminderActionIntent } from './device-gateway.js';
 import type { IsoDateTime, JsonValue } from '../shared/types.js';
 
 /** Gateway 支持的 IM 平台。 */
-export type ImPlatform = 'wechat_official' | 'wecom_aibot' | 'feishu' | 'dingtalk';
+export type ImPlatform = 'wechat_official' | 'feishu' | 'dingtalk';
 
 interface NormalizedImEventBase {
     readonly id: InboundEventId;

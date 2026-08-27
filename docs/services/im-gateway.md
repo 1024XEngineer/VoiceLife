@@ -48,12 +48,6 @@ pnpm --dir services/im-gateway test
 `PostgresImUnitOfWork`、Koishi Runtime、SSE Hub 与 `WechatOfficialAdapter`，然后监听设备 API、Action UI、
 `/wechat` 和 `/healthz`。生产进程不使用 `createMockImGateway()`。
 
-企业微信 AI Bot 是可选渠道。只有同时提供 `WECOM_AIBOT_CHANNEL_ACCOUNT_ID`、
-`WECOM_AIBOT_BOT_ID` 与 `WECOM_AIBOT_SECRET` 时，Gateway 才会主动连接
-`wss://openws.work.weixin.qq.com`，发送订阅请求并接收单聊文本回调；三项中任一项缺失会在启动时明确失败。
-未提供这三项时，现有微信公众号部署与 `/wechat` 路由保持不变。长连接 Secret 只保留在进程内存，不能写入
-`ChannelAccount`、日志、fixture 或 Issue。
-
 复制 [`.env.example`](../../.env.example) 后填入部署值；其中的 `replace-me` 会被生产配置故意拒绝，不能直接启动。
 生产进程不再读取单例 `DEVICE_ID`、`DEVICE_USER_ID` 或 `DEVICE_TOKEN`。设备必须先通过下述 CLI 注册，Gateway
 只按数据库中的 SHA-256 摘要认证 43 字符 base64url Token。`ACTION_TOKEN_SECRET` 至少 32 字节；建议额外提供
@@ -81,12 +75,6 @@ docker compose ps
 宿主机地址；`DATABASE_URL` 中的密码必须与 `POSTGRES_PASSWORD` 一致。Gateway 在 PostgreSQL healthcheck
 通过后启动，自身 healthcheck 会持续探测数据库中的渠道账号与 Koishi Bot 运行状态。Compose 默认只把
 Gateway 端口绑定到宿主机 loopback，避免设备 API 绕过公网 HTTPS 入口。
-
-企业微信配置存在时，`/healthz` 还要求 WSS 订阅已成功；连接断开后 Runtime 保持单活并从 1 秒开始指数退避重连，
-最高间隔 30 秒。停机时会停止心跳并取消重连。异常回退时移除全部 `WECOM_AIBOT_*` 变量并重启 Gateway；已存在的
-微信公众号账号和 HTTP 路由不受影响。WSS Runtime 可发送 Markdown 和按钮交互模板卡片，并等待企业微信的即时受理结果；
-模板卡片按钮 key 只携带短期加密动作令牌，收到 `aibot_event_callback` 后会先解析已绑定的外部身份，再交给
-`ActionApplication` 做动作、过期和幂等校验。企业微信后台必须具备模板卡片交互回调能力；真实机器人点击和送达回执仍需独立联调。
 
 监听器使用 HTTP，公网 HTTPS 必须由宿主机上的 Cloudflare Tunnel 或反向代理终止 TLS。Quick Tunnel 联调可先运行：
 
