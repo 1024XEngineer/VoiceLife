@@ -79,6 +79,10 @@ void CheckListToolsSchemaSerialization() {
     settings_field.description = "设置";
     settings_field.object_schema = nested;
     schema.properties.emplace("settings", std::move(settings_field));
+    auto empty_nested = std::make_shared<ToolInputSchema>();
+    ToolInputField empty_object_field = MakeField(ToolInputType::kObject);
+    empty_object_field.object_schema = empty_nested;
+    schema.properties.emplace("emptySettings", std::move(empty_object_field));
     schema.required = {"flag", "settings"};
 
     const std::string json = SerializeListToolsResult(ListToolsResult{
@@ -120,12 +124,35 @@ void CheckListToolsSchemaSerialization() {
     yyjson_doc_free(document);
 }
 
+void CheckPaginationAndNestedOutput() {
+    ToolInputSchema schema;
+    schema.type = "object";
+    const ListToolsResult result{
+        .tools = {ToolDefinition{.name = "first", .description = "first", .input_schema = schema},
+                  ToolDefinition{.name = "second", .description = "second", .input_schema = schema}},
+        .total = 2,
+    };
+    const std::string page = voicelife::mcp::SerializeListToolsResultPage(result, 0, 1);
+    Check(page.find(R"("nextCursor":"1")") != std::string::npos && page.find(R"("name":"first")") != std::string::npos,
+          "非末页工具列表应包含下一页游标");
+    const std::string last_page = voicelife::mcp::SerializeListToolsResultPage(result, 1, 2);
+    Check(last_page.find(R"("nextCursor":null)") != std::string::npos &&
+              last_page.find(R"("name":"second")") != std::string::npos,
+          "末页工具列表应使用空游标");
+
+    ToolOutputObject nested_object{
+        {"nested", MakeToolOutput(ToolOutputValue::Object({MakeToolOutput("value", ToolOutputValue::String("ok"))}))}};
+    const std::string nested_json = SerializeToolOutputValue(ToolOutputValue::Object(std::move(nested_object)));
+    Check(nested_json.find(R"("nested":{"value":"ok"})") != std::string::npos, "对象输出应递归序列化嵌套对象");
+}
+
 /**
  * @brief 执行新增的 MCP JSON 输出序列化覆盖测试。
  * @return 全部断言通过时返回 0。
  */
 int main() {
     CheckListToolsSchemaSerialization();
+    CheckPaginationAndNestedOutput();
     const std::string json =
         SerializeToolOutputValue(ToolOutputValue::Object(BuildObjectWithNull(BuildArrayWithNull())));
     yyjson_doc* document = yyjson_read(json.data(), json.size(), YYJSON_READ_NOFLAG);
@@ -149,5 +176,18 @@ int main() {
     Check(SerializeListToolsResult(empty_list) == R"({"tools":[],"nextCursor":null})", "空工具列表应带终止游标");
     Check(voicelife::mcp::SerializeListToolsResultPage(empty_list, 1, 0) == "{}", "反向分页范围应返回空对象");
     Check(voicelife::mcp::SerializeListToolsResultPage(empty_list, 0, 1) == "{}", "越界分页范围应返回空对象");
+
+    ToolInputSchema fallback_schema;
+    ToolInputField unknown_type = MakeField(static_cast<ToolInputType>(99));
+    fallback_schema.properties.emplace("unknown", unknown_type);
+    const std::string fallback_json = SerializeListToolsResult(ListToolsResult{
+        .tools = {ToolDefinition{.name = "coverage.fallback", .description = "回退", .input_schema = fallback_schema}},
+        .total = 1,
+    });
+    Check(fallback_json.find(R"("type":"string")") != std::string::npos, "未知工具输入类型应安全回退为 string");
+
+    ToolOutputValue unknown_output;
+    unknown_output.kind = static_cast<ToolOutputValue::Kind>(99);
+    Check(SerializeToolOutputValue(unknown_output) == "{}", "未知工具输出类型应安全回退为空对象");
     return 0;
 }

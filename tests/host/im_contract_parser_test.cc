@@ -395,6 +395,17 @@ int main() {
     RequireCommandRejected("reminder-action-command-missing-binding.json", "缺 actorBindingId 命令必须被 C++ 拒绝");
     RequireCommandRejected("reminder-action-command-missing-trigger.json", "缺 reminderTriggerId 命令必须被 C++ 拒绝");
     RequireCommandRejected("reminder-action-command-invalid-params-type.json", "params 非对象命令必须被 C++ 拒绝");
+    {
+        JsonValue missing_minutes;
+        Check(ParseJson(
+                  R"({"schemaVersion":"1","commandId":"c","operationId":"o","correlationId":"r",
+                     "deviceId":"d","actorBindingId":"b","reminderTriggerId":"t","action":"snooze",
+                     "occurredAt":"2026-08-03T00:00:00Z","expiresAt":"2026-08-03T00:10:00Z"})",
+                  missing_minutes)
+                      .ok() &&
+                  !ParseReminderActionCommand(missing_minutes, command).ok(),
+              "snooze 命令缺少 params.minutes 必须被 C++ 拒绝");
+    }
     RequireCommandRejected("reminder-action-command-invalid-params-minutes.json",
                            "params 缺 minutes 命令必须被 C++ 拒绝");
     RequireCommandRejected("reminder-action-command-invalid-params-fraction.json",

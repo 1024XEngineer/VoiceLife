@@ -7,7 +7,10 @@
 #include <system_error>
 #include <utility>
 
+#include "../src/sql/operation_sql.h"
+#include "../src/sql/schedule_sql.h"
 #include "support/test_support.h"
+#include "voicelife/schedule/schedule_commands.h"
 
 using voicelife::ErrorCode;
 using voicelife::storage_sqlite::SqliteDatabase;
@@ -248,5 +251,21 @@ int main() {
     CheckStatementLifecycle(lifecycle.path);
     const TemporaryDatabaseFile errors = MakeTemporaryDatabaseFile();
     CheckSqliteErrorMapping(errors.path);
+
+    voicelife::schedule::QueryOperationCommand operation_query;
+    const std::string operation_find = voicelife::storage_sqlite::sql::BuildOperationFindSql(operation_query);
+    const std::string operation_count = voicelife::storage_sqlite::sql::BuildOperationCountSql(operation_query);
+    Check(operation_find.find("ORDER BY operated_at DESC") != std::string::npos &&
+              operation_find.find("LIMIT ?8 OFFSET ?9") != std::string::npos &&
+              operation_count.find("SELECT COUNT(*)") != std::string::npos,
+          "操作记录查询与计数 SQL 应包含过滤、排序和分页契约");
+
+    voicelife::schedule::QueryScheduleCommand schedule_query;
+    const std::string schedule_find = voicelife::storage_sqlite::sql::BuildScheduleFindSql(schedule_query);
+    const std::string schedule_count = voicelife::storage_sqlite::sql::BuildScheduleCountSql(schedule_query);
+    Check(schedule_find.find("ORDER BY") != std::string::npos &&
+              schedule_find.find("LIMIT ?7 OFFSET ?8") != std::string::npos &&
+              schedule_count.find("SELECT COUNT(*)") != std::string::npos,
+          "日程查询与计数 SQL 应包含排序和分页契约");
     return 0;
 }
