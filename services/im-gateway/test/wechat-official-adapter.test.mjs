@@ -92,6 +92,53 @@ test('exposes WeChat capabilities and platform-local renderings', async () => {
     );
 });
 
+test('does not expose an inactive account and declines outbound work when no sender is configured', async () => {
+    const wechat = adapter();
+    const inactive = { id: 'other-channel', platform: 'wechat_official', status: 'active' };
+    const inactiveCapabilities = await wechat.resolve(inactive);
+    assert.deepEqual(inactiveCapabilities, {
+        proactiveMessage: false,
+        nativeAction: false,
+        actionUi: false,
+        deliveryReceipt: false,
+        presentationTypes: [],
+    });
+    assert.deepEqual(
+        await wechat.send({
+            delivery: { channelAccountId },
+            conversation: { externalConversationIdCiphertext: 'encrypted:open-fixture' },
+            content: { type: 'text', text: '提醒' },
+        }),
+        { accepted: false, retryable: false, errorCode: 'wechat_not_configured' },
+    );
+    assert.deepEqual(await wechat.sendToUser('open-fixture', { type: 'text', text: '提醒' }), {
+        accepted: false,
+        retryable: false,
+        errorCode: 'wechat_not_configured',
+    });
+    await assert.rejects(
+        () => wechat.render({ presentationType: 'text' }, inactive, inactiveCapabilities, {}),
+        (error) => error instanceof ImGatewayError && error.code === 'capability_not_supported',
+    );
+});
+
+test('configured legacy stub delegates capabilities and rejects malformed webhook wrappers', async () => {
+    const stub = new WechatCapabilityStub({
+        channelAccountId,
+        token,
+        expectedToUserName,
+        now: () => fixtureNowSeconds,
+    });
+    assert.deepEqual(
+        await stub.capabilities({ id: channelAccountId, platform: 'wechat_official', status: 'active' }),
+        await adapter().capabilities({ id: channelAccountId, platform: 'wechat_official', status: 'active' }),
+    );
+    await assert.rejects(
+        () => adapter().normalizeInbound({ ...request('<xml/>'), xml: '<xml/>' }),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+});
+
 test('rejects a non-object webhook before attempting verification', async () => {
     await assert.rejects(
         () => adapter().normalizeInbound(null),

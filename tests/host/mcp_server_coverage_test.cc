@@ -95,5 +95,64 @@ int main() {
                        .arguments = {{"settings", JsonValue::Object({{"count", JsonValue::String("bad")}})}}})
                   .status.code == ErrorCode::kInvalidArgument,
           "对象参数内部字段类型错误应被拒绝");
+
+    // 覆盖分页边界、重复注册和不完整定义的显式错误。
+    Check(server.list_tools_page_json(999, 1024).status.code == ErrorCode::kInvalidArgument,
+          "超出工具列表的游标应被拒绝");
+    Check(server.list_tools_page_json(server.list_tools().total, 1).status.code == ErrorCode::kUnavailable,
+          "无法容纳终止页时应返回不可用");
+    Check(server.add_tool("", "缺少名称", PropertyList{}, NoopHandler).code == ErrorCode::kInvalidArgument,
+          "空工具名称应被拒绝");
+    Check(server.add_tool("coverage.object", "重复", PropertyList{}, NoopHandler).code == ErrorCode::kAlreadyExists,
+          "重复工具名称应被拒绝");
+
+    // 覆盖标量类型、范围、字符串字符数和未知字段校验。
+    PropertyList scalar_properties({Property("enabled", PropertyType::kBoolean),
+                                    Property("count", PropertyType::kInteger, 1, 3),
+                                    Property("title", PropertyType::kString, 1, 2)});
+    Check(server.add_tool("coverage.scalar", "标量参数", scalar_properties, NoopHandler).ok(),
+          "有效标量工具应注册成功");
+    Check(server.call({.request_id = "", .name = "coverage.scalar"}).status.code == ErrorCode::kInvalidArgument,
+          "缺少 request_id 应被拒绝");
+    Check(server.call({.request_id = "missing-tool", .name = "unknown"}).status.code == ErrorCode::kNotFound,
+          "未知工具应被拒绝");
+    Check(server.call({.request_id = "missing-argument", .name = "coverage.scalar"}).status.code ==
+              ErrorCode::kInvalidArgument,
+          "缺少必填参数应被拒绝");
+    Check(server.call({.request_id = "wrong-boolean",
+                       .name = "coverage.scalar",
+                       .arguments = {{"enabled", std::string("true")},
+                                     {"count", int64_t{2}},
+                                     {"title", std::string("中")}}})
+                  .status.code == ErrorCode::kInvalidArgument,
+          "布尔参数类型错误应被拒绝");
+    Check(server.call({.request_id = "integer-range",
+                       .name = "coverage.scalar",
+                       .arguments = {{"enabled", true}, {"count", int64_t{4}}, {"title", std::string("中")}}})
+                  .status.code == ErrorCode::kInvalidArgument,
+          "整数范围外的参数应被拒绝");
+    Check(server.call({.request_id = "utf8-length",
+                       .name = "coverage.scalar",
+                       .arguments = {{"enabled", true}, {"count", int64_t{2}}, {"title", std::string("中文文")}}})
+                  .status.code == ErrorCode::kInvalidArgument,
+          "UTF-8 字符长度超限应被拒绝");
+    Check(server.call({.request_id = "unknown-argument",
+                       .name = "coverage.scalar",
+                       .arguments = {{"enabled", true},
+                                     {"count", int64_t{2}},
+                                     {"title", std::string("中")},
+                                     {"extra", int64_t{1}}}})
+                  .status.code == ErrorCode::kInvalidArgument,
+          "未声明参数应被拒绝");
+
+    // 覆盖不合法的默认值与约束定义，确保注册期即可阻断错误 Schema。
+    Check(server.add_tool("coverage.invalid-default", "非法默认值",
+                          PropertyList({Property("count", PropertyType::kInteger, std::string("bad"))}), NoopHandler)
+                  .code == ErrorCode::kInvalidArgument,
+          "与声明类型不一致的默认值应被拒绝");
+    Check(server.add_tool("coverage.invalid-range", "反向范围",
+                          PropertyList({Property("count", PropertyType::kInteger, 3, 1)}), NoopHandler)
+                  .code == ErrorCode::kInvalidArgument,
+          "反向整数范围应被拒绝");
     return 0;
 }

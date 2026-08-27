@@ -276,3 +276,133 @@ test('WeCom AI Bot rejects a message for another bot, an empty userid, and group
         );
     }
 });
+
+test('WeCom AI Bot makes unconfigured outbound operations explicitly unavailable', async () => {
+    const wecom = adapter();
+    const account = { id: 'channel-wecom', platform: 'wecom_aibot', status: 'active' };
+
+    assert.deepEqual(await wecom.resolve(account), {
+        proactiveMessage: false,
+        nativeAction: false,
+        actionUi: false,
+        deliveryReceipt: false,
+        presentationTypes: [],
+    });
+    assert.deepEqual(
+        await wecom.send({
+            delivery: { channelAccountId: 'channel-wecom' },
+            conversation: { externalConversationIdCiphertext: 'encrypted:userid-fixture' },
+            content: { type: 'wecom_aibot_markdown', content: '提醒' },
+        }),
+        { accepted: false, retryable: false, errorCode: 'wecom_aibot_not_configured' },
+    );
+    for (const operation of [
+        () => wecom.renderScheduleReceipt({ summary: '已更新' }),
+        () => wecom.renderNotification({ content: { title: '提醒' } }),
+        () =>
+            wecom.render(
+                { channelAccountId: 'channel-wecom', presentationType: 'rich_text', kind: 'schedule_receipt' },
+                account,
+                awaitableUnavailableCapabilities(),
+                {},
+            ),
+    ]) {
+        await assert.rejects(
+            operation,
+            (error) => error instanceof ImGatewayError && error.code === 'capability_not_supported',
+        );
+    }
+});
+
+function awaitableUnavailableCapabilities() {
+    return {
+        proactiveMessage: false,
+        nativeAction: false,
+        actionUi: false,
+        deliveryReceipt: false,
+        presentationTypes: [],
+    };
+}
+
+test('WeCom AI Bot renders receipt text, rejects unsupported native cards, and validates outbound cards', async () => {
+    let revealed = false;
+    const wecom = adapter({
+        outbound: {
+            revealExternalUserId: async () => {
+                revealed = true;
+                return 'userid-fixture';
+            },
+            transport: { sendMarkdown: async () => ({ accepted: true }) },
+        },
+    });
+    const account = { id: 'channel-wecom', platform: 'wecom_aibot', status: 'active' };
+    const capabilities = await wecom.resolve(account);
+
+    assert.deepEqual(await wecom.renderScheduleReceipt({ summary: '  已更新  ' }), {
+        type: 'wecom_aibot_markdown',
+        content: '**日程已更新**\n已更新',
+    });
+    assert.deepEqual(await wecom.renderNotification({ content: { title: '  提醒  ', body: '  处理它  ' } }), {
+        type: 'wecom_aibot_markdown',
+        content: '**提醒**\n处理它',
+    });
+    await assert.rejects(
+        () =>
+            wecom.render(
+                {
+                    channelAccountId: 'channel-wecom',
+                    presentationType: 'native_card',
+                    kind: 'reminder_due',
+                    semanticPayload: { reminderType: 'weak', actions: [] },
+                },
+                account,
+                capabilities,
+                { actionToken: 'v1.token.fixture' },
+            ),
+        (error) => error instanceof ImGatewayError && error.code === 'capability_not_supported',
+    );
+    assert.deepEqual(
+        await wecom.send({
+            delivery: { channelAccountId: 'channel-wecom' },
+            conversation: { externalConversationIdCiphertext: 'encrypted:userid-fixture' },
+            content: { type: 'wecom_aibot_template_card', template_card: { card_type: 'button_interaction' } },
+        }),
+        { accepted: false, retryable: false, errorCode: 'wecom_aibot_invalid_message' },
+    );
+    assert.equal(revealed, true);
+});
+
+test('WeCom AI Bot rejects malformed events before they become action commands', async () => {
+    const invalidFrames = [
+        textFrame({ msgtype: 'image' }),
+        textFrame({ text: { content: 'x'.repeat(16 * 1024 + 1) } }),
+        textFrame({ msgtype: 'event', event: { eventtype: 'other' } }),
+        textFrame({ msgtype: 'event', event: { eventtype: 'template_card_event' } }),
+        textFrame({
+            msgtype: 'event',
+            event: { eventtype: 'template_card_event', event_key: 'invalid' },
+        }),
+    ];
+    for (const frame of invalidFrames) {
+        await assert.rejects(
+            () => adapter().normalizeInbound(frame),
+            (error) => error instanceof ImGatewayError,
+        );
+    }
+
+    const actionFrame = textFrame({
+        msgtype: 'event',
+        event: {
+            eventtype: 'template_card_event',
+            event_key: 'voicelife-action:v1:v1.token.fixture:acknowledge:',
+        },
+    });
+    await assert.rejects(
+        () => adapter().normalizeInbound(actionFrame),
+        (error) => error instanceof ImGatewayError && error.code === 'capability_not_supported',
+    );
+    await assert.rejects(
+        () => adapter({ resolveExternalIdentityId: async () => undefined }).normalizeInbound(actionFrame),
+        (error) => error instanceof ImGatewayError && error.code === 'action_expired',
+    );
+});

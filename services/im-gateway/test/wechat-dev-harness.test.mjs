@@ -197,3 +197,77 @@ test('WeChat development harness protects test controls and bounds request bodie
         assert.equal(missing.headers.get('cache-control'), 'no-store');
     });
 });
+
+test('WeChat development harness rejects unsafe listeners and unsupported request shapes', async () => {
+    const required = {
+        expectedDeviceId: 'device-fixture',
+        authentication: { authenticate: async () => ({ deviceId: 'device-fixture' }) },
+        webhookApi: { verify: () => '', post: async () => ({ body: '', contentType: 'text/plain; charset=utf-8' }) },
+        actionUiPageApi: {
+            get: async () => ({ status: 200, headers: {}, body: '' }),
+            post: async () => ({ status: 200, headers: {}, body: '' }),
+        },
+        scheduleQueryPageApi: { get: async () => ({ status: 200, headers: {}, body: '' }) },
+        sendTestNotification: async () => ({ deliveryId: 'delivery', status: 'accepted' }),
+        inspectDelivery: async () => undefined,
+    };
+    await assert.rejects(
+        () => startWechatDevHttpHarness({ ...required, host: '0.0.0.0', port: 0 }),
+        /loopback address/u,
+    );
+    await assert.rejects(
+        () => startWechatDevHttpHarness({ ...required, host: '127.0.0.1', port: 65_536 }),
+        /port is invalid/u,
+    );
+
+    await withHarness({ inspectDelivery: async () => undefined }, async ({ origin }) => {
+        const webhookWrite = await globalThis.fetch(`${origin}/wechat`, { method: 'PUT' });
+        assert.equal(webhookWrite.status, 405);
+        assert.equal(webhookWrite.headers.get('allow'), 'GET, POST');
+
+        const unsupportedAction = await globalThis.fetch(`${origin}/voicelife/reminder-actions/token`, {
+            method: 'POST',
+            body: 'action=acknowledge',
+        });
+        assert.equal(unsupportedAction.status, 415);
+
+        const actionWrite = await globalThis.fetch(`${origin}/voicelife/reminder-actions/token`, { method: 'PUT' });
+        assert.equal(actionWrite.status, 405);
+        assert.equal(actionWrite.headers.get('allow'), 'GET, POST');
+
+        const missingDelivery = await globalThis.fetch(`${origin}/__dev/wechat/deliveries/missing`, {
+            headers: { authorization: `Bearer ${deviceToken}` },
+        });
+        assert.equal(missingDelivery.status, 404);
+
+        const malformedToken = await globalThis.fetch(`${origin}/voicelife/reminder-actions/%ZZ`);
+        assert.equal(malformedToken.status, 400);
+    });
+});
+
+test('WeChat development harness returns safe errors from webhook controller failures', async () => {
+    await withHarness(
+        {
+            webhookApi: {
+                verify: () => {
+                    throw new TypeError('invalid request');
+                },
+                post: async () => {
+                    throw new Error('unexpected failure');
+                },
+            },
+        },
+        async ({ origin }) => {
+            const invalid = await globalThis.fetch(`${origin}/wechat?signature=s&timestamp=1&nonce=n`);
+            assert.equal(invalid.status, 400);
+            assert.equal(await invalid.text(), 'Bad Request');
+
+            const unexpected = await globalThis.fetch(`${origin}/wechat?signature=s&timestamp=1&nonce=n`, {
+                method: 'POST',
+                body: '<xml/>',
+            });
+            assert.equal(unexpected.status, 500);
+            assert.equal(await unexpected.text(), 'Internal Server Error');
+        },
+    );
+});

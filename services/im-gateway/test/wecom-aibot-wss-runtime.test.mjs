@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { WecomAibotInboundAdapter, WecomAibotWssRuntime } from '../dist/index.js';
+import { ImGatewayError, WecomAibotInboundAdapter, WecomAibotWssRuntime } from '../dist/index.js';
 
 class FakeWebSocket {
     sent = [];
@@ -383,6 +383,75 @@ test('WeCom AI Bot WSS runtime rejects invalid or unavailable outbound messages 
         errorCode: 'wecom_aibot_invalid_message',
     });
     assert.equal(socket.sent.length, 0);
+});
+
+test('WeCom AI Bot WSS runtime validates construction, template cards, and outbound acknowledgement timeouts', async () => {
+    assert.throws(
+        () =>
+            new WecomAibotWssRuntime({
+                adapter: new WecomAibotInboundAdapter({ channelAccountId: 'channel-wecom', botId: 'bot-fixture' }),
+                botId: ' ',
+                secret: 'secret-fixture',
+                postEvent: async () => {},
+            }),
+        (error) => error instanceof ImGatewayError && error.code === 'invalid_contract',
+    );
+
+    const socket = new FakeWebSocket();
+    const runtime = new WecomAibotWssRuntime({
+        adapter: new WecomAibotInboundAdapter({ channelAccountId: 'channel-wecom', botId: 'bot-fixture' }),
+        botId: 'bot-fixture',
+        secret: 'secret-fixture',
+        postEvent: async () => {},
+        createWebSocket: () => socket,
+        nextRequestId: () => 'request-fixture',
+        outboundAckTimeoutMilliseconds: 1,
+    });
+    assert.deepEqual(await runtime.sendTemplateCard('userid-fixture', null), {
+        accepted: false,
+        retryable: false,
+        errorCode: 'wecom_aibot_invalid_message',
+    });
+    assert.deepEqual(await runtime.sendTemplateCard(' '.repeat(513), { card_type: 'button_interaction' }), {
+        accepted: false,
+        retryable: false,
+        errorCode: 'wecom_aibot_invalid_message',
+    });
+
+    runtime.start();
+    socket.emit('open', {});
+    socket.emit('message', { data: JSON.stringify({ headers: { req_id: 'request-fixture' }, errcode: 0 }) });
+    assert.deepEqual(await runtime.sendMarkdown('userid-fixture', 'timeout'), {
+        accepted: false,
+        retryable: true,
+        errorCode: 'wecom_aibot_timeout',
+    });
+    await runtime.close();
+});
+
+test('WeCom AI Bot WSS runtime ignores malformed platform frames and callback failures', async () => {
+    const socket = new FakeWebSocket();
+    const runtime = new WecomAibotWssRuntime({
+        adapter: new WecomAibotInboundAdapter({ channelAccountId: 'channel-wecom', botId: 'bot-fixture' }),
+        botId: 'bot-fixture',
+        secret: 'secret-fixture',
+        postEvent: async () => {
+            throw new Error('application rejected event');
+        },
+        createWebSocket: () => socket,
+        nextRequestId: () => 'request-fixture',
+    });
+    runtime.start();
+    socket.emit('open', {});
+    socket.emit('message', { data: 'not-json' });
+    socket.emit('message', { data: JSON.stringify([]) });
+    socket.emit('message', { data: JSON.stringify({ headers: { req_id: 'request-fixture' }, errcode: 0 }) });
+    socket.emit('message', {
+        data: JSON.stringify({ cmd: 'aibot_msg_callback', body: { msgid: 'bad-callback' } }),
+    });
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+    assert.equal(runtime.healthy, true);
+    await runtime.close();
 });
 
 test('WeCom AI Bot WSS runtime classifies transport errors and pending sends on disconnect as retryable', async (context) => {
