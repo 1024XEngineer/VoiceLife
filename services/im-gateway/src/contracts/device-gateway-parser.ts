@@ -385,7 +385,7 @@ function optionalPlatformArray(input: unknown, path: string): readonly ImPlatfor
     if (input === undefined) return undefined;
     if (!Array.isArray(input)) invalid(path, 'must be an array');
     const platforms = input.map((platform, index) =>
-        enumAt(platform, ['wechat_official', 'wecom_aibot', 'feishu', 'dingtalk'] as const, `${path}[${index}]`),
+        enumAt(platform, ['wechat_official', 'feishu', 'dingtalk'] as const, `${path}[${index}]`),
     );
     if (platforms.length === 0 || new Set(platforms).size !== platforms.length) {
         invalid(path, 'must be non-empty and contain no duplicates');

@@ -34,30 +34,26 @@ function adapter(name, calls) {
 
 test('channel adapter registry routes capabilities, rendering, and sending by channel account', async () => {
     const calls = [];
-    const registry = new ChannelAdapterRegistry([
-        { accountId: 'channel-wechat', adapter: adapter('wechat', calls) },
-        { accountId: 'channel-wecom', adapter: adapter('wecom', calls) },
-    ]);
+    const registry = new ChannelAdapterRegistry([{ accountId: 'channel-wechat', adapter: adapter('wechat', calls) }]);
     const wechat = account('channel-wechat', 'wechat_official');
-    const wecom = account('channel-wecom', 'wecom_aibot');
-    const delivery = { id: 'delivery-wecom', channelAccountId: 'channel-wecom' };
+    const delivery = { id: 'delivery-wechat', channelAccountId: 'channel-wechat' };
     const content = { type: 'markdown', content: '**Reminder**' };
 
     assert.equal(await registry.resolve(wechat), capabilities);
-    assert.deepEqual(await registry.render(delivery, wecom, capabilities, {}), {
-        adapter: 'wecom',
-        deliveryId: 'delivery-wecom',
+    assert.deepEqual(await registry.render(delivery, wechat, capabilities, {}), {
+        adapter: 'wechat',
+        deliveryId: 'delivery-wechat',
     });
     assert.deepEqual(await registry.send({ delivery, conversation: { kind: 'direct' }, content }), {
         accepted: true,
-        platformMessageId: 'wecom-message',
+        platformMessageId: 'wechat-message',
     });
     assert.deepEqual(
         calls.map((call) => [call.name, call.operation]),
         [
             ['wechat', 'resolve'],
-            ['wecom', 'render'],
-            ['wecom', 'send'],
+            ['wechat', 'render'],
+            ['wechat', 'send'],
         ],
     );
 });
@@ -65,7 +61,7 @@ test('channel adapter registry routes capabilities, rendering, and sending by ch
 test('channel adapter registry rejects calls for an unregistered channel account', async () => {
     const calls = [];
     const registry = new ChannelAdapterRegistry([{ accountId: 'channel-wechat', adapter: adapter('wechat', calls) }]);
-    const unknown = account('channel-unknown', 'wecom_aibot');
+    const unknown = account('channel-unknown', 'feishu');
 
     for (const work of [
         () => registry.resolve(unknown),

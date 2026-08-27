@@ -436,7 +436,7 @@ void TestControllerUsesServerWindowAndRejectsMalformedTime() {
 }
 
 void TestControllerRejectsIdentityDriftAndFinalRetry() {
-    for (int field = 0; field < 4; ++field) {
+    for (int field = 0; field < 3; ++field) {
         FakeTransport transport;
         FakeCredentials credentials;
         FakeClock clock;
@@ -444,7 +444,6 @@ void TestControllerRejectsIdentityDriftAndFinalRetry() {
         if (field == 0) response.replace(response.find("00:05:00"), 8, "00:04:00");
         if (field == 1) response.replace(response.find("00:00:00"), 8, "00:00:01");
         if (field == 2) response.replace(response.find("user-fixture"), 12, "user-changed");
-        if (field == 3) response.replace(response.find("wechat_official"), 15, "wecom_aibot");
         transport.responses = {Response(ImTransportStatus::kSuccess, 201, ReadFixture("pairing-created.json")),
                                Response(ImTransportStatus::kSuccess, 200, response)};
         ImPairingClient client(transport, credentials);

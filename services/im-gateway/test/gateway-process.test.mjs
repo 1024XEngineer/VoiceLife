@@ -1,44 +1,18 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
-import { tokenDigest } from '../dist/application/device-management.js';
 import {
     readGatewayConfiguration,
     startConfiguredGatewayProcess,
     startGatewayHttpServer,
 } from '../dist/app/gateway-process.js';
 import { PostgresImUnitOfWork } from '../dist/infrastructure/persistence/postgres.js';
-import { AesGcmExternalIdentityProtector } from '../dist/infrastructure/security/production-ports.js';
 import { ImGatewayError } from '../dist/shared/errors.js';
 
 const deviceToken = 'fixture-device-token-with-enough-entropy';
-
-class FakeWecomWebSocket {
-    sent = [];
-    listeners = new Map();
-
-    addEventListener(type, listener) {
-        const listeners = this.listeners.get(type) ?? [];
-        listeners.push(listener);
-        this.listeners.set(type, listeners);
-    }
-
-    send(data) {
-        this.sent.push(JSON.parse(data));
-    }
-
-    close() {
-        this.emit('close', {});
-    }
-
-    emit(type, event) {
-        for (const listener of this.listeners.get(type) ?? []) listener(event);
-    }
-}
 
 async function waitFor(assertion, message) {
     const deadline = Date.now() + 2_000;
@@ -243,7 +217,6 @@ test('production configuration requires every secret without exposing its value'
     assert.equal(config.port, 3000);
     assert.equal(config.wechat.channelAccountId, 'wechat-production');
     assert.equal(config.wechat.displayTimeZone, 'Asia/Shanghai');
-    assert.equal(config.wecom, undefined);
     assert.equal(
         new URL(readGatewayConfiguration(fixtureEnvironment({ DATABASE_HOST: 'postgres' })).databaseUrl).hostname,
         'postgres',
@@ -260,24 +233,6 @@ test('production configuration requires every secret without exposing its value'
     assert.throws(
         () => readGatewayConfiguration(fixtureEnvironment({ ACTION_TOKEN_SECRET: 'too-short' })),
         /ACTION_TOKEN_SECRET must contain at least 32 bytes/u,
-    );
-    assert.deepEqual(
-        readGatewayConfiguration(
-            fixtureEnvironment({
-                WECOM_AIBOT_CHANNEL_ACCOUNT_ID: 'wecom-production',
-                WECOM_AIBOT_BOT_ID: 'bot-fixture',
-                WECOM_AIBOT_SECRET: 'secret-fixture',
-            }),
-        ).wecom,
-        { channelAccountId: 'wecom-production', botId: 'bot-fixture', secret: 'secret-fixture' },
-    );
-    assert.throws(
-        () => readGatewayConfiguration(fixtureEnvironment({ WECOM_AIBOT_BOT_ID: 'bot-fixture' })),
-        /WECOM_AIBOT_CHANNEL_ACCOUNT_ID is required/u,
-    );
-    assert.throws(
-        () => readGatewayConfiguration(fixtureEnvironment({ WECOM_AIBOT_SECRET: 'secret-fixture' })),
-        /WECOM_AIBOT_CHANNEL_ACCOUNT_ID is required/u,
     );
 });
 
@@ -793,232 +748,6 @@ test('production start script gracefully closes the gateway on SIGTERM', async (
             child.kill('SIGKILL');
             await once(child, 'exit');
         }
-    }
-});
-
-test('configured production process registers and starts an optional WeCom AI Bot channel', async (context) => {
-    const databaseUrl = process.env.DATABASE_URL ?? 'postgres://voicelife:voicelife@127.0.0.1:5432/voicelife';
-    const probe = new PostgresImUnitOfWork(databaseUrl);
-    try {
-        await probe.migrate();
-    } catch (error) {
-        await probe.close().catch(() => undefined);
-        context.skip(`PostgreSQL unavailable: ${error instanceof Error ? error.name : 'unknown'}`);
-        return;
-    }
-    await probe.close();
-
-    const socket = new FakeWecomWebSocket();
-    const wecomChannelId = `wecom-process-${Date.now()}`;
-    const gateway = await startConfiguredGatewayProcess(
-        fixtureEnvironment({
-            DATABASE_URL: databaseUrl,
-            GATEWAY_PORT: '0',
-            WECHAT_CHANNEL_ACCOUNT_ID: `wechat-process-${Date.now()}`,
-            WECOM_AIBOT_CHANNEL_ACCOUNT_ID: wecomChannelId,
-            WECOM_AIBOT_BOT_ID: 'bot-fixture',
-            WECOM_AIBOT_SECRET: 'secret-fixture',
-        }),
-        { log: () => {} },
-        { createWecomWebSocket: () => socket },
-    );
-    try {
-        socket.emit('open', {});
-        const subscription = socket.sent[0];
-        assert.equal(subscription.cmd, 'aibot_subscribe');
-        socket.emit('message', {
-            data: JSON.stringify({ headers: { req_id: subscription.headers.req_id }, errcode: 0 }),
-        });
-        await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
-        assert.equal((await globalThis.fetch(`${gateway.origin}/healthz`)).status, 200);
-
-        const check = new PostgresImUnitOfWork(databaseUrl);
-        try {
-            const account = await check.transaction((tx) => tx.channelAccounts.findById(wecomChannelId));
-            assert.deepEqual(
-                {
-                    id: account?.id,
-                    platform: account?.platform,
-                    tenantExternalId: account?.tenantExternalId,
-                    connectionMode: account?.connectionMode,
-                },
-                {
-                    id: wecomChannelId,
-                    platform: 'wecom_aibot',
-                    tenantExternalId: 'bot-fixture',
-                    connectionMode: 'websocket',
-                },
-            );
-        } finally {
-            await check.close();
-        }
-    } finally {
-        await gateway.close();
-    }
-});
-
-test('configured WeCom AI Bot sends one weak reminder and persists the accepted platform message', async (context) => {
-    const databaseUrl = process.env.DATABASE_URL ?? 'postgres://voicelife:voicelife@127.0.0.1:5432/voicelife';
-    const suffix = String(Date.now());
-    const deviceId = `device-wecom-${suffix}`;
-    const userId = `user-wecom-${suffix}`;
-    const channelAccountId = `wecom-delivery-${suffix}`;
-    const deviceToken = randomBytes(32).toString('base64url');
-    const identitySecret = 'fixture-identity-secret-with-at-least-32-bytes';
-    const setup = new PostgresImUnitOfWork(databaseUrl);
-    try {
-        await setup.migrate();
-        await setup.transaction((tx) =>
-            tx.devices.create({
-                deviceId,
-                userId,
-                tokenDigest: tokenDigest(deviceToken),
-                status: 'active',
-                createdAt: '2026-08-20T00:00:00.000Z',
-                updatedAt: '2026-08-20T00:00:00.000Z',
-            }),
-        );
-    } catch (error) {
-        await setup.close().catch(() => undefined);
-        if (isPostgresUnavailable(error)) {
-            context.skip(`PostgreSQL unavailable: ${error instanceof Error ? error.name : 'unknown'}`);
-            return;
-        }
-        throw error;
-    }
-    await setup.close();
-
-    const socket = new FakeWecomWebSocket();
-    const gateway = await startConfiguredGatewayProcess(
-        fixtureEnvironment({
-            DATABASE_URL: databaseUrl,
-            GATEWAY_PORT: '0',
-            WECHAT_CHANNEL_ACCOUNT_ID: `wechat-delivery-${suffix}`,
-            WECOM_AIBOT_CHANNEL_ACCOUNT_ID: channelAccountId,
-            WECOM_AIBOT_BOT_ID: 'bot-fixture',
-            WECOM_AIBOT_SECRET: 'secret-fixture',
-        }),
-        { log: () => {} },
-        { createWecomWebSocket: () => socket },
-    );
-    try {
-        socket.emit('open', {});
-        const subscription = socket.sent[0];
-        socket.emit('message', {
-            data: JSON.stringify({ headers: { req_id: subscription.headers.req_id }, errcode: 0 }),
-        });
-
-        const protector = new AesGcmExternalIdentityProtector(identitySecret);
-        const protectedIdentity = await protector.protect('userid-fixture');
-        const records = new PostgresImUnitOfWork(databaseUrl);
-        try {
-            await records.transaction(async (tx) => {
-                await tx.identities.save({
-                    id: `identity-wecom-${suffix}`,
-                    channelAccountId,
-                    externalUserIdCiphertext: protectedIdentity.ciphertext,
-                    externalUserIdHash: protectedIdentity.hash,
-                    status: 'active',
-                    createdAt: '2026-08-20T00:00:00.000Z',
-                    updatedAt: '2026-08-20T00:00:00.000Z',
-                });
-                await tx.bindings.save({
-                    id: `binding-wecom-${suffix}`,
-                    userId,
-                    deviceId,
-                    externalIdentityId: `identity-wecom-${suffix}`,
-                    priority: 10,
-                    status: 'active',
-                    boundAt: '2026-08-20T00:00:00.000Z',
-                });
-            });
-        } finally {
-            await records.close();
-        }
-
-        const notification = {
-            schemaVersion: '1',
-            businessEventId: `event-wecom-${suffix}`,
-            correlationId: `correlation-wecom-${suffix}`,
-            kind: 'reminder_due',
-            recipient: { userId, deviceId },
-            scheduleId: `schedule-wecom-${suffix}`,
-            taskId: `task-wecom-${suffix}`,
-            instanceId: `instance-wecom-${suffix}`,
-            reminderTriggerId: `trigger-wecom-${suffix}`,
-            reminderType: 'weak',
-            content: { title: '日程提醒', body: '该处理了' },
-            plannedAt: '2026-08-20T00:00:00.000Z',
-            triggerAt: '2026-08-20T00:00:00.000Z',
-            actions: [],
-            occurredAt: '2026-08-20T00:00:00.000Z',
-        };
-        const request = () =>
-            globalThis.fetch(`${gateway.origin}/v1/im/notifications`, {
-                method: 'POST',
-                headers: {
-                    authorization: `Bearer ${deviceToken}`,
-                    'content-type': 'application/json',
-                    'idempotency-key': notification.businessEventId,
-                },
-                body: JSON.stringify(notification),
-            });
-        const first = await request();
-        const second = await request();
-        assert.equal(first.status, 202);
-        assert.equal(second.status, 202);
-        const firstSubmission = await first.json();
-        const secondSubmission = await second.json();
-        assert.deepEqual(secondSubmission.deliveries, firstSubmission.deliveries);
-
-        await waitFor(
-            () => socket.sent.some((frame) => frame.cmd === 'aibot_send_msg'),
-            'WeCom reminder was not sent through WSS',
-        );
-        const sent = socket.sent.filter((frame) => frame.cmd === 'aibot_send_msg');
-        assert.equal(sent.length, 1);
-        assert.deepEqual(sent[0].body, {
-            chatid: 'userid-fixture',
-            msgtype: 'markdown',
-            markdown: { content: '**日程提醒**\n该处理了' },
-        });
-        socket.emit('message', {
-            data: JSON.stringify({
-                headers: { req_id: sent[0].headers.req_id },
-                errcode: 0,
-                body: { msgid: `platform-wecom-${suffix}` },
-            }),
-        });
-
-        const deliveryId = firstSubmission.deliveries[0].deliveryId;
-        await waitFor(async () => {
-            const check = new PostgresImUnitOfWork(databaseUrl);
-            try {
-                return await check.transaction(async (tx) => {
-                    const delivery = await tx.deliveries.findById(deliveryId);
-                    return delivery?.status === 'accepted';
-                });
-            } finally {
-                await check.close();
-            }
-        }, 'WeCom platform acceptance was not persisted');
-        const check = new PostgresImUnitOfWork(databaseUrl);
-        try {
-            const { delivery, attempts } = await check.transaction(async (tx) => ({
-                delivery: await tx.deliveries.findById(deliveryId),
-                attempts: await tx.deliveries.listAttempts(deliveryId),
-            }));
-            assert.equal(delivery?.channelAccountId, channelAccountId);
-            assert.equal(delivery?.externalMessageId, `platform-wecom-${suffix}`);
-            assert.deepEqual(
-                attempts.map((attempt) => ({ status: attempt.status, platformMessageId: attempt.platformMessageId })),
-                [{ status: 'accepted', platformMessageId: `platform-wecom-${suffix}` }],
-            );
-        } finally {
-            await check.close();
-        }
-    } finally {
-        await gateway.close();
     }
 });
 
