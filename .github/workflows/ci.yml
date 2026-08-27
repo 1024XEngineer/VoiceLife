@@ -155,7 +155,9 @@ jobs:
           cmake -S tests/host -B build-coverage -DVOICELIFE_ENABLE_COVERAGE=ON -DCMAKE_CXX_COMPILER=g++
           cmake --build build-coverage --parallel
           ctest --test-dir build-coverage --output-on-failure
-          gcovr --root . --filter components --exclude tests --gcov-ignore-parse-errors negative_hits.warn --xml-pretty -o coverage/cpp.xml
+          # Exclude both the repository-level tests/ tree and component-level test/ trees.
+          # The components filter otherwise includes files such as components/*/test/*.cc.
+          gcovr --root . --filter components --exclude 'components/.*/test/.*' --exclude 'components/.*/tests/.*' --gcov-ignore-parse-errors negative_hits.warn --xml-pretty -o coverage/cpp.xml
       - name: 生成 Gateway 覆盖率报告
         shell: bash
         run: |
