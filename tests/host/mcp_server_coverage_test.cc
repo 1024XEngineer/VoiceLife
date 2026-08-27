@@ -154,5 +154,10 @@ int main() {
                           PropertyList({Property("count", PropertyType::kInteger, 3, 1)}), NoopHandler)
                   .code == ErrorCode::kInvalidArgument,
           "反向整数范围应被拒绝");
+
+    PropertyList unknown_type({Property("value", static_cast<PropertyType>(99))});
+    const auto unknown_schema = unknown_type.to_schema();
+    Check(unknown_schema.properties.at("value").type == voicelife::mcp::ToolInputType::kString,
+          "未知参数类型应安全回退为 string");
     return 0;
 }

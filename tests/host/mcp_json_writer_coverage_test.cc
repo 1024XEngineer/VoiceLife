@@ -149,5 +149,18 @@ int main() {
     Check(SerializeListToolsResult(empty_list) == R"({"tools":[],"nextCursor":null})", "空工具列表应带终止游标");
     Check(voicelife::mcp::SerializeListToolsResultPage(empty_list, 1, 0) == "{}", "反向分页范围应返回空对象");
     Check(voicelife::mcp::SerializeListToolsResultPage(empty_list, 0, 1) == "{}", "越界分页范围应返回空对象");
+
+    ToolInputSchema fallback_schema;
+    ToolInputField unknown_type = MakeField(static_cast<ToolInputType>(99));
+    fallback_schema.properties.emplace("unknown", unknown_type);
+    const std::string fallback_json = SerializeListToolsResult(ListToolsResult{
+        .tools = {ToolDefinition{.name = "coverage.fallback", .description = "回退", .input_schema = fallback_schema}},
+        .total = 1,
+    });
+    Check(fallback_json.find(R"("type":"string")") != std::string::npos, "未知工具输入类型应安全回退为 string");
+
+    ToolOutputValue unknown_output;
+    unknown_output.kind = static_cast<ToolOutputValue::Kind>(99);
+    Check(SerializeToolOutputValue(unknown_output) == "{}", "未知工具输出类型应安全回退为空对象");
     return 0;
 }

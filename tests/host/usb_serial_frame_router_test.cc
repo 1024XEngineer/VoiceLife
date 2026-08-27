@@ -10,6 +10,7 @@
 #include "serial_voice_protocol.h"
 #include "support/test_support.h"
 
+using voicelife::runtime::StartUsbSerialFrameRouter;
 using voicelife::runtime::UsbSerialFrame;
 using voicelife::runtime::UsbSerialFrameDecoder;
 using voicelife::runtime::UsbSerialFrameKind;
@@ -125,5 +126,7 @@ int main() {
     const auto resync_result = Push(resync_decoder, voice_begin);
     Check(resync_result.size() == 1 && resync_result.front().kind == UsbSerialFrameKind::kSerialVoice,
           "连续噪声后必须重新同步到合法语音帧");
+    Check(StartUsbSerialFrameRouter().code == voicelife::ErrorCode::kUnavailable,
+          "主机环境不得启动 ESP-IDF USB 串口帧路由");
     return 0;
 }
