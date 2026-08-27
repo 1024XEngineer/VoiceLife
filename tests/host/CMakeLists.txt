@@ -496,6 +496,9 @@ target_link_libraries(im_json_parser_test PRIVATE contracts)
 add_voicelife_test(im_contract_validation_test "unit;im" im_contract_validation_test.cc)
 target_link_libraries(im_contract_validation_test PRIVATE contracts)
 
+add_voicelife_test(im_contract_branch_coverage_test "unit;im;coverage" im_contract_branch_coverage_test.cc)
+target_link_libraries(im_contract_branch_coverage_test PRIVATE contracts)
+
 add_voicelife_test(im_reporting_channel_test "unit;im" im_reporting_channel_test.cc)
 target_link_libraries(im_reporting_channel_test PRIVATE im contracts)
 target_compile_definitions(im_reporting_channel_test PRIVATE VOICELIFE_SOURCE_DIR="${ROOT_DIR}")
