@@ -41,6 +41,14 @@ void CheckBridgeProtocolFailures() {
         R"({"jsonrpc":"2.0","method":"tools/list","params":{"cursor":"1"},"id":"cursor-range"})", server);
     Check(out_of_range_cursor.ok() && out_of_range_cursor.value->find("\"code\":-32602") != std::string::npos,
           "超出目录范围的 tools/list cursor 必须返回 invalid params");
+    for (const char* request :
+         {R"({"jsonrpc":"2.0","method":"tools/list","params":{"cursor":""},"id":"cursor-empty"})",
+          R"({"jsonrpc":"2.0","method":"tools/list","params":{"cursor":"abc"},"id":"cursor-text"})",
+          R"({"jsonrpc":"2.0","method":"tools/list","params":[],"id":"params-array"})"}) {
+        const auto invalid_cursor = voicelife::runtime::HandleLinxMcpPayload(request, server);
+        Check(invalid_cursor.ok() && invalid_cursor.value->find("-32602") != std::string::npos,
+              "非法 tools/list 参数必须返回 invalid params");
+    }
 
     const auto ping = voicelife::runtime::HandleLinxMcpPayload(R"({"jsonrpc":"2.0","method":"ping"})", server);
     Check(ping.ok() && ping.value.has_value() && ping.value->empty(), "无 id ping 应作为通知消费");
@@ -66,6 +74,14 @@ void CheckBridgeProtocolFailures() {
         server);
     Check(fractional_value.ok() && fractional_value.value->find("-32602") != std::string::npos,
           "非整数数字参数应返回 invalid params");
+    for (const char* request :
+         {R"({"jsonrpc":"2.0","method":"tools/call","params":{},"id":5})",
+          R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":1},"id":6})",
+          R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"schedule.create","arguments":1},"id":7})"}) {
+        const auto invalid_call = voicelife::runtime::HandleLinxMcpPayload(request, server);
+        Check(invalid_call.ok() && invalid_call.value->find("-32602") != std::string::npos,
+              "缺少或错误的 tools/call 参数必须返回 invalid params");
+    }
 }
 
 void CheckUnavailableAndOutcomeBranches() {
