@@ -1,10 +1,13 @@
 #include <functional>
+#include <limits>
 #include <string_view>
 #include <vector>
 
 #include "support/test_support.h"
+#include "voicelife/contracts/im/notification_intent.h"
 #include "voicelife/contracts/im/notification_submission.h"
 #include "voicelife/contracts/im/pairing_session.h"
+#include "voicelife/contracts/im/reminder_action_command.h"
 #include "voicelife/contracts/im/reminder_action_result.h"
 #include "voicelife/contracts/im/reminder_action_status_report.h"
 #include "voicelife/contracts/im/schedule_query_result.h"
@@ -13,8 +16,12 @@
 
 using voicelife::JsonValue;
 using voicelife::Status;
+using voicelife::contracts::im::NotificationIntent;
 using voicelife::contracts::im::NotificationSubmission;
 using voicelife::contracts::im::PairingSessionStatus;
+using voicelife::contracts::im::ParseNotificationIntent;
+using voicelife::contracts::im::ParseReminderActionCommand;
+using voicelife::contracts::im::ReminderActionCommand;
 using voicelife::contracts::im::ReminderActionResult;
 using voicelife::contracts::im::ReminderActionStatusReport;
 using voicelife::contracts::im::ScheduleQueryResultIntent;
@@ -74,6 +81,105 @@ const char kPairingStatus[] = R"json({
   "confirmedAt":"2026-08-03T00:05:00Z"
 })json";
 
+const char kNotificationWeak[] = R"json({
+  "schemaVersion":"1","businessEventId":"event","correlationId":"correlation","kind":"reminder_due",
+  "recipient":{"userId":"user","deviceId":"device"},"scheduleId":"schedule","taskId":"task",
+  "instanceId":"instance","reminderTriggerId":"trigger","reminderType":"weak","content":{"title":"title"},
+  "plannedAt":"2026-08-03T00:00:00Z","triggerAt":"2026-08-03T00:00:00Z","actions":[],
+  "occurredAt":"2026-08-03T00:00:00Z"
+})json";
+
+const char kNotificationStrong[] = R"json({
+  "schemaVersion":"1","businessEventId":"event","correlationId":"correlation","kind":"reminder_due",
+  "recipient":{"userId":"user","deviceId":"device"},"scheduleId":"schedule","taskId":"task",
+  "instanceId":"instance","reminderTriggerId":"trigger","reminderType":"strong","content":{"title":"title"},
+  "plannedAt":"2026-08-03T00:00:00Z","triggerAt":"2026-08-03T00:00:00Z",
+  "actions":[{"kind":"command","type":"acknowledge","label":"ack"}],
+  "occurredAt":"2026-08-03T00:00:00Z"
+})json";
+
+const char kActionCommand[] = R"json({
+  "schemaVersion":"1","commandId":"command","operationId":"operation","correlationId":"correlation",
+  "deviceId":"device","actorBindingId":"binding","reminderTriggerId":"trigger","action":"acknowledge",
+  "occurredAt":"2026-08-03T00:00:00Z","expiresAt":"2026-08-03T00:10:00Z"
+})json";
+
+void CheckNotificationBranches() {
+    auto weak = Document(kNotificationWeak);
+    NotificationIntent weak_output;
+    Check(ParseNotificationIntent(weak, weak_output).ok() && weak_output.actions.empty(), "弱提醒无动作时应被接受");
+
+    auto strong = Document(kNotificationStrong);
+    strong.object["actions"].array.push_back(
+        Document(R"json({"kind":"command","type":"snooze","label":"snooze","params":{"minutes":1440}})json"));
+    NotificationIntent strong_output;
+    Check(ParseNotificationIntent(strong, strong_output).ok() && strong_output.actions.size() == 2,
+          "强提醒应解析 acknowledge 与最大 snooze 动作");
+
+    auto bad_recipient_user = Document(kNotificationWeak);
+    bad_recipient_user.object["recipient"].object["userId"] = JsonValue::Number(1);
+    Reject<NotificationIntent>(std::move(bad_recipient_user), [](const JsonValue& root, NotificationIntent& out) {
+        return ParseNotificationIntent(root, out);
+    });
+    auto bad_kind = Document(kNotificationWeak);
+    bad_kind.object["kind"] = JsonValue::Number(1);
+    Reject<NotificationIntent>(std::move(bad_kind), [](const JsonValue& root, NotificationIntent& out) {
+        return ParseNotificationIntent(root, out);
+    });
+    auto bad_body = Document(kNotificationWeak);
+    bad_body.object["content"].object["body"] = JsonValue::String("");
+    Reject<NotificationIntent>(std::move(bad_body), [](const JsonValue& root, NotificationIntent& out) {
+        return ParseNotificationIntent(root, out);
+    });
+    auto bad_minutes = Document(kNotificationStrong);
+    bad_minutes.object["actions"].array[0].object["type"] = JsonValue::String("snooze");
+    bad_minutes.object["actions"].array[0].object["params"] =
+        JsonValue::Object({{"minutes", JsonValue::Number(std::numeric_limits<double>::quiet_NaN())}});
+    Reject<NotificationIntent>(std::move(bad_minutes), [](const JsonValue& root, NotificationIntent& out) {
+        return ParseNotificationIntent(root, out);
+    });
+    auto too_many_actions = Document(kNotificationStrong);
+    too_many_actions.object["actions"].array.resize(17, too_many_actions.object["actions"].array[0]);
+    Reject<NotificationIntent>(std::move(too_many_actions), [](const JsonValue& root, NotificationIntent& out) {
+        return ParseNotificationIntent(root, out);
+    });
+}
+
+void CheckActionCommandBranches() {
+    auto acknowledge = Document(kActionCommand);
+    ReminderActionCommand acknowledge_output;
+    Check(ParseReminderActionCommand(acknowledge, acknowledge_output).ok() &&
+              acknowledge_output.action == "acknowledge" && !acknowledge_output.minutes.has_value(),
+          "acknowledge 命令无参数时应被接受");
+    auto snooze = Document(kActionCommand);
+    snooze.object["action"] = JsonValue::String("snooze");
+    snooze.object["params"] = JsonValue::Object({{"minutes", JsonValue::Number(1)}});
+    ReminderActionCommand snooze_output;
+    Check(ParseReminderActionCommand(snooze, snooze_output).ok() && snooze_output.minutes == 1,
+          "snooze 命令最小分钟数应被接受");
+
+    for (const char* field : {"commandId", "operationId", "correlationId", "deviceId", "actorBindingId",
+                              "reminderTriggerId", "occurredAt", "expiresAt"}) {
+        auto value = Document(kActionCommand);
+        value.object[field] = JsonValue::Number(1);
+        Reject<ReminderActionCommand>(std::move(value), [](const JsonValue& root, ReminderActionCommand& out) {
+            return ParseReminderActionCommand(root, out);
+        });
+    }
+    auto bad_params_type = Document(kActionCommand);
+    bad_params_type.object["params"] = JsonValue::Array({});
+    Reject<ReminderActionCommand>(std::move(bad_params_type), [](const JsonValue& root, ReminderActionCommand& out) {
+        return ParseReminderActionCommand(root, out);
+    });
+    auto bad_minutes = Document(kActionCommand);
+    bad_minutes.object["action"] = JsonValue::String("snooze");
+    bad_minutes.object["params"] =
+        JsonValue::Object({{"minutes", JsonValue::Number(std::numeric_limits<double>::quiet_NaN())}});
+    Reject<ReminderActionCommand>(std::move(bad_minutes), [](const JsonValue& root, ReminderActionCommand& out) {
+        return ParseReminderActionCommand(root, out);
+    });
+}
+
 void CheckReceiptBranches() {
     for (const char* field : {"eventId", "correlationId", "deviceId", "scheduleId", "summary"}) {
         auto value = Document(kReceipt);
@@ -104,6 +210,17 @@ void CheckReceiptBranches() {
     Reject<ScheduleReceiptIntent>(std::move(invalid_occurred), [](const JsonValue& root, ScheduleReceiptIntent& out) {
         return ParseScheduleReceiptIntent(root, out);
     });
+    for (const char* timestamp : {"2026-01-01T0x:00:00Z", "2026-01-01T00:00:x0Z", "2026-01-01T00:00:00+01:"}) {
+        auto value = Document(kReceipt);
+        value.object["occurredAt"] = JsonValue::String(timestamp);
+        Reject<ScheduleReceiptIntent>(std::move(value), [](const JsonValue& root, ScheduleReceiptIntent& out) {
+            return ParseScheduleReceiptIntent(root, out);
+        });
+    }
+    auto fractional_offset = Document(kReceipt);
+    fractional_offset.object["occurredAt"] = JsonValue::String("2026-01-01T00:00:00.1+08:30");
+    ScheduleReceiptIntent fractional_output;
+    Check(ParseScheduleReceiptIntent(fractional_offset, fractional_output).ok(), "带小数秒和时区偏移的时间应被接受");
 }
 
 void CheckSubmissionBranches() {
@@ -171,6 +288,14 @@ void CheckActionResultBranches() {
     oversized_details.object["details"] = JsonValue::Array(std::vector<JsonValue>(33, JsonValue::Number(1)));
     Check(oversized_details.object["details"].array.size() > 16, "details 变体必须超出预算");
     Reject<ReminderActionResult>(std::move(oversized_details), [](const JsonValue& root, ReminderActionResult& out) {
+        return ParseReminderActionResult(root, out);
+    });
+    auto oversized_object = Document(kActionResult);
+    oversized_object.object["details"] = JsonValue::Object({});
+    for (int index = 0; index < 17; ++index) {
+        oversized_object.object["details"].object["key" + std::to_string(index)] = JsonValue::Number(index);
+    }
+    Reject<ReminderActionResult>(std::move(oversized_object), [](const JsonValue& root, ReminderActionResult& out) {
         return ParseReminderActionResult(root, out);
     });
 }
@@ -258,6 +383,12 @@ void CheckQueryBranches() {
     Reject<ScheduleQueryResultIntent>(std::move(mismatch), [](const JsonValue& root, ScheduleQueryResultIntent& out) {
         return ParseScheduleQueryResultIntent(root, out);
     });
+    auto non_digit_date = Document(kQuery);
+    non_digit_date.object["query"].object["startDate"] = JsonValue::String("2026-0x-03");
+    Reject<ScheduleQueryResultIntent>(std::move(non_digit_date),
+                                      [](const JsonValue& root, ScheduleQueryResultIntent& out) {
+                                          return ParseScheduleQueryResultIntent(root, out);
+                                      });
 }
 
 void CheckPairingBranches() {
@@ -295,11 +426,19 @@ void CheckPairingBranches() {
     Reject<PairingSessionStatus>(std::move(invalid_window), [](const JsonValue& root, PairingSessionStatus& out) {
         return ParsePairingSessionStatus(root, out);
     });
+    auto fractional_offset = Document(kPairingStatus);
+    fractional_offset.object["createdAt"] = JsonValue::String("2026-08-03T00:00:00.1+08:00");
+    fractional_offset.object["confirmedAt"] = JsonValue::String("2026-08-03T00:05:00.2+08:00");
+    fractional_offset.object["expiresAt"] = JsonValue::String("2026-08-03T00:10:00.000+08:00");
+    PairingSessionStatus fractional_output;
+    Check(ParsePairingSessionStatus(fractional_offset, fractional_output).ok(), "配对时间的短小数秒与时区偏移应被接受");
 }
 
 }  // namespace
 
 int main() {
+    CheckNotificationBranches();
+    CheckActionCommandBranches();
     CheckReceiptBranches();
     CheckSubmissionBranches();
     CheckActionResultBranches();
