@@ -58,6 +58,9 @@ export { DefaultInboundEventApplication } from './inbound-event-application.js';
 export { DefaultPairingApplication } from './pairing-application.js';
 
 const DEFAULT_ACTION_WINDOW_MINUTES = 10;
+// 设备正常动作结果在历史实板测试中通常几十秒内返回；租约留出网络抖动余量，
+// 同时避免断链后的 processing 状态持续到整个十分钟提醒窗口结束。
+const ACTION_PROCESSING_LEASE_MILLISECONDS = 120_000;
 const MAX_AUTOMATIC_DELIVERY_ATTEMPTS = 5;
 const MAX_DELIVERY_RETRY_DELAY_MINUTES = 30;
 const SCHEDULE_QUERY_PAGE_TOKEN_MINUTES = 7 * 24 * 60;
@@ -1159,6 +1162,19 @@ export class DefaultActionApplication implements ActionApplication {
         return expired.length;
     }
 
+    /** {@inheritDoc ActionApplication.recoverStaleProcessing} */
+    public async recoverStaleProcessing(): Promise<number> {
+        const now = this.clock.now();
+        const staleBefore = new Date(
+            Date.parse(now) - ACTION_PROCESSING_LEASE_MILLISECONDS,
+        ).toISOString() as IsoDateTime;
+        const recovered = await this.unitOfWork.transaction((tx) =>
+            tx.actions.recoverStaleProcessingActions(now, staleBefore),
+        );
+        for (const action of recovered) await this.dispatch(toCommand(action));
+        return recovered.length;
+    }
+
     /** {@inheritDoc ActionApplication.resolveActionWindow} */
     public resolveActionWindow(deviceId: DeviceId, reminderTriggerId: ReminderTriggerId): Promise<IsoDateTime> {
         return this.unitOfWork.transaction(async (tx) => {
@@ -1178,7 +1194,10 @@ export class DefaultActionApplication implements ActionApplication {
                 action !== undefined &&
                 action.deviceId === deviceId &&
                 action.reminderTriggerId === reminderTriggerId &&
-                action.status === 'processing'
+                (action.status === 'processing' ||
+                    action.status === 'succeeded' ||
+                    action.status === 'failed' ||
+                    action.status === 'expired')
             ) {
                 return;
             }
@@ -1186,7 +1205,7 @@ export class DefaultActionApplication implements ActionApplication {
                 action === undefined ||
                 action.deviceId !== deviceId ||
                 action.reminderTriggerId !== reminderTriggerId ||
-                action.status !== 'dispatched'
+                (action.status !== 'dispatched' && action.status !== 'pending')
             ) {
                 throw new ImGatewayError('invalid_transition', 'Action cannot enter processing for this stream');
             }
@@ -1241,6 +1260,9 @@ export class DefaultActionApplication implements ActionApplication {
         await this.unitOfWork.transaction(async (tx) => {
             const action = await tx.actions.findById(command.commandId);
             if (action === undefined) return;
+            // Recovery/replay may race: the first path that marks an action dispatched
+            // owns publication; the shared operationId still makes device retries safe.
+            if (action.status === 'dispatched') return;
             await tx.actions.save({
                 ...action,
                 status: 'dispatched',

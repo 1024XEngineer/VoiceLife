@@ -21,7 +21,9 @@ if(CONFIG_VOICELIFE_BOARD_ESP_SPARKBOT)
     set(SPARKBOT_GIF_DIR "${CMAKE_SOURCE_DIR}/components/voicelife_display_esp/assets/esp-sparkbot/mascot/gifs")
     set(SPARKBOT_COMMON_FONT "${CMAKE_SOURCE_DIR}/components/voicelife_display_esp/assets/esp-sparkbot/fonts/font_noto_sans_common_14_1.bin")
     set(SPARKBOT_ASSETS_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/build_sparkbot_assets.py")
-    file(GLOB SPARKBOT_GIF_FILES "${SPARKBOT_GIF_DIR}/*.gif")
+    # CONFIGURE_DEPENDS 让新增/删除受控 GIF 自动触发重新配置，避免
+    # 构建目录沿用不含新资源的旧 assets 镜像。
+    file(GLOB SPARKBOT_GIF_FILES CONFIGURE_DEPENDS "${SPARKBOT_GIF_DIR}/*.gif")
     add_custom_command(
         OUTPUT "${CMAKE_BINARY_DIR}/sparkbot_assets.bin"
         COMMAND python3 "${SPARKBOT_ASSETS_SCRIPT}"

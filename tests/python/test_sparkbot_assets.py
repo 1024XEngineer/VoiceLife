@@ -108,12 +108,12 @@ class SparkBotAssetManifestTest(unittest.TestCase):
         self.assertIn("license", self.manifest["source"])
         self.assertEqual(self.manifest["source"]["license"], "MIT")
         self.assertTrue(self.manifest["source"]["upstream_commit"])
-        self.assertEqual(len(self.assets), 11)
-        self.assertEqual(self.manifest["budget"]["gif_bytes"], 147018)
+        self.assertEqual(len(self.assets), 12)
+        self.assertEqual(self.manifest["budget"]["gif_bytes"], 166392)
         self.assertEqual(self.manifest["budget"]["common_text_font_bytes"], 269580)
         self.assertNotIn("wake_model", self.manifest)
         self.assertNotIn("wakenet_packed_bytes", self.manifest["budget"])
-        self.assertEqual(self.manifest["budget"]["total_bytes"], 416598)
+        self.assertEqual(self.manifest["budget"]["total_bytes"], 435972)
 
     def test_common_font_matches_official_14px_spec(self) -> None:
         font = self.manifest["text_font"]
@@ -176,7 +176,7 @@ class SparkBotAssetManifestTest(unittest.TestCase):
                 return "过短"
             total, _chk, ln = struct.unpack("<III", image[:HEADER])
             table_bytes = total * ENTRY
-            if total > 12 or table_bytes > ln:
+            if total > 13 or table_bytes > ln:
                 return "表越界"
             if ln > len(image) - HEADER:
                 return "长度非法"

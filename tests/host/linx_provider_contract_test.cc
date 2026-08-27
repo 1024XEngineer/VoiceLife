@@ -283,8 +283,9 @@ int main() {
     const auto events_after_goodbye = events.size();
     transport.EmitText(
         R"({"type":"llm","session_id":"remote-linx-session","text":"ok","emotion":"happy","action":"thinking"})");
-    Check(events_after_goodbye == events_before_goodbye && events.size() == events_after_goodbye,
-          "goodbye 与 llm 表情消息不得触发 provider 错误事件");
+    Check(events_after_goodbye == events_before_goodbye && events.size() == events_after_goodbye + 1 &&
+              events.back().kind == voicelife::voice::VoiceEventKind::kLlmEmotion && events.back().text == "happy",
+          "goodbye 不应产生事件，llm 表情应以独立情感事件交给显示链路");
     Check(provider.audio_formats().ok(), "goodbye/llm 消息不得破坏已协商的音频格式");
 
     FakeTransport mcp_transport;

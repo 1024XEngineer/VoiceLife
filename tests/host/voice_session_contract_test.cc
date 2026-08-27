@@ -119,8 +119,9 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
         generation_at_abort = generation_;
         return abort_result;
     }
-    Status Speak(std::string_view) override {
+    Status Speak(std::string_view text) override {
         ++speaks;
+        last_speech = std::string(text);
         return speak_result;
     }
     Status NotifyLocalWakeWord(std::string_view wake_word, std::string_view text_response = {}) override {
@@ -174,6 +175,7 @@ class FakeProvider final : public voicelife::voice::SpeechProviderAdapter {
     std::vector<std::string> calls;
     std::string last_wake_word;
     std::string last_wake_response;
+    std::string last_speech;
 };
 
 voicelife::voice::VoiceSessionConfig Config() {
@@ -261,6 +263,13 @@ int main() {
     Check(evidence.size() >= 3 && evidence[evidence.size() - 2].event == "mcp_tool_started" &&
               evidence.back().event == "mcp_tool_result" && evidence.back().detail == "event=创建会议",
           "MCP worker 只能通过 VoiceSession 的受控 evidence 出口回注结果");
+    provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kLlmEmotion,
+                                               .generation = session.generation(),
+                                               .text = "happy",
+                                               .aborted = false});
+    Check(session.state() == voicelife::voice::VoiceSessionState::kReady && !evidence.empty() &&
+              evidence.back().event == "llm_emotion" && evidence.back().detail == "happy",
+          "Linx 情感事件只应进入显示证据链，不得改变语音会话状态");
     const uint64_t generation = session.generation();
     // 空闲（kReady）收到服务端残留 TTS start 必须忽略，不进入播报。
     provider.Emit(voicelife::voice::VoiceEvent{
@@ -512,6 +521,13 @@ int main() {
               timed_out_ack_session.state() == voicelife::voice::VoiceSessionState::kCapturing,
           "跳过迟到确认后必须立即可开始真实采集");
     const uint64_t timed_out_capture_generation = timed_out_ack_session.generation();
+    timed_out_ack_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
+                                                             .generation = timed_out_ack_generation,
+                                                             .text = {},
+                                                             .aborted = false});
+    Check(timed_out_ack_session.state() == voicelife::voice::VoiceSessionState::kCapturing &&
+              timed_out_ack_evidence.back().event == "stale_event_dropped",
+          "确认超时后迟到的 tts.start 不得再次播放收到或停止新一轮采集");
     timed_out_ack_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStopped,
                                                              .generation = timed_out_ack_generation,
                                                              .text = {},
@@ -609,6 +625,33 @@ int main() {
     Check(speak_failure.Speak("失败测试").code == ErrorCode::kUnavailable &&
               speak_failure.state() == voicelife::voice::VoiceSessionState::kReady,
           "TTS 失败不得卡在 speaking 状态");
+
+    // 本地摇动反馈必须等待旧 TTS 的顺序栅栏，避免新提示被旧流丢弃。
+    FakeInput shake_input;
+    FakeOutput shake_output;
+    FakeProvider shake_provider;
+    voicelife::voice::VoiceSession shake_session(shake_input, shake_output, shake_provider);
+    Check(shake_session.Start(Config()).ok() && shake_session.BeginCapture().ok(), "摇动反馈会话应能启动采集");
+    const uint64_t shake_generation = shake_session.generation();
+    shake_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kAsrText,
+                                                     .generation = shake_generation,
+                                                     .text = "上一句话",
+                                                     .aborted = false});
+    shake_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStarted,
+                                                     .generation = shake_generation,
+                                                     .text = {},
+                                                     .aborted = false});
+    Check(shake_session.state() == voicelife::voice::VoiceSessionState::kSpeaking, "摇动反馈前应处于 speaking");
+    Check(shake_session.InterruptAndSpeak("别摇了，牛牛来了").ok() && shake_provider.aborts == 1 &&
+              shake_provider.speaks == 0 && shake_session.state() == voicelife::voice::VoiceSessionState::kReady,
+          "旧 TTS 播放中摇动必须先中断并延迟新系统语音");
+    const uint64_t shake_new_generation = shake_session.generation();
+    shake_provider.Emit(voicelife::voice::VoiceEvent{.kind = voicelife::voice::VoiceEventKind::kTtsStopped,
+                                                     .generation = shake_new_generation,
+                                                     .text = {},
+                                                     .aborted = true});
+    Check(shake_provider.speaks == 1 && shake_provider.last_speech == "别摇了，牛牛来了",
+          "旧 TTS 栅栏到达后必须提交摇动系统语音");
 
     FakeInput negotiated_input;
     FakeOutput negotiated_output;

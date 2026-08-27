@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inject a real DashScope TTS wake phrase into SparkBot's local wake detector."""
+"""Inject a wake phrase into SparkBot's local MultiNet detector over USB PCM."""
 
 from __future__ import annotations
 
@@ -37,7 +37,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", default="/dev/cu.usbmodem14401")
     parser.add_argument("--baud", type=int, default=115200)
-    parser.add_argument("--text", default="你好牛牛")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--text", default="你好牛牛", help="由百炼合成后注入的唤醒词。")
+    source.add_argument("--input-audio", type=Path, help="本地音频文件；支持 ffmpeg 可解码的格式。")
+    parser.add_argument(
+        "--expected-word",
+        help="期望本地 MultiNet 命中的显示词；默认使用 --text。",
+    )
     parser.add_argument(
         "--followup-text",
         action="append",
@@ -47,14 +53,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--voice", default="longanhuan_v3")
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument(
+        "--expect-detection",
+        choices=("yes", "no"),
+        default="yes",
+        help="yes 要求命中；no 在观察窗口内出现命中即失败。",
+    )
+    parser.add_argument(
+        "--negative-observation-seconds",
+        type=float,
+        default=4.0,
+        help="--expect-detection=no 时，WAKE_END 后继续观察的时长。",
+    )
+    parser.add_argument(
         "--reset-before-run",
         action="store_true",
         help="Hard-reset the board after opening the serial port, then wait for its ready sequence.",
     )
     parser.add_argument("--serial-log", type=Path)
     args = parser.parse_args()
-    if args.baud <= 0 or args.timeout <= 0:
-        parser.error("baud 和 timeout 必须为正数")
+    if args.baud <= 0 or args.timeout <= 0 or args.negative_observation_seconds <= 0:
+        parser.error("baud、timeout 和 negative-observation-seconds 必须为正数")
+    if args.input_audio is not None and not args.input_audio.is_file():
+        parser.error(f"input-audio 不存在或不是文件: {args.input_audio}")
     return args
 
 
@@ -108,20 +128,30 @@ def request_wake_begin(log: SerialLog, device: serial.Serial, timeout: float) ->
 
 def main() -> int:
     args = parse_args()
-    api_key = os.environ.get("DASHSCOPE_API_KEY")
-    if not api_key:
-        print("DASHSCOPE_API_KEY is required", file=sys.stderr)
+    if serial is None:
+        print("pyserial is required", file=sys.stderr)
         return 2
-    if serial is None or dashscope is None or SpeechSynthesizer is None:
-        print("pyserial and dashscope are required", file=sys.stderr)
-        return 2
-
-    dashscope.api_key = api_key
     try:
-        audio = synthesize(args.text, args.tts_model, args.voice)
+        if args.input_audio is not None:
+            audio = args.input_audio.read_bytes()
+            input_description = str(args.input_audio)
+        else:
+            api_key = os.environ.get("DASHSCOPE_API_KEY")
+            if not api_key:
+                print("DASHSCOPE_API_KEY is required with --text", file=sys.stderr)
+                return 2
+            if dashscope is None or SpeechSynthesizer is None:
+                print("dashscope is required with --text", file=sys.stderr)
+                return 2
+            dashscope.api_key = api_key
+            audio = synthesize(args.text, args.tts_model, args.voice)
+            input_description = args.text
         frames = to_pcm_frames(audio)
         followups = []
         for text in args.followup_text or []:
+            if dashscope is None or SpeechSynthesizer is None:
+                print("dashscope is required with --followup-text", file=sys.stderr)
+                return 2
             followup_audio = synthesize(text, args.tts_model, args.voice)
             followups.append(PreparedTurn(input_text=text, tts_ms=0, frames=to_pcm_frames(followup_audio)))
     except (RuntimeError, OSError) as error:
@@ -153,10 +183,26 @@ def main() -> int:
             device.write(packet(PCM, frame))
             device.flush()
             time.sleep(0.02)
+        # MultiNet can decide on the final PCM chunk before the host-side
+        # WAKE_END acknowledgement is emitted. Keep the pre-END cursor for
+        # detection lookup; starting at the END marker would misclassify an
+        # otherwise valid early detection (and miss early false positives).
+        detection_cursor = cursor
         device.write(packet(WAKE_END))
         device.flush()
         cursor = wait_for(log, "SERIAL_VOICE_WAKE_END=ok", cursor, 5)
-        cursor = wait_for(log, "WAKE_DETECTED word=你好牛牛", cursor, args.timeout)
+        expected_word = args.expected_word or args.text
+        if args.expect_detection == "no":
+            try:
+                log.wait_for("WAKE_DETECTED word=", detection_cursor, args.negative_observation_seconds)
+            except TimeoutError:
+                print(
+                    f"wake_injection_no_detection_success input={input_description} "
+                    f"frames={len(frames)} observation_s={args.negative_observation_seconds:g}"
+                )
+                return 0
+            raise TimeoutError("unexpected_wake_detection")
+        cursor = wait_for(log, f"WAKE_DETECTED word={expected_word}", detection_cursor, args.timeout)
         cursor = wait_for(log, "SERIAL_VOICE_EVIDENCE event=wake_detected ", cursor, 5)
         # Both Linx-compatible wake paths are valid: a silent detect opens the
         # capture immediately, while a deliberate confirmation speech first
@@ -175,7 +221,7 @@ def main() -> int:
             cursor = wait_for(log, "SERIAL_VOICE_EVIDENCE event=tts_stopped ", cursor, args.timeout)
         cursor = wait_for(log, "SERIAL_VOICE_EVIDENCE event=capture_started ", cursor, args.timeout)
         if not followups:
-            print(f"wake_injection_success text={args.text} frames={len(frames)}")
+            print(f"wake_injection_success input={input_description} frames={len(frames)}")
             return 0
         for index, prepared in enumerate(followups, start=1):
             result = run_turn(

@@ -14,7 +14,7 @@
       "Shenzhen Xinzhi Future Technology Co., Ltd.",
       "Project Contributors"
     ],
-    "note": "官方 emoji 目录另有 neutral.gif 与 robot_2.gif，本轮未复制；idle_eyes.gif 为 VoiceLife 待机屏保资源。"
+    "note": "官方 emoji 目录另有 neutral.gif 与 robot_2.gif，本轮未复制；idle_eyes.gif 为 VoiceLife 待机屏保资源；dizzy.gif 为 VoiceLife 本地 IMU 摇晃反馈资源。"
   },
   "loading": {
     "mode": "embedded_manifest_only",
@@ -23,15 +23,15 @@
     "allow_arbitrary_bytes": false
   },
   "budget": {
-    "gif_bytes": 147018,
+    "gif_bytes": 166392,
     "common_text_font_bytes": 269580,
-    "total_bytes": 416598,
+    "total_bytes": 435972,
     "assets_partition_bytes": 1048576,
     "single_frame_rgb565_bytes": 18432,
     "psram_decode_peak_bytes": null,
     "psram_note": "GIF 解码峰值内存尚未测量；Renderer 移植时以真机 heap 证据补充。",
-    "assets_image_sha256": "7bc16f4712b7750bbbb04ca60cea69947c2e00ae7898387c84ef7cbe1b4badcb",
-    "assets_image_bytes": 417162
+    "assets_image_sha256": "73e6c69640087607d793f540f62d23fb2028ca61b75d9120c8aa056869cdf43f",
+    "assets_image_bytes": 436582
   },
   "text_font": {
     "file": "font_noto_sans_common_14_1.bin",
@@ -67,6 +67,16 @@
       "duration_ms": 2880,
       "size_bytes": 11385,
       "sha256": "e32e2f91e1c8adab5e7e912ccf84c6a95a977df2d6ee98ee743abe3584523584"
+    },
+    {
+      "asset_id": "dizzy",
+      "file": "dizzy.gif",
+      "width": 96,
+      "height": 96,
+      "frame_count": 8,
+      "duration_ms": 800,
+      "size_bytes": 19374,
+      "sha256": "63ba5f9b2447fe4a336fa1f719aa2c411bceadd6cd53b79d814d59de66a88d90"
     },
     {
       "asset_id": "error",

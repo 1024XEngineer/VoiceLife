@@ -19,7 +19,7 @@ class EspMultiNetWakeDetector final : public voice::LocalWakeDetectorPort {
     /** @brief 检测器禁止赋值，避免重复持有模型资源。 */
     EspMultiNetWakeDetector& operator=(const EspMultiNetWakeDetector&) = delete;
 
-    /** @brief 启动检测并注册“你好牛牛”“牛牛”“别说了”三个本地命令。
+    /** @brief 启动检测并注册“你好牛牛”“牛来”“别说了”三个本地命令。
      * @param sink 命中唤醒词后的回调。
      * @return 模型和命令初始化成功时返回成功。
      */

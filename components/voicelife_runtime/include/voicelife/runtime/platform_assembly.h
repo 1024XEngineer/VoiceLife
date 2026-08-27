@@ -20,6 +20,8 @@ enum class BoardInputAction : uint8_t {
     kVolumeMute,
     /** Physical long-press request: reboot into local SoftAP Wi-Fi provisioning. */
     kStartWifiProvisioning,
+    /** SparkBot BMI270 reports a debounced shake gesture. */
+    kShakeDetected,
 };
 
 /** @brief Runtime 提供给板级输入适配器的非阻塞语义事件入口。 */

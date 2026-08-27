@@ -209,7 +209,8 @@ SparkBotAssembly::SparkBotAssembly()
                     .maximum_playback_latency_ms = audio_esp::kSparkBotPlaybackLatencyBudgetMs},
                    [this](bool enabled) { (void)SetAudioOutputEnabled(enabled); }),
       arbiter_(voicelife::board_esp::SparkBotProfile().shared_power),
-      adapter_(MakeSparkBotLcdConfig(), [this](bool enabled) { ApplyBacklight(enabled); }) {}
+      adapter_(MakeSparkBotLcdConfig(), [this](bool enabled) { ApplyBacklight(enabled); }),
+      imu_(std::make_unique<voicelife::board_esp::SparkBotImu>()) {}
 
 voicelife::voice::PresentationPort& SparkBotAssembly::presentation() { return adapter_; }
 
@@ -217,6 +218,17 @@ void SparkBotAssembly::BoardInputTaskEntry(void* context) { static_cast<SparkBot
 
 voicelife::Status SparkBotAssembly::StartBoardInput(BoardInputSink sink) {
     board_input_sink_ = std::move(sink);
+    const Status imu_status = imu_->Start([this]() {
+        if (board_input_sink_) board_input_sink_(BoardInputAction::kShakeDetected);
+    });
+#ifdef ESP_PLATFORM
+    if (!imu_status.ok()) {
+        ESP_LOGW(kPowerTag, "SPARKBOT_IMU_UNAVAILABLE code=%d message=%s", static_cast<int>(imu_status.code),
+                 imu_status.message.c_str());
+    }
+#else
+    (void)imu_status;
+#endif
 #ifdef ESP_PLATFORM
     // 官方 SparkBot 只将 BOOT GPIO0 作为用户输入；SPI/I2S 复用引脚不参与配置。
     const gpio_config_t config = {
@@ -311,9 +323,9 @@ voicelife::Status SparkBotAssembly::Start() {
     ApplyBacklight(true);
     const Status display = adapter_.Start();
     if (!display.ok()) return display;
-    // Keep the board profiles equal at the voice boundary: both boards use
-    // the existing MultiNet7 command grammar for "你好牛牛". ESP-SR emits the
-    // model partition image from the selected profile at build time.
+    // Keep the board profiles equal at the voice boundary. The command
+    // inventory is owned by EspMultiNetWakeDetector and includes the primary
+    // phrase, its short alias, and the interrupt phrase.
     wake_detector_ = std::make_unique<audio_esp::EspMultiNetWakeDetector>();
     wake_gate_ = std::make_unique<voice::WakeGateAudioInput>(audio_ports_.input(), *wake_detector_, true);
     wake_ready_ = true;

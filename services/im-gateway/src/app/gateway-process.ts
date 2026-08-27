@@ -1,14 +1,15 @@
-import { createKoishiGatewayRuntime, type KoishiGatewayRuntime } from './create-koishi-gateway.js';
 import { Context } from '@koishijs/core';
-import { unsafeId, type ChannelAccountId } from '../contracts/ids.js';
+
+import { type ChannelAccountId, unsafeId } from '../contracts/ids.js';
 import type { ChannelAccount } from '../domain/models.js';
-import { DeliveryOutboxWorker } from '../infrastructure/delivery-outbox-worker.js';
 import { ChannelAdapterRegistry } from '../infrastructure/channel-adapter-registry.js';
+import { DeliveryOutboxWorker } from '../infrastructure/delivery-outbox-worker.js';
 import {
     type GatewayLogger,
-    startGatewayHttpServer,
     type StartedGatewayHttpServer,
+    startGatewayHttpServer,
 } from '../infrastructure/http/gateway-http-server.js';
+import { WechatOfficialKoishiBot } from '../infrastructure/koishi/wechat-official-koishi-bot.js';
 import { JsonLineGatewayLogger } from '../infrastructure/observability/json-line-logger.js';
 import { PostgresImUnitOfWork } from '../infrastructure/persistence/postgres.js';
 import {
@@ -16,6 +17,7 @@ import {
     DirectConversationResolver,
     SystemClock,
 } from '../infrastructure/production-support.js';
+import { ReminderActionExpiryWorker } from '../infrastructure/reminder-action-expiry-worker.js';
 import { AesGcmActionTokenPort } from '../infrastructure/security/aes-gcm-action-token.js';
 import {
     AesGcmExternalIdentityProtector,
@@ -24,14 +26,15 @@ import {
     UuidIdGenerator,
 } from '../infrastructure/security/production-ports.js';
 import { WechatOfficialAdapter } from '../infrastructure/wechat/wechat-official-adapter.js';
-import { WechatOfficialKoishiBot } from '../infrastructure/koishi/wechat-official-koishi-bot.js';
+
+import { createKoishiGatewayRuntime, type KoishiGatewayRuntime } from './create-koishi-gateway.js';
 
 export {
-    startGatewayHttpServer,
     type GatewayHttpServerOptions,
     type GatewayLogEntry,
     type GatewayLogger,
     type StartedGatewayHttpServer,
+    startGatewayHttpServer,
 } from '../infrastructure/http/gateway-http-server.js';
 
 /** 生产进程可读取的环境变量集合。 */
@@ -59,17 +62,9 @@ export interface GatewayWechatConfiguration {
     readonly webhookToken: string;
     readonly expectedToUserName: string;
     readonly templateId: string;
-    readonly templateFields: {
-        readonly title: string;
-        readonly body: string;
-        readonly time: string;
-    };
+    readonly templateFields: { readonly title: string; readonly body: string; readonly time: string };
     readonly queryTemplateId: string;
-    readonly queryTemplateFields: {
-        readonly title: string;
-        readonly body: string;
-        readonly time: string;
-    };
+    readonly queryTemplateFields: { readonly title: string; readonly body: string; readonly time: string };
     readonly displayTimeZone: string;
     readonly actionUiBaseUrl: string;
 }
@@ -163,6 +158,7 @@ export async function startConfiguredGatewayProcess(
     const unitOfWork = new PostgresImUnitOfWork(config.databaseUrl);
     let koishi: KoishiGatewayRuntime | undefined;
     let deliveryWorker: DeliveryOutboxWorker | undefined;
+    let actionExpiryWorker: ReminderActionExpiryWorker | undefined;
     let http: StartedGatewayHttpServer | undefined;
     try {
         await unitOfWork.migrate();
@@ -236,6 +232,11 @@ export async function startConfiguredGatewayProcess(
             logger: processLogger,
         });
         deliveryWorker.start();
+        actionExpiryWorker = new ReminderActionExpiryWorker({
+            actions: koishi.runtime.application.actions,
+            logger: processLogger,
+        });
+        actionExpiryWorker.start();
         http = await startGatewayHttpServer({
             host: config.host,
             port: config.port,
@@ -255,13 +256,21 @@ export async function startConfiguredGatewayProcess(
         return {
             origin: http.origin,
             close(): Promise<void> {
-                closePromise ??= closeGateway(http!, deliveryWorker!, koishi!, unitOfWork, processLogger);
+                closePromise ??= closeGateway(
+                    http!,
+                    deliveryWorker!,
+                    actionExpiryWorker!,
+                    koishi!,
+                    unitOfWork,
+                    processLogger,
+                );
                 return closePromise;
             },
         };
     } catch (error) {
         if (http !== undefined) await http.close().catch(() => undefined);
         if (deliveryWorker !== undefined) await deliveryWorker.close().catch(() => undefined);
+        if (actionExpiryWorker !== undefined) await actionExpiryWorker.close().catch(() => undefined);
         if (koishi !== undefined) await koishi.close().catch(() => undefined);
         await unitOfWork.close().catch(() => undefined);
         throw error;
@@ -317,6 +326,7 @@ function assertConfiguredChannel(account: ChannelAccount, wechat: GatewayWechatC
 async function closeGateway(
     http: StartedGatewayHttpServer,
     deliveryWorker: DeliveryOutboxWorker,
+    actionExpiryWorker: ReminderActionExpiryWorker,
     koishi: KoishiGatewayRuntime,
     unitOfWork: PostgresImUnitOfWork,
     logger: GatewayLogger,
@@ -325,6 +335,7 @@ async function closeGateway(
     for (const close of [
         () => http.close(),
         () => deliveryWorker.close(),
+        () => actionExpiryWorker.close(),
         () => koishi.close(),
         () => unitOfWork.close(),
     ]) {

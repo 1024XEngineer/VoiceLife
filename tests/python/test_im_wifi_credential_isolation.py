@@ -60,7 +60,7 @@ class ImWifiCredentialIsolationTest(unittest.TestCase):
         self.assertIn("ulTaskNotifyTake(pdTRUE, portMAX_DELAY)", RUNTIME_SOURCE)
         self.assertIn("xTaskNotifyGive(im_lifecycle_task_)", RUNTIME_SOURCE)
 
-    def test_reminder_action_worker_reserves_an_internal_stack_before_storage(self):
+    def test_reminder_action_worker_reserves_internal_stack_before_storage(self):
         startup = RUNTIME_SOURCE[
             RUNTIME_SOURCE.index("Status Start(PlatformAssembly& assembly)") : RUNTIME_SOURCE.index(
                 "void StopEventLoop()"
@@ -74,7 +74,7 @@ class ImWifiCredentialIsolationTest(unittest.TestCase):
         self.assertLess(startup.index("StartReminderActionWorker()"), startup.index("storage_.Start()"))
         self.assertIn("xTaskCreateWithCaps(&Runtime::ReminderActionTaskEntry", worker)
         self.assertIn("MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT", worker)
-        self.assertIn("kReminderActionWorkerStackBytes = 16 * 1024", worker)
+        self.assertIn("kReminderActionWorkerStackBytes = 8 * 1024", worker)
         self.assertNotIn("MALLOC_CAP_SPIRAM", worker)
 
     def test_im_provisioning_writes_all_four_credentials_only_in_im_namespace(self):

@@ -11,7 +11,8 @@ from typing import NamedTuple
 
 TYPE_DECLARATION = re.compile(r"^(?:template\s*<.*>\s*)?(?:class|struct|enum\s+class)\s+\w+")
 FUNCTION_DECLARATION = re.compile(
-    r"^(?!static_assert\b)(?:(?:\[\[nodiscard\]\]\s*)?(?:(?:virtual|static|explicit)\s+)?)"
+    r"^(?!(?:static_assert|if|for|while|switch|catch)\b)"
+    r"(?:(?:\[\[nodiscard\]\]\s*)?(?:(?:virtual|static|explicit)\s+)?)"
     r"(?:(?:[\w:<>]+(?:\s+[\w:<>]+)*\s*[*&]?\s+)?~?\w+)\s*\("
 )
 ACCESS_SPECIFIER = re.compile(r"^(public|private|protected):$")

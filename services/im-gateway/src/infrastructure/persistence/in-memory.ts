@@ -708,6 +708,22 @@ export class InMemoryImUnitOfWork implements ImUnitOfWork, ImUnitOfWorkContext {
         );
     }
 
+    /** {@inheritDoc ActionRepository.recoverStaleProcessingActions} */
+    public recoverStaleProcessingActions(now: IsoDateTime, staleBefore: IsoDateTime): Promise<readonly ImAction[]> {
+        const recovered: ImAction[] = [];
+        for (const action of this.actionRows.values()) {
+            if (action.status !== 'processing' || action.updatedAt > staleBefore || action.expiresAt <= now) continue;
+            const updated: ImAction = {
+                ...action,
+                status: 'pending',
+                updatedAt: now,
+            };
+            this.actionRows.set(action.id, updated);
+            recovered.push(updated);
+        }
+        return Promise.resolve(recovered);
+    }
+
     /** {@inheritDoc OutboxRepository.append} */
     public append(event: ImOutboxEvent): Promise<void> {
         this.outboxRows.push(event);

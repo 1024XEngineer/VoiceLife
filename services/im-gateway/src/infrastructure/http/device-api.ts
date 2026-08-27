@@ -319,12 +319,15 @@ async function* markCommandsProcessing(
     actions: ActionApplication,
 ): AsyncIterable<ReminderActionSseEvent> {
     for await (const command of commands) {
-        await actions.markProcessing(command.commandId, command.deviceId, command.reminderTriggerId);
         yield {
             id: command.commandId,
             event: 'reminder.action',
             data: command,
         };
+        // The HTTP consumer requests the next event only after the previous SSE
+        // frame has been written. Marking here avoids a lost command becoming
+        // processing when the response closes before any bytes are sent.
+        await actions.markProcessing(command.commandId, command.deviceId, command.reminderTriggerId);
     }
 }
 

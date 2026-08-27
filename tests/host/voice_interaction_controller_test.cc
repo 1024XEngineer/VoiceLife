@@ -55,6 +55,46 @@ int main() {
     CheckTransition(controller, VoiceInteractionEvent::kFinalizationTimedOut, VoiceInteractionState::kStandby,
                     VoiceInteractionAction::kRestoreStandby, "提醒后的语音轮次超时应恢复待机");
 
+    VoiceInteractionController no_speech_controller;
+    CheckTransition(no_speech_controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "无输入超时用例应先进入待机");
+    CheckTransition(no_speech_controller, VoiceInteractionEvent::kPressDown, VoiceInteractionState::kOpeningCapture,
+                    VoiceInteractionAction::kStartCapture, "无输入超时用例应先请求采集");
+    CheckTransition(no_speech_controller, VoiceInteractionEvent::kCaptureStarted, VoiceInteractionState::kListening,
+                    VoiceInteractionAction::kNone, "无输入超时用例应先确认采集");
+    CheckTransition(no_speech_controller, VoiceInteractionEvent::kNoSpeechTimeout, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "无语音超时应直接回待机而不是进入处理中");
+
+    VoiceInteractionController shake_controller;
+    CheckTransition(shake_controller, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "摇晃反馈用例应先进入待机");
+    CheckTransition(shake_controller, VoiceInteractionEvent::kShakeSpeechRequested,
+                    VoiceInteractionState::kOpeningCapture, VoiceInteractionAction::kNone,
+                    "摇晃反馈不得先显示处理中，应直接进入聆听事务阶段");
+    CheckTransition(shake_controller, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
+                    VoiceInteractionAction::kNone, "摇晃提示音开始后应进入说话中");
+    CheckTransition(shake_controller, VoiceInteractionEvent::kTtsStopped, VoiceInteractionState::kOpeningCapture,
+                    VoiceInteractionAction::kStartCapture, "摇晃提示音结束后应请求真实采集");
+    CheckTransition(shake_controller, VoiceInteractionEvent::kCaptureStarted, VoiceInteractionState::kListening,
+                    VoiceInteractionAction::kNone, "摇晃后的采集确认才进入聆听中");
+
+    VoiceInteractionController shake_during_speaking;
+    CheckTransition(shake_during_speaking, VoiceInteractionEvent::kBootCompleted, VoiceInteractionState::kStandby,
+                    VoiceInteractionAction::kRestoreStandby, "播报中摇晃用例应先进入待机");
+    CheckTransition(shake_during_speaking, VoiceInteractionEvent::kSystemSpeechRequested,
+                    VoiceInteractionState::kThinking, VoiceInteractionAction::kNone, "播报前置状态应允许系统播报");
+    CheckTransition(shake_during_speaking, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
+                    VoiceInteractionAction::kNone, "播报中摇晃用例应进入说话中");
+    CheckTransition(shake_during_speaking, VoiceInteractionEvent::kShakeSpeechRequested,
+                    VoiceInteractionState::kOpeningCapture, VoiceInteractionAction::kNone,
+                    "播报中摇晃必须跳过处理中并进入聆听事务阶段");
+    CheckTransition(shake_during_speaking, VoiceInteractionEvent::kTtsStarted, VoiceInteractionState::kSpeaking,
+                    VoiceInteractionAction::kNone, "摇晃提示音替换旧播报后仍应保持说话中");
+    CheckTransition(shake_during_speaking, VoiceInteractionEvent::kTtsStopped, VoiceInteractionState::kOpeningCapture,
+                    VoiceInteractionAction::kStartCapture, "替换播报结束后应启动采集");
+    CheckTransition(shake_during_speaking, VoiceInteractionEvent::kCaptureStarted, VoiceInteractionState::kListening,
+                    VoiceInteractionAction::kNone, "播报中摇晃最终必须进入聆听中");
+
     VoiceInteractionController acknowledgement_timeout_controller;
     CheckTransition(acknowledgement_timeout_controller, VoiceInteractionEvent::kBootCompleted,
                     VoiceInteractionState::kStandby, VoiceInteractionAction::kRestoreStandby,

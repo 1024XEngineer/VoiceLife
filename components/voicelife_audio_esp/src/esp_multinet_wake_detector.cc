@@ -19,6 +19,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "model_path.h"
+#include "voicelife/audio_esp/esp_multinet_wake_commands.h"
+#include "voicelife/audio_esp/multinet_audio_conditioning.h"
 
 namespace voicelife::audio_esp {
 namespace {
@@ -31,20 +33,6 @@ constexpr std::size_t kInputCapacitySamples = kMaxFrameSamples * 2;
 constexpr std::size_t kMailboxCapacity = 9;
 constexpr uint32_t kWorkerStackWords = 16384 / sizeof(StackType_t);
 constexpr UBaseType_t kWorkerPriority = 4;
-
-struct LocalCommand {
-    int id;
-    const char* grammar;
-    const char* display;
-};
-
-// MultiNet's command grammar is a pinyin token sequence. These commands are
-// registered once per active board assembly, not from Runtime.
-constexpr LocalCommand kCommands[] = {
-    {1, "ni hao niu niu", "你好牛牛"},
-    {2, "niu niu", "牛牛"},
-    {3, "bie shuo le", "别说了"},
-};
 
 Status DetectorError(ErrorCode code, const char* message) { return Status::Error(code, message); }
 
@@ -61,11 +49,24 @@ class EspMultiNetWakeDetector::Impl final {
     Status Start(LocalWakeDetectorPort::WakeSink sink) {
         {
             std::lock_guard<std::mutex> model_lock(model_mutex_);
-            if (!EnsureModelLocked().ok()) return model_status_;
+            const Status model_status = EnsureModelLocked();
+            if (!model_status.ok()) {
+                ESP_LOGW(kTag, "WAKE_START_FAILED stage=model code=%d msg=%s", static_cast<int>(model_status.code),
+                         model_status.message.c_str());
+                return model_status;
+            }
             const Status buffer_status = PrepareInputLocked();
-            if (!buffer_status.ok()) return buffer_status;
+            if (!buffer_status.ok()) {
+                ESP_LOGW(kTag, "WAKE_START_FAILED stage=input_buffer code=%d msg=%s",
+                         static_cast<int>(buffer_status.code), buffer_status.message.c_str());
+                return buffer_status;
+            }
             const Status worker_status = EnsureWorkerLocked();
-            if (!worker_status.ok()) return worker_status;
+            if (!worker_status.ok()) {
+                ESP_LOGW(kTag, "WAKE_START_FAILED stage=worker code=%d msg=%s", static_cast<int>(worker_status.code),
+                         worker_status.message.c_str());
+                return worker_status;
+            }
             multinet_->clean(model_data_);
             sink_ = std::move(sink);
         }
@@ -180,6 +181,15 @@ class EspMultiNetWakeDetector::Impl final {
             }
             const auto* samples = reinterpret_cast<const int16_t*>(pending.frame.payload.data());
             const std::size_t sample_count = pending.frame.payload.size() / sizeof(int16_t);
+            auto* mutable_samples = reinterpret_cast<int16_t*>(pending.frame.payload.data());
+            const MultiNetAudioConditioningStats conditioning = ConditionMultiNetPcm(mutable_samples, sample_count);
+            ++conditioned_frames_;
+            if (conditioned_frames_ == 1 || conditioned_frames_ % 100 == 0) {
+                ESP_LOGI(kTag, "WAKE_INPUT_CONDITIONING frame=%llu rms=%u->%u peak=%u->%u gain_q10=%u gated=%d",
+                         static_cast<unsigned long long>(conditioned_frames_), conditioning.input_rms,
+                         conditioning.output_rms, conditioning.input_peak, conditioning.output_peak,
+                         static_cast<unsigned>(conditioning.gain_q10), conditioning.gated ? 1 : 0);
+            }
             if (!AppendInputLocked(samples, sample_count).ok()) {
                 // This is a model-side continuity loss, not a physical PCM
                 // loss. Clear its private staging buffer and resume from the
@@ -197,7 +207,12 @@ class EspMultiNetWakeDetector::Impl final {
                     const esp_mn_results_t* result = multinet_->get_results(model_data_);
                     if (result != nullptr) {
                         for (int i = 0; i < result->num; ++i) {
-                            for (const auto& command : kCommands) {
+                            ESP_LOGI(kTag, "WAKE_RESULT candidate_id=%d phrase_id=%d prob=%.4f string=%s raw=%s",
+                                     result->command_id[i], result->phrase_id[i], static_cast<double>(result->prob[i]),
+                                     result->string, result->raw_string);
+                        }
+                        for (int i = 0; i < result->num; ++i) {
+                            for (const auto& command : kMultiNetWakeCommands) {
                                 if (command.id == result->command_id[i]) {
                                     matched_display = command.display;
                                     break;
@@ -242,6 +257,15 @@ class EspMultiNetWakeDetector::Impl final {
             static_cast<StaticTask_t*>(heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         if (worker_wakeup_ == nullptr || worker_stopped_ == nullptr || worker_stack_ == nullptr ||
             worker_tcb_ == nullptr) {
+            ESP_LOGW(kTag,
+                     "WAKE_WORKER_ALLOC_FAILED wake=%d stopped=%d stack=%d tcb=%d internal_free=%u internal_largest=%u "
+                     "psram_free=%u psram_largest=%u",
+                     worker_wakeup_ != nullptr ? 1 : 0, worker_stopped_ != nullptr ? 1 : 0,
+                     worker_stack_ != nullptr ? 1 : 0, worker_tcb_ != nullptr ? 1 : 0,
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
             CleanupWorkerStorage();
             return DetectorError(ErrorCode::kUnavailable, "MultiNet 异步检测任务资源分配失败");
         }
@@ -314,24 +338,34 @@ class EspMultiNetWakeDetector::Impl final {
             model_status_ = DetectorError(ErrorCode::kUnavailable, "MultiNet 模型分块大小不受支持");
             return model_status_;
         }
-        const int threshold_status = multinet_->set_det_threshold(model_data_, 0.2f);
         const esp_err_t alloc_status = esp_mn_commands_alloc(multinet_, model_data_);
         const esp_err_t clear_status = esp_mn_commands_clear();
         esp_err_t add_status = ESP_OK;
-        for (const auto& command : kCommands) {
+        for (const auto& command : kMultiNetWakeCommands) {
             if (add_status != ESP_OK) break;
             add_status = esp_mn_commands_add(command.id, command.grammar);
         }
         esp_mn_error_t* update_error = esp_mn_commands_update();
-        ESP_LOGI(kTag, "WAKE_COMMAND_STATUS threshold=%d alloc=%d clear=%d add=%d update_errors=%d", threshold_status,
-                 static_cast<int>(alloc_status), static_cast<int>(clear_status), static_cast<int>(add_status),
+        // MultiNet rejects threshold changes until its active command FST is
+        // built. Keep this order so the configured sensitivity is effective.
+        const int threshold_status = multinet_->set_det_threshold(model_data_, kMultiNetDetectionThreshold);
+        ESP_LOGI(kTag,
+                 "WAKE_COMMAND_STATUS threshold=%d threshold_value=%.2f alloc=%d clear=%d add=%d update_errors=%d",
+                 threshold_status, static_cast<double>(kMultiNetDetectionThreshold), static_cast<int>(alloc_status),
+                 static_cast<int>(clear_status), static_cast<int>(add_status),
                  update_error == nullptr ? 0 : static_cast<int>(update_error->num));
         const bool command_update_failed = update_error != nullptr && update_error->num > 0;
+        // The ESP-SR MultiNet7 binary used by ESP32-S3 prints the configured
+        // threshold but returns -1 from this setter even when the value is
+        // accepted. There is no getter in this ABI; the reference SparkBot
+        // implementation also treats the setter as fire-and-forget. The
+        // command-list results remain fatal, while this return value is kept
+        // as a diagnostic field in WAKE_COMMAND_STATUS.
         if (alloc_status != ESP_OK || clear_status != ESP_OK || add_status != ESP_OK || command_update_failed) {
             model_status_ = DetectorError(ErrorCode::kUnavailable, "MultiNet 唤醒命令注册失败");
             return model_status_;
         }
-        ESP_LOGI(kTag, "本地命令检测器已就绪：MultiNet=%s commands=你好牛牛,牛牛,别说了", model_name);
+        ESP_LOGI(kTag, "本地命令检测器已就绪：MultiNet=%s commands=你好牛牛,牛来,别说了", model_name);
         model_status_ = Status::Ok();
         return model_status_;
     }
@@ -343,6 +377,11 @@ class EspMultiNetWakeDetector::Impl final {
         chunk_scratch_ = static_cast<int16_t*>(heap_caps_malloc(
             static_cast<std::size_t>(chunk_samples_) * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         if (input_ == nullptr || chunk_scratch_ == nullptr) {
+            ESP_LOGW(kTag, "WAKE_INPUT_ALLOC_FAILED input=%d scratch=%d input_bytes=%u scratch_bytes=%u psram_free=%u",
+                     input_ != nullptr ? 1 : 0, chunk_scratch_ != nullptr ? 1 : 0,
+                     static_cast<unsigned>(kInputCapacitySamples * sizeof(int16_t)),
+                     static_cast<unsigned>(static_cast<std::size_t>(chunk_samples_) * sizeof(int16_t)),
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
             heap_caps_free(input_);
             heap_caps_free(chunk_scratch_);
             input_ = nullptr;
@@ -416,6 +455,7 @@ class EspMultiNetWakeDetector::Impl final {
     std::size_t mailbox_size_ = 0;
     std::atomic<uint64_t> generation_{0};
     std::atomic<uint64_t> mailbox_drops_{0};
+    uint64_t conditioned_frames_ = 0;
     std::atomic_bool running_{false};
     std::atomic_bool worker_shutdown_{false};
     LocalWakeDetectorPort::WakeSink sink_;

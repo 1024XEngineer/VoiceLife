@@ -183,6 +183,19 @@ void CheckProtocolSerializationBranches() {
                         })
               .ok(),
           "协议序列化测试工具应注册成功");
+    Check(server
+              .add_tool("protocol.boolean", "协议布尔结果",
+                        PropertyList({Property::Optional("enabled", PropertyType::kBoolean)}),
+                        [](const PropertyList&) { return ToolResult::Success(ToolOutputValue::Boolean(true)); })
+              .ok(),
+          "布尔结果工具应注册成功");
+
+    voicelife::runtime::LinxMcpToolOutcome boolean_outcome;
+    const auto boolean_call = voicelife::runtime::HandleLinxMcpPayload(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"protocol.boolean","arguments":{}},"id":"bool-1"})",
+        server, {}, &boolean_outcome);
+    Check(boolean_call.ok() && boolean_outcome.success && boolean_outcome.result_status == "success",
+          "ToolResult::Success 的布尔输出必须判定为业务成功");
 
     const std::string session_id = "quote:\" slash:\\ control:\b\f\n\r\t\x01";
     const auto list = voicelife::runtime::HandleLinxMcpPayload(

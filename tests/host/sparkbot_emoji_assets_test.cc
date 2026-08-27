@@ -13,7 +13,7 @@ int main() {
     // 受控标识：官方 key 和待机屏保 key 全部接受。
     const std::string_view kAllIds[] = {
         "boot",      "connecting",   "error",  "happy",    "idle",     "idle_eyes",
-        "listening", "provisioning", "sleepy", "speaking", "thinking",
+        "listening", "provisioning", "sleepy", "speaking", "thinking", "dizzy",
     };
     for (const std::string_view id : kAllIds) {
         Check(IsControlledAssetId(id), "官方 asset_id 必须被接受");

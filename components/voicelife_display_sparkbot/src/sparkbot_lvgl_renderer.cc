@@ -17,6 +17,7 @@
 #ifdef ESP_PLATFORM
 LV_FONT_DECLARE(font_noto_sans_basic_16_4);
 LV_FONT_DECLARE(font_noto_sans_basic_14_1);
+LV_FONT_DECLARE(font_xi_14_1);
 LV_FONT_DECLARE(font_material_symbols_14_1);
 LV_FONT_DECLARE(font_material_symbols_20_4);
 LV_FONT_DECLARE(font_material_symbols_30_4);
@@ -32,6 +33,10 @@ constexpr const char* kTag = "sparkbot_renderer";
 // 官方 SparkBot 强制 dark 主题颜色（lcd_display.cc InitializeLcdThemes）。
 const lv_color_t kBackgroundColor = lv_color_hex(0x000000);
 const lv_color_t kTextColor = lv_color_hex(0xFFFFFF);
+
+// LVGL's built-in SCROLL mode reverses at the end of its path. Animate the
+// child label explicitly so each subtitle makes one leftward pass only.
+void AnimateSubtitleOffset(void* variable, int32_t value) { lv_obj_set_x(static_cast<lv_obj_t*>(variable), value); }
 
 // 横向滚动只需要一行；保留 UTF-8 字节序列，只把显式换行折叠为空格。
 std::string FlattenSubtitleLine(std::string_view text) {
@@ -73,6 +78,48 @@ bool HasRenderableGlyph(const lv_font_t* font, uint32_t codepoint, uint16_t* adv
 #endif
 }  // namespace
 
+std::string_view EmotionKeyForSnapshot(const voicelife::voice::DisplaySnapshot& snapshot) {
+    // "dizzy" is a local, controlled IMU reaction rather than a Linx emotion.
+    // Keep it outside the protocol allowlist while still routing through the
+    // same assets partition and GIF lifecycle.
+    if (snapshot.emotion_key == "dizzy") return "dizzy";
+    if (snapshot.phase == voicelife::voice::VoiceInteractionState::kSpeaking) return "speaking";
+    return IsCommonLinxEmojiKey(snapshot.emotion_key) ? std::string_view(snapshot.emotion_key)
+                                                      : EmotionKeyForMood(snapshot.mood);
+}
+
+uint32_t ScrollDurationForSubtitle(uint32_t overflow_width, std::string_view text) {
+    if (overflow_width == 0) return 0;
+
+    std::size_t codepoints = 0;
+    std::size_t punctuation = 0;
+    for (std::size_t index = 0; index < text.size();) {
+        const std::size_t start = index;
+        const unsigned char byte = static_cast<unsigned char>(text[index]);
+        const std::size_t encoded_width = byte < 0x80 ? 1 : (byte < 0xE0 ? 2 : (byte < 0xF0 ? 3 : 4));
+        index += std::min(encoded_width, text.size() - index);
+        const std::string_view codepoint = text.substr(start, index - start);
+        ++codepoints;
+        if (codepoint == "，" || codepoint == "。" || codepoint == "！" || codepoint == "？" || codepoint == "、" ||
+            codepoint == "," || codepoint == "." || codepoint == "!" || codepoint == "?") {
+            ++punctuation;
+        }
+    }
+
+    constexpr uint32_t kBaseMs = 500;
+    constexpr uint32_t kMsPerCodepoint = 115;
+    constexpr uint32_t kMsPerPunctuation = 140;
+    constexpr uint32_t kMinMs = 1800;
+    constexpr uint32_t kMaxMs = 45000;
+    const uint64_t speech_ms =
+        static_cast<uint64_t>(kBaseMs) + codepoints * kMsPerCodepoint + punctuation * kMsPerPunctuation;
+    // Keep the animation from outrunning the readable text even for short
+    // ASCII/emoji-heavy subtitles whose glyphs are wider than Han characters.
+    const uint64_t travel_ms = (static_cast<uint64_t>(overflow_width) * 1000 + 139) / 140;
+    return static_cast<uint32_t>(
+        std::min<uint64_t>(kMaxMs, std::max<uint64_t>(kMinMs, std::max(speech_ms, travel_ms))));
+}
+
 std::string_view EmotionKeyForMood(voicelife::voice::VoiceMood mood) {
     // 官方无 sad/surprised/angry 表情，VoiceLife manifest 无 neutral.gif，
     // 按视觉语义就近映射；资源均来自受控资源清单。
@@ -113,7 +160,8 @@ SparkBotLvglRenderer::~SparkBotLvglRenderer() {
         lv_timer_del(static_cast<lv_timer_t*>(screen_saver_timer_));
         screen_saver_timer_ = nullptr;
     }
-    StopIdleScreenSaverGif();
+    ExitDizzyScreenSaver();
+    StopScreenSaverGif();
     if (gif_controller_ != nullptr) {
         auto* gif = static_cast<LvglGif*>(gif_controller_);
         gif->Stop();
@@ -155,10 +203,12 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
                 cbin_font_create(const_cast<uint8_t*>(static_cast<const uint8_t*>(common_font_asset.value->data)));
             if (common_font != nullptr && common_font->line_height == 16 && common_font->base_line == 2 &&
                 common_font->dsc != nullptr && static_cast<const lv_font_fmt_txt_dsc_t*>(common_font->dsc)->bpp == 1) {
-                common_font->fallback = &font_noto_sans_basic_14_1;
+                // common 字符集不含产品名中的“矽”(U+77FD)，用一个受控
+                // 的单字 fallback 补齐；该字体自身再回退到 basic14。
+                common_font->fallback = &font_xi_14_1;
                 common_text_font_ = common_font;
                 text_font = common_font;
-                ESP_LOGI(kTag, "SPARKBOT_COMMON_FONT_READY size=14 bpp=1 line_height=16 fallback=basic14");
+                ESP_LOGI(kTag, "SPARKBOT_COMMON_FONT_READY size=14 bpp=1 line_height=16 fallback=xi14->basic14");
             } else {
                 if (common_font != nullptr) {
                     cbin_font_delete(common_font);
@@ -172,11 +222,13 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     }
     uint16_t kai_advance = 0;
     uint16_t xian_advance = 0;
+    uint16_t xi_advance = 0;
     const bool kai_ok = HasRenderableGlyph(text_font, 0x5F00, &kai_advance);    // 开
     const bool xian_ok = HasRenderableGlyph(text_font, 0x95F2, &xian_advance);  // 闲
-    ESP_LOGI(kTag, "SPARKBOT_TEXT_GLYPH_CHECK kai=%d kai_adv=%u xian=%d xian_adv=%u common_font=%d", kai_ok,
-             static_cast<unsigned>(kai_advance), xian_ok, static_cast<unsigned>(xian_advance),
-             common_text_font_ != nullptr);
+    const bool xi_ok = HasRenderableGlyph(text_font, 0x77FD, &xi_advance);      // 矽
+    ESP_LOGI(kTag, "SPARKBOT_TEXT_GLYPH_CHECK kai=%d kai_adv=%u xian=%d xian_adv=%u xi=%d xi_adv=%u common_font=%d",
+             kai_ok, static_cast<unsigned>(kai_advance), xian_ok, static_cast<unsigned>(xian_advance), xi_ok,
+             static_cast<unsigned>(xi_advance), common_text_font_ != nullptr);
 
     auto* screen = lv_screen_active();
     lv_obj_set_style_text_font(screen, text_font, 0);
@@ -217,7 +269,7 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     lv_obj_center(emoji_label);
     emoji_label_ = emoji_label;
 
-    // emoji 图片节点（后续 GIF 资源接入后使用；当前隐藏）。
+    // emoji 图片节点：GIF 首帧成功时显示，失败时由字形标签接管。
     auto* emoji_image = lv_img_create(emoji_box);
     lv_obj_set_size(emoji_image, layout.emoji_size, layout.emoji_size);
     lv_image_set_scale(emoji_image, layout.emoji_scale);
@@ -344,13 +396,12 @@ voicelife::Status SparkBotLvglRenderer::SetupUI() {
     auto* chat_message_label = lv_label_create(bottom_bar);
     lv_label_set_text(chat_message_label, "");
     lv_obj_set_width(chat_message_label, message_width);
-    lv_label_set_long_mode(chat_message_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_long_mode(chat_message_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_height(chat_message_label, layout.content_height);
     lv_obj_set_style_text_align(chat_message_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(chat_message_label, text_font, 0);
     lv_obj_set_style_text_color(chat_message_label, kTextColor, 0);
     lv_obj_set_style_text_opa(chat_message_label, LV_OPA_COVER, 0);
-    lv_obj_set_style_anim_duration(chat_message_label, layout.content_scroll_duration_ms, 0);
     lv_obj_align(chat_message_label, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(bottom_bar, LV_OBJ_FLAG_HIDDEN);  // 有内容才显示
     bottom_bar_ = bottom_bar;
@@ -390,6 +441,23 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
     has_snapshot_ = true;
     last_snapshot_generation_ = snapshot.generation;
     last_snapshot_revision_ = snapshot.revision;
+
+    // IMU 晕眩反馈复用待机屏保的独立 image 节点和半高视口。它是本地
+    // 交互覆盖层，不应经过顶部状态栏、中央 emotion 或底部字幕的普通路径。
+    const bool dizzy_requested = snapshot.emotion_key == "dizzy";
+    if (dizzy_screen_saver_active_) {
+        if (!dizzy_requested) {
+            ExitDizzyScreenSaver();
+        } else {
+            return voicelife::Status::Ok();
+        }
+    }
+    if (dizzy_requested) {
+        if (screen_saver_active_) ExitIdleScreenSaver();
+        EnterDizzyScreenSaver();
+        if (dizzy_screen_saver_active_) return voicelife::Status::Ok();
+    }
+
     screen_saver_eligible_ = IsIdleScreenSaverEligible(snapshot);
     if (!screen_saver_active_) {
         if (screen_saver_eligible_) {
@@ -413,7 +481,7 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
     // 官方 SetEmotion：优先 emoji GIF（assets 分区），失败回退字形。
     // 仅 emotion（mood 映射的 asset）变化时切换 GIF/字形；同状态下只更新
     // 文本，避免状态文本刷新反复重建并重启动画。
-    const std::string_view emotion = EmotionKeyForMood(snapshot.mood);
+    const std::string_view emotion = EmotionKeyForSnapshot(snapshot);
     const bool emotion_changed = emotion != current_emotion_;
     bool using_gif = false;
     if (emotion_changed && gif_controller_ != nullptr) {
@@ -487,22 +555,61 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
         lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
     }
 
-    // 消息栏：固定一行，显式换行折叠为空格；超长内容由 LVGL label 在
-    // 安全边距内做横向循环滚动，绝不把第三行挤进表情舞台。
+    // 消息栏：固定一行，显式换行折叠为空格；超长内容由子标签从零位
+    // 单向移到负溢出宽度，父容器负责裁剪，绝不把第三行挤进表情舞台。
     auto* bottom_bar = static_cast<lv_obj_t*>(bottom_bar_);
     auto* chat_message_label = static_cast<lv_obj_t*>(chat_message_label_);
     constexpr SparkBotDisplayLayout layout = DefaultSparkBotDisplayLayout();
     const lv_coord_t viewport_width = LV_HOR_RES - static_cast<lv_coord_t>(layout.horizontal_inset * 2);
     const lv_coord_t message_width = viewport_width - static_cast<lv_coord_t>(layout.content_inset * 2);
     const std::string display_text = FlattenSubtitleLine(snapshot.content_text);
+    const lv_font_t* content_font = lv_obj_get_style_text_font(chat_message_label, LV_PART_MAIN);
+    const int32_t content_letter_space = lv_obj_get_style_text_letter_space(chat_message_label, LV_PART_MAIN);
+    const int32_t content_line_space = lv_obj_get_style_text_line_space(chat_message_label, LV_PART_MAIN);
+    lv_point_t content_text_size{};
+    lv_text_get_size(&content_text_size, display_text.c_str(), content_font, content_letter_space, content_line_space,
+                     LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    const lv_coord_t content_overflow_width =
+        content_text_size.x > message_width ? content_text_size.x - message_width : 0;
+    const uint32_t scroll_duration =
+        ScrollDurationForSubtitle(static_cast<uint32_t>(content_overflow_width), display_text);
+    const bool content_changed = display_text != rendered_content_text_;
     if (!snapshot.content_text.empty()) {
-        lv_label_set_text(chat_message_label, display_text.c_str());
-        lv_obj_set_width(chat_message_label, message_width);
+        // 状态栏时钟和网络事件会频繁刷新快照；正文未变化时不能重设 label，
+        // 否则 LVGL 会重启动画，表现为重复句或突然加速。
+        if (content_changed) {
+            lv_anim_delete(chat_message_label, AnimateSubtitleOffset);
+            lv_label_set_text(chat_message_label, display_text.c_str());
+            rendered_content_text_ = display_text;
+        }
+        if (content_changed) {
+            const lv_coord_t label_width = std::max(message_width, content_text_size.x);
+            lv_obj_set_width(chat_message_label, label_width);
+            lv_obj_align(chat_message_label, LV_ALIGN_LEFT_MID, 0, 0);
+            lv_obj_set_x(chat_message_label, 0);
+            if (content_overflow_width > 0) {
+                lv_anim_t animation;
+                lv_anim_init(&animation);
+                lv_anim_set_var(&animation, chat_message_label);
+                lv_anim_set_values(&animation, 0, ScrollEndOffset(static_cast<uint32_t>(content_overflow_width)));
+                lv_anim_set_duration(&animation, scroll_duration);
+                lv_anim_set_delay(&animation, 800);
+                lv_anim_set_path_cb(&animation, lv_anim_path_linear);
+                lv_anim_set_exec_cb(&animation, AnimateSubtitleOffset);
+                lv_anim_start(&animation);
+            }
+        }
         lv_obj_set_height(chat_message_label, layout.content_height);
-        lv_obj_align(chat_message_label, LV_ALIGN_CENTER, 0, 0);
         lv_obj_remove_flag(bottom_bar, LV_OBJ_FLAG_HIDDEN);
     } else {
-        lv_label_set_text(chat_message_label, "");
+        lv_anim_delete(chat_message_label, AnimateSubtitleOffset);
+        if (!rendered_content_text_.empty()) {
+            lv_label_set_text(chat_message_label, "");
+            rendered_content_text_.clear();
+        }
+        lv_obj_set_width(chat_message_label, message_width);
+        lv_obj_align(chat_message_label, LV_ALIGN_LEFT_MID, 0, 0);
+        lv_obj_set_x(chat_message_label, 0);
         lv_obj_add_flag(bottom_bar, LV_OBJ_FLAG_HIDDEN);
     }
 
@@ -513,20 +620,13 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
     lv_obj_get_coords(static_cast<lv_obj_t*>(container_), &viewport_coords);
     lv_obj_get_coords(status_label, &status_coords);
     lv_obj_get_coords(chat_message_label, &content_coords);
-    const lv_font_t* content_font = lv_obj_get_style_text_font(chat_message_label, LV_PART_MAIN);
-    const int32_t content_letter_space = lv_obj_get_style_text_letter_space(chat_message_label, LV_PART_MAIN);
-    const int32_t content_line_space = lv_obj_get_style_text_line_space(chat_message_label, LV_PART_MAIN);
-    lv_point_t content_text_size{};
-    lv_text_get_size(&content_text_size, display_text.c_str(), content_font, content_letter_space, content_line_space,
-                     LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    const lv_coord_t content_overflow_width =
-        content_text_size.x > message_width ? content_text_size.x - message_width : 0;
     ESP_LOGI(
         kTag,
         "SPARKBOT_TEXT_RENDER generation=%llu revision=%llu status_bytes=%u content_bytes=%u "
         "viewport_xywh=%d,%d,%d,%d status_visible=%d status_xywh=%d,%d,%d,%d content_visible=%d "
         "content_xywh=%d,%d,%d,%d viewport_height=%d content_width=%d content_height=%d overflow_width=%d "
-        "manual_line_breaks=0 scroll_mode=horizontal scroll_duration_ms=%u common_font=%d status=%.*s content=%.*s",
+        "manual_line_breaks=0 scroll_mode=explicit_left scroll_start=0 scroll_end=%d scroll_duration_ms=%u "
+        "common_font=%d status=%.*s content=%.*s",
         static_cast<unsigned long long>(snapshot.generation), static_cast<unsigned long long>(snapshot.revision),
         static_cast<unsigned>(snapshot.status_text.size()), static_cast<unsigned>(snapshot.content_text.size()),
         static_cast<int>(viewport_coords.x1), static_cast<int>(viewport_coords.y1),
@@ -537,7 +637,8 @@ voicelife::Status SparkBotLvglRenderer::Render(const voicelife::voice::DisplaySn
         static_cast<int>(lv_area_get_width(&content_coords)), static_cast<int>(lv_area_get_height(&content_coords)),
         static_cast<int>(lv_area_get_height(&viewport_coords)), static_cast<int>(content_text_size.x),
         static_cast<int>(lv_area_get_height(&content_coords)), static_cast<int>(content_overflow_width),
-        static_cast<unsigned>(layout.content_scroll_duration_ms), common_text_font_ != nullptr,
+        static_cast<int>(ScrollEndOffset(static_cast<uint32_t>(content_overflow_width))),
+        static_cast<unsigned>(scroll_duration), common_text_font_ != nullptr,
         static_cast<int>(snapshot.status_text.size()), snapshot.status_text.c_str(),
         static_cast<int>(snapshot.content_text.size()), snapshot.content_text.c_str());
     return voicelife::Status::Ok();
@@ -564,7 +665,7 @@ void SparkBotLvglRenderer::SetNormalUiVisible(bool visible) {
     set_visibility(bottom_bar_);
 }
 
-void SparkBotLvglRenderer::StopIdleScreenSaverGif() {
+void SparkBotLvglRenderer::StopScreenSaverGif() {
     if (screen_saver_gif_controller_ == nullptr) return;
     auto* gif = static_cast<LvglGif*>(screen_saver_gif_controller_);
     gif->Stop();
@@ -572,32 +673,67 @@ void SparkBotLvglRenderer::StopIdleScreenSaverGif() {
     screen_saver_gif_controller_ = nullptr;
 }
 
-bool SparkBotLvglRenderer::StartIdleScreenSaverGif() {
+bool SparkBotLvglRenderer::StartIdleScreenSaverGif() { return StartScreenSaverGif("idle_eyes"); }
+
+bool SparkBotLvglRenderer::StartScreenSaverGif(std::string_view asset_id) {
     if (emoji_assets_ == nullptr || !assets_ready_ || screen_saver_image_ == nullptr) {
         return false;
     }
-    const auto asset = emoji_assets_->Load("idle_eyes");
+    const auto asset = emoji_assets_->Load(asset_id);
     if (!asset.ok() || !asset.value.has_value() || asset.value->data == nullptr || asset.value->size == 0) {
-        ESP_LOGW(kTag, "SPARKBOT_IDLE_SCREENSAVER_ASSET_FAILED=1");
+        ESP_LOGW(kTag, "SPARKBOT_SCREEN_SAVER_ASSET_FAILED=1 asset=%.*s", static_cast<int>(asset_id.size()),
+                 asset_id.data());
         return false;
     }
     auto* gif = new LvglGif(static_cast<const uint8_t*>(asset.value->data), asset.value->size);
     if (!gif->IsLoaded()) {
         delete gif;
-        ESP_LOGW(kTag, "SPARKBOT_IDLE_SCREENSAVER_GIF_OPEN_FAILED=1");
+        ESP_LOGW(kTag, "SPARKBOT_SCREEN_SAVER_GIF_OPEN_FAILED=1 asset=%.*s", static_cast<int>(asset_id.size()),
+                 asset_id.data());
         return false;
     }
-    gif->SetTelemetryAsset("idle_eyes");
+    gif->SetTelemetryAsset(asset_id);
     gif->SetFrameCallback(
         [this, gif]() { lv_image_set_src(static_cast<lv_obj_t*>(screen_saver_image_), gif->image_dsc()); });
     if (!gif->Start()) {
         delete gif;
-        ESP_LOGW(kTag, "SPARKBOT_IDLE_SCREENSAVER_FIRST_FRAME_FAILED=1");
+        ESP_LOGW(kTag, "SPARKBOT_SCREEN_SAVER_FIRST_FRAME_FAILED=1 asset=%.*s", static_cast<int>(asset_id.size()),
+                 asset_id.data());
         return false;
     }
     lv_image_set_src(static_cast<lv_obj_t*>(screen_saver_image_), gif->image_dsc());
     screen_saver_gif_controller_ = gif;
     return true;
+}
+
+void SparkBotLvglRenderer::EnterDizzyScreenSaver() {
+    if (dizzy_screen_saver_active_ || !StartScreenSaverGif("dizzy")) return;
+    if (screen_saver_gif_controller_ == nullptr) return;
+    if (gif_controller_ != nullptr) {
+        auto* gif = static_cast<LvglGif*>(gif_controller_);
+        gif->Stop();
+        delete gif;
+        gif_controller_ = nullptr;
+    }
+    current_emotion_.clear();
+    SetNormalUiVisible(false);
+    lv_obj_remove_flag(static_cast<lv_obj_t*>(screen_saver_image_), LV_OBJ_FLAG_HIDDEN);
+    dizzy_screen_saver_active_ = true;
+    standby_idle_tracking_ = false;
+    ESP_LOGI(kTag, "SPARKBOT_DIZZY_SCREENSAVER_ENTERED=1 asset=dizzy viewport_y=%u size=%u",
+             static_cast<unsigned>(DefaultSparkBotDisplayLayout().viewport_y),
+             static_cast<unsigned>(DefaultSparkBotDisplayLayout().screen_saver_size));
+}
+
+void SparkBotLvglRenderer::ExitDizzyScreenSaver() {
+    if (!dizzy_screen_saver_active_) return;
+    StopScreenSaverGif();
+    lv_obj_add_flag(static_cast<lv_obj_t*>(screen_saver_image_), LV_OBJ_FLAG_HIDDEN);
+    SetNormalUiVisible(true);
+    current_emotion_.clear();
+    dizzy_screen_saver_active_ = false;
+    standby_idle_tracking_ = false;
+    ESP_LOGI(kTag, "SPARKBOT_DIZZY_SCREENSAVER_EXITED=1");
 }
 
 void SparkBotLvglRenderer::EnterIdleScreenSaver() {
@@ -624,7 +760,7 @@ void SparkBotLvglRenderer::EnterIdleScreenSaver() {
 
 void SparkBotLvglRenderer::ExitIdleScreenSaver() {
     if (!screen_saver_active_) return;
-    StopIdleScreenSaverGif();
+    StopScreenSaverGif();
     lv_obj_add_flag(static_cast<lv_obj_t*>(screen_saver_image_), LV_OBJ_FLAG_HIDDEN);
     SetNormalUiVisible(true);
     current_emotion_.clear();

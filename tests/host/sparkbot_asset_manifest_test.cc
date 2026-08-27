@@ -180,7 +180,7 @@ int main() {
     yyjson_val* assets = yyjson_obj_get(root, "assets");
     Check(assets != nullptr && yyjson_is_arr(assets), "assets 必须是数组");
     const std::size_t asset_count = yyjson_arr_size(assets);
-    Check(asset_count == 11, "SparkBot 表情和待机屏保清单必须恰好包含 11 个 GIF");
+    Check(asset_count == 12, "SparkBot 表情和待机屏保清单必须恰好包含 12 个 GIF");
 
     std::set<std::string> asset_ids;
     std::uint64_t total_bytes = 0;
@@ -281,7 +281,7 @@ int main() {
         Check(ToHex(hasher.Final()) == sha, "文件 SHA-256 必须与 manifest 记录一致");
     }
 
-    Check(total_bytes == 147018, "GIF 总大小必须与已验证的 147018 字节一致");
+    Check(total_bytes == 166392, "GIF 总大小必须与已验证的 166392 字节一致");
     Check(yyjson_get_uint(yyjson_obj_get(budget, "gif_bytes")) == total_bytes,
           "budget.gif_bytes 必须等于全部 GIF 字节数之和");
 
@@ -318,9 +318,9 @@ int main() {
     {
         const std::string_view kExpectedIds[] = {
             "boot",      "connecting",   "error",  "happy",    "idle",     "idle_eyes",
-            "listening", "provisioning", "sleepy", "speaking", "thinking",
+            "listening", "provisioning", "sleepy", "speaking", "thinking", "dizzy",
         };
-        std::set<std::string> expected_ids(kExpectedIds, kExpectedIds + 11);
+        std::set<std::string> expected_ids(kExpectedIds, kExpectedIds + 12);
         Check(expected_ids == asset_ids, "manifest asset_id 集合必须与受控 allowlist 一致");
         for (const std::string& id : asset_ids) {
             Check(voicelife::display_sparkbot::IsControlledAssetId(id), "每个清单 asset_id 必须能被受控解析器接受");

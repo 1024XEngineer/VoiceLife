@@ -350,6 +350,11 @@ export interface ActionApplication {
      */
     expireDue(): Promise<number>;
     /**
+     * 恢复超过执行租约但提醒窗口仍有效的 processing 动作，并按原 operationId 重派发。
+     * @returns 本次恢复并重派发的动作数量。
+     */
+    recoverStaleProcessing(): Promise<number>;
+    /**
      * 查询设备上指定提醒仍然有效的动作窗口截止时间。
      * @param deviceId 目标设备标识。
      * @param reminderTriggerId 提醒触发窗口标识。

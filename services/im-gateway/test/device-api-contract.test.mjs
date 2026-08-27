@@ -361,5 +361,7 @@ test('action stream does not lose a command published between persistent replay 
         done: false,
         value: { id: command.commandId, event: 'reminder.action', data: command },
     });
+    assert.equal(markProcessingCalls, 0);
+    await stream[Symbol.asyncIterator]().next();
     assert.equal(markProcessingCalls, 1);
 });

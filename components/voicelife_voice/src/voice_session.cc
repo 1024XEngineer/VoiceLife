@@ -173,6 +173,7 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
     uint64_t generation = 0;
     std::string pending_wake_word;
     std::string pending_text_response;
+    std::string pending_system_speech;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         // A zero generation is not a wildcard: late events must not mutate a
@@ -198,6 +199,7 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
             interrupt_fence_pending_ = false;
             pending_interrupt_wake_word_.clear();
             pending_interrupt_text_response_.clear();
+            pending_system_speech_.clear();
         } else if (event.kind == VoiceEventKind::kAsrText) {
             // 只接受仍处于本轮采集的 STT。服务器可能在 TTS 已开始后才
             // 送达上一段识别结果；该事件不得穿透到交互状态机重启“处理”。
@@ -259,6 +261,7 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
                 interrupt_fence_reached = true;
                 pending_wake_word = std::move(pending_interrupt_wake_word_);
                 pending_text_response = std::move(pending_interrupt_text_response_);
+                pending_system_speech = std::move(pending_system_speech_);
             } else if (event.aborted && audio_ready_ && state_ == VoiceSessionState::kSpeaking) {
                 // 服务端主动中止当前实际播报：失效旧代次并清空已排队的 PCM。
                 ++generation_;
@@ -313,6 +316,9 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
         Emit("stt_text_received", event.text);
     } else if (event.kind == VoiceEventKind::kToolCall) {
         Emit("tool_call_received", event.text);
+    } else if (event.kind == VoiceEventKind::kLlmEmotion) {
+        // 情感提示只更新显示，不改变采集、播报或回合状态。
+        Emit("llm_emotion", event.text);
     } else if (event.kind == VoiceEventKind::kTtsStarted) {
         if (stop_input_for_tts) {
             const Status status = input_.StopCapture();
@@ -362,6 +368,28 @@ void VoiceSession::HandleEvent(const VoiceEvent& event) {
                 Emit("interrupt_ack_failed", status.message);
             } else {
                 Emit("interrupt_ack_requested", "");
+            }
+        }
+    }
+    if (!pending_system_speech.empty()) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (state_ != VoiceSessionState::kReady || !audio_ready_) {
+                pending_system_speech.clear();
+            } else {
+                response_armed_ = true;
+            }
+        }
+        if (!pending_system_speech.empty()) {
+            const Status status = provider_.Speak(pending_system_speech);
+            if (!status.ok()) {
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    response_armed_ = false;
+                }
+                Emit("system_speech_failed", status.message);
+            } else {
+                Emit("system_speech_requested", "interrupt_fence_reached");
             }
         }
     }
@@ -724,6 +752,7 @@ Status VoiceSession::InterruptAndNotifyLocalWakeWord(std::string_view wake_word,
         interrupt_fence_pending_ = wait_for_old_tts_stop;
         pending_interrupt_wake_word_.assign(wake_word);
         pending_interrupt_text_response_.assign(text_response);
+        pending_system_speech_.clear();
         generation = generation_;
     }
     provider_.SetGeneration(generation);
@@ -735,6 +764,7 @@ Status VoiceSession::InterruptAndNotifyLocalWakeWord(std::string_view wake_word,
         interrupt_fence_pending_ = false;
         pending_interrupt_wake_word_.clear();
         pending_interrupt_text_response_.clear();
+        pending_system_speech_.clear();
         response_armed_ = false;
         pending_local_wake_tts_ = false;
         local_wake_tts_active_ = false;
@@ -800,6 +830,7 @@ Status VoiceSession::Interrupt() {
         interrupt_fence_pending_ = needs_interrupt_fence;
         pending_interrupt_wake_word_.clear();
         pending_interrupt_text_response_.clear();
+        pending_system_speech_.clear();
         generation = generation_;
     }
     // Notify the provider before tearing down so it can drop stale frames.
@@ -818,6 +849,74 @@ Status VoiceSession::Interrupt() {
         Emit("interrupt_fence_reached", "no active playback");
     }
     return flush_status;
+}
+
+Status VoiceSession::InterruptAndSpeak(std::string_view text) {
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+    if (text.empty()) return Status::Error(ErrorCode::kInvalidArgument, "系统播报文本不能为空");
+
+    bool capturing = false;
+    bool provider_listening = false;
+    bool wait_for_old_tts_stop = false;
+    uint64_t generation = 0;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (state_ != VoiceSessionState::kReady && state_ != VoiceSessionState::kCapturing &&
+            state_ != VoiceSessionState::kSpeaking) {
+            return Status::Error(ErrorCode::kUnavailable, "语音会话当前不能播报系统语音");
+        }
+        capturing = state_ == VoiceSessionState::kCapturing;
+        wait_for_old_tts_stop = state_ == VoiceSessionState::kSpeaking;
+        provider_listening = provider_capture_active_;
+        ++generation_;
+        config_.generation = generation_;
+        next_sequence_ = 0;
+        state_ = VoiceSessionState::kReady;
+        provider_capture_active_ = false;
+        response_armed_ = false;
+        pending_local_wake_tts_ = false;
+        local_wake_tts_active_ = false;
+        awaiting_final_asr_ = false;
+        pending_local_wake_echo_.clear();
+        interrupt_fence_pending_ = wait_for_old_tts_stop;
+        pending_interrupt_wake_word_.clear();
+        pending_interrupt_text_response_.clear();
+        pending_system_speech_.assign(text);
+        generation = generation_;
+    }
+
+    provider_.SetGeneration(generation);
+    Status input_status = Status::Ok();
+    if (capturing) input_status = input_.StopCapture();
+    const Status abort_status =
+        (provider_listening || wait_for_old_tts_stop) ? provider_.Abort("local_system_speech") : Status::Ok();
+    const Status flush_status = output_.Flush();
+    if (!input_status.ok() || !abort_status.ok() || !flush_status.ok()) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            interrupt_fence_pending_ = false;
+            pending_system_speech_.clear();
+            response_armed_ = false;
+        }
+        return !input_status.ok() ? input_status : (!abort_status.ok() ? abort_status : flush_status);
+    }
+    Emit("interrupted", "old audio generation invalidated for local system speech");
+    if (!wait_for_old_tts_stop) {
+        std::string immediate_speech;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            immediate_speech = std::move(pending_system_speech_);
+            response_armed_ = true;
+        }
+        const Status status = provider_.Speak(immediate_speech);
+        if (!status.ok()) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            response_armed_ = false;
+            return status;
+        }
+        Emit("system_speech_requested", "immediate");
+    }
+    return Status::Ok();
 }
 
 Status VoiceSession::Stop() {
@@ -842,6 +941,7 @@ Status VoiceSession::Stop() {
         interrupt_fence_pending_ = false;
         pending_interrupt_wake_word_.clear();
         pending_interrupt_text_response_.clear();
+        pending_system_speech_.clear();
         generation = generation_;
     }
     provider_.SetGeneration(generation);
