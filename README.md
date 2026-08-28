@@ -1,7 +1,7 @@
 <div align="center">
 
 <h1 align="center">
-  <img src="./assets/logo.svg" alt="VoiceLife 声活 Logo" width="350"  valign="middle" />
+  <img src="./docs/assets/logo.svg" alt="VoiceLife 声活 Logo" width="350"  valign="middle" />
 </h1>
 
 <p><strong>面向本地日程、提醒、存储、语音和消息渠道的设备端系统</strong></p>
@@ -33,7 +33,7 @@
 </p>
 
 > [!IMPORTANT]
-> 当前仓库是可编译、可测试的设备端架构主干，不是已经完成所有外部接入的成品。日程和定时任务可以用内存适配器串联；设备存储基础链路已经接入 Runtime，实板恢复验证、语音服务和 IM 平台仍按各自 Issue 验收。
+> 当前 `main` 已完成仓库范围内的功能开发：日程与提醒、持久化存储、语音/Linx、SparkBot 音频与显示、MCP 工具、IM Gateway 以及 Profile 驱动 Runtime 均已接入，并由主机测试、CI 和已有设备验证覆盖。部署到具体硬件或外部服务时，仍需按文档配置凭据并执行现场验证。
 
 ## 项目在解决什么问题
 
@@ -77,8 +77,8 @@ pnpm --dir services/im-gateway test
 ```bash
 source /path/to/esp-idf-v6.0.2/export.sh
 python3 scripts/prepare_sqlite.py
-python3 scripts/firmware.py build esp32s3-storage-dev
-python3 scripts/firmware.py package esp32s3-storage-dev
+python3 scripts/firmware.py build esp32s3-esp-sparkbot
+python3 scripts/firmware.py package esp32s3-esp-sparkbot
 ```
 
 ## 模块边界
@@ -107,17 +107,18 @@ VoiceLife 使用 ESP-IDF 组件化模块单体。核心代码使用 C++，外部
 
 每个模块先写稳定契约，再接入真实实现。主机测试覆盖状态、错误和跨模块串联；设备测试只验证设备才能证明的内容，例如分区恢复、I2S 生命周期和资源水位。
 
-Profile 描述一次固件选择哪些实现，不保存凭据：
+Profile 描述一次可发布固件选择哪些实现，不保存凭据。默认生产 Profile 是 [`esp32s3-esp-sparkbot`](./config/profiles/esp32s3-esp-sparkbot.json)：
 
 ```json
 {
-  "id": "esp32s3-dev",
+  "schemaVersion": 1,
+  "id": "esp32s3-esp-sparkbot",
   "target": "esp32s3",
   "adapters": {
-    "audio": { "driver": "scaffold", "capabilities": [] },
-    "speech": { "driver": "scaffold", "capabilities": [] },
-    "storage": { "driver": "memory", "capabilities": ["atomic-calendar-write"] },
-    "im": { "driver": "disabled", "capabilities": [] }
+    "audio": { "driver": "esp32s3-es8311-duplex", "capabilities": ["es8311-duplex"] },
+    "speech": { "driver": "xrobot-websocket", "capabilities": ["streaming-asr", "tts", "cancel-generation", "pcm"] },
+    "storage": { "driver": "fatfs-sqlite", "capabilities": ["persistent-sqlite", "atomic-calendar-write", "durable-calendar"] },
+    "im": { "driver": "voicelife-gateway", "capabilities": ["https", "secure-credentials"] }
   }
 }
 ```
@@ -126,16 +127,19 @@ Profile 描述一次固件选择哪些实现，不保存凭据：
 
 ## 当前状态
 
+功能开发已完成，当前进入维护、发布和部署验证阶段：
+
 | 方向 | 状态 | 说明 |
 | --- | --- | --- |
 | 组件边界和依赖检查 | 已完成 | 主机与 CI 可验证 |
-| 日程模块 | 主机契约已覆盖 | 主机集成测试已跑通 SQLite 创建与查询最小链路；设备 Runtime 暂不装配日程业务，修改、取消和撤销仍待接入 |
-| 定时任务模块 | 主机契约已覆盖 | 已支持创建、更新、取消和提醒规则，注册与唯一性语义已固定 |
-| SQLite 存储资格测试 | 已完成基线 | FATFS/WL 路线通过，断电和长期磨损仍待补测 |
-| IM Gateway | 开发中 | 已接入 PostgreSQL 持久化与重启恢复，平台渠道仍在补齐 |
-| 语音、音频和 Linx 适配器 | 开发中 | WSS Transport 可构建并有主机契约，真实云端与声学闭环未完成 |
-| Profile 驱动 Runtime | 基础存储已接入 | storage profile 可组装 FATFS/WL、SQLite、Schema 检查；其他适配器切换继续补齐 |
-| 真机闭环与用户试用 | 未开始 | 进入对应功能 Issue 后再验收 |
+| 日程与定时提醒 | 已完成 | 日程、周期规则、精确触发、确认/稍后提醒、动作幂等和持久化重放已接入 Runtime |
+| SQLite 持久化存储 | 已完成 | FATFS/Wear Levelling、SQLite Schema/迁移、重启恢复和健康检查已接入生产 Profile |
+| IM Gateway | 已完成 | PostgreSQL 持久化、Koishi Runtime、微信公众号 Webhook/模板投递、H5 Action UI 和 SSE 动作流已交付 |
+| 语音、音频和 Linx 适配器 | 已完成 | ESP32-S3 PCM/I2S、ES8311 双工、Linx WSS/TLS、ASR/TTS、Opus 和会话状态机已接入 |
+| SparkBot 显示与板级能力 | 已完成 | GIF 资源分区、表情渲染、按键、电源仲裁和显示状态联动已接入 |
+| MCP 工具与跨端契约 | 已完成 | 工具 Schema、调用路由、日程操作和 C++/TypeScript 双端契约测试已固定 |
+| Profile 驱动 Runtime | 已完成 | Profile 校验、能力声明、凭据引用和生命周期启动/回滚已接入 |
+| 测试与发布门禁 | 已完成 | 主机测试、Python 检查、IM Gateway 契约测试、架构检查和 CI 覆盖率门禁已配置 |
 
 ## 仓库结构
 
@@ -143,7 +147,7 @@ Profile 描述一次固件选择哪些实现，不保存凭据：
 VoiceLife/
 ├── components/       # C++ 组件
 ├── config/            # Profile 和 Schema，不放凭据
-├── docs/              # 架构、工程和协作文档
+├── docs/              # 架构、工程、协作文档和展示资源
 ├── main/              # ESP-IDF app_main
 ├── scripts/           # 构建、测试、检查和设备恢复工具
 ├── services/          # 设备外的服务，例如 IM Gateway
