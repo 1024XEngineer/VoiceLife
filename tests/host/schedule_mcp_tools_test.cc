@@ -262,8 +262,7 @@ int main() {
     const auto missing_anchor = server.call({
         .request_id = "create-rule-missing-anchor",
         .name = "schedule.create_rule",
-        .arguments = {{"event", std::string("缺字段")},
-                      {"freq_type", std::string("daily")}},
+        .arguments = {{"event", std::string("缺字段")}, {"freq_type", std::string("daily")}},
     });
     Check(!missing_anchor.status.ok(), "周期日程缺少 anchor 应被参数校验拒绝");
 
@@ -378,6 +377,14 @@ int main() {
         });
         Check(q.status.ok(), "状态查询应成功");
     }
+
+    // schedule.query：schedule_id 与 rule_id 互斥。
+    const auto query_both_ids = server.call({
+        .request_id = "query-both-ids",
+        .name = "schedule.query",
+        .arguments = {{"schedule_id", int64_t{1}}, {"rule_id", int64_t{600}}},
+    });
+    Check(OutputString(query_both_ids, "status") == "failure", "query 同时传 schedule_id 与 rule_id 应失败");
 
     // schedule.update：schedule_id 与 rule_id 互斥。
     const auto both_ids = server.call({

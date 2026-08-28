@@ -134,8 +134,8 @@ ParsedRepeat ParseFlat(const PropertyList& properties, bool require_anchor) {
         parsed.occurrence_count = static_cast<int32_t>(*count);
     }
 
-    if (require_anchor && (!parsed.freq_type.has_value() || !parsed.start_time.has_value() ||
-                           !parsed.start_date.has_value())) {
+    if (require_anchor &&
+        (!parsed.freq_type.has_value() || !parsed.start_time.has_value() || !parsed.start_date.has_value())) {
         parsed.error = "创建周期日程时必须传入 freq_type、start_date 和 start_time；这些字段不能省略";
     }
     return parsed;
@@ -331,8 +331,7 @@ PropertyList CreateRuleProperties() {
             .with_description("每次 occurrence 的结束时间，格式 HH:mm:ss"),
         Property::Optional("location", PropertyType::kString).with_description("周期日程地点"),
         Property::Optional("notes", PropertyType::kString).with_description("周期日程备注"),
-        Property("interval_val", PropertyType::kInteger, int64_t{1})
-            .with_description("重复间隔，默认 1，必须为正整数"),
+        Property("interval_val", PropertyType::kInteger, int64_t{1}).with_description("重复间隔，默认 1，必须为正整数"),
         Property::Optional("weekdays_mask", PropertyType::kInteger)
             .with_description("仅 weekly 使用，按位表示星期一至星期日，范围 1 到 127"),
         Property::Optional("day_of_month", PropertyType::kInteger)
@@ -365,7 +364,8 @@ PropertyList QueryProperties() {
 PropertyList UpdateProperties() {
     return PropertyList({
         Property::Optional("schedule_id", PropertyType::kInteger)
-            .with_description("要修改的 schedule 表记录 ID；由 schedule.query 返回。不要传 rule_id 或 original_start_time"),
+            .with_description(
+                "要修改的 schedule 表记录 ID；由 schedule.query 返回。不要传 rule_id 或 original_start_time"),
         Property::Optional("event", PropertyType::kString).with_description("新的日程标题"),
         Property::Optional("start_time", PropertyType::kString)
             .with_description("新的开始时间，格式 YYYY-MM-DD HH:mm:ss"),
@@ -397,7 +397,8 @@ PropertyList UpdateOccurrenceProperties() {
 PropertyList UpdateRuleProperties() {
     return PropertyList({
         Property::Optional("rule_id", PropertyType::kInteger)
-            .with_description("要修改的整条周期规则 ID；由 schedule.query 返回。不要传 schedule_id 或 original_start_time"),
+            .with_description(
+                "要修改的整条周期规则 ID；由 schedule.query 返回。不要传 schedule_id 或 original_start_time"),
         Property::Optional("event", PropertyType::kString).with_description("新的规则标题"),
         Property::Optional("freq_type", PropertyType::kString)
             .with_description("新的周期频率，只能是 daily、weekly、monthly、yearly"),
@@ -422,18 +423,21 @@ PropertyList UpdateRuleProperties() {
 PropertyList DeleteProperties() {
     return PropertyList({
         Property::Optional("schedule_id", PropertyType::kInteger)
-            .with_description("要取消的 schedule 表记录 ID，可指向一次性日程或已物化周期实例；由 schedule.query 返回。不要传 rule_id 或 original_start_time"),
+            .with_description("要取消的 schedule 表记录 ID，可指向一次性日程或已物化周期实例；由 schedule.query "
+                              "返回。不要传 rule_id 或 original_start_time"),
         Property::Optional("expected_event", PropertyType::kString)
             .with_description("删除前必须从 schedule.query 原样回传该记录的 event，用于确认不会取消错误目标"),
         Property::Optional("expected_start_time", PropertyType::kString)
-            .with_description("删除前必须从 schedule.query 原样回传该记录的 start_time；无开始时间的记录不能通过此确认工具取消"),
+            .with_description(
+                "删除前必须从 schedule.query 原样回传该记录的 start_time；无开始时间的记录不能通过此确认工具取消"),
     });
 }
 
 PropertyList DeleteRuleProperties() {
     return PropertyList({
         Property::Optional("rule_id", PropertyType::kInteger)
-            .with_description("要取消的整条周期规则 ID；会停止后续 occurrence。不要传 schedule_id 或 original_start_time"),
+            .with_description(
+                "要取消的整条周期规则 ID；会停止后续 occurrence。不要传 schedule_id 或 original_start_time"),
     });
 }
 
@@ -442,9 +446,11 @@ PropertyList SkipOccurrenceProperties() {
         Property::Optional("rule_id", PropertyType::kInteger)
             .with_description("周期规则 ID；只用于定位一个未来 occurrence"),
         Property::Optional("original_start_time", PropertyType::kString)
-            .with_description("要跳过的原始 occurrence 完整本地开始时间，严格使用 YYYY-MM-DD HH:mm:ss；不是规则的 HH:mm:ss 时间部分"),
+            .with_description(
+                "要跳过的原始 occurrence 完整本地开始时间，严格使用 YYYY-MM-DD HH:mm:ss；不是规则的 HH:mm:ss 时间部分"),
         Property::Optional("expected_event", PropertyType::kString)
-            .with_description("从 schedule.query 的 future_occurrences 原样回传 event，用于确认跳过的是正确 occurrence"),
+            .with_description(
+                "从 schedule.query 的 future_occurrences 原样回传 event，用于确认跳过的是正确 occurrence"),
     });
 }
 
