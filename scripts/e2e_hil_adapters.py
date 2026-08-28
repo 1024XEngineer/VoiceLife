@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -194,10 +195,12 @@ class RealHilHardware:
     """Production adapters that reuse existing build, flash, provisioning and pairing scripts."""
 
     def __init__(self, server: str, server_directory: str, gateway_origin: str, user_id: str) -> None:
-        self._server = server
-        self._server_directory = server_directory
-        self._gateway_origin = gateway_origin
-        self._user_id = user_id
+        # GitHub secrets are commonly pasted with a trailing newline; normalize
+        # transport configuration before constructing SSH and provisioning calls.
+        self._server = server.strip()
+        self._server_directory = server_directory.strip()
+        self._gateway_origin = gateway_origin.strip().rstrip("/")
+        self._user_id = user_id.strip()
         self._active_application_offset: int | None = None
 
     def _run(self, command: list[str], timeout_s: float, *, input_text: str | None = None) -> str:
@@ -216,6 +219,10 @@ class RealHilHardware:
         except OSError as error:
             raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "hil_command_unavailable") from error
         if result.returncode != 0:
+            print(
+                f"HIL command failed: executable={Path(command[0]).name} exit_code={result.returncode}",
+                file=sys.stderr,
+            )
             raise RunnerFailure(FailureCategory.INFRASTRUCTURE, "hil_command_failed")
         return result.stdout
 
@@ -339,21 +346,27 @@ class RealHilHardware:
             raise RunnerFailure(FailureCategory.CONFIGURATION, "pyserial_unavailable") from error
         signals: list[dict[str, object]] = [{"signal": "provisioned"}]
         deadline = time.monotonic() + timeout_s
-        with serial.Serial(descriptor.port.as_posix(), 115200, timeout=0.2, write_timeout=2) as device:
-            device.dtr = False
-            device.rts = True
-            time.sleep(0.15)
-            device.rts = False
-            while time.monotonic() < deadline:
-                signal = parse_im_signal(device.readline().decode("utf-8", "replace"))
-                if signal is not None:
-                    signals.append(signal)
-                    if signal["signal"] == "ready" or signal["signal"] in {
-                        "degraded",
-                        "provision_failure",
-                        "startup_failure",
-                    }:
-                        return signals
+        while time.monotonic() < deadline:
+            try:
+                with serial.Serial(descriptor.port.as_posix(), 115200, timeout=0.2, write_timeout=2) as device:
+                    device.dtr = False
+                    device.rts = True
+                    time.sleep(0.15)
+                    device.rts = False
+                    while time.monotonic() < deadline:
+                        signal = parse_im_signal(device.readline().decode("utf-8", "replace"))
+                        if signal is not None:
+                            signals.append(signal)
+                            if signal["signal"] == "ready" or signal["signal"] in {
+                                "degraded",
+                                "provision_failure",
+                                "startup_failure",
+                            }:
+                                return signals
+                    return signals
+            except serial.SerialException:
+                # USB-Serial/JTAG briefly disappears while the board reboots.
+                time.sleep(0.5)
         return signals
 
     def pair(self, descriptor: DeviceDescriptor, identity: TemporaryIdentity, timeout_s: float) -> list[dict[str, str]]:
@@ -368,24 +381,29 @@ class RealHilHardware:
             raise RunnerFailure(FailureCategory.CONFIGURATION, "pyserial_unavailable") from error
         events: list[dict[str, str]] = []
         deadline = time.monotonic() + timeout_s
-        with serial.Serial(descriptor.port.as_posix(), 115200, timeout=0.2, write_timeout=2) as device:
-            device.write(trigger_payload(1))
-            device.flush()
-            while time.monotonic() < deadline:
-                event = parse_pairing_line(device.readline())
-                if event is None:
-                    continue
-                events.append(event)
-                if event.get("status") in {
-                    "expired",
-                    "confirmed",
-                    "cancelled",
-                    "not_found",
-                    "timed_out",
-                    "credential_rejected",
-                    "failed",
-                }:
+        while time.monotonic() < deadline:
+            try:
+                with serial.Serial(descriptor.port.as_posix(), 115200, timeout=0.2, write_timeout=2) as device:
+                    device.write(trigger_payload(1))
+                    device.flush()
+                    while time.monotonic() < deadline:
+                        event = parse_pairing_line(device.readline())
+                        if event is None:
+                            continue
+                        events.append(event)
+                        if event.get("status") in {
+                            "expired",
+                            "confirmed",
+                            "cancelled",
+                            "not_found",
+                            "timed_out",
+                            "credential_rejected",
+                            "failed",
+                        }:
+                            return events
                     return events
+            except serial.SerialException:
+                time.sleep(0.5)
         return events
 
     def recover(self, descriptor: DeviceDescriptor) -> None:
@@ -393,8 +411,12 @@ class RealHilHardware:
             import serial
         except ImportError as error:
             raise RunnerFailure(FailureCategory.CONFIGURATION, "pyserial_unavailable") from error
-        with serial.Serial(descriptor.port.as_posix(), 115200, timeout=0.2, write_timeout=2) as device:
-            device.dtr = False
-            device.rts = True
-            time.sleep(0.15)
-            device.rts = False
+        try:
+            with serial.Serial(descriptor.port.as_posix(), 115200, timeout=0.2, write_timeout=2) as device:
+                device.dtr = False
+                device.rts = True
+                time.sleep(0.15)
+                device.rts = False
+        except serial.SerialException:
+            # A board may still be re-enumerating after provisioning; recovery is idempotent.
+            pass

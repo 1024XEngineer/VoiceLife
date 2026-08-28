@@ -284,9 +284,11 @@ Status Esp32s3PcmAudioPorts::Impl::OpenOutput(const voice::AudioFormat& format) 
         return Status::Error(ErrorCode::kConflict, "输出端口正在关闭，请等待关闭完成后重开");
     }
     if (output_open_) {
-        return playback_format_.has_value() && detail::SameFormat(*playback_format_, format, true)
-                   ? Status::Ok()
-                   : Status::Error(ErrorCode::kConflict, "输出端口已经以其他格式打开");
+        // The hardware clock stays at the board Profile format. Negotiated
+        // playback frames are resampled by PushOutput, so a second Open from
+        // VoiceSession may legitimately use a different valid wire format
+        // after startup pre-allocation has opened the fixed hardware port.
+        return Status::Ok();
     }
     if (profile_.topology != AudioBoardTopology::kDirectI2sSimplex &&
         profile_.topology != AudioBoardTopology::kExternalCodecDuplex) {

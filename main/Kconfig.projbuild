@@ -52,7 +52,7 @@ config VOICELIFE_STATE_FLOW_TEST
 config VOICELIFE_SERIAL_VOICE_TEST
     bool "Enable SparkBot serial PCM voice regression harness"
     default n
-    depends on VOICELIFE_BOARD_ESP_SPARKBOT && ESP_CONSOLE_USB_SERIAL_JTAG && !VOICELIFE_STATE_FLOW_TEST
+    depends on (VOICELIFE_BOARD_ESP_SPARKBOT || VOICELIFE_BOARD_VOICELIFE_PCB) && ESP_CONSOLE_USB_SERIAL_JTAG && !VOICELIFE_STATE_FLOW_TEST
     help
         Start a test-only USB Serial/JTAG PCM input reader. It accepts a fixed,
         bounded 16 kHz S16LE mono protocol and routes frames through the normal

@@ -469,6 +469,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--say-voice", default="Ting-Ting", help="macOS voice used with --input-tts macos-say.")
     parser.add_argument("--response-timeout", type=float, default=45)
     parser.add_argument(
+        "--startup-settle-seconds",
+        type=float,
+        default=0,
+        help="Wait after standby_ready before the first injected turn (for transport reconnect settling).",
+    )
+    parser.add_argument(
         "--expect-terminal",
         action="store_true",
         help="Treat the final utterance as terminal and verify the 8-second local-wake guard.",
@@ -494,7 +500,12 @@ def parse_args() -> argparse.Namespace:
         "--result-json", type=Path, help="Optional local result summary; never contains credentials or audio."
     )
     args = parser.parse_args()
-    if args.baud <= 0 or args.response_timeout <= 0 or args.guard_observation_seconds < 8:
+    if (
+        args.baud <= 0
+        or args.response_timeout <= 0
+        or args.guard_observation_seconds < 8
+        or args.startup_settle_seconds < 0
+    ):
         parser.error("baud、response-timeout 和 guard-observation-seconds 必须有效，且观察窗口不得小于 8 秒")
     return args
 
@@ -537,6 +548,8 @@ def main() -> int:
         # to standby. Starting before standby_ready is intentionally rejected
         # by the state machine and must never be treated as a valid first turn.
         log.wait_for("SERIAL_VOICE_EVIDENCE event=standby_ready ", 0, 20)
+        if args.startup_settle_seconds:
+            time.sleep(args.startup_settle_seconds)
         for index, prepared in enumerate(prepared_turns, start=1):
             result = run_turn(
                 device,

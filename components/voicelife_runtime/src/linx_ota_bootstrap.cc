@@ -57,6 +57,8 @@ constexpr size_t kMaxOtaResponseBytes = 16 * 1024;
 constexpr EventBits_t kWifiConnectedBit = BIT0;
 constexpr EventBits_t kWifiFailedBit = BIT1;
 constexpr int kWifiConnectTimeoutMs = 15000;
+constexpr int kWifiConnectWindowMs = 5 * 60 * 1000;
+constexpr int kWifiRetryDelayMs = 1000;
 constexpr int kOtaAttempts = 3;
 constexpr int kOtaBootstrapAttempts = 5;
 constexpr std::array<int, kOtaBootstrapAttempts - 1> kOtaRetryDelayMs = {1000, 2000, 4000, 8000};
@@ -336,18 +338,23 @@ Status EnsureWifiStaConnected(const WifiProvisioningStatusSink& status_sink) {
         if (const esp_err_t error = esp_wifi_start(); error != ESP_OK && error != ESP_ERR_INVALID_STATE)
             return EspError("启动 ESP Wi-Fi", error);
         bool connected = false;
-        for (int attempt = 0; attempt < kOtaAttempts; ++attempt) {
+        const int64_t connect_deadline_us = esp_timer_get_time() + static_cast<int64_t>(kWifiConnectWindowMs) * 1000;
+        while (esp_timer_get_time() < connect_deadline_us) {
             xEventGroupClearBits(events, kWifiConnectedBit | kWifiFailedBit);
             if (const esp_err_t error = esp_wifi_connect(); error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
                 return EspError("连接 Wi-Fi STA", error);
             }
+            const int64_t remaining_us = connect_deadline_us - esp_timer_get_time();
+            const int wait_ms =
+                static_cast<int>(std::min<int64_t>(kWifiConnectTimeoutMs, std::max<int64_t>(1, remaining_us / 1000)));
             const EventBits_t result = xEventGroupWaitBits(events, kWifiConnectedBit | kWifiFailedBit, pdFALSE, pdFALSE,
-                                                           pdMS_TO_TICKS(kWifiConnectTimeoutMs));
+                                                           pdMS_TO_TICKS(wait_ms));
             wifi_ap_record_t access_point{};
             if ((result & kWifiConnectedBit) != 0 && esp_wifi_sta_get_ap_info(&access_point) == ESP_OK) {
                 connected = true;
                 break;
             }
+            if (esp_timer_get_time() < connect_deadline_us) vTaskDelay(pdMS_TO_TICKS(kWifiRetryDelayMs));
         }
         if (connected) {
             if (candidate_requires_persistence) {
