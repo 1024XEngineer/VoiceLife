@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "name": "voice-schedule-sparkbot",
+  "port": "/dev/cu.usbmodemXXXX",
+  "profile": "sparkbot"
+}
