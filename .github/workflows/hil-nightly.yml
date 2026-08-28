@@ -1,0 +1,170 @@
+name: HIL Manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Device profile to run (the default runs both profiles)
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - sparkbot
+          - pcb
+      journey:
+        description: HIL journey
+        required: false
+        type: choice
+        default: im-pairing
+        options:
+          - im-pairing
+          - voice
+      tts_provider:
+        description: Host TTS fixture provider used by the voice journey
+        required: false
+        type: choice
+        default: dashscope
+        options:
+          - dashscope
+          - aliyun-nls
+      device:
+        description: Optional descriptor name; requires a single profile selection
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hil-nightly-${{ github.ref }}-${{ inputs.profile || 'all' }}
+  cancel-in-progress: false
+
+jobs:
+  hil:
+    name: HIL / ${{ matrix.profile }}
+    runs-on: [self-hosted, voicelife-hil, "${{ matrix.profile }}"]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: ${{ fromJSON(inputs.profile == 'sparkbot' && '["sparkbot"]' || inputs.profile == 'pcb' && '["pcb"]' || '["sparkbot", "pcb"]') }}
+    env:
+      HIL_DEVICE_ROOT: ${{ vars.VOICELIFE_HIL_DEVICE_ROOT || '/opt/voicelife/hil/devices' }}
+      HIL_LEASE_ROOT: ${{ vars.VOICELIFE_HIL_LEASE_ROOT || '/opt/voicelife/hil/leases' }}
+      VOICELIFE_HIL_SERVER: ${{ secrets.VOICELIFE_HIL_SERVER }}
+      VOICELIFE_HIL_SERVER_DIR: ${{ secrets.VOICELIFE_HIL_SERVER_DIR }}
+      VOICELIFE_HIL_GATEWAY_ORIGIN: ${{ secrets.VOICELIFE_HIL_GATEWAY_ORIGIN }}
+      VOICELIFE_HIL_USER_ID: ${{ secrets.VOICELIFE_HIL_USER_ID }}
+      DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+      ALIYUN_NLS_APPKEY: ${{ secrets.ALIYUN_NLS_APPKEY }}
+      ALIYUN_NLS_TOKEN: ${{ secrets.ALIYUN_NLS_TOKEN }}
+      ALIYUN_NLS_URL: ${{ vars.ALIYUN_NLS_URL }}
+      HIL_DEVICE_NAME: ${{ inputs.device || '' }}
+      ESP_IDF_VERSION: "6.0.2"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: 检查受控 Runner 配置
+        run: |
+          set -euo pipefail
+          device_name="$HIL_DEVICE_NAME"
+          if [[ -n "$device_name" ]]; then
+            [[ "${{ inputs.profile || 'all' }}" != "all" ]]
+            [[ "$device_name" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]]
+            descriptor="$HIL_DEVICE_ROOT/$device_name.json"
+          else
+            descriptor="$HIL_DEVICE_ROOT/${{ matrix.profile }}.json"
+          fi
+          test -r "$descriptor"
+          test -n "${VOICELIFE_HIL_SERVER:-}"
+          test -n "${VOICELIFE_HIL_SERVER_DIR:-}"
+          test -n "${VOICELIFE_HIL_GATEWAY_ORIGIN:-}"
+          test -n "${VOICELIFE_HIL_USER_ID:-}"
+          python3 -c 'import serial, esptool' >/dev/null
+          if [[ "${{ inputs.journey || 'im-pairing' }}" == "voice" ]]; then
+            if [[ "${{ inputs.tts_provider || 'dashscope' }}" == "dashscope" ]]; then
+              test -n "${DASHSCOPE_API_KEY:-}"
+              python3 -c 'import dashscope' >/dev/null
+            else
+              test -n "${ALIYUN_NLS_APPKEY:-}"
+              test -n "${ALIYUN_NLS_TOKEN:-}"
+              python3 -c 'import nls' >/dev/null
+            fi
+            command -v ffmpeg >/dev/null
+          fi
+      - name: 加载 ESP-IDF 工具链
+        run: |
+          set -euo pipefail
+          idf_path="${IDF_PATH:-$HOME/esp/esp-idf}"
+          test -f "$idf_path/export.sh"
+          # export.sh 只影响当前 shell；将其关键环境和 PATH 条目传给后续 steps。
+          source "$idf_path/export.sh"
+          printf 'IDF_PATH=%s\n' "$IDF_PATH" >> "$GITHUB_ENV"
+          printf 'IDF_PYTHON_ENV_PATH=%s\n' "$IDF_PYTHON_ENV_PATH" >> "$GITHUB_ENV"
+          if [[ -n "${IDF_TOOLS_PATH:-}" ]]; then
+            printf 'IDF_TOOLS_PATH=%s\n' "$IDF_TOOLS_PATH" >> "$GITHUB_ENV"
+          fi
+          printf 'PATH=%s\n' "$PATH" >> "$GITHUB_ENV"
+          command -v idf.py >/dev/null
+          command -v xtensa-esp32s3-elf-gcc >/dev/null
+      - name: 运行 HIL journey
+        id: journey
+        run: |
+          set +e
+          mkdir -p "artifacts/hil-${{ matrix.profile }}"
+          device_name="$HIL_DEVICE_NAME"
+          if [[ -n "$device_name" ]]; then
+            device_path="$HIL_DEVICE_ROOT/$device_name.json"
+          else
+            device_path="$HIL_DEVICE_ROOT/${{ matrix.profile }}.json"
+          fi
+          run_args=(
+            python3 scripts/run_e2e.py \
+            --layer hil \
+            --journey "${{ inputs.journey || 'im-pairing' }}" \
+            --profile "${{ matrix.profile }}" \
+            --artifact-dir "artifacts/hil-${{ matrix.profile }}" \
+            --timeout 900 \
+            --retries 0 \
+            --device "$device_path" \
+            --lease-dir "$HIL_LEASE_ROOT" \
+            --server "$VOICELIFE_HIL_SERVER" \
+            --server-dir "$VOICELIFE_HIL_SERVER_DIR" \
+            --gateway-origin "$VOICELIFE_HIL_GATEWAY_ORIGIN" \
+            --user-id "$VOICELIFE_HIL_USER_ID"
+          )
+          if [[ "${{ inputs.journey || 'im-pairing' }}" == "voice" ]]; then
+            run_args+=(
+              --input-tts "${{ inputs.tts_provider || 'dashscope' }}"
+              --tts-model "${VOICELIFE_TTS_MODEL:-qwen-audio-3.0-tts-flash}"
+              --voice "${VOICELIFE_TTS_VOICE:-longanlingxi}"
+              --text '你好牛牛，请介绍一下你自己。'
+              --text '把刚才的回答再简短一点。'
+              --text '再见。'
+              --expect-terminal
+            )
+          fi
+          "${run_args[@]}"
+          run_status=$?
+          exit "$run_status"
+      - name: 校验 HIL 脱敏 evidence
+        id: validate-hil-evidence
+        if: always()
+        run: python3 scripts/check_e2e_artifacts.py "artifacts/hil-${{ matrix.profile }}"
+      - name: 写入 HIL job summary
+        if: always()
+        run: python3 scripts/render_e2e_summary.py "artifacts/hil-${{ matrix.profile }}" >> "$GITHUB_STEP_SUMMARY"
+      - name: 上传 HIL 脱敏 evidence
+        if: always() && steps.validate-hil-evidence.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hil-${{ matrix.profile }}-evidence
+          path: artifacts/hil-${{ matrix.profile }}
+          if-no-files-found: error
+          retention-days: 14

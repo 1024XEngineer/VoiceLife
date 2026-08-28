@@ -8,6 +8,7 @@ import re
 import secrets
 import shutil
 import signal
+import sys
 import tempfile
 import threading
 import time
@@ -357,7 +358,8 @@ def run_e2e(config: RunnerConfig, adapter: RunnerAdapter) -> RunnerResult:
         category = FailureCategory.INTERRUPTED
         failed_phase = context.phase
         message_code = f"{context.phase}_interrupted"
-    except Exception:
+    except Exception as error:
+        print(f"E2E unexpected exception: {type(error).__name__}", file=sys.stderr)
         category = FailureCategory.INFRASTRUCTURE
         failed_phase = context.phase
         message_code = f"{context.phase}_unexpected_error"

@@ -188,7 +188,8 @@ Status InitializeStatusDisplay() {
     esp_lcd_panel_dev_config_t panel_config = {};
     panel_config.reset_gpio_num = GPIO_NUM_NC;
     panel_config.bits_per_pixel = 1;
-    esp_lcd_panel_ssd1306_config_t ssd_config = {.height = kHeight};
+    esp_lcd_panel_ssd1306_config_t ssd_config = {};
+    ssd_config.height = kHeight;
     panel_config.vendor_config = &ssd_config;
     if (const esp_err_t error = esp_lcd_new_panel_ssd1306(state.io, &panel_config, &state.panel); error != ESP_OK) {
         return Status::Error(ErrorCode::kUnavailable, "OLED SSD1306 驱动创建失败");

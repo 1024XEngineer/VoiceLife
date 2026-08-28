@@ -162,10 +162,9 @@ Status StartUsbSerialFrameRouter() {
     bool expected = false;
     if (!g_started.compare_exchange_strong(expected, true)) return Status::Ok();
     if (!usb_serial_jtag_is_driver_installed()) {
-        usb_serial_jtag_driver_config_t config = {
-            .tx_buffer_size = 1024,
-            .rx_buffer_size = 2048,
-        };
+        usb_serial_jtag_driver_config_t config = {};
+        config.tx_buffer_size = 1024;
+        config.rx_buffer_size = 2048;
         if (usb_serial_jtag_driver_install(&config) != ESP_OK) {
             g_started.store(false);
             return Status::Error(ErrorCode::kUnavailable, "初始化 USB 串口帧路由失败");

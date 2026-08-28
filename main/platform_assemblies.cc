@@ -84,7 +84,10 @@ voicelife::Status VoiceLifePcbAssembly::StartGpioInput(std::array<int, 4> gpios,
         buttons_[index].long_fired = false;
         buttons_[index].pressed_at_us = 0;
     }
-    if (xTaskCreate(&VoiceLifePcbAssembly::BoardInputTaskEntry, task_name, 3072, this, 5, nullptr) != pdPASS) {
+    // The voice stack consumes most internal RAM before board input starts;
+    // this polling task performs no cache-disabled work and can live in PSRAM.
+    if (xTaskCreateWithCaps(&VoiceLifePcbAssembly::BoardInputTaskEntry, task_name, 3072, this, 5, nullptr,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         return Status::Error(ErrorCode::kInternal, "创建 PCB 按键任务失败");
     }
 #else
