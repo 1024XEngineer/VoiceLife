@@ -15,15 +15,15 @@ void CheckRuleUpdateReminderResyncFailure() {
 
     const auto created = fixture.server.call({
         .request_id = "create-before-resync-failure",
-        .name = "schedule.create",
-        .arguments = {{"event", std::string("待重同步规则")}, {"repeat", DailyRepeat("2099-01-01")}},
+        .name = "schedule.create_rule",
+        .arguments = {{"event", std::string("待重同步规则")}, {"freq_type", std::string("daily")}, {"start_date", std::string("2099-01-01")}, {"start_time", std::string("09:00:00")}},
     });
     Check(created.status.ok() && OutputString(created, "status") == "success", "更新前应成功创建周期规则");
 
     fixture.timing.register_acceptance = CommandAcceptance::kUnavailable;
     const auto updated = fixture.server.call({
         .request_id = "update-rule-resync-failure",
-        .name = "schedule.update",
+        .name = "schedule.update_rule",
         .arguments = {{"rule_id", int64_t{fixture.rules.rules.back().id}}, {"event", std::string("重同步失败规则")}},
     });
     Check(updated.status.ok() && OutputString(updated, "status") == "failure" &&

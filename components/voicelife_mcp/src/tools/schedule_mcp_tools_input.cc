@@ -2,8 +2,10 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "schedule_tool_output.h"
 #include "voicelife/schedule/schedule_rule_commands.h"
@@ -39,26 +41,104 @@ std::optional<int64_t> JsonInteger(const JsonValue& object, const std::string& k
     return static_cast<int64_t>(value->number);
 }
 
-PropertyList RepeatProperties() {
-    return PropertyList({
-        Property("freq_type", PropertyType::kString)
-            .with_description(
-                "周期频率，只能取 daily、weekly、monthly、yearly。不要把不支持的自然语言规则近似成另一种频率"),
-        Property("interval_val", PropertyType::kInteger, int64_t{1})
-            .with_description("周期间隔，例如 1 表示每天、每周、每月或每年一次"),
-        Property("start_date", PropertyType::kString).with_description("周期规则开始日期，格式 YYYY-MM-DD"),
-        Property("start_time", PropertyType::kString).with_description("周期日程每日开始时间，格式 HH:mm:ss"),
-        Property::Optional("end_time", PropertyType::kString).with_description("周期日程每日结束时间，格式 HH:mm:ss"),
-        Property::Optional("end_date", PropertyType::kString).with_description("周期规则结束日期，格式 YYYY-MM-DD"),
-        Property::Optional("occurrence_count", PropertyType::kInteger).with_description("周期规则最多发生的次数"),
-        Property::Optional("weekdays_mask", PropertyType::kInteger)
-            .with_description("每周重复的星期掩码，weekly 模式使用；只表达指定星期，不表达每月第 N 个星期几"),
-        Property::Optional("day_of_month", PropertyType::kInteger)
-            .with_description("每月或每年重复的固定日期；不支持每月第 N 个星期几或最后一个工作日"),
-        Property::Optional("month_of_year", PropertyType::kInteger).with_description("每年重复的月份，yearly 模式使用"),
-        Property::Optional("monthly_mode", PropertyType::kString)
-            .with_description("月重复模式，只能取 specific_day 或 last_day；不支持 ordinal weekday、工作日等相对规则"),
-    });
+ParsedRepeat ParseFlat(const PropertyList& properties, bool require_anchor) {
+    ParsedRepeat parsed;
+    const auto frequency = properties.value<std::string>("freq_type");
+    if (frequency.has_value()) {
+        parsed.freq_type = ParseFrequency(*frequency);
+        if (!parsed.freq_type.has_value()) {
+            parsed.error = "freq_type 必须是 daily、weekly、monthly 或 yearly；请不要传入其他周期名称";
+            return parsed;
+        }
+    }
+
+    const auto start_time = properties.value<std::string>("start_time");
+    if (start_time.has_value()) {
+        parsed.start_time = schedule_tool_output::ParseLocalTime(*start_time);
+        if (!parsed.start_time.has_value()) {
+            parsed.error = "start_time 必须是严格的 HH:mm:ss 格式，例如 08:30:00";
+            return parsed;
+        }
+    }
+    const auto end_time = properties.value<std::string>("end_time");
+    if (end_time.has_value()) {
+        parsed.end_time = schedule_tool_output::ParseLocalTime(*end_time);
+        if (!parsed.end_time.has_value()) {
+            parsed.error = "end_time 必须是严格的 HH:mm:ss 格式，例如 09:30:00";
+            return parsed;
+        }
+    }
+    const auto start_date = properties.value<std::string>("start_date");
+    if (start_date.has_value()) {
+        parsed.start_date = schedule_tool_output::ParseLocalDate(*start_date);
+        if (!parsed.start_date.has_value()) {
+            parsed.error = "start_date 必须是严格的 YYYY-MM-DD 格式，例如 2026-08-27";
+            return parsed;
+        }
+    }
+    const auto end_date = properties.value<std::string>("end_date");
+    if (end_date.has_value()) {
+        parsed.end_date = schedule_tool_output::ParseLocalDate(*end_date);
+        if (!parsed.end_date.has_value()) {
+            parsed.error = "end_date 必须是严格的 YYYY-MM-DD 格式，例如 2026-12-31";
+            return parsed;
+        }
+    }
+
+    const auto interval = properties.value<int64_t>("interval_val");
+    if (interval.has_value()) {
+        if (*interval < 1 || *interval > std::numeric_limits<int32_t>::max()) {
+            parsed.error = "interval_val 必须是 1 到 2147483647 之间的整数";
+            return parsed;
+        }
+        parsed.interval_val = static_cast<int32_t>(*interval);
+    }
+    const auto weekdays = properties.value<int64_t>("weekdays_mask");
+    if (weekdays.has_value()) {
+        if (*weekdays < 1 || *weekdays > 127) {
+            parsed.error = "weekdays_mask 必须是 1 到 127 之间的整数；仅 weekly 周期需要传入";
+            return parsed;
+        }
+        parsed.weekdays_mask = static_cast<uint8_t>(*weekdays);
+    }
+    const auto day = properties.value<int64_t>("day_of_month");
+    if (day.has_value()) {
+        if (*day < 1 || *day > 31) {
+            parsed.error = "day_of_month 必须是 1 到 31 之间的整数；按月指定日期时传入";
+            return parsed;
+        }
+        parsed.day_of_month = static_cast<uint8_t>(*day);
+    }
+    const auto month = properties.value<int64_t>("month_of_year");
+    if (month.has_value()) {
+        if (*month < 1 || *month > 12) {
+            parsed.error = "month_of_year 必须是 1 到 12 之间的整数；yearly 周期需要传入";
+            return parsed;
+        }
+        parsed.month_of_year = static_cast<uint8_t>(*month);
+    }
+    const auto mode = properties.value<std::string>("monthly_mode");
+    if (mode.has_value()) {
+        parsed.monthly_mode = ParseMonthlyMode(*mode);
+        if (!parsed.monthly_mode.has_value()) {
+            parsed.error = "monthly_mode 只能是 specific_day 或 last_day；仅 monthly 周期使用";
+            return parsed;
+        }
+    }
+    const auto count = properties.value<int64_t>("occurrence_count");
+    if (count.has_value()) {
+        if (*count < 1 || *count > std::numeric_limits<int32_t>::max()) {
+            parsed.error = "occurrence_count 必须是 1 到 2147483647 之间的整数";
+            return parsed;
+        }
+        parsed.occurrence_count = static_cast<int32_t>(*count);
+    }
+
+    if (require_anchor && (!parsed.freq_type.has_value() || !parsed.start_time.has_value() ||
+                           !parsed.start_date.has_value())) {
+        parsed.error = "创建周期日程时必须传入 freq_type、start_date 和 start_time；这些字段不能省略";
+    }
+    return parsed;
 }
 
 bool IsKnownRepeatField(const std::string& key) {
@@ -177,6 +257,10 @@ ParsedRepeat ParseRepeat(const std::optional<JsonValue>& repeat, bool require_an
     return parsed;
 }
 
+ParsedRepeat ParseRuleProperties(const PropertyList& properties, bool require_anchor) {
+    return ParseFlat(properties, require_anchor);
+}
+
 schedule::CreateScheduleRuleCommand CreateRuleCommand(const PropertyList& properties, const ParsedRepeat& repeat) {
     schedule::CreateScheduleRuleCommand command;
     command.event = properties.value<std::string>("event").value_or("");
@@ -224,22 +308,52 @@ schedule::UpdateScheduleRuleCommand UpdateRuleCommand(const PropertyList& proper
 
 PropertyList CreateProperties() {
     return PropertyList({
-        Property("event", PropertyType::kString).with_description("日程标题或事件内容"),
+        Property("event", PropertyType::kString).with_description("一次性日程标题或事件内容"),
         Property::Optional("start_time", PropertyType::kString)
             .with_description("一次性日程开始时间，格式 YYYY-MM-DD HH:mm:ss。不传表示无明确开始时间"),
         Property::Optional("end_time", PropertyType::kString)
             .with_description("一次性日程结束时间，格式 YYYY-MM-DD HH:mm:ss。不传表示无明确结束时间"),
-        Property::Optional("location", PropertyType::kString).with_description("日程地点"),
-        Property::Optional("notes", PropertyType::kString).with_description("日程备注"),
+        Property::Optional("location", PropertyType::kString).with_description("一次性日程地点"),
+        Property::Optional("notes", PropertyType::kString).with_description("一次性日程备注"),
         Property("ignore_conflict", PropertyType::kBoolean, bool{false})
             .with_description("是否忽略时间冲突；为 true 时直接创建并返回创建后的日程"),
-        Property::OptionalObject("repeat", RepeatProperties())
-            .with_description("周期规则。不传时创建一次性日程，传入时创建周期日程并生成未来实例"),
+    });
+}
+
+PropertyList CreateRuleProperties() {
+    return PropertyList({
+        Property("event", PropertyType::kString).with_description("周期日程标题或事件内容"),
+        Property("freq_type", PropertyType::kString)
+            .with_description("周期频率，只能是 daily、weekly、monthly、yearly"),
+        Property("start_date", PropertyType::kString).with_description("周期规则开始日期，格式 YYYY-MM-DD"),
+        Property("start_time", PropertyType::kString).with_description("每次 occurrence 的开始时间，格式 HH:mm:ss"),
+        Property::Optional("end_time", PropertyType::kString)
+            .with_description("每次 occurrence 的结束时间，格式 HH:mm:ss"),
+        Property::Optional("location", PropertyType::kString).with_description("周期日程地点"),
+        Property::Optional("notes", PropertyType::kString).with_description("周期日程备注"),
+        Property("interval_val", PropertyType::kInteger, int64_t{1})
+            .with_description("重复间隔，默认 1，必须为正整数"),
+        Property::Optional("weekdays_mask", PropertyType::kInteger)
+            .with_description("仅 weekly 使用，按位表示星期一至星期日，范围 1 到 127"),
+        Property::Optional("day_of_month", PropertyType::kInteger)
+            .with_description("monthly 或 yearly 按固定日期重复时使用，范围 1 到 31"),
+        Property::Optional("month_of_year", PropertyType::kInteger)
+            .with_description("仅 yearly 使用，表示月份，范围 1 到 12"),
+        Property::Optional("monthly_mode", PropertyType::kString)
+            .with_description("仅 monthly 使用，只能是 specific_day 或 last_day"),
+        Property::Optional("end_date", PropertyType::kString).with_description("周期结束日期，格式 YYYY-MM-DD"),
+        Property::Optional("occurrence_count", PropertyType::kInteger).with_description("最多发生次数"),
+        Property("ignore_conflict", PropertyType::kBoolean, bool{false})
+            .with_description("是否忽略首条实例与已有日程的时间冲突"),
     });
 }
 
 PropertyList QueryProperties() {
     return PropertyList({
+        Property::Optional("schedule_id", PropertyType::kInteger)
+            .with_description("查询一条已物化 schedule；可指向一次性日程或周期实例。与 rule_id 互斥"),
+        Property::Optional("rule_id", PropertyType::kInteger)
+            .with_description("查询一条周期规则及其已物化实例、未来 occurrence、exception；与 schedule_id 互斥"),
         Property::Optional("keyword", PropertyType::kString).with_description("按日程标题或备注模糊搜索"),
         Property("status", PropertyType::kString, std::string("active"))
             .with_description("日程状态筛选，取值为 all、active、cancelled、completed"),
@@ -251,15 +365,7 @@ PropertyList QueryProperties() {
 PropertyList UpdateProperties() {
     return PropertyList({
         Property::Optional("schedule_id", PropertyType::kInteger)
-            .with_description("更新或取消已物化日程时使用的日程 ID，由 schedule.query 返回"),
-        Property::Optional("expected_event", PropertyType::kString)
-            .with_description("取消单次日程时，必须逐字回传 schedule.query 返回的 event 以确认目标"),
-        Property::Optional("expected_start_time", PropertyType::kString)
-            .with_description("取消单次日程时，必须逐字回传 schedule.query 返回的 start_time 以确认目标"),
-        Property::Optional("rule_id", PropertyType::kInteger)
-            .with_description("更新未来周期实例或整条周期规则时使用的规则 ID"),
-        Property::Optional("original_start_time", PropertyType::kString)
-            .with_description("未来周期实例的原始发生时间，格式 YYYY-MM-DD HH:mm:ss"),
+            .with_description("要修改的 schedule 表记录 ID；由 schedule.query 返回。不要传 rule_id 或 original_start_time"),
         Property::Optional("event", PropertyType::kString).with_description("新的日程标题"),
         Property::Optional("start_time", PropertyType::kString)
             .with_description("新的开始时间，格式 YYYY-MM-DD HH:mm:ss"),
@@ -267,24 +373,78 @@ PropertyList UpdateProperties() {
             .with_description("新的结束时间，格式 YYYY-MM-DD HH:mm:ss"),
         Property::Optional("location", PropertyType::kString).with_description("新的地点"),
         Property::Optional("notes", PropertyType::kString).with_description("新的备注"),
-        Property::Optional("status", PropertyType::kString)
-            .with_description("更新日程状态；跳过某次周期日程时传 cancelled，恢复时传 active"),
         Property("ignore_conflict", PropertyType::kBoolean, bool{false}).with_description("是否忽略时间冲突"),
-        Property::OptionalObject("repeat", RepeatProperties()).with_description("更新周期规则时使用的新周期配置"),
+    });
+}
+
+PropertyList UpdateOccurrenceProperties() {
+    return PropertyList({
+        Property::Optional("rule_id", PropertyType::kInteger)
+            .with_description("周期规则 ID；只用于定位未来 occurrence"),
+        Property::Optional("original_start_time", PropertyType::kString)
+            .with_description("未来 occurrence 的原始发生时间，格式 YYYY-MM-DD HH:mm:ss"),
+        Property::Optional("event", PropertyType::kString).with_description("仅覆盖这一次 occurrence 的标题"),
+        Property::Optional("start_time", PropertyType::kString)
+            .with_description("仅覆盖这一次 occurrence 的开始时间，格式 YYYY-MM-DD HH:mm:ss"),
+        Property::Optional("end_time", PropertyType::kString)
+            .with_description("仅覆盖这一次 occurrence 的结束时间，格式 YYYY-MM-DD HH:mm:ss"),
+        Property::Optional("location", PropertyType::kString).with_description("仅覆盖这一次 occurrence 的地点"),
+        Property::Optional("notes", PropertyType::kString).with_description("仅覆盖这一次 occurrence 的备注"),
+        Property("ignore_conflict", PropertyType::kBoolean, bool{false}).with_description("是否忽略时间冲突"),
+    });
+}
+
+PropertyList UpdateRuleProperties() {
+    return PropertyList({
+        Property::Optional("rule_id", PropertyType::kInteger)
+            .with_description("要修改的整条周期规则 ID；由 schedule.query 返回。不要传 schedule_id 或 original_start_time"),
+        Property::Optional("event", PropertyType::kString).with_description("新的规则标题"),
+        Property::Optional("freq_type", PropertyType::kString)
+            .with_description("新的周期频率，只能是 daily、weekly、monthly、yearly"),
+        Property::Optional("start_date", PropertyType::kString).with_description("新的规则开始日期，格式 YYYY-MM-DD"),
+        Property::Optional("start_time", PropertyType::kString).with_description("新的规则开始时间，格式 HH:mm:ss"),
+        Property::Optional("end_time", PropertyType::kString).with_description("新的规则结束时间，格式 HH:mm:ss"),
+        Property::Optional("location", PropertyType::kString).with_description("新的规则地点"),
+        Property::Optional("notes", PropertyType::kString).with_description("新的规则备注"),
+        Property::Optional("interval_val", PropertyType::kInteger).with_description("新的重复间隔"),
+        Property::Optional("weekdays_mask", PropertyType::kInteger)
+            .with_description("weekly 新的星期掩码，范围 1 到 127"),
+        Property::Optional("day_of_month", PropertyType::kInteger).with_description("新的固定日期，范围 1 到 31"),
+        Property::Optional("month_of_year", PropertyType::kInteger).with_description("yearly 新的月份，范围 1 到 12"),
+        Property::Optional("monthly_mode", PropertyType::kString)
+            .with_description("monthly 新模式，只能是 specific_day 或 last_day"),
+        Property::Optional("end_date", PropertyType::kString).with_description("新的结束日期，格式 YYYY-MM-DD"),
+        Property::Optional("occurrence_count", PropertyType::kInteger).with_description("新的最大发生次数"),
+        Property("ignore_conflict", PropertyType::kBoolean, bool{false}).with_description("是否忽略规则重建后的冲突"),
     });
 }
 
 PropertyList DeleteProperties() {
     return PropertyList({
         Property::Optional("schedule_id", PropertyType::kInteger)
-            .with_description("要删除或取消的单次日程 ID；必须先由 schedule.query 返回"),
+            .with_description("要取消的 schedule 表记录 ID，可指向一次性日程或已物化周期实例；由 schedule.query 返回。不要传 rule_id 或 original_start_time"),
         Property::Optional("expected_event", PropertyType::kString)
-            .with_description("按 schedule_id 删除时，必须逐字回传 schedule.query 返回的 event 以确认目标"),
+            .with_description("删除前必须从 schedule.query 原样回传该记录的 event，用于确认不会取消错误目标"),
         Property::Optional("expected_start_time", PropertyType::kString)
-            .with_description("按 schedule_id 删除时，必须逐字回传 schedule.query 返回的 start_time 以确认目标"),
-        Property::Optional("rule_id", PropertyType::kInteger).with_description("要删除或取消的周期规则 ID"),
+            .with_description("删除前必须从 schedule.query 原样回传该记录的 start_time；无开始时间的记录不能通过此确认工具取消"),
+    });
+}
+
+PropertyList DeleteRuleProperties() {
+    return PropertyList({
+        Property::Optional("rule_id", PropertyType::kInteger)
+            .with_description("要取消的整条周期规则 ID；会停止后续 occurrence。不要传 schedule_id 或 original_start_time"),
+    });
+}
+
+PropertyList SkipOccurrenceProperties() {
+    return PropertyList({
+        Property::Optional("rule_id", PropertyType::kInteger)
+            .with_description("周期规则 ID；只用于定位一个未来 occurrence"),
         Property::Optional("original_start_time", PropertyType::kString)
-            .with_description("删除未来周期单次时使用的原始发生时间，格式 YYYY-MM-DD HH:mm:ss"),
+            .with_description("要跳过的原始 occurrence 完整本地开始时间，严格使用 YYYY-MM-DD HH:mm:ss；不是规则的 HH:mm:ss 时间部分"),
+        Property::Optional("expected_event", PropertyType::kString)
+            .with_description("从 schedule.query 的 future_occurrences 原样回传 event，用于确认跳过的是正确 occurrence"),
     });
 }
 

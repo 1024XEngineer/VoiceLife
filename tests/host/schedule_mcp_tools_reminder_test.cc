@@ -270,14 +270,6 @@ std::optional<int64_t> OutputInteger(const ToolResult& result, const std::string
     return std::nullopt;
 }
 
-JsonValue DailyRepeat(const std::string& start_date = "2099-01-01") {
-    return JsonValue::Object({
-        {"freq_type", JsonValue::String("daily")},
-        {"start_date", JsonValue::String(start_date)},
-        {"start_time", JsonValue::String("09:00:00")},
-    });
-}
-
 void CheckOneShotReminderLifecycle() {
     InMemoryScheduleRepository schedules;
     FakeExceptionRepository exceptions;
@@ -441,22 +433,22 @@ void CheckRuleReminderSuccessPaths() {
 
     const auto created = fixture.server.call({
         .request_id = "create-rule-reminder-success",
-        .name = "schedule.create",
-        .arguments = {{"event", std::string("可同步规则")}, {"repeat", DailyRepeat("2099-01-01")}},
+        .name = "schedule.create_rule",
+        .arguments = {{"event", std::string("可同步规则")}, {"freq_type", std::string("daily")}, {"start_date", std::string("2099-01-01")}, {"start_time", std::string("09:00:00")}},
     });
     Check(created.status.ok() && OutputString(created, "status") == "success", "创建周期规则并同步提醒应成功");
     const ScheduleRuleId rule_id = fixture.rules.rules.back().id;
 
     const auto updated = fixture.server.call({
         .request_id = "update-rule-reminder-success",
-        .name = "schedule.update",
+        .name = "schedule.update_rule",
         .arguments = {{"rule_id", int64_t{rule_id}}, {"event", std::string("更新后的可同步规则")}},
     });
     Check(updated.status.ok() && OutputString(updated, "status") == "success", "更新周期规则并同步提醒应成功");
 
     const auto deleted = fixture.server.call({
         .request_id = "delete-rule-reminder-success",
-        .name = "schedule.delete",
+        .name = "schedule.delete_rule",
         .arguments = {{"rule_id", int64_t{rule_id}}},
     });
     Check(deleted.status.ok() && OutputString(deleted, "status") == "success", "删除周期规则并撤销提醒应成功");
@@ -472,8 +464,8 @@ void CheckRuleReminderRollbackSyncPaths() {
           "带提醒服务工具应注册成功");
     const auto update_created = update_fixture.server.call({
         .request_id = "create-rule-before-update-failure",
-        .name = "schedule.create",
-        .arguments = {{"event", std::string("更新失败前规则")}, {"repeat", DailyRepeat("2099-01-01")}},
+        .name = "schedule.create_rule",
+        .arguments = {{"event", std::string("更新失败前规则")}, {"freq_type", std::string("daily")}, {"start_date", std::string("2099-01-01")}, {"start_time", std::string("09:00:00")}},
     });
     Check(update_created.status.ok() && OutputString(update_created, "status") == "success",
           "更新失败同步测试应先创建规则");
@@ -481,7 +473,7 @@ void CheckRuleReminderRollbackSyncPaths() {
     update_fixture.rules.next_update_failure = Status::Error(ErrorCode::kUnavailable, "规则更新失败");
     const auto update_failed = update_fixture.server.call({
         .request_id = "update-rule-then-sync",
-        .name = "schedule.update",
+        .name = "schedule.update_rule",
         .arguments = {{"rule_id", int64_t{update_fixture.rules.rules.back().id}}, {"event", std::string("更新失败")}},
     });
     Check(update_failed.status.ok() && OutputString(update_failed, "status") == "failure",
@@ -496,8 +488,8 @@ void CheckRuleReminderRollbackSyncPaths() {
           "带提醒服务工具应注册成功");
     const auto delete_created = delete_fixture.server.call({
         .request_id = "create-rule-before-delete-failure",
-        .name = "schedule.create",
-        .arguments = {{"event", std::string("删除失败前规则")}, {"repeat", DailyRepeat("2099-01-01")}},
+        .name = "schedule.create_rule",
+        .arguments = {{"event", std::string("删除失败前规则")}, {"freq_type", std::string("daily")}, {"start_date", std::string("2099-01-01")}, {"start_time", std::string("09:00:00")}},
     });
     Check(delete_created.status.ok() && OutputString(delete_created, "status") == "success",
           "删除失败同步测试应先创建规则");
@@ -505,7 +497,7 @@ void CheckRuleReminderRollbackSyncPaths() {
     delete_fixture.rules.next_cancel_rule_failure = Status::Error(ErrorCode::kUnavailable, "规则删除失败");
     const auto delete_failed = delete_fixture.server.call({
         .request_id = "delete-rule-then-sync",
-        .name = "schedule.delete",
+        .name = "schedule.delete_rule",
         .arguments = {{"rule_id", int64_t{delete_fixture.rules.rules.back().id}}},
     });
     Check(delete_failed.status.ok() && OutputString(delete_failed, "status") == "failure",
@@ -524,8 +516,8 @@ void CheckRuleReminderSyncFailurePaths() {
 
     const auto rule_create_failed = create_fail_fixture.server.call({
         .request_id = "create-rule-sync-failed",
-        .name = "schedule.create",
-        .arguments = {{"event", std::string("创建规则失败")}, {"repeat", DailyRepeat("2099-01-01")}},
+        .name = "schedule.create_rule",
+        .arguments = {{"event", std::string("创建规则失败")}, {"freq_type", std::string("daily")}, {"start_date", std::string("2099-01-01")}, {"start_time", std::string("09:00:00")}},
     });
     Check(rule_create_failed.status.ok() && OutputString(rule_create_failed, "status") == "failure" &&
               OutputString(rule_create_failed, "message").find("提醒同步失败") != std::string::npos,
@@ -539,15 +531,15 @@ void CheckRuleReminderSyncFailurePaths() {
           "带提醒服务工具应注册成功");
     const auto rule_create = fixture.server.call({
         .request_id = "create-rule-for-update",
-        .name = "schedule.create",
-        .arguments = {{"event", std::string("可更新规则")}, {"repeat", DailyRepeat("2099-01-01")}},
+        .name = "schedule.create_rule",
+        .arguments = {{"event", std::string("可更新规则")}, {"freq_type", std::string("daily")}, {"start_date", std::string("2099-01-01")}, {"start_time", std::string("09:00:00")}},
     });
     Check(rule_create.status.ok() && OutputString(rule_create, "status") == "success", "正常周期规则创建应成功");
 
     fixture.timing.cancel_acceptance = CommandAcceptance::kUnavailable;
     const auto rule_update_failed = fixture.server.call({
         .request_id = "update-rule-suspend-failed",
-        .name = "schedule.update",
+        .name = "schedule.update_rule",
         .arguments = {{"rule_id", int64_t{600}}, {"event", std::string("更新规则失败")}},
     });
     Check(rule_update_failed.status.ok() && OutputString(rule_update_failed, "status") == "failure" &&
@@ -556,7 +548,7 @@ void CheckRuleReminderSyncFailurePaths() {
 
     const auto rule_delete_failed = fixture.server.call({
         .request_id = "delete-rule-suspend-failed",
-        .name = "schedule.delete",
+        .name = "schedule.delete_rule",
         .arguments = {{"rule_id", int64_t{600}}},
     });
     Check(rule_delete_failed.status.ok() && OutputString(rule_delete_failed, "status") == "failure" &&

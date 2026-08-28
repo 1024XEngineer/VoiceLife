@@ -63,17 +63,16 @@ int main() {
           "错误 ID 时不得取消任何日程");
 
     const ToolResult wrong_id_update = server.call({
-        .request_id = "update-cancel-wrong-id",
-        .name = "schedule.update",
+        .request_id = "delete-cancel-wrong-id",
+        .name = "schedule.delete",
         .arguments = {{"schedule_id", int64_t{2}},
                       {"expected_event", std::string("带紫色水彩笔")},
-                      {"expected_start_time", std::string("2026-08-27 14:13:00")},
-                      {"status", std::string("cancelled")}},
+                      {"expected_start_time", std::string("2026-08-27 14:13:00")}},
     });
-    Check(OutputString(wrong_id_update, "status") == "failure", "update 取消遇到错误 ID 也必须失败");
+    Check(OutputString(wrong_id_update, "status") == "failure", "删除遇到错误 ID 也必须失败");
     Check(schedules.FindSchedule(1).value->status == ScheduleStatus::kActive &&
               schedules.FindSchedule(2).value->status == ScheduleStatus::kActive,
-          "update 取消遇到错误 ID 时不得取消任何日程");
+          "删除遇到错误 ID 时不得取消任何日程");
 
     const ToolResult correct_target = Call(server, "delete-correct-target",
                                            {{"schedule_id", int64_t{1}},

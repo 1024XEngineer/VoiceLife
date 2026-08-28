@@ -13,11 +13,16 @@ using voicelife::JsonValue;
 using voicelife::mcp::PropertyList;
 using voicelife::mcp::schedule_tool_input::CreateProperties;
 using voicelife::mcp::schedule_tool_input::CreateRuleCommand;
+using voicelife::mcp::schedule_tool_input::CreateRuleProperties;
 using voicelife::mcp::schedule_tool_input::DeleteProperties;
+using voicelife::mcp::schedule_tool_input::DeleteRuleProperties;
 using voicelife::mcp::schedule_tool_input::ParseRepeat;
+using voicelife::mcp::schedule_tool_input::SkipOccurrenceProperties;
 using voicelife::mcp::schedule_tool_input::QueryProperties;
+using voicelife::mcp::schedule_tool_input::UpdateOccurrenceProperties;
 using voicelife::mcp::schedule_tool_input::UpdateProperties;
 using voicelife::mcp::schedule_tool_input::UpdateRuleCommand;
+using voicelife::mcp::schedule_tool_input::UpdateRuleProperties;
 using voicelife::schedule::Frequency;
 using voicelife::schedule::MonthlyMode;
 using voicelife::test::Check;
@@ -103,11 +108,18 @@ int main() {
               update.monthly_mode == MonthlyMode::kSpecificDay && update.occurrence_count == 7,
           "UpdateRuleCommand 应把 repeat 字段写入更新命令");
 
-    Check(CreateProperties().to_schema().properties.contains("repeat"), "create 工具应声明 repeat 参数");
+    Check(CreateProperties().to_schema().properties.contains("event"), "create 工具应声明 event 参数");
+    Check(CreateRuleProperties().to_schema().properties.contains("freq_type"), "create_rule 工具应声明 freq_type 参数");
     Check(QueryProperties().to_schema().properties.contains("keyword"), "query 工具应声明 keyword 参数");
-    Check(UpdateProperties().to_schema().properties.contains("repeat"), "update 工具应声明 repeat 参数");
-    Check(DeleteProperties().to_schema().properties.contains("rule_id"), "delete 工具应声明 rule_id 参数");
+    Check(UpdateProperties().to_schema().properties.contains("schedule_id"), "update 工具应声明 schedule_id 参数");
+    Check(UpdateOccurrenceProperties().to_schema().properties.contains("original_start_time"),
+          "update_occurrence 工具应声明 original_start_time 参数");
+    Check(UpdateRuleProperties().to_schema().properties.contains("freq_type"), "update_rule 工具应声明 freq_type 参数");
+    Check(DeleteProperties().to_schema().properties.contains("schedule_id"), "delete 工具应声明 schedule_id 参数");
     Check(DeleteProperties().to_schema().properties.contains("expected_event"), "delete 工具应声明目标确认事件");
     Check(DeleteProperties().to_schema().properties.contains("expected_start_time"), "delete 工具应声明目标确认时间");
+    Check(DeleteRuleProperties().to_schema().properties.contains("rule_id"), "delete_rule 工具应声明 rule_id 参数");
+    Check(SkipOccurrenceProperties().to_schema().properties.contains("original_start_time"),
+          "skip_occurrence 工具应声明 original_start_time 参数");
     return 0;
 }

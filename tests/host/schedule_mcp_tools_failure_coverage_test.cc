@@ -346,15 +346,6 @@ std::string OutputString(const ToolResult& result, const std::string& key) {
     return {};
 }
 
-/** @brief 构造每日周期 repeat 对象。 @return repeat JSON 对象。 */
-JsonValue DailyRepeat() {
-    return JsonValue::Object({
-        {"freq_type", JsonValue::String("daily")},
-        {"start_date", JsonValue::String("2099-01-01")},
-        {"start_time", JsonValue::String("09:00:00")},
-    });
-}
-
 /** @brief 构造测试规则。 @param id 规则标识。 @return 周期规则。 */
 ScheduleRule Rule(ScheduleRuleId id) {
     ScheduleRule rule;
@@ -414,8 +405,11 @@ int main() {
     rules.next_insert_failure = Status::Error(ErrorCode::kUnavailable, "规则写入失败");
     const auto create_rule_failed = server.call({
         .request_id = "create-rule-failed",
-        .name = "schedule.create",
-        .arguments = {{"event", std::string("周期失败")}, {"repeat", DailyRepeat()}},
+        .name = "schedule.create_rule",
+        .arguments = {{"event", std::string("周期失败")},
+                      {"freq_type", std::string("daily")},
+                      {"start_date", std::string("2099-01-01")},
+                      {"start_time", std::string("09:00:00")}},
     });
     Check(OutputString(create_rule_failed, "status") == "failure", "周期规则创建非冲突失败应返回 failure");
 
@@ -456,7 +450,7 @@ int main() {
     rules.next_cancel_failure = Status::Error(ErrorCode::kUnavailable, "取消规则失败");
     const auto delete_rule_failed = server.call({
         .request_id = "delete-rule-failed",
-        .name = "schedule.delete",
+        .name = "schedule.delete_rule",
         .arguments = {{"rule_id", int64_t{600}}},
     });
     Check(OutputString(delete_rule_failed, "status") == "failure", "取消周期规则失败应返回 failure");
@@ -464,7 +458,7 @@ int main() {
     exceptions.next_upsert_failure = Status::Error(ErrorCode::kUnavailable, "跳过失败");
     const auto delete_occurrence_failed = server.call({
         .request_id = "delete-occurrence-failed",
-        .name = "schedule.delete",
+        .name = "schedule.skip_occurrence",
         .arguments = {{"rule_id", int64_t{600}}, {"original_start_time", std::string("2099-01-03 09:00:00")}},
     });
     Check(OutputString(delete_occurrence_failed, "status") == "failure", "删除未来单次失败应返回 failure");
@@ -472,7 +466,7 @@ int main() {
     exceptions.next_upsert_failure = Status::Error(ErrorCode::kUnavailable, "单次更新失败");
     const auto update_occurrence_failed = server.call({
         .request_id = "update-occurrence-failed",
-        .name = "schedule.update",
+        .name = "schedule.update_occurrence",
         .arguments = {{"rule_id", int64_t{600}},
                       {"original_start_time", std::string("2099-01-04 09:00:00")},
                       {"event", std::string("失败更新")}},
@@ -531,14 +525,13 @@ int main() {
     failing_schedules.find_by_id_failure.reset();
     failing_schedules.delete_failure = Status::Error(ErrorCode::kUnavailable, "取消失败");
     const auto update_cancel_failed = failing_server.call({
-        .request_id = "update-cancel-failed",
-        .name = "schedule.update",
+        .request_id = "delete-cancel-failed",
+        .name = "schedule.delete",
         .arguments = {{"schedule_id", int64_t{20}},
                       {"expected_event", std::string("待更新日程")},
-                      {"expected_start_time", std::string("2030-03-18 01:46:40")},
-                      {"status", std::string("cancelled")}},
+                      {"expected_start_time", std::string("2030-03-18 01:46:40")}},
     });
-    Check(OutputString(update_cancel_failed, "status") == "failure", "update 取消失败应返回 failure");
+    Check(OutputString(update_cancel_failed, "status") == "failure", "delete 取消失败应返回 failure");
 
     failing_schedules.delete_failure.reset();
     failing_schedules.find_failure = Status::Error(ErrorCode::kUnavailable, "删除快照失败");

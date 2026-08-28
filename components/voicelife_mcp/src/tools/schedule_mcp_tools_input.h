@@ -40,6 +40,14 @@ struct ParsedRepeat {
 ParsedRepeat ParseRepeat(const std::optional<JsonValue>& repeat, bool require_anchor);
 
 /**
+ * @brief 解析扁平周期字段。
+ * @param properties MCP 调用参数。
+ * @param require_anchor 是否要求 freq_type、start_date 和 start_time 必填。
+ * @return 解析后的周期字段或错误。
+ */
+ParsedRepeat ParseRuleProperties(const PropertyList& properties, bool require_anchor);
+
+/**
  * @brief 从 MCP 参数和 repeat 字段构造创建周期规则命令。
  * @param properties MCP 调用参数。
  * @param repeat 解析后的 repeat 字段。
@@ -58,14 +66,29 @@ schedule::UpdateScheduleRuleCommand UpdateRuleCommand(const PropertyList& proper
 /** @brief 创建 schedule.create 工具参数定义。 @return 参数定义。 */
 PropertyList CreateProperties();
 
+/** @brief 创建 schedule.create_rule 工具参数定义。 @return 参数定义。 */
+PropertyList CreateRuleProperties();
+
 /** @brief 创建 schedule.query 工具参数定义。 @return 参数定义。 */
 PropertyList QueryProperties();
 
 /** @brief 创建 schedule.update 工具参数定义。 @return 参数定义。 */
 PropertyList UpdateProperties();
 
+/** @brief 创建 schedule.update_occurrence 工具参数定义。 @return 参数定义。 */
+PropertyList UpdateOccurrenceProperties();
+
+/** @brief 创建 schedule.update_rule 工具参数定义。 @return 参数定义。 */
+PropertyList UpdateRuleProperties();
+
 /** @brief 创建 schedule.delete 工具参数定义。 @return 参数定义。 */
 PropertyList DeleteProperties();
+
+/** @brief 创建 schedule.delete_rule 工具参数定义。 @return 参数定义。 */
+PropertyList DeleteRuleProperties();
+
+/** @brief 创建 schedule.skip_occurrence 工具参数定义。 @return 参数定义。 */
+PropertyList SkipOccurrenceProperties();
 
 /** @brief 创建 schedule.operation_query 工具参数定义。 @return 参数定义。 */
 PropertyList OperationQueryProperties();
