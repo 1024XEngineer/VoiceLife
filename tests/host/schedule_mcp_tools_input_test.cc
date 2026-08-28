@@ -10,14 +10,21 @@
 #include "voicelife/schedule/schedule_rule_commands.h"
 
 using voicelife::JsonValue;
+using voicelife::ToolArguments;
 using voicelife::mcp::PropertyList;
 using voicelife::mcp::schedule_tool_input::CreateProperties;
 using voicelife::mcp::schedule_tool_input::CreateRuleCommand;
+using voicelife::mcp::schedule_tool_input::CreateRuleProperties;
 using voicelife::mcp::schedule_tool_input::DeleteProperties;
+using voicelife::mcp::schedule_tool_input::DeleteRuleProperties;
 using voicelife::mcp::schedule_tool_input::ParseRepeat;
+using voicelife::mcp::schedule_tool_input::ParseRuleProperties;
 using voicelife::mcp::schedule_tool_input::QueryProperties;
+using voicelife::mcp::schedule_tool_input::SkipOccurrenceProperties;
+using voicelife::mcp::schedule_tool_input::UpdateOccurrenceProperties;
 using voicelife::mcp::schedule_tool_input::UpdateProperties;
 using voicelife::mcp::schedule_tool_input::UpdateRuleCommand;
+using voicelife::mcp::schedule_tool_input::UpdateRuleProperties;
 using voicelife::schedule::Frequency;
 using voicelife::schedule::MonthlyMode;
 using voicelife::test::Check;
@@ -89,6 +96,38 @@ int main() {
         std::optional<JsonValue>{JsonValue::Object({{"end_date", JsonValue::String("2099-00-01")}})}, false);
     Check(!bad_end_date.ok(), "无效 end_date 应失败");
 
+    // ParseRuleProperties（扁平周期字段）的字段级校验。
+    const auto parse_flat = [](ToolArguments args, bool require_anchor = false) {
+        return ParseRuleProperties(CreateRuleProperties().with_values(std::move(args)), require_anchor);
+    };
+    const auto flat_ok = parse_flat({{"freq_type", std::string("weekly")},
+                                     {"start_date", std::string("2099-01-01")},
+                                     {"start_time", std::string("09:00:00")},
+                                     {"interval_val", int64_t{2}}},
+                                    true);
+    Check(flat_ok.ok() && flat_ok.interval_val == 2, "扁平周期字段应解析成功");
+
+    const auto flat_missing_anchor = parse_flat({{"freq_type", std::string("daily")}}, true);
+    Check(!flat_missing_anchor.ok(), "扁平周期缺少 anchor 应失败");
+    const auto flat_bad_start_time = parse_flat({{"start_time", std::string("25:00:00")}});
+    Check(!flat_bad_start_time.ok(), "扁平 start_time 非法格式应失败");
+    const auto flat_bad_end_time = parse_flat({{"end_time", std::string("99:00:00")}});
+    Check(!flat_bad_end_time.ok(), "扁平 end_time 非法格式应失败");
+    const auto flat_bad_end_date = parse_flat({{"end_date", std::string("2099-00-01")}});
+    Check(!flat_bad_end_date.ok(), "扁平 end_date 非法格式应失败");
+    const auto flat_bad_interval = parse_flat({{"interval_val", int64_t{0}}});
+    Check(!flat_bad_interval.ok(), "扁平 interval_val 越界应失败");
+    const auto flat_bad_weekdays = parse_flat({{"weekdays_mask", int64_t{128}}});
+    Check(!flat_bad_weekdays.ok(), "扁平 weekdays_mask 越界应失败");
+    const auto flat_bad_day = parse_flat({{"day_of_month", int64_t{32}}});
+    Check(!flat_bad_day.ok(), "扁平 day_of_month 越界应失败");
+    const auto flat_bad_month = parse_flat({{"month_of_year", int64_t{13}}});
+    Check(!flat_bad_month.ok(), "扁平 month_of_year 越界应失败");
+    const auto flat_bad_mode = parse_flat({{"monthly_mode", std::string("ordinal_weekday")}});
+    Check(!flat_bad_mode.ok(), "扁平 monthly_mode 非法值应失败");
+    const auto flat_bad_count = parse_flat({{"occurrence_count", int64_t{0}}});
+    Check(!flat_bad_count.ok(), "扁平 occurrence_count 越界应失败");
+
     PropertyList create_properties;
     const auto create = CreateRuleCommand(create_properties, parsed);
     Check(create.freq_type == Frequency::kWeekly && create.interval_val == 2 && create.weekdays_mask == 3 &&
@@ -103,11 +142,18 @@ int main() {
               update.monthly_mode == MonthlyMode::kSpecificDay && update.occurrence_count == 7,
           "UpdateRuleCommand 应把 repeat 字段写入更新命令");
 
-    Check(CreateProperties().to_schema().properties.contains("repeat"), "create 工具应声明 repeat 参数");
+    Check(CreateProperties().to_schema().properties.contains("event"), "create 工具应声明 event 参数");
+    Check(CreateRuleProperties().to_schema().properties.contains("freq_type"), "create_rule 工具应声明 freq_type 参数");
     Check(QueryProperties().to_schema().properties.contains("keyword"), "query 工具应声明 keyword 参数");
-    Check(UpdateProperties().to_schema().properties.contains("repeat"), "update 工具应声明 repeat 参数");
-    Check(DeleteProperties().to_schema().properties.contains("rule_id"), "delete 工具应声明 rule_id 参数");
+    Check(UpdateProperties().to_schema().properties.contains("schedule_id"), "update 工具应声明 schedule_id 参数");
+    Check(UpdateOccurrenceProperties().to_schema().properties.contains("original_start_time"),
+          "update_occurrence 工具应声明 original_start_time 参数");
+    Check(UpdateRuleProperties().to_schema().properties.contains("freq_type"), "update_rule 工具应声明 freq_type 参数");
+    Check(DeleteProperties().to_schema().properties.contains("schedule_id"), "delete 工具应声明 schedule_id 参数");
     Check(DeleteProperties().to_schema().properties.contains("expected_event"), "delete 工具应声明目标确认事件");
     Check(DeleteProperties().to_schema().properties.contains("expected_start_time"), "delete 工具应声明目标确认时间");
+    Check(DeleteRuleProperties().to_schema().properties.contains("rule_id"), "delete_rule 工具应声明 rule_id 参数");
+    Check(SkipOccurrenceProperties().to_schema().properties.contains("original_start_time"),
+          "skip_occurrence 工具应声明 original_start_time 参数");
     return 0;
 }

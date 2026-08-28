@@ -190,15 +190,6 @@ class FakeRuleRepository final : public voicelife::schedule::ScheduleRuleReposit
     FakeExceptionRepository& exceptions_;
 };
 
-/** @brief 构造每日周期 repeat 对象。 @return 完整周期 repeat JSON 对象。 */
-JsonValue DailyRepeat() {
-    return JsonValue::Object({
-        {"freq_type", JsonValue::String("daily")},
-        {"start_date", JsonValue::String("2099-01-01")},
-        {"start_time", JsonValue::String("09:00:00")},
-    });
-}
-
 /** @brief 从工具输出对象中读取字符串字段。 @param result 工具结果。 @param key 字段名。 @return 字段值或空。 */
 std::string OutputString(const ToolResult& result, const std::string& key) {
     if (!result.output.IsObject()) return {};
@@ -228,7 +219,7 @@ int main() {
     Check(voicelife::mcp::RegisterScheduleMcpTools(server, service, rule_service).ok(), "日程工具应注册成功");
 
     const auto listed = server.list_tools();
-    Check(listed.total == 4, "日程工具应注册四个工具");
+    Check(listed.total == 9, "启用周期能力时应注册九个日程工具");
 
     // schedule.create：一次性日程的各个字段与错误路径。
     const auto one_shot = server.call({
@@ -259,28 +250,30 @@ int main() {
     // schedule.create：周期日程创建成功，返回规则与物化首条实例。
     const auto rule_create = server.call({
         .request_id = "create-rule",
-        .name = "schedule.create",
-        .arguments = {{"event", std::string("每日站会")}, {"repeat", DailyRepeat()}},
+        .name = "schedule.create_rule",
+        .arguments = {{"event", std::string("每日站会")},
+                      {"freq_type", std::string("daily")},
+                      {"start_date", std::string("2099-01-01")},
+                      {"start_time", std::string("09:00:00")}},
     });
     Check(rule_create.status.ok() && OutputString(rule_create, "status") == "success", "周期日程应创建成功");
 
     // schedule.create：周期日程缺少 anchor 字段应失败。
     const auto missing_anchor = server.call({
         .request_id = "create-rule-missing-anchor",
-        .name = "schedule.create",
-        .arguments = {{"event", std::string("缺字段")},
-                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("daily")}})}},
+        .name = "schedule.create_rule",
+        .arguments = {{"event", std::string("缺字段")}, {"freq_type", std::string("daily")}},
     });
     Check(!missing_anchor.status.ok(), "周期日程缺少 anchor 应被参数校验拒绝");
 
     // schedule.create：周期日程 repeat 非法频率应失败。
     const auto bad_repeat = server.call({
         .request_id = "create-rule-bad-freq",
-        .name = "schedule.create",
+        .name = "schedule.create_rule",
         .arguments = {{"event", std::string("坏频率")},
-                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("bad")},
-                                                    {"start_date", JsonValue::String("2099-01-01")},
-                                                    {"start_time", JsonValue::String("09:00:00")}})}},
+                      {"freq_type", std::string("bad")},
+                      {"start_date", std::string("2099-01-01")},
+                      {"start_time", std::string("09:00:00")}},
     });
     Check(OutputString(bad_repeat, "status") == "failure", "非法 repeat.freq_type 应失败");
 
@@ -291,10 +284,10 @@ int main() {
         .arguments = {{"status", std::string("active")}},
     });
     Check(queried.status.ok() && OutputString(queried, "status") == "success", "查询应返回成功结果");
-    Check(queried.text_output.has_value() && queried.text_output->find("条日程") != std::string::npos,
-          "语音查询结果必须提供日程数量");
-    Check(queried.text_output.has_value() && queried.text_output->find("第 1 条：") != std::string::npos,
-          "语音查询结果必须逐条播报完整日程");
+    Check(!queried.text_output.has_value(), "查询应返回结构化 JSON 而非文本摘要");
+    Check(OutputArraySize(queried, "one_time_schedules") >= 1, "查询结果应包含一次性日程数组");
+    Check(OutputArraySize(queried, "recurring_schedules") >= 1, "查询结果应包含周期实例数组");
+    Check(!OutputString(queried, "message").empty(), "查询结果应包含结构化 message 字段");
 
     // schedule.query：带日期范围与关键字，触发规则未来 occurrence 与例外展开。
     const auto queried_range = server.call({
@@ -347,23 +340,23 @@ int main() {
 
     const auto impossible_repeat_date = server.call({
         .request_id = "create-impossible-repeat-date",
-        .name = "schedule.create",
+        .name = "schedule.create_rule",
         .arguments = {{"event", std::string("非法周期日期")},
-                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("daily")},
-                                                    {"start_date", JsonValue::String("2099-02-29")},
-                                                    {"start_time", JsonValue::String("09:00:00")}})}},
+                      {"freq_type", std::string("daily")},
+                      {"start_date", std::string("2099-02-29")},
+                      {"start_time", std::string("09:00:00")}},
     });
     Check(OutputString(impossible_repeat_date, "status") == "failure", "不存在的周期起始日期应失败");
 
     const auto unsupported_repeat_field = server.call({
         .request_id = "create-unsupported-repeat-field",
-        .name = "schedule.create",
+        .name = "schedule.create_rule",
         .arguments = {{"event", std::string("不支持的相对周期")},
-                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("monthly")},
-                                                    {"start_date", JsonValue::String("2099-01-01")},
-                                                    {"start_time", JsonValue::String("09:00:00")},
-                                                    {"monthly_mode", JsonValue::String("ordinal_weekday")},
-                                                    {"weekday_ordinal", JsonValue::Number(2)}})}},
+                      {"freq_type", std::string("monthly")},
+                      {"start_date", std::string("2099-01-01")},
+                      {"start_time", std::string("09:00:00")},
+                      {"monthly_mode", std::string("ordinal_weekday")},
+                      {"weekday_ordinal", int64_t{2}}},
     });
     Check(!unsupported_repeat_field.status.ok() || OutputString(unsupported_repeat_field, "status") == "failure",
           "未声明的周期字段不得被静默忽略");
@@ -385,13 +378,21 @@ int main() {
         Check(q.status.ok(), "状态查询应成功");
     }
 
+    // schedule.query：schedule_id 与 rule_id 互斥。
+    const auto query_both_ids = server.call({
+        .request_id = "query-both-ids",
+        .name = "schedule.query",
+        .arguments = {{"schedule_id", int64_t{1}}, {"rule_id", int64_t{600}}},
+    });
+    Check(OutputString(query_both_ids, "status") == "failure", "query 同时传 schedule_id 与 rule_id 应失败");
+
     // schedule.update：schedule_id 与 rule_id 互斥。
     const auto both_ids = server.call({
         .request_id = "update-both",
         .name = "schedule.update",
         .arguments = {{"schedule_id", int64_t{1}}, {"rule_id", int64_t{600}}},
     });
-    Check(OutputString(both_ids, "status") == "failure", "schedule_id 与 rule_id 同用应失败");
+    Check(!both_ids.status.ok(), "schedule_id 与 rule_id 同用应失败");
 
     // schedule.update：original_start_time 必须与 rule_id 一起使用。
     const auto orphan_time = server.call({
@@ -399,7 +400,7 @@ int main() {
         .name = "schedule.update",
         .arguments = {{"original_start_time", std::string("2099-01-05 09:00:00")}},
     });
-    Check(OutputString(orphan_time, "status") == "failure", "单独 original_start_time 应失败");
+    Check(!orphan_time.status.ok(), "单独 original_start_time 应失败");
 
     // schedule.update：按 schedule_id 修改已物化一次性日程。
     const auto update_schedule = server.call({
@@ -418,20 +419,20 @@ int main() {
     });
     Check(OutputString(update_bad_start, "status") == "failure", "更新非法开始时间应失败");
 
-    // schedule.update：按 rule_id + original_start_time 跳过未来单次。
+    // schedule.skip_occurrence：按 rule_id + original_start_time 跳过未来单次。
     const auto skip_occurrence = server.call({
         .request_id = "update-skip",
-        .name = "schedule.update",
+        .name = "schedule.skip_occurrence",
         .arguments = {{"rule_id", int64_t{600}},
                       {"original_start_time", std::string("2099-01-05 09:00:00")},
-                      {"status", std::string("cancelled")}},
+                      {"expected_event", std::string("每日站会")}},
     });
     Check(skip_occurrence.status.ok() && OutputString(skip_occurrence, "status") == "success", "跳过未来单次应成功");
 
-    // schedule.update：按 rule_id + original_start_time 修改未来单次。
+    // schedule.update_occurrence：按 rule_id + original_start_time 修改未来单次。
     const auto update_occurrence = server.call({
         .request_id = "update-occurrence",
-        .name = "schedule.update",
+        .name = "schedule.update_occurrence",
         .arguments = {{"rule_id", int64_t{600}},
                       {"original_start_time", std::string("2099-01-06 09:00:00")},
                       {"event", std::string("改期站会")}},
@@ -439,22 +440,22 @@ int main() {
     Check(update_occurrence.status.ok() && OutputString(update_occurrence, "status") == "success",
           "修改未来单次应成功");
 
-    // schedule.update：按 rule_id 更新整条规则。
+    // schedule.update_rule：按 rule_id 更新整条规则。
     const auto update_rule = server.call({
         .request_id = "update-rule",
-        .name = "schedule.update",
+        .name = "schedule.update_rule",
         .arguments = {{"rule_id", int64_t{600}}, {"event", std::string("每日站会（改）")}},
     });
     Check(update_rule.status.ok() && OutputString(update_rule, "status") == "success", "更新整条规则应成功");
 
-    // schedule.update：按 rule_id 更新时非法 repeat 应失败。
+    // schedule.update_rule：按 rule_id 更新时非法 repeat 应失败。
     const auto update_rule_bad_repeat = server.call({
         .request_id = "update-rule-bad-repeat",
-        .name = "schedule.update",
+        .name = "schedule.update_rule",
         .arguments = {{"rule_id", int64_t{600}},
-                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("bad")},
-                                                    {"start_date", JsonValue::String("2099-01-01")},
-                                                    {"start_time", JsonValue::String("09:00:00")}})}},
+                      {"freq_type", std::string("bad")},
+                      {"start_date", std::string("2099-01-01")},
+                      {"start_time", std::string("09:00:00")}},
     });
     Check(OutputString(update_rule_bad_repeat, "status") == "failure", "非法 repeat 应失败");
 
@@ -474,13 +475,13 @@ int main() {
     });
     Check(OutputString(delete_no_id, "status") == "failure", "缺少 schedule_id 或 rule_id 应失败");
 
-    // schedule.delete：schedule_id 与 rule_id 同用应失败。
+    // schedule.delete：schedule_id 与 rule_id 同用应失败（rule_id 不属于 schedule.delete）。
     const auto delete_both = server.call({
         .request_id = "delete-both",
         .name = "schedule.delete",
         .arguments = {{"schedule_id", int64_t{1}}, {"rule_id", int64_t{600}}},
     });
-    Check(OutputString(delete_both, "status") == "failure", "删除时 schedule_id 与 rule_id 同用应失败");
+    Check(!delete_both.status.ok(), "删除时 schedule_id 与 rule_id 同用应失败");
 
     // schedule.delete：删除不存在的日程应失败。
     const auto delete_missing = server.call({
@@ -501,19 +502,21 @@ int main() {
     Check(delete_schedule.status.ok() && OutputString(delete_schedule, "status") == "success",
           "按 schedule_id 删除应成功");
 
-    // schedule.delete：按 rule_id + original_start_time 删除未来单次。
+    // schedule.skip_occurrence：按 rule_id + original_start_time 删除未来单次。
     const auto delete_occurrence = server.call({
         .request_id = "delete-occurrence",
-        .name = "schedule.delete",
-        .arguments = {{"rule_id", int64_t{600}}, {"original_start_time", std::string("2099-01-07 09:00:00")}},
+        .name = "schedule.skip_occurrence",
+        .arguments = {{"rule_id", int64_t{600}},
+                      {"original_start_time", std::string("2099-01-07 09:00:00")},
+                      {"expected_event", std::string("每日站会")}},
     });
     Check(delete_occurrence.status.ok() && OutputString(delete_occurrence, "status") == "success",
           "删除未来单次应成功");
 
-    // schedule.delete：按 rule_id 取消整条规则。
+    // schedule.delete_rule：按 rule_id 取消整条规则。
     const auto delete_rule = server.call({
         .request_id = "delete-rule",
-        .name = "schedule.delete",
+        .name = "schedule.delete_rule",
         .arguments = {{"rule_id", int64_t{600}}},
     });
     Check(delete_rule.status.ok() && OutputString(delete_rule, "status") == "success", "取消整条规则应成功");
@@ -539,12 +542,12 @@ int main() {
     // 周期规则首条实例与已有日程冲突。
     const auto conflict_rule = server.call({
         .request_id = "conflict-rule",
-        .name = "schedule.create",
+        .name = "schedule.create_rule",
         .arguments = {{"event", std::string("冲突规则")},
-                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("daily")},
-                                                    {"start_date", JsonValue::String("2030-03-18")},
-                                                    {"start_time", JsonValue::String("09:30:00")},
-                                                    {"end_time", JsonValue::String("10:30:00")}})}},
+                      {"freq_type", std::string("daily")},
+                      {"start_date", std::string("2030-03-18")},
+                      {"start_time", std::string("09:30:00")},
+                      {"end_time", std::string("10:30:00")}},
     });
     Check(OutputString(conflict_rule, "status") == "conflict", "周期规则冲突应返回 conflict");
 
@@ -584,16 +587,15 @@ int main() {
     });
     Check(OutputString(update_bad_end, "status") == "failure", "更新非法 end_time 应失败");
 
-    // 按 schedule_id 取消已物化日程。
+    // 按 schedule_id 删除已物化日程。
     const auto cancel_by_id = server.call({
-        .request_id = "update-cancel",
-        .name = "schedule.update",
+        .request_id = "delete-cancel",
+        .name = "schedule.delete",
         .arguments = {{"schedule_id", int64_t{4}},
                       {"expected_event", std::string("更新目标")},
-                      {"expected_start_time", std::string("2030-05-02 09:00:00")},
-                      {"status", std::string("cancelled")}},
+                      {"expected_start_time", std::string("2030-05-02 09:00:00")}},
     });
-    Check(OutputString(cancel_by_id, "status") == "success", "按 schedule_id 取消应成功");
+    Check(OutputString(cancel_by_id, "status") == "success", "按 schedule_id 删除应成功");
 
     // 更新不存在的日程。
     const auto update_missing = server.call({
@@ -621,7 +623,7 @@ int main() {
     // 未来单次：非法 original_start_time。
     const auto occ_bad_original = server.call({
         .request_id = "occ-bad-original",
-        .name = "schedule.update",
+        .name = "schedule.update_occurrence",
         .arguments = {{"rule_id", int64_t{600}}, {"original_start_time", std::string("bad")}},
     });
     Check(OutputString(occ_bad_original, "status") == "failure", "非法 original_start_time 应失败");
@@ -629,7 +631,7 @@ int main() {
     // 未来单次：非法 start_time / end_time。
     const auto occ_bad_start = server.call({
         .request_id = "occ-bad-start",
-        .name = "schedule.update",
+        .name = "schedule.update_occurrence",
         .arguments = {{"rule_id", int64_t{600}},
                       {"original_start_time", std::string("2099-01-06 09:00:00")},
                       {"start_time", std::string("bad")}},
@@ -638,7 +640,7 @@ int main() {
 
     const auto occ_bad_end = server.call({
         .request_id = "occ-bad-end",
-        .name = "schedule.update",
+        .name = "schedule.update_occurrence",
         .arguments = {{"rule_id", int64_t{600}},
                       {"original_start_time", std::string("2099-01-06 09:00:00")},
                       {"end_time", std::string("bad")}},
@@ -648,7 +650,7 @@ int main() {
     // 未来单次：合法全字段修改。
     const auto occ_valid = server.call({
         .request_id = "occ-valid",
-        .name = "schedule.update",
+        .name = "schedule.update_occurrence",
         .arguments = {{"rule_id", int64_t{600}},
                       {"original_start_time", std::string("2099-01-08 09:00:00")},
                       {"start_time", std::string("2099-01-08 10:00:00")},
@@ -661,7 +663,7 @@ int main() {
     // 更新不存在的规则。
     const auto update_rule_missing = server.call({
         .request_id = "update-rule-missing",
-        .name = "schedule.update",
+        .name = "schedule.update_rule",
         .arguments = {{"rule_id", int64_t{9999}}, {"event", std::string("不存在规则")}},
     });
     Check(OutputString(update_rule_missing, "status") == "failure", "更新不存在规则应失败");
@@ -669,26 +671,29 @@ int main() {
     // 新建活跃规则后更新为冲突时间。
     const auto new_rule = server.call({
         .request_id = "new-rule",
-        .name = "schedule.create",
-        .arguments = {{"event", std::string("新规则")}, {"repeat", DailyRepeat()}},
+        .name = "schedule.create_rule",
+        .arguments = {{"event", std::string("新规则")},
+                      {"freq_type", std::string("daily")},
+                      {"start_date", std::string("2099-01-01")},
+                      {"start_time", std::string("09:00:00")}},
     });
     Check(new_rule.status.ok() && OutputString(new_rule, "status") == "success", "新规则应创建成功");
 
     const auto update_rule_conflict = server.call({
         .request_id = "update-rule-conflict",
-        .name = "schedule.update",
+        .name = "schedule.update_rule",
         .arguments = {{"rule_id", int64_t{601}},
-                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("daily")},
-                                                    {"start_date", JsonValue::String("2030-03-18")},
-                                                    {"start_time", JsonValue::String("09:30:00")},
-                                                    {"end_time", JsonValue::String("10:30:00")}})}},
+                      {"freq_type", std::string("daily")},
+                      {"start_date", std::string("2030-03-18")},
+                      {"start_time", std::string("09:30:00")},
+                      {"end_time", std::string("10:30:00")}},
     });
     Check(OutputString(update_rule_conflict, "status") == "conflict", "更新规则冲突应返回 conflict");
 
     // 删除未来单次：非法 original_start_time。
     const auto delete_bad_original = server.call({
         .request_id = "delete-bad-original",
-        .name = "schedule.delete",
+        .name = "schedule.skip_occurrence",
         .arguments = {{"rule_id", int64_t{600}}, {"original_start_time", std::string("bad")}},
     });
     Check(OutputString(delete_bad_original, "status") == "failure", "删除未来单次非法时间应失败");
@@ -709,51 +714,51 @@ int main() {
     // weekly 规则：覆盖 FrequencyName 的 weekly 分支，并带 end_time 用于后续未来实例展开。
     const auto weekly_rule = server.call({
         .request_id = "create-weekly",
-        .name = "schedule.create",
+        .name = "schedule.create_rule",
         .arguments = {{"event", std::string("每周复盘")},
-                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("weekly")},
-                                                    {"start_date", JsonValue::String("2099-01-01")},
-                                                    {"start_time", JsonValue::String("08:00:00")},
-                                                    {"end_time", JsonValue::String("09:00:00")},
-                                                    {"weekdays_mask", JsonValue::Number(1)}})}},
+                      {"freq_type", std::string("weekly")},
+                      {"start_date", std::string("2099-01-01")},
+                      {"start_time", std::string("08:00:00")},
+                      {"end_time", std::string("09:00:00")},
+                      {"weekdays_mask", int64_t{1}}},
     });
     Check(weekly_rule.status.ok() && OutputString(weekly_rule, "status") == "success", "每周规则应创建成功");
 
     // monthly last_day 规则：覆盖 FrequencyName monthly 与 MonthlyModeName last_day 分支。
     const auto monthly_last = server.call({
         .request_id = "create-monthly-last",
-        .name = "schedule.create",
+        .name = "schedule.create_rule",
         .arguments = {{"event", std::string("月末总结")},
-                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("monthly")},
-                                                    {"start_date", JsonValue::String("2099-01-01")},
-                                                    {"start_time", JsonValue::String("07:00:00")},
-                                                    {"monthly_mode", JsonValue::String("last_day")}})}},
+                      {"freq_type", std::string("monthly")},
+                      {"start_date", std::string("2099-01-01")},
+                      {"start_time", std::string("07:00:00")},
+                      {"monthly_mode", std::string("last_day")}},
     });
     Check(monthly_last.status.ok() && OutputString(monthly_last, "status") == "success", "月末规则应创建成功");
 
     // monthly specific_day 规则：覆盖 MonthlyModeName specific_day 分支。
     const auto monthly_day = server.call({
         .request_id = "create-monthly-day",
-        .name = "schedule.create",
+        .name = "schedule.create_rule",
         .arguments = {{"event", std::string("每月十五号")},
-                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("monthly")},
-                                                    {"start_date", JsonValue::String("2099-01-01")},
-                                                    {"start_time", JsonValue::String("06:00:00")},
-                                                    {"monthly_mode", JsonValue::String("specific_day")},
-                                                    {"day_of_month", JsonValue::Number(15)}})}},
+                      {"freq_type", std::string("monthly")},
+                      {"start_date", std::string("2099-01-01")},
+                      {"start_time", std::string("06:00:00")},
+                      {"monthly_mode", std::string("specific_day")},
+                      {"day_of_month", int64_t{15}}},
     });
     Check(monthly_day.status.ok() && OutputString(monthly_day, "status") == "success", "指定日期规则应创建成功");
 
     // yearly 规则：覆盖 FrequencyName yearly 分支。
     const auto yearly_rule = server.call({
         .request_id = "create-yearly",
-        .name = "schedule.create",
+        .name = "schedule.create_rule",
         .arguments = {{"event", std::string("年度纪念")},
-                      {"repeat", JsonValue::Object({{"freq_type", JsonValue::String("yearly")},
-                                                    {"start_date", JsonValue::String("2099-01-01")},
-                                                    {"start_time", JsonValue::String("05:00:00")},
-                                                    {"month_of_year", JsonValue::Number(6)},
-                                                    {"day_of_month", JsonValue::Number(15)}})}},
+                      {"freq_type", std::string("yearly")},
+                      {"start_date", std::string("2099-01-01")},
+                      {"start_time", std::string("05:00:00")},
+                      {"month_of_year", int64_t{6}},
+                      {"day_of_month", int64_t{15}}},
     });
     Check(yearly_rule.status.ok() && OutputString(yearly_rule, "status") == "success", "每年规则应创建成功");
 
@@ -785,7 +790,7 @@ int main() {
     // 更新整条规则时传入 location 与 notes，覆盖 UpdateRuleCommand 的可选字段赋值分支。
     const auto update_rule_full = server.call({
         .request_id = "update-rule-full",
-        .name = "schedule.update",
+        .name = "schedule.update_rule",
         .arguments = {{"rule_id", int64_t{601}},
                       {"location", std::string("新会议室")},
                       {"notes", std::string("新备注")}},
@@ -831,31 +836,34 @@ int main() {
               OutputArraySize(capped_query, "exceptions") == 100,
           "查询输出必须限制到 Gateway 每个数组的 100 项上限");
 
-    // 未启用周期日程能力时（2 参数重载），repeat / rule_id 路径应返回明确失败。
+    // 未启用周期日程能力时（2 参数重载），周期字段 / rule_id 路径应返回明确失败。
     McpServer one_shot_server;
     ScheduleService one_shot_service(schedules);
     Check(voicelife::mcp::RegisterScheduleMcpTools(one_shot_server, one_shot_service).ok(), "2 参数重载应注册成功");
 
     const auto disabled_rule = one_shot_server.call({
         .request_id = "disabled-rule",
-        .name = "schedule.create",
-        .arguments = {{"event", std::string("无规则能力")}, {"repeat", DailyRepeat()}},
+        .name = "schedule.create_rule",
+        .arguments = {{"event", std::string("无规则能力")},
+                      {"freq_type", std::string("daily")},
+                      {"start_date", std::string("2099-01-01")},
+                      {"start_time", std::string("09:00:00")}},
     });
-    Check(OutputString(disabled_rule, "status") == "failure", "未启用周期能力时创建周期日程应失败");
+    Check(!disabled_rule.status.ok(), "未启用周期能力时创建周期日程应失败");
 
     const auto disabled_update = one_shot_server.call({
         .request_id = "disabled-update",
-        .name = "schedule.update",
+        .name = "schedule.update_rule",
         .arguments = {{"rule_id", int64_t{600}}},
     });
-    Check(OutputString(disabled_update, "status") == "failure", "未启用周期能力时按 rule_id 更新应失败");
+    Check(!disabled_update.status.ok(), "未启用周期能力时按 rule_id 更新应失败");
 
     const auto disabled_delete = one_shot_server.call({
         .request_id = "disabled-delete",
-        .name = "schedule.delete",
+        .name = "schedule.delete_rule",
         .arguments = {{"rule_id", int64_t{600}}},
     });
-    Check(OutputString(disabled_delete, "status") == "failure", "未启用周期能力时按 rule_id 删除应失败");
+    Check(!disabled_delete.status.ok(), "未启用周期能力时按 rule_id 删除应失败");
 
     return 0;
 }

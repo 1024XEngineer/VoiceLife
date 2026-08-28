@@ -218,9 +218,11 @@ MCP Tool 回调只做四件事：
    - `schedules`：已物化日程。
    - `future_occurrences`：未来周期候选日程。
    - `exceptions`：`schedule_rule_exception` 实体。
-7. 语音链路使用数量、最近一条和必要提醒构成摘要文本；当 IM Reporting 可用时，使用
-   `schedule-query:<request_id>` 作为幂等业务事件 ID，将完整范围、总数、三类条目和查询时间提交到
-   `POST /v1/im/schedule-query-results`。IM 失败只返回可重试状态，不改变语音摘要。
+7. 将完整范围、总数、三类条目和查询时间提交到 `POST /v1/im/schedule-query-results`；使用
+   `schedule-query:<request_id>` 作为幂等业务事件 ID。IM 失败只影响 `im_delivery` 字段，
+   不改变返回给模型的结构化结果。
+8. 向模型返回结构化 JSON（`schedules`、`future_occurrences`、`exceptions`、`result_count`、
+   `recent`、`im_delivery`），不再返回自然语言文本摘要。
 
 ### `schedule.update` 回调编排
 
@@ -303,7 +305,7 @@ MCP Tool 回调只做四件事：
 | `schedule.query` | `future_occurrences` | array | 是 | 未来周期候选日程列表，元素为 `future_occurrence` |
 | `schedule.query` | `exceptions` | array | 是 | 周期单次例外列表，元素为 `exception` |
 | `schedule.query` | `result_count` | integer | 是 | `schedules` 与 `future_occurrences` 的总条数 |
-| `schedule.query` | `recent` | object/null | 是 | 语音摘要使用的最近一条日程 |
+| `schedule.query` | `recent` | object/null | 是 | 结构化结果中的最近一条日程 |
 | `schedule.query` | `im_delivery` | string | 否 | `submitted`、`retryable_failed` 或 `failed` |
 
 ## Tool 3：`schedule.update`

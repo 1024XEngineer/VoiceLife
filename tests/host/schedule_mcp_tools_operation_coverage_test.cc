@@ -213,8 +213,8 @@ void CheckScheduleQueryReportingPaths() {
         .arguments = {{"keyword", std::string("上报")}},
     });
     Check(submitted.status.ok() && OutputString(submitted, "im_delivery") == "submitted" &&
-              submitted.text_output.has_value() && submitted.text_output->find("已通过 IM 提交") != std::string::npos,
-          "IM 上报成功应返回 submitted 状态和用户摘要");
+              !submitted.text_output.has_value(),
+          "IM 上报成功应返回 submitted 状态和结构化 JSON 而非文本摘要");
 
     runtime_fixture.transport->next_post_response = {
         .status = ImTransportStatus::kNetworkFailure, .status_code = 0, .body = {}, .message = "network down"};
@@ -224,8 +224,8 @@ void CheckScheduleQueryReportingPaths() {
         .arguments = {},
     });
     Check(retryable.status.ok() && OutputString(retryable, "im_delivery") == "retryable_failed" &&
-              retryable.text_output.has_value() && retryable.text_output->find("可重试") != std::string::npos,
-          "IM 上报失败应返回 retryable_failed 和可重试摘要");
+              !retryable.text_output.has_value(),
+          "IM 上报失败应返回 retryable_failed 和结构化 JSON 而非文本摘要");
 }
 
 }  // namespace

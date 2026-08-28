@@ -2906,12 +2906,13 @@ class Runtime final {
         vTaskDelete(nullptr);
 #endif
     }
-    // Keep production at 70. Serial voice validation runs at half volume so
-    // physical-board stress tests do not disturb the surrounding environment.
+    // Production uses full output volume. Serial voice validation runs at
+    // reduced volume so physical-board stress tests do not disturb the
+    // surrounding environment.
 #if defined(ESP_PLATFORM) && CONFIG_VOICELIFE_SERIAL_VOICE_TEST
     int volume_ = 35;
 #else
-    int volume_ = 70;
+    int volume_ = 100;
 #endif
     std::atomic<int64_t> capture_started_us_{0};
     // 只由交互事件循环读写：区分“聆听窗口完全无输入”与“已有语音但

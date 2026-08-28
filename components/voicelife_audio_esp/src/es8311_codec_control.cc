@@ -179,11 +179,11 @@ voicelife::Result<void*> InitializeEs8311(const Es8311ControlConfig& config) {
     // esp_codec_dev initializes output volume to 0. XiaoZhi explicitly
     // restores its user volume immediately after open; without this call the
     // ES8311 remains muted even when PCM reaches the I2S TX channel.
-    // Match Runtime's serial-validation volume before the first PCM frame.
+    // Match Runtime's output volume before the first PCM frame.
 #if CONFIG_VOICELIFE_SERIAL_VOICE_TEST
     constexpr uint8_t kSparkBotDefaultOutputVolume = 35;
 #else
-    constexpr uint8_t kSparkBotDefaultOutputVolume = 70;
+    constexpr uint8_t kSparkBotDefaultOutputVolume = 100;
 #endif
     const esp_err_t volume_err = esp_codec_dev_set_out_vol(dev, kSparkBotDefaultOutputVolume);
     if (volume_err != ESP_OK) {
