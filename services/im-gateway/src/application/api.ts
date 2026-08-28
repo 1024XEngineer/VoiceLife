@@ -285,6 +285,8 @@ export interface ConsumedActionUiView {
     readonly action: ReminderActionKind;
     readonly params?: { readonly minutes: number };
     readonly nextTriggerAt?: IsoDateTime;
+    /** 已知的设备侧动作来源；仅公开可安全展示的来源名称。 */
+    readonly source?: 'voice';
     readonly expiresAt: ImAction['expiresAt'];
 }
 

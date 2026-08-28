@@ -813,6 +813,25 @@ export class DefaultActionApplication implements ActionApplication {
             ) {
                 throw new ImGatewayError('action_expired', 'Action UI token has expired');
             }
+            // A voice action may reach the device before this H5 link is first
+            // opened, so consult the device-owned fact before offering any
+            // browser action. A succeeded device fact is terminal for this
+            // reminder trigger and must never expose reusable controls.
+            const voiceFact = await tx.reminderActionFacts.findLatestByDeviceAndTrigger(
+                metadata.deviceId,
+                metadata.reminderTriggerId,
+            );
+            if (voiceFact?.report.status === 'succeeded') {
+                return {
+                    state: 'succeeded',
+                    action: voiceFact.report.action,
+                    ...(voiceFact.report.nextTriggerAt === undefined
+                        ? {}
+                        : { nextTriggerAt: voiceFact.report.nextTriggerAt }),
+                    source: voiceFact.report.source,
+                    expiresAt: claims.expiresAt,
+                };
+            }
             const existing = await tx.actions.findById(claims.actionId);
             if (existing !== undefined) {
                 if (existing.deliveryId !== delivery.id || existing.expiresAt !== claims.expiresAt) {
