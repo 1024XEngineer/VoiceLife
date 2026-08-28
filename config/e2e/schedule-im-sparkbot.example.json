@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "name": "schedule-im-sparkbot",
+  "port": "/dev/cu.usbmodemXXXX",
+  "profile": "sparkbot"
+}
