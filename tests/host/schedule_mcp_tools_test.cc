@@ -291,10 +291,9 @@ int main() {
         .arguments = {{"status", std::string("active")}},
     });
     Check(queried.status.ok() && OutputString(queried, "status") == "success", "查询应返回成功结果");
-    Check(queried.text_output.has_value() && queried.text_output->find("条日程") != std::string::npos,
-          "语音查询结果必须提供日程数量");
-    Check(queried.text_output.has_value() && queried.text_output->find("第 1 条：") != std::string::npos,
-          "语音查询结果必须逐条播报完整日程");
+    Check(!queried.text_output.has_value(), "查询应返回结构化 JSON 而非文本摘要");
+    Check(OutputArraySize(queried, "schedules") >= 1, "查询结果应包含结构化 schedules 数组");
+    Check(OutputString(queried, "message") == "query success", "查询结果应包含结构化 message 字段");
 
     // schedule.query：带日期范围与关键字，触发规则未来 occurrence 与例外展开。
     const auto queried_range = server.call({

@@ -5,7 +5,6 @@
 #include <ctime>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -49,12 +48,6 @@ using voicelife::mcp::schedule_tool_input::UpdateProperties;
 using voicelife::mcp::schedule_tool_input::UpdateRuleCommand;
 
 ToolResult Output(ToolOutputObject fields) { return ToolResult::Success(ToolOutputValue::Object(std::move(fields))); }
-
-ToolResult SummaryOutput(ToolOutputObject fields, std::string summary) {
-    ToolResult result = Output(std::move(fields));
-    result.text_output = std::move(summary);
-    return result;
-}
 
 ToolResult FailureOutput(std::string message) {
     return Output({
@@ -104,52 +97,6 @@ std::optional<JsonValue> OutputJson(const ToolOutputValue& output) {
     options.max_allocator_bytes = 512 * 1024;
     if (!ParseJson(SerializeToolOutputValue(output), value, options).ok()) return std::nullopt;
     return value;
-}
-
-const ToolOutputValue* ObjectField(const ToolOutputValue& value, std::string_view key) {
-    if (!value.IsObject() || value.object == nullptr) return nullptr;
-    for (const auto& [field, item] : *value.object) {
-        if (field == key) return item.get();
-    }
-    return nullptr;
-}
-
-std::string StringField(const ToolOutputValue& value, std::string_view key) {
-    const ToolOutputValue* field = ObjectField(value, key);
-    return field != nullptr && field->IsString() ? field->string : std::string{};
-}
-
-std::string VoiceScheduleEntry(const ToolOutputValue& value, std::size_t index) {
-    std::string text = "第 " + std::to_string(index) + " 条：";
-    const std::string event = StringField(value, "event");
-    text += event.empty() ? "未命名日程" : event;
-    const std::string start = StringField(value, "start_time");
-    const std::string end = StringField(value, "end_time");
-    if (!start.empty()) {
-        text += "，时间 " + start;
-        if (!end.empty()) text += " 至 " + end;
-    }
-    const std::string location = StringField(value, "location");
-    if (!location.empty()) text += "，地点 " + location;
-    const std::string notes = StringField(value, "notes");
-    if (!notes.empty()) text += "，备注 " + notes;
-    return text;
-}
-
-std::string FullVoiceScheduleText(const ToolOutputArray& schedules, const ToolOutputArray& future_occurrences,
-                                  const ToolOutputArray& exceptions) {
-    const std::size_t count = schedules.size() + future_occurrences.size();
-    if (count == 0) return "没有查询到日程。";
-    std::string text = "查询到 " + std::to_string(count) + " 条日程。";
-    std::size_t index = 1;
-    for (const auto& item : schedules) {
-        if (item != nullptr) text += VoiceScheduleEntry(*item, index++) + "。";
-    }
-    for (const auto& item : future_occurrences) {
-        if (item != nullptr) text += VoiceScheduleEntry(*item, index++) + "。";
-    }
-    if (!exceptions.empty()) text += "另有 " + std::to_string(exceptions.size()) + " 项例外调整。";
-    return text;
 }
 
 /** @brief 将实体类型字符串转为枚举；非法值返回空。 @param value 输入字符串。 @return 对应枚举。 */
@@ -462,7 +409,6 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
             const ToolOutputValue recent = !schedules.empty()           ? *schedules.front()
                                            : future_occurrences.empty() ? ToolOutputValue::Null()
                                                                         : *future_occurrences.front();
-            const std::string voice_result = FullVoiceScheduleText(schedules, future_occurrences, exceptions);
             auto* reporting_channel =
                 reporting_context.runtime == nullptr ? nullptr : reporting_context.runtime->reporting_channel();
             const std::string reporting_device_id =
@@ -498,26 +444,20 @@ Status RegisterScheduleMcpTools(McpServer& server, ScheduleService& service, Sch
                     MakeToolOutput("future_occurrences", ToolOutputValue::Array(std::move(future_occurrences))),
                     MakeToolOutput("exceptions", ToolOutputValue::Array(std::move(exceptions))),
                 });
-                output.text_output = voice_result + "完整结果已通过 IM 提交。";
-                if (report.status != voicelife::im::ReportStatus::kSubmitted) {
-                    output.text_output = voice_result + "IM 结果提交失败，可重试。";
-                }
                 return output;
             }
-            return SummaryOutput(
-                {
-                    MakeToolOutput("status", ToolOutputValue::String("success")),
-                    MakeToolOutput("message", ToolOutputValue::String("query success")),
-                    MakeToolOutput("result_count", ToolOutputValue::Integer(result_count)),
-                    MakeToolOutput("recent", recent),
-                    MakeToolOutput("im_delivery", reporting_context.runtime == nullptr
-                                                      ? ToolOutputValue::Null()
-                                                      : ToolOutputValue::String("retryable_failed")),
-                    MakeToolOutput("schedules", ToolOutputValue::Array(std::move(schedules))),
-                    MakeToolOutput("future_occurrences", ToolOutputValue::Array(std::move(future_occurrences))),
-                    MakeToolOutput("exceptions", ToolOutputValue::Array(std::move(exceptions))),
-                },
-                reporting_context.runtime == nullptr ? voice_result : voice_result + "IM 暂不可用，可重试。");
+            return Output({
+                MakeToolOutput("status", ToolOutputValue::String("success")),
+                MakeToolOutput("message", ToolOutputValue::String("query success")),
+                MakeToolOutput("result_count", ToolOutputValue::Integer(result_count)),
+                MakeToolOutput("recent", recent),
+                MakeToolOutput("im_delivery", reporting_context.runtime == nullptr
+                                                  ? ToolOutputValue::Null()
+                                                  : ToolOutputValue::String("retryable_failed")),
+                MakeToolOutput("schedules", ToolOutputValue::Array(std::move(schedules))),
+                MakeToolOutput("future_occurrences", ToolOutputValue::Array(std::move(future_occurrences))),
+                MakeToolOutput("exceptions", ToolOutputValue::Array(std::move(exceptions))),
+            });
         });
     if (!status.ok()) return status;
 
