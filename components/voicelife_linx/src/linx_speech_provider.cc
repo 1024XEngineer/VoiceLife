@@ -539,9 +539,18 @@ void LinxSpeechProviderAdapter::OnText(std::string_view message) {
         case LinxMessageKind::kGoodbye:
             // 服务端结束会话的告别消息：不是故障，保持当前状态等待断开事件。
             return;
-        case LinxMessageKind::kLlm:
-            // 服务端表情/情感 UI 消息：本板仅文本 OLED，无表情渲染，直接忽略。
+        case LinxMessageKind::kLlm: {
+            // Linx 文档定义的 emotion key 由显示链路消费；text 是配套的
+            // emoji 字符，仅保留 key 作为受控资源选择，不改变语音状态。
+            const std::string_view emotion =
+                inbound.emotion.has_value() && !inbound.emotion->empty()
+                    ? std::string_view(*inbound.emotion)
+                    : (inbound.action.has_value() ? std::string_view(*inbound.action) : std::string_view{});
+            if (!emotion.empty()) {
+                Emit(Event(voice::VoiceEventKind::kLlmEmotion, emotion));
+            }
             return;
+        }
         case LinxMessageKind::kError:
             Emit(Event(voice::VoiceEventKind::kError, inbound.text));
             return;

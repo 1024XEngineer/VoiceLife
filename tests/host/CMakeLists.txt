@@ -173,6 +173,7 @@ add_voicelife_library(audio_esp voicelife_audio_esp
 target_link_libraries(audio_esp PUBLIC contracts voice)
 add_voicelife_library(board_esp voicelife_board_esp
     "${ROOT_DIR}/components/voicelife_board_esp/src/sparkbot_profile.cc"
+    "${ROOT_DIR}/components/voicelife_board_esp/src/sparkbot_imu.cc"
     "${ROOT_DIR}/components/voicelife_board_esp/src/gpio46_power_arbiter.cc"
     "${ROOT_DIR}/components/voicelife_board_esp/src/esp32s3_board_probe.cc"
     )
@@ -283,6 +284,16 @@ add_voicelife_test(mcp_server_test "unit;mcp"
     "${ROOT_DIR}/components/voicelife_mcp/test/mcp_server_test.cc")
 target_include_directories(mcp_server_test PRIVATE "${ROOT_DIR}/third_party/yyjson")
 target_link_libraries(mcp_server_test PRIVATE mcp)
+
+add_voicelife_test(wake_command_contract_test "unit;audio;wake"
+    "${CMAKE_CURRENT_LIST_DIR}/wake_command_contract_test.cc")
+target_include_directories(wake_command_contract_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_audio_esp/include")
+
+add_voicelife_test(multinet_audio_conditioning_test "unit;audio;wake"
+    "${CMAKE_CURRENT_LIST_DIR}/multinet_audio_conditioning_test.cc")
+target_include_directories(multinet_audio_conditioning_test PRIVATE
+    "${ROOT_DIR}/components/voicelife_audio_esp/include")
 
 set(SCHEDULE_MCP_TOOLS_SOURCE "${ROOT_DIR}/components/voicelife_mcp/src/tools/schedule_mcp_tools.cc")
 add_library(schedule_mcp_tools_coverage_impl OBJECT "${SCHEDULE_MCP_TOOLS_SOURCE}")
@@ -449,6 +460,11 @@ target_link_libraries(audio_board_profile_contract_test PRIVATE audio_esp)
 add_voicelife_test(sparkbot_profile_contract_test "unit;board;esp;contract"
     sparkbot_profile_contract_test.cc)
 target_link_libraries(sparkbot_profile_contract_test PRIVATE board_esp)
+
+add_voicelife_test(sparkbot_imu_test "unit;board;esp;imu;contract"
+    sparkbot_imu_test.cc
+    "${ROOT_DIR}/components/voicelife_board_esp/src/sparkbot_imu.cc")
+target_link_libraries(sparkbot_imu_test PRIVATE board_esp)
 
 add_voicelife_test(sparkbot_presentation_adapter_test "unit;display;sparkbot;board;contract"
     sparkbot_presentation_adapter_test.cc)

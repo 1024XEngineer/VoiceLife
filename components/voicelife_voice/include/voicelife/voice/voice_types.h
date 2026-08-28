@@ -34,6 +34,8 @@ enum class VoiceEventKind {
     kTtsStopped,
     /** @brief 工具调用。 */
     kToolCall,
+    /** @brief Linx 服务端下发的情感/动作提示。 */
+    kLlmEmotion,
     /** @brief 错误。 */
     kError,
 };

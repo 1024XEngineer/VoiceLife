@@ -89,6 +89,15 @@ class VoiceSession {
     Status InterruptAndNotifyLocalWakeWord(std::string_view wake_word, std::string_view text_response);
     /** @brief 中断当前会话并推进会话代次。 @return 中断结果。 */
     Status Interrupt();
+    /**
+     * @brief 中断当前会话并在旧 TTS 顺序栅栏后播报一段系统语音。
+     *
+     * 该接口专用于本地动作反馈（例如 IMU 摇动）。旧 TTS 正在播放时，
+     * 新语音会延迟到旧 tts.stop 到达后再提交，避免新 TTS 被传输层围栏丢弃。
+     * @param text 待播报的本地系统文本。
+     * @return 中断和播报请求的提交结果。
+     */
+    Status InterruptAndSpeak(std::string_view text);
     /** @brief 停止会话并关闭所有音频资源。 @return 停止结果。 */
     Status Stop();
 
@@ -146,6 +155,7 @@ class VoiceSession {
     bool interrupt_fence_pending_ = false;
     std::string pending_interrupt_wake_word_;
     std::string pending_interrupt_text_response_;
+    std::string pending_system_speech_;
     // VAD 端点：本地静音检测（无 AFE，用 RMS 能量近似）。
     bool vad_speech_seen_ = false;
     bool vad_silence_emitted_ = false;

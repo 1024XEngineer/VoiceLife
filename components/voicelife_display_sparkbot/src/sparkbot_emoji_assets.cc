@@ -17,9 +17,9 @@ namespace voicelife::display_sparkbot {
 namespace {
 
 /** @brief SparkBot 表情和待机屏保的受控标识列表（与 manifest.json 一致）。 */
-constexpr std::array<std::string_view, 11> kControlledAssetIds = {
+constexpr std::array<std::string_view, 12> kControlledAssetIds = {
     "boot",      "connecting",   "error",  "happy",    "idle",     "idle_eyes",
-    "listening", "provisioning", "sleepy", "speaking", "thinking",
+    "listening", "provisioning", "sleepy", "speaking", "thinking", "dizzy",
 };
 
 #ifdef ESP_PLATFORM
@@ -63,13 +63,13 @@ std::string_view AssetFilenameForId(std::string_view asset_id) {
         return {};
     }
     // manifest 的 file 字段为固定的单段文件名；不由 Runtime 或调用方传入。
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 11> kAssetFiles = {
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 12> kAssetFiles = {
         std::pair{"boot", "boot.gif"},           std::pair{"connecting", "connecting.gif"},
         std::pair{"error", "error.gif"},         std::pair{"happy", "happy.gif"},
         std::pair{"idle", "idle.gif"},           std::pair{"idle_eyes", "idle_eyes.gif"},
         std::pair{"listening", "listening.gif"}, std::pair{"provisioning", "provisioning.gif"},
         std::pair{"sleepy", "sleepy.gif"},       std::pair{"speaking", "speaking.gif"},
-        std::pair{"thinking", "thinking.gif"},
+        std::pair{"thinking", "thinking.gif"},   std::pair{"dizzy", "dizzy.gif"},
     };
     for (const auto& [id, filename] : kAssetFiles) {
         if (id == asset_id) {
@@ -112,9 +112,9 @@ voicelife::Status SparkBotEmojiAssets::Initialize() {
         esp_partition_munmap(mmap_handle);
         return voicelife::Status::Error(voicelife::ErrorCode::kInternal, "assets 分区数据长度非法");
     }
-    // 文件表边界：11 个 GIF 和固定 common 14px 字体。ESP-SR 模型从独立
+    // 文件表边界：12 个 GIF 和固定 common 14px 字体。ESP-SR 模型从独立
     // model 分区加载，不属于显示 assets 容器。
-    constexpr std::size_t kMaxControlledFiles = 12;
+    constexpr std::size_t kMaxControlledFiles = 13;
     const std::size_t table_bytes = static_cast<std::size_t>(stored_files) * sizeof(MmappedAssetEntry);
     if (stored_files > kMaxControlledFiles || table_bytes > stored_len) {
         esp_partition_munmap(mmap_handle);

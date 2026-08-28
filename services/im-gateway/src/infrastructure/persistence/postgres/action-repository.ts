@@ -80,6 +80,21 @@ export class PostgresActionRepository implements ActionRepository {
         return rows.map(mapAction);
     }
 
+    /** {@inheritDoc ActionRepository.recoverStaleProcessingActions} */
+    public async recoverStaleProcessingActions(
+        now: IsoDateTime,
+        staleBefore: IsoDateTime,
+    ): Promise<readonly ImAction[]> {
+        const { rows } = await this.executor.query(
+            `UPDATE im_actions
+             SET status = 'pending', dispatched_at = NULL, updated_at = $2
+             WHERE status = 'processing' AND updated_at <= $1 AND expires_at > $2
+             RETURNING *`,
+            [staleBefore, now],
+        );
+        return rows.map(mapAction);
+    }
+
     /** {@inheritDoc ActionRepository.save} */
     public async save(action: ImAction): Promise<void> {
         await upsert(

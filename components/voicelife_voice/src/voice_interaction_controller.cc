@@ -97,7 +97,8 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             }
             break;
         case VoiceInteractionEvent::kAcknowledgementTimedOut:
-            if (state_ != VoiceInteractionState::kAcknowledging && state_ != VoiceInteractionState::kSpeaking) {
+            if (state_ != VoiceInteractionState::kAcknowledging && state_ != VoiceInteractionState::kSpeaking &&
+                state_ != VoiceInteractionState::kOpeningCapture) {
                 return InvalidTransition(state_, event);
             }
             // 云端确认音色只有在首段 PCM 及时到达时才有价值。超时后必须
@@ -117,6 +118,13 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             if (state_ != VoiceInteractionState::kListening) return InvalidTransition(state_, event);
             state_ = VoiceInteractionState::kFinalizing;
             transition.action = VoiceInteractionAction::kStopVoiceTurn;
+            break;
+        case VoiceInteractionEvent::kNoSpeechTimeout:
+            // 聆听窗口内完全没有检测到语音时，不发送 listen.stop 等待最终
+            // STT，也不把用户误导成“处理中”；直接收口到待机并中止本轮。
+            if (state_ != VoiceInteractionState::kListening) return InvalidTransition(state_, event);
+            state_ = VoiceInteractionState::kStandby;
+            transition.action = VoiceInteractionAction::kRestoreStandby;
             break;
         case VoiceInteractionEvent::kFinalizationTimedOut:
             // 最终 STT 超时：kFinalizing → kStandby，恢复待机（由 runtime 中止残留回合）。
@@ -141,6 +149,16 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             }
             state_ = VoiceInteractionState::kThinking;
             break;
+        case VoiceInteractionEvent::kShakeSpeechRequested:
+            // 摇晃反馈是一次本地打断：提示音播放期间不应把 UI 误报为
+            // 云端处理中；提示音结束后由 kTtsStopped 继续启动真实采集。
+            if (state_ != VoiceInteractionState::kStandby && state_ != VoiceInteractionState::kListening &&
+                state_ != VoiceInteractionState::kFinalizing && state_ != VoiceInteractionState::kThinking &&
+                state_ != VoiceInteractionState::kSpeaking && state_ != VoiceInteractionState::kOpeningCapture) {
+                return InvalidTransition(state_, event);
+            }
+            state_ = VoiceInteractionState::kOpeningCapture;
+            break;
         case VoiceInteractionEvent::kIntentReceived:
             if (state_ != VoiceInteractionState::kListening && state_ != VoiceInteractionState::kThinking &&
                 state_ != VoiceInteractionState::kFinalizing) {
@@ -150,7 +168,8 @@ Result<VoiceInteractionTransition> VoiceInteractionController::Handle(VoiceInter
             break;
         case VoiceInteractionEvent::kTtsStarted:
             if (state_ != VoiceInteractionState::kAcknowledging && state_ != VoiceInteractionState::kListening &&
-                state_ != VoiceInteractionState::kThinking && state_ != VoiceInteractionState::kFinalizing) {
+                state_ != VoiceInteractionState::kThinking && state_ != VoiceInteractionState::kFinalizing &&
+                state_ != VoiceInteractionState::kOpeningCapture) {
                 return InvalidTransition(state_, event);
             }
             state_ = VoiceInteractionState::kSpeaking;

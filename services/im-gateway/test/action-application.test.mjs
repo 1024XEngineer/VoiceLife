@@ -768,3 +768,65 @@ test('expireDue expires and closes actions past their deadline', async () => {
     assert.equal(found.status, 'expired');
     assert.equal(stream.closed.includes(command.commandId), true);
 });
+
+test('stale processing actions return to pending and are re-dispatched with the same operation', async () => {
+    const { gateway, clock, stream } = actionGateway();
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+    await gateway.application.actions.markProcessing(command.commandId, command.deviceId, command.reminderTriggerId);
+
+    clock.advanceMinutes(3);
+    const recovered = await gateway.application.actions.recoverStaleProcessing();
+
+    assert.equal(recovered, 1);
+    const found = await gateway.application.actions.find(command.commandId);
+    assert.equal(found.status, 'dispatched');
+    assert.equal(found.operationId, command.operationId);
+    assert.equal(stream.commands.length, 2);
+    assert.equal(stream.commands[1].operationId, command.operationId);
+});
+
+test('processing actions inside the lease are not recovered', async () => {
+    const { gateway, clock, stream } = actionGateway();
+    const first = await prepareAction(gateway);
+    const processing = await gateway.application.actionUi.execute({ token: first.token, action: 'acknowledge' });
+    await gateway.application.actions.markProcessing(
+        processing.commandId,
+        processing.deviceId,
+        processing.reminderTriggerId,
+    );
+
+    assert.equal(await gateway.application.actions.recoverStaleProcessing(), 0);
+    clock.advanceMinutes(3);
+    assert.equal(await gateway.application.actions.recoverStaleProcessing(), 1);
+    assert.equal(stream.commands.length, 2);
+});
+
+test('terminal actions are never recovered by the processing lease', async () => {
+    const { gateway, clock, stream } = actionGateway();
+    const { token } = await prepareAction(gateway);
+    const terminal = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+    await gateway.application.actions.recordResult(
+        terminal.commandId,
+        terminal.deviceId,
+        succeededResult(terminal, clock.now()),
+    );
+
+    clock.advanceMinutes(3);
+    assert.equal(await gateway.application.actions.recoverStaleProcessing(), 0);
+    assert.equal((await gateway.application.actions.find(terminal.commandId)).status, 'succeeded');
+    assert.equal(stream.commands.filter(({ commandId }) => commandId === terminal.commandId).length, 1);
+});
+
+test('processing actions are expired by the normal deadline instead of being requeued', async () => {
+    const { gateway, clock, stream } = actionGateway();
+    const { token } = await prepareAction(gateway);
+    const command = await gateway.application.actionUi.execute({ token, action: 'acknowledge' });
+    await gateway.application.actions.markProcessing(command.commandId, command.deviceId, command.reminderTriggerId);
+
+    clock.advanceMinutes(11);
+    assert.equal(await gateway.application.actions.recoverStaleProcessing(), 0);
+    assert.equal(await gateway.application.actions.expireDue(), 1);
+    assert.equal((await gateway.application.actions.find(command.commandId)).status, 'expired');
+    assert.equal(stream.commands.length, 1);
+});

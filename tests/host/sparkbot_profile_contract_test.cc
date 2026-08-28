@@ -40,8 +40,8 @@ int main() {
           "底盘 UART1 和 BOOT GPIO 必须保留官方配置");
 
     const auto* imu = FindCapability(profile, BoardCapability::kImu);
-    Check(imu != nullptr && imu->status == CapabilityStatus::kNeedsBoardTest,
-          "没有证据的 IMU 必须保持 needs-board-test");
+    Check(imu != nullptr && imu->status == CapabilityStatus::kVerified,
+          "SparkBot BMI270 已有实板 chip ID、样本与摇晃事件证据，必须标记 verified");
     const auto* display = FindCapability(profile, BoardCapability::kDisplay);
     Check(display != nullptr && display->status == CapabilityStatus::kVerified, "官方屏幕事实必须标记 verified");
     Check(FindCapability(profile, static_cast<BoardCapability>(255)) == nullptr, "未知能力标识不能伪造能力证据");

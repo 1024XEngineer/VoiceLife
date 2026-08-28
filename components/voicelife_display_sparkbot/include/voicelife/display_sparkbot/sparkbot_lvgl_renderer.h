@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -14,17 +16,18 @@ namespace voicelife::display_sparkbot {
  * @brief 当前 SparkBot 外壳观察用的产品布局参数。
  *
  * 这些参数只约束产品 UI 的安全视口，不改变 ST7789/LVGL 的 240x240
- * 控制器坐标。当前 viewport_y=0 用于先观察上半区；实物边界确认后，
+ * 控制器坐标。当前 viewport_y=10 用于避开外壳上沿；实物边界确认后，
  * 后续只需调整 viewport_y 或尺寸，不必重写面板初始化。
  */
 struct SparkBotDisplayLayout {
     /** @brief 正文栏的滚动策略。 */
     enum class ContentScrollMode : uint8_t {
-        kHorizontalCircular,
+        /** 显式从零位向左移动，避免 LVGL 往返/循环模式。 */
+        kExplicitLeft,
     };
 
     // SparkBot 外壳会遮挡物理屏最上沿，产品视口整体下移少量保留安全边距。
-    uint16_t viewport_y = 6;
+    uint16_t viewport_y = 10;
     uint16_t viewport_height = 120;
     uint16_t horizontal_inset = 12;
     uint16_t top_bar_height = 16;
@@ -42,7 +45,7 @@ struct SparkBotDisplayLayout {
     uint16_t emoji_scale = 181;
     uint32_t screen_saver_idle_timeout_ms = 30000;
     uint32_t content_scroll_duration_ms = 6000;
-    ContentScrollMode content_scroll_mode = ContentScrollMode::kHorizontalCircular;
+    ContentScrollMode content_scroll_mode = ContentScrollMode::kExplicitLeft;
 };
 
 /**
@@ -50,6 +53,60 @@ struct SparkBotDisplayLayout {
  * @return 当前半高观察布局参数。
  */
 [[nodiscard]] constexpr SparkBotDisplayLayout DefaultSparkBotDisplayLayout() { return {}; }
+
+/**
+ * @brief 根据正文溢出宽度计算稳定的单向滚动时长。
+ *
+ * 短句不滚动；长句按固定像素速度滚动，并限制上下界，避免字幕忽快忽慢。
+ * @param overflow_width 正文超出可视区域的像素宽度。
+ * @return 滚动时长（毫秒）；不溢出时为 0。
+ */
+[[nodiscard]] constexpr uint32_t ScrollDurationForOverflow(uint32_t overflow_width) {
+    constexpr uint32_t kMinMs = 3000;
+    constexpr uint32_t kMaxMs = 12000;
+    const uint32_t scaled = overflow_width > kMaxMs / 35 ? kMaxMs : overflow_width * 35;
+    return overflow_width == 0 ? 0 : (scaled < kMinMs ? kMinMs : scaled);
+}
+
+/**
+ * @brief 按 UTF-8 字符数和像素距离估算与语音相近的单向滚动时长。
+ * @param overflow_width 正文超出可视区域的像素宽度。
+ * @param text 当前字幕文本。
+ * @return 估算出的单向滚动时长（毫秒）。
+ */
+[[nodiscard]] uint32_t ScrollDurationForSubtitle(uint32_t overflow_width, std::string_view text);
+
+/**
+ * @brief 计算单向滚动终点，始终为左移的负溢出宽度。
+ * @param overflow_width 正文超出可视区域的像素宽度。
+ * @return 左移终点偏移量。
+ */
+[[nodiscard]] constexpr int32_t ScrollEndOffset(uint32_t overflow_width) {
+    return overflow_width > 0x7FFFFFFFU ? -0x7FFFFFFF : -static_cast<int32_t>(overflow_width);
+}
+
+/** @brief Linx 文档列出的常用情感/动作 key，随应用固化到固件。 */
+inline constexpr std::array<std::string_view, 21> kCommonLinxEmojiKeys = {
+    "neutral", "loving",    "happy",    "embarrassed", "laughing", "surprised", "funny",
+    "shocked", "sad",       "thinking", "angry",       "winking",  "crying",    "cool",
+    "relaxed", "delicious", "kissy",    "confident",   "sleepy",   "silly",     "confused",
+};
+
+/**
+ * @brief 仅允许协议文档定义的 emotion key 进入显示资源映射。
+ * @param key 待校验的 Linx emotion key。
+ * @return key 是否处于受控常用列表。
+ */
+[[nodiscard]] constexpr bool IsCommonLinxEmojiKey(std::string_view key) {
+    return std::find(kCommonLinxEmojiKeys.begin(), kCommonLinxEmojiKeys.end(), key) != kCommonLinxEmojiKeys.end();
+}
+
+/**
+ * @brief 返回快照中的受控 Linx key，未知值回退到 VoiceMood。
+ * @param snapshot 当前显示语义快照。
+ * @return 可映射到显示资源的 emotion key。
+ */
+[[nodiscard]] std::string_view EmotionKeyForSnapshot(const voicelife::voice::DisplaySnapshot& snapshot);
 
 /**
  * @brief 显示模型表情到官方 SparkBot emotion key 的映射。
@@ -70,10 +127,10 @@ struct SparkBotDisplayLayout {
  * 移植来源：xiaozhi-esp32@37d1aee main/display/lcd_display.cc 的
  * SetupUI 简单模式（顶部状态栏、中央 emoji 舞台、底部消息栏）与官方
  * dark 主题颜色。控制器仍是 240x240；产品对象统一挂在可裁剪的半高
- * 视口下，消息栏使用单行横向循环滚动以节省垂直空间。
+ * 视口下，消息栏使用单行单向横向滚动以节省垂直空间。
  *
- * 本阶段 emoji 使用官方字形 fallback（xiaozhi-fonts 的 noto_emoji /
- * material_symbols）；assets 分区的 GIF 资源加载在后续阶段接入。
+ * 中央 emotion 优先使用 assets 分区的 GIF，GIF 不可用时回退到官方字形
+ * （xiaozhi-fonts 的 noto_emoji / material_symbols）。
  * host 构建不触碰 LVGL，SetupUI/Render 返回 kUnavailable。
  */
 class SparkBotLvglRenderer {
@@ -153,12 +210,19 @@ class SparkBotLvglRenderer {
     [[maybe_unused]] bool standby_idle_tracking_ = false;
     /** @brief 是否已进入黑底动态眼睛屏保。 */
     [[maybe_unused]] bool screen_saver_active_ = false;
+    /** @brief 是否已进入 IMU 晕眩屏保；与普通待机屏保共用同一视口。 */
+    [[maybe_unused]] bool dizzy_screen_saver_active_ = false;
+    /** @brief 已提交给 LVGL 的正文，避免每次快照刷新重启动画。 */
+    [[maybe_unused]] std::string rendered_content_text_;
 
 #ifdef ESP_PLATFORM
     void EnterIdleScreenSaver();
     void ExitIdleScreenSaver();
+    void EnterDizzyScreenSaver();
+    void ExitDizzyScreenSaver();
+    bool StartScreenSaverGif(std::string_view asset_id);
     bool StartIdleScreenSaverGif();
-    void StopIdleScreenSaverGif();
+    void StopScreenSaverGif();
     void ScreenSaverTimerTick();
     void SetNormalUiVisible(bool visible);
 #endif

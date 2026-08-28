@@ -6,6 +6,7 @@
 #include "voicelife/audio_esp/esp32s3_pcm_audio_port.h"
 #include "voicelife/audio_esp/esp_multinet_wake_detector.h"
 #include "voicelife/board_esp/gpio46_power_arbiter.h"
+#include "voicelife/board_esp/sparkbot_imu.h"
 #include "voicelife/display_esp/ssd1306_presentation_adapter.h"
 #include "voicelife/display_sparkbot/sparkbot_presentation_adapter.h"
 #include "voicelife/runtime/platform_assembly.h"
@@ -153,6 +154,7 @@ class SparkBotAssembly : public PlatformAssembly {
     voicelife::audio_esp::Esp32s3PcmAudioPorts audio_ports_;
     voicelife::board_esp::Gpio46PowerArbiter arbiter_;
     voicelife::display_sparkbot::SparkBotPresentationAdapter adapter_;
+    std::unique_ptr<voicelife::board_esp::SparkBotImu> imu_;
 };
 
 }  // namespace voicelife::runtime

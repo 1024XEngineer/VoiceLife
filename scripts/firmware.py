@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -123,10 +124,102 @@ def validate_all() -> None:
         print(f"PASS {profile['id']}")
 
 
-def run(command: list[str]) -> None:
-    print("+", " ".join(command))
+def _idf_root_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    configured = os.environ.get("IDF_PATH")
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    candidates.extend(
+        [
+            Path.home() / "esp-idf-v6.0.2",
+            Path.home() / "esp-idf",
+            ROOT / ".esp-idf",
+        ]
+    )
+    candidates.extend(sorted(Path.home().glob("esp-idf-v*"), reverse=True))
+
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.expanduser()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(resolved)
+    return unique
+
+
+def _idf_version(idf_root: Path) -> str | None:
+    version_file = idf_root / "tools" / "cmake" / "version.cmake"
     try:
-        subprocess.run(command, cwd=ROOT, check=True)
+        content = version_file.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(
+        r"set\(IDF_VERSION_MAJOR\s+(\d+)\).*?"
+        r"set\(IDF_VERSION_MINOR\s+(\d+)\).*?"
+        r"set\(IDF_VERSION_PATCH\s+(\d+)\)",
+        content,
+        re.DOTALL,
+    )
+    return ".".join(match.groups()) if match else None
+
+
+def _idf_python_env(idf_version: str | None) -> Path | None:
+    configured = os.environ.get("IDF_PYTHON_ENV_PATH")
+    if configured:
+        path = Path(configured).expanduser()
+        if (path / "bin" / "python").is_file() or (path / "bin" / "python3").is_file():
+            return path
+
+    python_root = Path.home() / ".espressif" / "python_env"
+    candidates = sorted(path for path in python_root.glob("idf*_env") if path.is_dir())
+    if idf_version:
+        major_minor = ".".join(idf_version.split(".")[:2])
+        candidates = [path for path in candidates if path.name.startswith(f"idf{major_minor}_")] or candidates
+    python_minor = f"py{sys.version_info.major}.{sys.version_info.minor}"
+    matching_python = [path for path in candidates if python_minor in path.name]
+    candidates = matching_python or candidates
+    return candidates[-1] if candidates else None
+
+
+def _idf_command_environment() -> tuple[list[str], dict[str, str]]:
+    """Resolve idf.py and its process-local environment without sourcing a shell."""
+    environment = os.environ.copy()
+    idf_root = next(
+        (candidate for candidate in _idf_root_candidates() if (candidate / "tools" / "idf.py").is_file()), None
+    )
+    if idf_root is None:
+        return ["idf.py"], environment
+
+    idf_version = _idf_version(idf_root)
+    python_env = _idf_python_env(idf_version)
+    environment["IDF_PATH"] = str(idf_root)
+    environment.setdefault("IDF_TOOLS_PATH", str(Path.home() / ".espressif"))
+    if python_env is not None:
+        environment["IDF_PYTHON_ENV_PATH"] = str(python_env)
+        environment["PATH"] = f"{python_env / 'bin'}{os.pathsep}{environment.get('PATH', '')}"
+    if idf_version:
+        environment["ESP_IDF_VERSION"] = idf_version
+        environment["IDF_VERSION"] = idf_version
+    environment["PATH"] = f"{idf_root / 'tools'}{os.pathsep}{environment.get('PATH', '')}"
+    python_executable = sys.executable
+    if python_env is not None:
+        for candidate in (python_env / "bin" / "python", python_env / "bin" / "python3"):
+            if candidate.is_file():
+                python_executable = str(candidate)
+                break
+    return [python_executable, str(idf_root / "tools" / "idf.py")], environment
+
+
+def run(command: list[str]) -> None:
+    actual_command = command
+    environment = None
+    if command and command[0] == "idf.py":
+        idf_command, environment = _idf_command_environment()
+        actual_command = idf_command + command[1:]
+    print("+", " ".join(actual_command))
+    try:
+        subprocess.run(actual_command, cwd=ROOT, check=True, env=environment)
     except FileNotFoundError as error:
         raise ProfileError(f"找不到命令 {command[0]}，请先加载对应工具链环境") from error
 

@@ -27,6 +27,7 @@ export interface GatewayLogEntry {
     readonly route?: string;
     readonly method?: string;
     readonly status?: number;
+    readonly count?: number;
     readonly durationMs?: number;
     readonly deliveryId?: string;
     readonly actionId?: string;

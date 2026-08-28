@@ -118,12 +118,17 @@ bool IsKnownToolResultStatus(std::string_view value) {
 
 std::string ToolResultStatus(const ToolResult& result) {
     if (!result.status.ok()) return "failure";
-    if (!result.output.IsObject() || result.output.object == nullptr) return "unknown";
+    // ToolResult::Success is authoritative for scalar/null outputs. Structured
+    // tools may additionally publish a business status (for example
+    // conflict), so only an explicit status field overrides the transport
+    // success. This keeps boolean tools such as set_volume from rendering a
+    // transient failure after the hardware operation already succeeded.
+    if (!result.output.IsObject() || result.output.object == nullptr) return "success";
     for (const auto& [key, value] : *result.output.object) {
         if (key != "status" || value == nullptr || !value->IsString()) continue;
         return IsKnownToolResultStatus(value->string) ? value->string : "unknown";
     }
-    return "unknown";
+    return "success";
 }
 
 LinxMcpToolOutcome ToolOutcomeFromResult(std::string_view request_payload, const ToolResult& result) {

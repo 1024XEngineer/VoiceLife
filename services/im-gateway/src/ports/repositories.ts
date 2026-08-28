@@ -415,6 +415,13 @@ export interface ActionRepository {
      */
     findExpiredActions(now: IsoDateTime): Promise<readonly ImAction[]>;
     /**
+     * 原子恢复超过执行租约、但业务窗口尚未结束的 processing 动作。
+     * @param now 当前时间；只恢复 expires_at 仍在未来的动作。
+     * @param staleBefore 处理租约截止时间；updated_at 不晚于此时间的动作可恢复。
+     * @returns 本次从 processing 转回 pending 的动作列表。
+     */
+    recoverStaleProcessingActions(now: IsoDateTime, staleBefore: IsoDateTime): Promise<readonly ImAction[]>;
+    /**
      * 保存动作当前状态。
      * @param action 动作。
      * @returns 保存完成后兑现的 Promise。

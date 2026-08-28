@@ -29,12 +29,16 @@ enum class VoiceInteractionEvent {
     kAcknowledgementTimedOut,
     /** VAD 检测到语音端点（说话结束）：发 listen.stop，等待最终 STT，不回待机。 */
     kEndpointDetected,
+    /** 聆听窗口内未观察到任何语音：直接回待机，不伪装成处理中。 */
+    kNoSpeechTimeout,
     /** 最终 STT 超时：kFinalizing → kStandby，中止残留服务端回合并恢复待机。 */
     kFinalizationTimedOut,
     /** 无需 follow-up 的终结型回复播报完成：kSpeaking → kStandby，恢复待机。 */
     kTerminalResponseCompleted,
     /** 定时提醒或其它系统文本请求播报；先离开待机再等待 TTS started。 */
     kSystemSpeechRequested,
+    /** 摇晃反馈播报；保持“聆听中”事务状态，不显示“处理中”。 */
+    kShakeSpeechRequested,
     kIntentReceived,
     kTtsStarted,
     kTtsStopped,
