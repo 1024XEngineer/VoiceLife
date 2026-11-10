@@ -162,7 +162,7 @@ jobs:
         run: python3 scripts/render_e2e_summary.py "artifacts/hil-${{ matrix.profile }}" >> "$GITHUB_STEP_SUMMARY"
       - name: 上传 HIL 脱敏 evidence
         if: always() && steps.validate-hil-evidence.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: hil-${{ matrix.profile }}-evidence
           path: artifacts/hil-${{ matrix.profile }}
